@@ -114,10 +114,22 @@ list and context reads must not spawn an Agent process or access the network.
 When the local Gateway detects known ACP executables in its launch environment,
 it may auto-create Profile ACP backend rows so `Capabilities > Agents > ACP
 Backends` opens with useful localhost options. The supported shortcuts are
-`opencode` as command `opencode` with args `["acp"]`, and `hermes` as command
-`hermes` with args `["acp"]`. Existing effective backend definitions take
-precedence, so auto-creation is additive and never overwrites Profile or Project
-configuration.
+`codex`, `opencode`, and `hermes`, resolved from the Gateway's inherited
+environment. `opencode` uses command `opencode` with args `["acp"]`, `hermes`
+uses command `hermes` with args `["acp"]`, and Codex uses the managed ACP
+adapter command. Detection performs no process launch or network access.
+Existing effective backend definitions take precedence, so auto-creation is
+additive and never overwrites or removes Profile or Project configuration,
+including previously materialized rows whose CLI is no longer present.
+
+Generated Runtime Profiles and Import Agent session entries follow the same
+effective backend catalog: an unconfigured known ACP product is absent when
+its CLI is not detected, while an existing configured backend remains visible
+for diagnosis and explicit recovery. A Codex row with a missing managed
+adapter shows `Install` in the enablement slot; after verified installation it
+shows the ordinary enablement switch. The Import Agent session surface exposes
+the existing `backend/install` recovery action inline for an unavailable Codex
+profile and refreshes its discovery result after installation.
 
 ## Skills
 

@@ -82,6 +82,11 @@ gate.
   session do not render as standalone primary transcript rows.
 - Empty reasoning completions close existing Thinking rows without creating
   placeholder rows.
+- Running Thinking defaults to a visible body or bounded live preview, then
+  collapses once on completion, failure, or cancellation. Manual collapse
+  during streaming survives later deltas, manual expansion after completion
+  survives repeated terminal rendering, and already-terminal history defaults
+  collapsed.
 - Agent invocation handoff, stale pending blocks, child previews, and
   completion metadata leave exactly one parent Agent row.
 - Folding preserves useful head/tail previews without turning large outputs

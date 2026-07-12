@@ -44,6 +44,15 @@ Thinking material and must not be copied into assistant text rows. Empty
 reasoning completion closes existing Thinking state; it must not create an
 empty visible row.
 
+Thinking rows default open while their reasoning block is running, then
+collapse to the title when that block first enters a terminal state. A user
+may collapse a running row without later deltas reopening it, and may reopen a
+terminal row without repeated terminal snapshots collapsing it again. History
+or committed transcript material that is already terminal defaults collapsed.
+Long-running Thinking may retain a renderer-specific bounded preview instead
+of forcing the full body open; this lifecycle folding does not alter global
+Thinking visibility or stored transcript content.
+
 Tool and Agent rows require explicit typed transcript blocks, execution
 observations, or message-derived tool-result relationships. Reasoning or
 assistant prose that describes intended work must not create active `read`,

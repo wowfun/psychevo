@@ -89,12 +89,15 @@ Implemented first-slice commands:
 - `pevo run`
 - `pevo tui`
 - `pevo web`
+- `pevo desktop`
 - `pevo serve`
 - `pevo gateway`
 - `pevo doctor`
 - `pevo setup`
 - `pevo acp`
+- `pevo mcp`
 - `pevo profile`
+- `pevo agent`
 - `pevo skill`
 - `pevo plugin`
 - `pevo hooks`
@@ -105,6 +108,25 @@ Implemented first-slice commands:
 - `pevo tool`
 - `pevo config`
 - `pevo auth`
+
+## Public Documentation
+
+The root README is the concise entry point for developers who want to use a
+local coding agent in an existing codebase. `README.md` is the English source,
+and `README.zh-CN.md` is its complete Simplified Chinese counterpart. Both
+files link to each other, keep the same product claims, command summary,
+examples, and local documentation links, and preserve command spelling exactly.
+
+Both README files lead with the user outcome and a concise capability summary,
+then show source installation and a first task before detailed product-surface
+or contributor information. The user entry path must explain that provider
+configuration, permission policy, and session history stay local and can be
+inspected.
+
+The README command summary must describe only current public commands and
+agree with process help without duplicating its flags or subcommand reference.
+Source-install details remain in [Installation Guide](../../docs/install.md),
+not in the README.
 
 Process help is part of the product surface. Top-level commands, subcommands,
 arguments, and flags should carry human-readable descriptions in `--help`

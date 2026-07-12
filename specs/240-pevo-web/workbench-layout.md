@@ -267,11 +267,13 @@ variants insert newline, IME composition is respected, and running-turn prompt
 submission steers by default. Queueing remains available as an explicit composer
 mode and via `/queue`.
 The composer panel uses a Copilot-style restrained input surface: the textarea
-and send control are inside the input frame, the attachment button and current
-Agent selector sit in the lower-left action slot, and model controls are moved
-out of the text frame into the status line. The status line mirrors the TUI
-footer shape with clickable permission mode, chat mode, model, variant, context
-usage ring, project path, and Git branch. Context usage is graphical by
+and send control are inside the input frame, the attachment button, Permission
+mode, and current Agent selector sit in the lower-left action slot, and model
+controls are moved out of the text frame into the status line. Permission mode
+is immediately to the right of the attachment button and is not repeated in
+the Agent popover. The status line mirrors the TUI footer shape with clickable
+chat mode, model, variant, context usage ring, project path, and Git branch.
+Context usage is graphical by
 default; detailed text appears on hover or in the same graphical popover used
 by the right `Status` context panel. Tokenizer and context-scope details are
 not shown in the Workbench UI.

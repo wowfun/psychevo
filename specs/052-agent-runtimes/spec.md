@@ -212,6 +212,16 @@ identity remains process-local; only source target/control intent is durable.
 Replacing the target, resetting the source, process shutdown, or idle expiry
 releases the draft. Native preparation never creates a runtime session.
 
+Stable ACP `configOptions` are authoritative for session model controls. For an
+older ACP Agent that returns the deprecated `models` session field but no
+stable model config option, Gateway may capability-detect that bounded field
+and project it through the same product model-control descriptor. A valid
+legacy selection is applied with `session/set_model`; stable
+`session/set_config_option` always wins when both surfaces are present. This
+compatibility is derived from the response shape, not Agent branding, backend
+identity, or a user-facing switch, and it does not enable any other deprecated
+ACP extension.
+
 Source ingress that has selected an ACP Runtime Profile but has not yet selected
 an Agent Definition resolves that profile's `default_agent` only when it names
 a compatible catalog Agent, then falls back to the compatible Agent named by
@@ -507,9 +517,34 @@ session ids and cursors stay behind this seam. Public import candidates and
 cursors are bounded, expiring, opaque handles; a restart or expiry requires a
 new discovery request.
 
-Import reserves an unpublished public Thread, resumes the selected Agent
-session, reduces replay through the response barrier, then atomically publishes
-the immutable binding and Thread snapshot. An existing
+Import reserves an unpublished public Thread and requires stable ACP
+`session/load` so the selected Agent session can replay its product-visible
+history. Gateway reduces replay through the response barrier, persists every
+bounded transcript fact that the public Message model can represent (user and
+assistant text, reasoning, tool calls and results, and plan metadata), then
+atomically publishes the immutable binding and Thread snapshot. Import never
+claims `fidelity=full` when a replay fact was omitted, truncated, or could not
+be projected. A stable-v1 content chunk without a non-empty `messageId` is not
+given a synthetic durable message identity: its projectable display content
+and reliable neighboring facts are published, the Thread remains writable, and
+history is explicitly `partial` with a recovery hint. Bounded internal replay
+ids may make unidentified content, tool-only, and Plan facts idempotent, but
+only real Agent-supplied message ids may participate in delivery
+reconciliation.
+
+History replay preserves notification order inside assistant content. Text or
+reasoning chunks for the active message may continue after an intervening tool
+call, producing the same text/tool/text slot order in durable history; a new
+user or message identity closes the prior active segment. Tool updates replace
+the state of the original `toolCallId` slot rather than creating another slot.
+Stable-v1 Plan notifications are complete replacement snapshots: replay owns
+one logical Plan value and persists only the latest update, with no synthetic
+Plan identity treated as message delivery evidence.
+
+Import never
+falls back to `session/resume`, because that lifecycle operation does not replay
+history; an Agent without `session/load` fails explicitly and no empty public
+Thread is published. An existing
 `(runtime_ref, native_session_id)` binding wins an import race and is returned
 instead of being duplicated. Fork follows the same publish-after-ready rule and
 records the source Thread as parent. It is exposed only when the negotiated
@@ -533,8 +568,12 @@ intents before allowing another lifecycle mutation.
 
 History replay and live notifications enter the same typed reducer. Every fact
 has history/live origin, process generation, session epoch, ordering identity,
-and a bounded product projection. Replay completion uses an explicit barrier;
-time-based notification draining is forbidden.
+and a bounded product projection. Replay-origin transcript facts retain source
+order and stable Agent message or tool identities so repeated loads deduplicate
+against durable history. Replay completion uses an explicit barrier; time-based
+notification draining is forbidden. Import commits the completed replay before
+publishing its Thread and releases both the reserved Thread and resident Agent
+session if load, reduction, or persistence fails.
 
 The resident Adapter exposes one immutable per-session snapshot as the only
 read interface for negotiated Agent identity/capabilities, prompt input support,
@@ -601,7 +640,10 @@ authority and fidelity:
 Gateway persists accepted user intent, binding, delivery state, terminal state,
 and product-safe projections. It does not reconstruct an Agent-authoritative ACP
 session by replaying a synthetic transcript into a new session. Missing Agent
-history is explicit.
+history is explicit. `replayComplete` means both the Agent response barrier and
+lossless bounded product projection completed; reaching a replay bound,
+encountering unsupported content, or lacking stable message identity keeps the
+projection partial across import, context refresh, and later continuation.
 
 Each accepted turn produces exactly one terminal. Delivery is
 `notDelivered`, `delivered`, or `unknown`. Unknown delivery enters a
@@ -691,6 +733,25 @@ never copies the key into ACP `_meta`, events, diagnostics, or persisted state.
 If `opencode` resolves and no explicit backend shadows it, Gateway materializes
 an `opencode` ACP backend with command `opencode` and args `["acp"]`. Existing
 Profile or Project definitions are never overwritten.
+
+Known local ACP shortcuts are discovered from the Gateway's captured inherited
+environment by resolving the `codex`, `opencode`, and `hermes` CLI commands.
+Detection is cache-only: it must not launch a command, create an ACP session,
+or access the network. Gateway materializes the corresponding built-in backend
+only when its CLI resolves. The managed Codex adapter remains a separate
+installation prerequisite: detecting `codex` makes the Codex ACP profile
+discoverable with an install recovery action, but does not imply that
+`codex-acp` is installed. Existing Profile or Project backend definitions,
+including definitions created by an earlier Gateway, are retained when the
+current environment no longer resolves the CLI; detection gates only new
+automatic materialization.
+
+The Workbench ACP Backend row uses one enablement slot for managed Codex
+readiness: a missing adapter shows an explicit `Install` action, an invalid
+adapter shows `Repair`, and a verified adapter shows the normal enablement
+switch. Import Agent session uses the existing structured `backend/install`
+recovery action to offer the same Codex installation without requiring the
+user to leave the import surface.
 
 ## Retired Direct Runtime Hard Cut
 

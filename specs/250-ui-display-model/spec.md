@@ -249,6 +249,16 @@ closes every unfinished tool. Plan and Diff blocks are replacement values.
 Clearing either removes the block, and empty values never render synthetic
 placeholder evidence.
 
+Agent-authoritative history uses the same ordering and replacement semantics as
+live projection. Within one assistant segment, reasoning, text, and tool slots
+render in replay notification order, including text/tool/text sequences. Plan
+history exposes one stable logical block whose content is the latest complete
+ACP snapshot; prior pending or running Plan snapshots do not become additional
+entries. If the Adapter cannot project replay losslessly, surfaces render the
+declared `partial` fidelity and hint rather than presenting an apparently full
+transcript. Projectable text without an Agent message identity remains visible;
+its internal replay identity is not presented as delivery evidence.
+
 Tool-call assistant text may be marked as an `assistant_phase` live projection
 while the turn is active. It is a block-level projection hint inside the live
 assistant segment, not a cross-owner dedupe rule. Client reconciliation must use

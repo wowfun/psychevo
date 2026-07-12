@@ -1,7 +1,21 @@
 # Changelog
 
+## 2026-07-13
+
+- Fixed ACP Agent history replay to report incomplete projections as partial,
+  preserve projectable content order, and keep synthetic replay identities out
+  of delivery reconciliation.
+
 ## 2026-07-12
 
+- Reworked the README around a developer's first local coding task and added a
+  full Simplified Chinese edition.
+- Refined Composer controls and authoritative model/reasoning display, including
+  the Native `Psychevo` label and visible Permission mode.
+- Added environment-gated Codex, OpenCode, and Hermes ACP discovery, managed
+  Codex installation/recovery, and readiness-aware backend controls.
+- Fixed Agent Session import history and scrolling, legacy ACP model controls,
+  and Thinking-row folding across Workbench and TUI.
 - Fixed ACP child and side-thread continuity across delegated and follow-up
   turns, including immutable Agent/Profile bindings, transcript reconciliation,
   controls, activity, interactions, lifecycle actions, and first-turn Agent

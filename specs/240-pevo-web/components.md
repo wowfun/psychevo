@@ -156,6 +156,11 @@ effective value is non-interactive, and an absent descriptor produces no
 Reasoning group or invented default. The model label and context-usage popover
 must not clip their selected value, summary, or visible usage details at desktop
 or narrow Workbench widths.
+Permission mode is a visible descriptor-driven selection immediately after the
+`+` control and before the Agent control. It uses the current effective value,
+remains interactive when the descriptor is selectable, and is not repeated in
+the Agent target popover. If Gateway cannot provide an effective value, the
+control shows an explicit unavailable or selection-required state.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
 estimated cost. The composer context popover remains compact and must not show
@@ -177,8 +182,7 @@ model-visible context. Observability refreshes are scoped to the selected view
 epoch/session: a delayed response for a previously selected session must be
 discarded after the user creates or selects a different session or detached
 draft.
-Permission,
-path, and branch remain in the quieter status line. The default send control is
+Path and branch remain in the quieter status line. The default send control is
 a compact circular arrow-up button; during an
 active turn, the same slot becomes an interrupt control with a Codex-like filled
 square stop glyph inside the same circular button. The prompt textarea grows with

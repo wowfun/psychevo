@@ -22,6 +22,11 @@ product surface and frontend platform.
   method names, event names, and wire shape compatibility.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
   primary controls.
+- Agent-session import browser coverage uses a short viewport and enough
+  discovered sessions to require internal dialog scrolling while keeping the
+  dialog header, footer, and document shell fixed. It imports deterministic
+  replay containing user and assistant text, reasoning, plan, and tool evidence,
+  then verifies that the opened Transcript preserves that durable order.
 - Non-fullscreen Desktop main-window validation must assert that the Workbench
   document itself cannot scroll vertically while preserving internal transcript,
   session-list, Settings-content, and long-panel scrolling.
@@ -112,6 +117,12 @@ required. They must not print tokens or secrets.
   closed control model-plus-reasoning display, longest-visible-option popover
   width adaptation, full-width popover rows without unused right gutters, and
   switching models without submitting an invalid `Select model` value.
+- Composer runtime-control tests cover the visible `Permission mode` control
+  immediately after `+`, its absence from the Agent target popover, and its
+  descriptor-backed effective value after a control receipt. They also cover
+  the Native `Psychevo` target label and reasoning display: an explicit
+  `high` value renders `High`, an explicit `none` value renders `Default`, and
+  an unknown value does not fall back to `Default` or the first choice.
 - Settings > Models assignment tests cover reuse of the same model/reasoning
   selector behavior used by the composer.
 - Settings > Usage visual tests cover token-activity heatmap levels with

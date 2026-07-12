@@ -212,8 +212,10 @@ mutability, apply scope, stability, and Channel safety distinct. Shared
 Attention carries runtime/profile and parent/child origin and states the exact
 authorization lifetime.
 
-Composer places Mode on the left and the grouped Model/Reasoning selector plus
-Context on the right. These footer selection triggers are borderless,
+Composer places the Permission mode control immediately to the right of the `+`
+attachment control, followed by Agent and Mode on the left; the grouped
+Model/Reasoning selector plus Context remain on the right. Permission mode is
+not duplicated inside the Agent target popover. These footer selection triggers are borderless,
 chevron-free, and intrinsically sized to the current value with bounded narrow
 viewport truncation; action controls such as add, dictation, and Send retain
 their existing icon-button treatment. Mode focus removes the rectangular
@@ -227,7 +229,10 @@ boundary. Model and Reasoning render from the
 selected target's Thread Context descriptors through the same picker used by
 Settings assignment rows. Reasoning is selectable only when its descriptor is
 selectable, renders the effective value without interaction when read-only, and
-is omitted when absent; the client never invents a `Default` reasoning choice.
+is omitted when absent. The display priority is a local pending value, then the
+Thread Context `effectiveValue`, then an authoritative runtime readback; the
+client never invents a `Default` or first-choice reasoning value. `none` renders
+as `Default` only when the descriptor explicitly returns `none`.
 Model shows a proven effective value or an explicit unavailable reason. An ACP
 draft renders only Agent-provided config choices; Settings metadata may enrich
 labels and grouping but never synthesizes values. An unbound draft sends only
@@ -263,6 +268,10 @@ Sessions or archived history is not. The import surface groups candidates by
 ACP Profile, keeps successful groups usable when another Profile fails, offers
 refresh, and asks for an Agent target only when a Profile has multiple
 compatible targets. Empty and error states state the next action plainly.
+The import dialog keeps its header and footer visible inside the viewport; long
+Profile and Session results scroll only within its body on desktop and mobile.
+After a successful import, Workbench opens the published Thread whose Transcript
+already contains the Agent history committed by Gateway.
 
 Session menus render Gateway lifecycle descriptors. Fork is visible only for a
 negotiated fork-capable Agent. Delete remains visible but disabled with its
