@@ -301,6 +301,7 @@
 .composerSubmitControls .modelReasoningButton {
   grid-template-columns: minmax(0, auto) auto;
   width: auto;
+  gap: 0;
   max-width: min(232px, 46vw);
 }
 

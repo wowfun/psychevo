@@ -39,9 +39,16 @@ export function ComposerRuntimeControls({
   onTargetChange(targetId: string): void;
   onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
+  const permissionControls = controls.filter((control) => control.id === "permissionMode");
   const modeControls = controls.filter((control) => control.surfaceRole === "mode");
   return (
     <div className="composerRuntimeControls" aria-label="Runtime controls">
+      <RuntimeControlFields
+        controls={permissionControls}
+        disabled={disabled || contextLoading}
+        values={controlValues}
+        onChange={onControlChange}
+      />
       <AgentRuntimeSelector
         binding={binding}
         controls={controls}
@@ -94,7 +101,9 @@ function AgentRuntimeSelector({
   const agentLabel = selectedTarget?.agentLabel || "Select Agent";
   const profileLabel = selectedTarget?.profileLabel || "Runtime Profile";
   const displayLabel = selectedTarget ? agentTargetDisplayLabel(selectedTarget, profiles) : agentLabel;
-  const optionControls = controls.filter((control) => control.surfaceRole === "advanced");
+  const optionControls = controls.filter((control) => (
+    control.surfaceRole === "advanced" && control.id !== "permissionMode"
+  ));
   const selectedPairingReason = runnableTargetUnavailableReason(selectedTarget);
   const startsNewBoundThread = binding != null;
   usePopoverDismiss(open, rootRef, () => setOpen(false));
@@ -216,7 +225,10 @@ export function RuntimeControlFields({
       : control.choices.map((_, index) => String(index));
     const optionLabels: Record<string, string> = {
       [unavailableKey]: control.surfaceRole === "model" ? "Unavailable" : `Choose ${control.label}`,
-      ...Object.fromEntries(control.choices.map((choice, index) => [String(index), choice.label]))
+      ...Object.fromEntries(control.choices.map((choice, index) => [
+        String(index),
+        runtimeControlChoiceLabel(control, choice.label, choice.value)
+      ]))
     };
     return (
       <StatusSelect
@@ -235,6 +247,21 @@ export function RuntimeControlFields({
       />
     );
   })}</>;
+}
+
+function runtimeControlChoiceLabel(
+  control: ThreadControlDescriptorView,
+  label: string,
+  value: unknown
+): string {
+  if (control.id !== "permissionMode") return label;
+  switch (typeof value === "string" ? value : label) {
+    case "default": return "Default Permission";
+    case "acceptEdits": return "Accept Edits";
+    case "dontAsk": return "Don't Ask";
+    case "bypassPermissions": return "Bypass Permissions";
+    default: return label;
+  }
 }
 
 function runtimeControlSourceLabel(control: ThreadControlDescriptorView): string {

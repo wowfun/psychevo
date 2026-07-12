@@ -29,6 +29,7 @@ export function AgentsConfigPanel({
   backendDoctor,
   backends,
   disabled,
+  runtimeReadiness,
   onCancelBackendEdit,
   onChangeBackendDraft,
   onDeleteBackend,
@@ -44,6 +45,7 @@ export function AgentsConfigPanel({
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
   disabled: boolean;
+  runtimeReadiness: Record<string, string>;
   onCancelBackendEdit(): void;
   onChangeBackendDraft(draft: BackendDraft): void;
   onDeleteBackend(backend: WorkbenchBackend): void;
@@ -78,8 +80,11 @@ export function AgentsConfigPanel({
       {(!backendDraft || catalogBackends.length > 0) && <div className="agentSurfaceList">
         {catalogBackends.map((backend) => {
           const doctor = backendDoctor[backend.id] ?? null;
+          const managedState = managedCodexState(backend, doctor, runtimeReadiness);
           const profileMutable = backend.sourceTargets.includes("profile");
-          const managedAction = managedBackendAction(backend, doctor);
+          const managedAction = managedBackendAction(backend, managedState);
+          const managedRecovery = managedRecoveryAction(backend, managedState);
+          const backendReady = managedState === "ready";
           return (
             <div className="agentSurfaceRow agentBackendRow" key={backend.id}>
 	              <div>
@@ -96,18 +101,31 @@ export function AgentsConfigPanel({
               </div>
               <div className="agentBackendSide">
                 <div className="agentBackendControls">
-                  <Switch
-                    ariaLabel={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
-                    checked={backend.enabled}
-                    disabled={disabled || !profileMutable}
-                    label={backend.enabled ? "Enabled" : "Disabled"}
-                    onCheckedChange={(enabled) => onSetBackendEnabled(backend, enabled)}
-                    showLabel={false}
-                    size="compact"
-                  />
+                  {managedRecovery ? (
+                    <ActionButton
+                      ariaLabel={`${managedActionLabel(managedRecovery)} ${backend.label || backend.id} ACP`}
+                      disabled={disabled}
+                      icon={managedRecovery === "repair" ? <Wrench size={13} /> : <Plus size={13} />}
+                      onClick={() => onManageBackend(backend, managedRecovery)}
+                      size="compact"
+                      variant={managedRecovery === "repair" ? "danger" : "primary"}
+                    >
+                      {managedActionLabel(managedRecovery)}
+                    </ActionButton>
+                  ) : (
+                    <Switch
+                      ariaLabel={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
+                      checked={backend.enabled}
+                      disabled={disabled || !profileMutable || !backendReady}
+                      label={backend.enabled ? "Enabled" : "Disabled"}
+                      onCheckedChange={(enabled) => onSetBackendEnabled(backend, enabled)}
+                      showLabel={false}
+                      size="compact"
+                    />
+                  )}
                   <BackendEntrypointControls
                     backend={backend}
-                    disabled={disabled || !profileMutable}
+                    disabled={disabled || !profileMutable || !backendReady}
                     onChange={(entrypoints) => onSetBackendEntrypoints(backend, entrypoints)}
                   />
                 </div>
@@ -157,16 +175,41 @@ export function AgentsConfigPanel({
 
 function managedBackendAction(
   backend: WorkbenchBackend,
-  doctor: WorkbenchBackendDoctor | null
+  state: ManagedCodexState
 ): ManagedBackendAction | null {
   if (backend.id !== "codex") return null;
-  const managedCheck = doctor?.checks.find((check) => check.name === "managedAdapter") ?? null;
-  if (doctor?.ok || managedCheck?.ok) return "upgrade";
-  if (managedCheck?.message.toLowerCase().includes("repair")) return "repair";
-  return "install";
+  return state === "ready" ? "upgrade" : null;
 }
 
-function managedActionLabel(action: ManagedBackendAction): string {
+type ManagedCodexState = "missing" | "invalid" | "ready";
+type ManagedRecoveryAction = "install" | "repair";
+
+function managedCodexState(
+  backend: WorkbenchBackend,
+  doctor: WorkbenchBackendDoctor | null,
+  runtimeReadiness: Record<string, string>
+): ManagedCodexState {
+  if (backend.id !== "codex") return "ready";
+  const managedCheck = doctor?.checks.find((check) => check.name === "managedAdapter") ?? null;
+  if (managedCheck) {
+    if (managedCheck.ok) return "ready";
+    return managedCheck.message.toLowerCase().includes("repair") ? "invalid" : "missing";
+  }
+  const readiness = runtimeReadiness[backend.id];
+  if (readiness === "ready" || readiness === "needsAuth" || readiness === "disabled") return "ready";
+  if (readiness === "error" || readiness === "unsupported") return "invalid";
+  return "missing";
+}
+
+function managedRecoveryAction(
+  backend: WorkbenchBackend,
+  state: ManagedCodexState
+): ManagedRecoveryAction | null {
+  if (backend.id !== "codex" || state === "ready") return null;
+  return state === "invalid" ? "repair" : "install";
+}
+
+function managedActionLabel(action: ManagedBackendAction | ManagedRecoveryAction): string {
   return `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
 }
 

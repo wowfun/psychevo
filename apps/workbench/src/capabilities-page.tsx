@@ -622,6 +622,14 @@ function AgentsCapabilityPanel({
   const allRows = useMemo(() => agentRowsFromData(data), [data]);
   const allTeamRows = useMemo(() => agentTeamRowsFromData(data), [data]);
   const runtimeRows = useMemo(() => runtimeProfileRowsFromData(data), [data]);
+  const runtimeReadiness = useMemo(
+    () => Object.fromEntries(
+      runtimeRows
+        .filter((row) => row.backendRef)
+        .map((row) => [row.backendRef, row.healthStatus])
+    ),
+    [runtimeRows]
+  );
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return allRows.filter((row) => !needle || `${row.name} ${row.description} ${row.sourceLabel}`.toLowerCase().includes(needle));
@@ -907,6 +915,7 @@ function AgentsCapabilityPanel({
           backendDoctor={backendDoctor}
           backends={backends}
           disabled={disabled}
+          runtimeReadiness={runtimeReadiness}
           onCancelBackendEdit={onCancelBackendEdit}
           onChangeBackendDraft={onChangeBackendDraft}
           onDeleteBackend={onDeleteBackend}

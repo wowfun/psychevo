@@ -137,8 +137,10 @@
 
 .agentBackendSide {
   display: grid;
+  justify-self: end;
   justify-items: end;
   gap: 7px;
+  width: max-content;
   min-width: 0;
 }
 
@@ -197,6 +199,7 @@
 
 .agentBackendActions {
   display: inline-flex;
+  justify-content: flex-end;
   gap: 4px;
 }
 

@@ -507,9 +507,52 @@ test.describe("Native and ACP Agent application visual contract", () => {
         "opencode-external": {
           config: { model: "fixture/default", effort: "medium", mode: "build" },
           cwd: null,
-          messages: [],
+          messages: [
+            { id: "import-user-1", role: "user", text: "Imported replay user question" },
+            { update: {
+              sessionUpdate: "agent_thought_chunk",
+              messageId: "import-assistant-1",
+              content: { type: "text", text: "Imported replay reasoning" }
+            } },
+            { id: "import-assistant-1", role: "assistant", text: "Imported replay assistant answer" },
+            { update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "import-tool-1",
+              title: "Inspect imported replay",
+              kind: "execute",
+              status: "pending",
+              rawInput: { cmd: "printf imported" }
+            } },
+            { update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "import-tool-1",
+              status: "completed",
+              content: [{
+                type: "content",
+                content: { type: "text", text: "imported replay tool output\n" }
+              }],
+              rawOutput: { output: "imported replay tool output\n" }
+            } },
+            { update: {
+              sessionUpdate: "plan",
+              entries: [{
+                content: "Verify imported replay",
+                priority: "high",
+                status: "completed"
+              }]
+            } }
+          ],
           title: "OpenCode external session"
-        }
+        },
+        ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [
+          `opencode-overflow-${index + 1}`,
+          {
+            config: { model: "fixture/default", effort: "medium", mode: "build" },
+            cwd: null,
+            messages: [],
+            title: `OpenCode overflow session ${index + 1}`
+          }
+        ]))
       }
     }));
     const server = await startPevoWeb({
@@ -517,12 +560,28 @@ test.describe("Native and ACP Agent application visual contract", () => {
       live: false
     });
     try {
+      await page.setViewportSize({ width: isMobile ? 412 : 900, height: 560 });
       await page.goto(server.url);
       if (isMobile) await page.getByRole("button", { name: "History", exact: true }).click();
       await page.getByRole("button", { name: "Import Agent session" }).click();
       const importDialog = page.getByRole("dialog", { name: "Import Agent session" });
       await expect(importDialog).toContainText("Codex external session");
       await expect(importDialog).toContainText("OpenCode external session");
+      const dialogBody = importDialog.locator(".pevo-createPanelBody");
+      const dialogFooter = importDialog.locator(".pevo-createPanelFooter");
+      await expect(dialogFooter).toBeVisible();
+      const geometry = await dialogBody.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight
+      }));
+      expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+      await dialogBody.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      expect(await dialogBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      const dialogBox = await importDialog.boundingBox();
+      expect(dialogBox).not.toBeNull();
+      expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(560);
       expect(JSON.stringify(await gatewayRequest(page, "thread/import/list", {
         scope: { cwd: server.cwd, source: { kind: "web", rawId: "visual-import-proof" } },
         cursors: {}
@@ -531,32 +590,72 @@ test.describe("Native and ACP Agent application visual contract", () => {
 
       await importDialog.getByRole("button", { name: /OpenCode external session/ }).click();
       await expect(importDialog).toBeHidden();
-      if (isMobile) await page.getByRole("button", { name: "History", exact: true }).click();
+      const importedTranscript = page.getByRole("region", { name: "Transcript" });
+      await expect(importedTranscript).toContainText("Imported replay user question");
+      await expect(importedTranscript).toContainText("Imported replay assistant answer");
+      await importedTranscript.getByRole("button", { name: /Thinking/ }).click();
+      await expect(importedTranscript).toContainText("Imported replay reasoning");
+      await expect(importedTranscript).toContainText("Inspect imported replay");
+      await expect(importedTranscript).toContainText("Verify imported replay");
+      if (isMobile) {
+        await capture(page, testInfo, "agent-session-imported-transcript");
+        await page.getByRole("button", { name: "History", exact: true }).click();
+      }
       await page.getByRole("button", { name: "Import Agent session" }).click();
       const secondImportDialog = page.getByRole("dialog", { name: "Import Agent session" });
       await secondImportDialog.getByRole("button", { name: /Codex external session/ }).click();
       await expect(secondImportDialog).toBeHidden();
-      if (isMobile) await page.getByRole("button", { name: "History", exact: true }).click();
-
+      if (isMobile) {
+        await page.waitForTimeout(400);
+        await page.getByRole("button", { name: "History", exact: true }).click();
+        await expect(page.locator(".historyColumn.is-mobileSelected")).toBeVisible();
+      }
       const openCodeRow = page.locator(".pevo-sessionRow").filter({ hasText: "OpenCode external session" });
-      if (!isMobile) await openCodeRow.hover();
-      await openCodeRow.locator('summary[aria-label="Session actions"]').click();
+      await expect(openCodeRow).toBeVisible();
+      const openCodeActions = openCodeRow.locator('summary[aria-label="Session actions"]');
+      if (isMobile) {
+        await openCodeActions.evaluate((element) => (element as HTMLElement).click());
+      } else {
+        await openCodeRow.hover();
+        await openCodeActions.click();
+      }
       await expect(openCodeRow.getByRole("menuitem", { name: "Fork" })).toBeVisible();
       const openCodeDelete = openCodeRow.getByRole("menuitem", { name: "Delete" });
       await expect(openCodeDelete).toBeDisabled();
       await expect(openCodeDelete).toHaveAttribute("title", /did not advertise persistent session deletion/i);
       await capture(page, testInfo, "agent-session-lifecycle-actions");
-      await openCodeRow.locator('summary[aria-label="Session actions"]').click();
-      await openCodeRow.getByRole("button", { name: /OpenCode external session/ }).click();
-      await expect(openCodeRow).toHaveClass(/is-active/);
+      const openCodeSession = openCodeRow.getByRole("button", { name: /OpenCode external session/ });
       if (isMobile) {
-        await page.getByRole("button", { name: "History", exact: true }).click();
+        await openCodeActions.evaluate((element) => {
+          (element as HTMLDetailsElement).open = false;
+        });
+        await openCodeSession.evaluate((element) => (element as HTMLElement).click());
+      } else {
+        await page.keyboard.press("Escape");
+        await openCodeSession.click();
       }
+      await expect(openCodeRow).toHaveClass(/is-active/);
 
+      if (isMobile) {
+        await page.waitForTimeout(400);
+        await page.getByRole("button", { name: "History", exact: true }).click();
+        await expect(page.locator(".historyColumn.is-mobileSelected")).toBeVisible();
+      }
       const codexRow = page.locator(".pevo-sessionRow").filter({ hasText: "Codex external session" });
-      if (!isMobile) await codexRow.hover();
-      await codexRow.locator('summary[aria-label="Session actions"]').click();
-      await codexRow.getByRole("menuitem", { name: "Delete" }).click();
+      await expect(codexRow).toBeVisible();
+      const codexActions = codexRow.locator('summary[aria-label="Session actions"]');
+      if (isMobile) {
+        await codexActions.evaluate((element) => (element as HTMLElement).click());
+      } else {
+        await codexRow.hover();
+        await codexActions.click();
+      }
+      const codexDelete = codexRow.getByRole("menuitem", { name: "Delete" });
+      if (isMobile) {
+        await codexDelete.evaluate((element) => (element as HTMLElement).click());
+      } else {
+        await codexDelete.click();
+      }
       const deleteDialog = page.getByRole("dialog", { name: "Delete session?" });
       await expect(deleteDialog).toContainText(/Codex.*session/i);
       await expect(deleteDialog).toContainText(/Remote deletion must succeed/i);

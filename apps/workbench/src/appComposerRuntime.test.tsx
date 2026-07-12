@@ -20,7 +20,7 @@ describe("Workbench first-class Agent runtime controls", () => {
 
     const popover = await openAgentRuntimePopover();
     const targets = within(popover).getByRole("radiogroup", { name: "Agent target" });
-    expect(within(targets).getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toBeTruthy();
+    expect(within(targets).getByRole("radio", { name: "Psychevo · Psychevo (Native)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "Codex · Codex (ACP)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "OpenCode · OpenCode (ACP)" })).toBeTruthy();
     await waitFor(() => {
@@ -65,9 +65,9 @@ describe("Workbench first-class Agent runtime controls", () => {
           targetId: "target:default:native",
           agentRef: null,
           runtimeProfileRef: "native",
-          agentLabel: "Default Agent",
+          agentLabel: "Psychevo",
           profileLabel: "Psychevo (Native)",
-          label: "Default Agent · Psychevo (Native)",
+          label: "Psychevo · Psychevo (Native)",
           ready: true,
           unavailableReason: null
         },
@@ -367,9 +367,9 @@ describe("Workbench first-class Agent runtime controls", () => {
           targetId: "target:default:native",
           agentRef: null,
           runtimeProfileRef: "native",
-          agentLabel: "Default Agent",
+          agentLabel: "Psychevo",
           profileLabel: "Psychevo (Native)",
-          label: "Default Agent · Psychevo (Native)",
+          label: "Psychevo · Psychevo (Native)",
           ready: true,
           unavailableReason: null
         },
@@ -601,9 +601,9 @@ function firstClassContext(
         targetId: "target:default:native",
         agentRef: null,
         runtimeProfileRef: "native",
-        agentLabel: "Default Agent",
+        agentLabel: "Psychevo",
         profileLabel: "Psychevo (Native)",
-        label: "Default Agent · Psychevo (Native)",
+        label: "Psychevo · Psychevo (Native)",
         ready: true,
         unavailableReason: null
       },

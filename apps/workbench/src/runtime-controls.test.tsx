@@ -26,18 +26,21 @@ describe("runtime composer controls", () => {
       />
     );
 
+    const permission = screen.getByRole("combobox", { name: "Permission mode" }) as HTMLSelectElement;
+    expect(permission.options[permission.selectedIndex]?.textContent).toBe("Default Permission");
     expect(screen.getByRole("combobox", { name: "Mode" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Agent target" }));
 
     const dialog = screen.getByRole("dialog", { name: "Agent target" });
     const targets = within(dialog).getByRole("radiogroup", { name: "Agent target" });
-    expect(within(targets).getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toBeTruthy();
+    expect(within(targets).getByRole("radio", { name: "Psychevo · Psychevo (Native)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "Codex · Codex (ACP)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "OpenCode · OpenCode (ACP)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "Codex · Codex (ACP)" }).textContent).toContain("Codex (ACP)");
     expect(within(targets).getByRole("radio", { name: "Codex · Codex (ACP)" }).textContent).not.toContain("Codex ·");
     expect(within(dialog).queryByText("Agent target")).toBeNull();
     expect(within(dialog).queryByText("Manage Agent targets")).toBeNull();
+    expect(within(dialog).queryByRole("combobox", { name: "Permission mode" })).toBeNull();
     expect(within(dialog).getByLabelText("Approval: ask (read-only)")).toBeTruthy();
   });
 
@@ -201,6 +204,28 @@ function firstClassContext(runtimeProfileRef: "native" | "codex" | "opencode") {
         stability: "stable",
         channelSafe: false,
         capabilityRevision: "14"
+      },
+      {
+        id: "permissionMode",
+        label: "Permission mode",
+        surfaceRole: "advanced",
+        mutability: "selectable",
+        enabled: true,
+        required: false,
+        unavailableReason: null,
+        effectiveValue: "default",
+        effectiveSource: "runtimeDefault",
+        isDefault: true,
+        choices: [
+          { value: "default", label: "default" },
+          { value: "acceptEdits", label: "acceptEdits" },
+          { value: "dontAsk", label: "dontAsk" },
+          { value: "bypassPermissions", label: "bypassPermissions" }
+        ],
+        applyScope: "turnDraft",
+        stability: "stable",
+        channelSafe: true,
+        capabilityRevision: "15"
       }
     ],
     compatibleTargets: [
@@ -208,9 +233,9 @@ function firstClassContext(runtimeProfileRef: "native" | "codex" | "opencode") {
         targetId: "target:default:native",
         agentRef: null,
         runtimeProfileRef: "native",
-        agentLabel: "Default Agent",
+        agentLabel: "Psychevo",
         profileLabel: "Psychevo (Native)",
-        label: "Default Agent · Psychevo (Native)",
+        label: "Psychevo · Psychevo (Native)",
         ready: true
       },
       {

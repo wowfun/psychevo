@@ -459,7 +459,7 @@ describe("Workbench capabilities management", () => {
     fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
     fireEvent.click(await within(region).findByRole("tab", { name: "ACP Backends" }));
 
-    const install = await within(region).findByRole("button", { name: "Install managed codex" });
+    const install = await within(region).findByRole("button", { name: "Install Codex ACP" });
     fireEvent.click(install);
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -468,6 +468,32 @@ describe("Workbench capabilities management", () => {
       });
     });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/auth/action")).toBe(false);
+  });
+
+  it("shows the Codex enablement switch after managed readiness is available", async () => {
+    gatewayMock.runtimeProfileRecords = gatewayMock.runtimeProfileRecords.map((profile) => profile.id === "codex"
+      ? {
+          ...profile,
+          runtime: "acp",
+          backendRef: "codex",
+          health: {
+            status: "ready",
+            summary: "Managed adapter ready",
+            commandPath: "/tmp/psychevo/runtime-adapters/codex-acp/1.1.2/node_modules/.bin/codex-acp",
+            checkedAtMs: 1_700_000_000_000
+          }
+        }
+      : profile);
+    gatewayMock.backendRecords = [acpBackendRecord("codex", "/tmp/psychevo/runtime-adapters/codex-acp/1.1.2/node_modules/.bin/codex-acp")];
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
+    fireEvent.click(await within(region).findByRole("tab", { name: "ACP Backends" }));
+
+    expect(await within(region).findByRole("switch", { name: "Disable codex" })).toBeTruthy();
+    expect(within(region).queryByRole("button", { name: "Install Codex ACP" })).toBeNull();
   });
 
   it("keeps disabled skills visible and can re-enable them", async () => {

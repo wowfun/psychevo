@@ -197,7 +197,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(
         targetPopover
           .getByRole("radiogroup", { name: "Agent target" })
-          .getByRole("radio", { name: "Default Agent · Psychevo (Native)" })
+          .getByRole("radio", { name: "Psychevo · Psychevo (Native)" })
       ).toHaveAttribute("aria-checked", "true");
       await page.keyboard.press("Escape");
 

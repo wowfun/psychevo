@@ -462,7 +462,7 @@ export function ComposerSubmitControls({
   const contextPopoverRef = useRef<HTMLDivElement | null>(null);
   const model = controlStringValue(modelControl, controlValues);
   const explicitReasoning = controlStringValue(reasoningControl, controlValues);
-  const reasoning = explicitReasoning ?? "none";
+  const reasoning = explicitReasoning;
   const reasoningSelectable = reasoningControl?.enabled === true
     && reasoningControl.mutability === "selectable"
     && reasoningControl.choices.some((choice) => typeof choice.value === "string");

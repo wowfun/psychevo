@@ -167,7 +167,7 @@
     max-width: min(190px, calc(100vw - 112px));
   }
 
-  .agentRuntimeSelector:first-child .agentRuntimeButton {
+  .composerRuntimeControls .agentRuntimeSelector .agentRuntimeButton {
     max-width: 132px;
   }
 
@@ -228,6 +228,11 @@
 
   .agentRuntimePopover {
     width: min(260px, calc(100vw - 32px));
+  }
+
+  .agentDefinitionPopover {
+    right: 0;
+    left: auto;
   }
 
   .composerSubmitControls {

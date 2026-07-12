@@ -177,26 +177,26 @@ test.describe("Workbench composer visual contract", () => {
       }))).toEqual({ borderWidth: "1px", outlineStyle: "none" });
       const agentControl = page.getByRole("button", { name: "Agent target", exact: true });
       await expect(agentControl).toBeVisible();
-      await expect(agentControl).toContainText("Default Agent");
+      await expect(agentControl).toContainText("Psychevo");
       await expect(agentControl).not.toContainText("Psychevo (Native)");
-      await expect(agentControl).toHaveAttribute("title", "Default Agent · Psychevo (Native)");
+      await expect(agentControl).toHaveAttribute("title", "Psychevo · Psychevo (Native)");
+      const permissionMode = page.getByRole("combobox", { name: "Permission mode" });
+      await expect(permissionMode).toBeVisible();
+      expect(await selectedOptionText(permissionMode)).toBe("Default Permission");
       await agentControl.click();
       const agentPopover = page.getByRole("dialog", { name: "Agent target" });
       const agentGroup = agentPopover.getByRole("radiogroup", { name: "Agent target" });
-      await expect(agentGroup.getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toHaveAttribute("aria-checked", "true");
+      await expect(agentGroup.getByRole("radio", { name: "Psychevo · Psychevo (Native)" })).toHaveAttribute("aria-checked", "true");
       await expect(agentGroup.getByRole("radio", { name: "translate · Psychevo (Native)" })).toBeVisible();
       await expect(agentPopover.getByText("Agent target", { exact: true })).toHaveCount(0);
       await expect(agentPopover.getByText("Manage Agent targets", { exact: true })).toHaveCount(0);
-      await expect(agentPopover.getByText("Runtime Options", { exact: true })).toBeVisible();
-      const permissionMode = agentPopover.getByRole("combobox", { name: "Permission mode" });
-      await expect(permissionMode).toBeVisible();
-      expect(await selectedOptionText(permissionMode)).toBe("Choose Permission mode");
-      await expect(permissionMode.getByRole("option", { name: "default" })).toBeAttached();
+      await expect(agentPopover.getByText("Runtime Options", { exact: true })).toHaveCount(0);
+      await expect(agentPopover.getByRole("combobox", { name: "Permission mode" })).toHaveCount(0);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-agent-runtime-${testInfo.project.name}.png`)
       });
       await agentControl.click();
-      await expect(permissionMode).toHaveCount(0);
+      await expect(permissionMode).toBeVisible();
 
       const modeSelect = page.getByRole("combobox", { name: "Mode", exact: true });
       const modelButton = page.getByRole("button", { name: "Model", exact: true });
@@ -204,8 +204,8 @@ test.describe("Workbench composer visual contract", () => {
       await expect(modelButton).toBeVisible();
       expect(await selectedOptionText(modeSelect)).toBe("default");
       await expectSelectTextFits(modeSelect);
-      await expect(modelButton).toContainText("big-pickle Default");
-      await expect(modelButton).toHaveAttribute("title", "opencode-zen/big-pickle / Default");
+      await expect(modelButton).toContainText("big-pickle Unavailable");
+      await expect(modelButton).toHaveAttribute("title", "opencode-zen/big-pickle / Reasoning unavailable");
       await expectTextFits(modelButton.locator("span").first());
       for (const control of [agentControl, modeSelect, modelButton]) {
         expect(await control.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe("0px");
@@ -220,7 +220,7 @@ test.describe("Workbench composer visual contract", () => {
       await expect(modelPopover).toBeVisible();
       await expect(modelPopover.getByRole("searchbox", { name: "Model filter" })).toBeVisible();
       await expect(modelPopover.getByRole("radiogroup", { name: "Model" }).getByRole("radio")).toHaveCount(7);
-      await expect(modelPopover.getByRole("radiogroup", { name: "Reasoning" }).getByRole("radio", { name: "Default" })).toHaveAttribute("aria-checked", "true");
+      await expect(modelPopover.getByRole("radiogroup", { name: "Reasoning" }).getByRole("radio", { name: "Default" })).toHaveAttribute("aria-checked", "false");
       await expect(page.getByRole("option", { name: "Select model" })).toHaveCount(0);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-model-reasoning-${testInfo.project.name}.png`)
@@ -333,8 +333,8 @@ test.describe("Workbench composer visual contract", () => {
 
       const modelButton = page.getByRole("button", { name: "Model", exact: true });
       await expect(modelButton).toBeVisible();
-      await expect(modelButton).toContainText("mimo-v2.5-pro Default");
-      await expect(modelButton).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro / Default");
+      await expect(modelButton).toContainText("mimo-v2.5-pro Unavailable");
+      await expect(modelButton).toHaveAttribute("title", "lmstudio/mimo-v2.5-pro / Reasoning unavailable");
       await expectTextFits(modelButton.locator("span").first());
       await modelButton.click();
       const modelPicker = page.getByRole("dialog", { name: "Model and reasoning" });
@@ -652,15 +652,17 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
   const action = page.locator(".pevo-sendButton");
   const dictation = page.getByRole("button", { name: /dictation/ });
   const agent = page.getByRole("button", { name: "Agent target", exact: true });
+  const permission = page.getByRole("combobox", { name: "Permission mode" });
   const mode = page.getByRole("combobox", { name: "Mode", exact: true });
   const model = page.getByRole("button", { name: "Model", exact: true });
   const context = page.getByRole("button", { name: "Context usage" });
-  const [addBox, inputBox, footerBox, actionBox, dictationBox, agentBox, modeBox, modelBox, contextBox] = await Promise.all([
+  const [addBox, inputBox, footerBox, actionBox, dictationBox, permissionBox, agentBox, modeBox, modelBox, contextBox] = await Promise.all([
     add.boundingBox(),
     input.boundingBox(),
     footer.boundingBox(),
     action.boundingBox(),
     dictation.boundingBox(),
+    permission.boundingBox(),
     agent.boundingBox(),
     mode.boundingBox(),
     model.boundingBox(),
@@ -672,6 +674,7 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
   expect(footerBox).not.toBeNull();
   expect(actionBox).not.toBeNull();
   expect(dictationBox).not.toBeNull();
+  expect(permissionBox).not.toBeNull();
   expect(agentBox).not.toBeNull();
   expect(modeBox).not.toBeNull();
   expect(modelBox).not.toBeNull();
@@ -690,12 +693,13 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
   if (isMobile) {
     const viewport = await page.viewportSize();
     expect(viewport).not.toBeNull();
-    const visibleBoxes = [addBox!, agentBox!, modeBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
+    const visibleBoxes = [addBox!, permissionBox!, agentBox!, modeBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
     for (const box of visibleBoxes) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
     }
     expect(Math.abs(addCenterY - agentCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(addCenterY - (permissionBox!.y + permissionBox!.height / 2))).toBeLessThanOrEqual(5);
     expect(Math.abs(agentCenterY - modeCenterY)).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(5);
     expect(contextBox!.y).toBeGreaterThanOrEqual(modelBox!.y - 1);
@@ -703,17 +707,22 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
     expect(await footer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
     expect(addBox!.x).toBeLessThan(agentBox!.x);
+    expect(addBox!.x).toBeLessThan(permissionBox!.x);
+    expect(permissionBox!.x).toBeLessThan(agentBox!.x);
     expect(dictationBox!.x).toBeLessThan(actionBox!.x);
     return;
   }
   expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - agentCenterY)).toBeLessThanOrEqual(4);
+  expect(Math.abs(actionCenterY - (permissionBox!.y + permissionBox!.height / 2))).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modeCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(4);
 
   expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
   expect(addBox!.x).toBeLessThan(agentBox!.x);
+  expect(addBox!.x).toBeLessThan(permissionBox!.x);
+  expect(permissionBox!.x).toBeLessThan(agentBox!.x);
   expect(modeBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeLessThan(dictationBox!.x);

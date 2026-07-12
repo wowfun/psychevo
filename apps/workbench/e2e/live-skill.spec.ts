@@ -66,8 +66,18 @@ test.describe("pevo Web live skill validation", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       const composer = page.getByPlaceholder("Ask Psychevo...");
       await expect(composer).toBeVisible();
+      const send = page.getByRole("button", { name: "Send" });
+      if (await send.isDisabled()) {
+        await page.getByRole("button", { name: "Agent target", exact: true }).click();
+        const targets = page.getByRole("dialog", { name: "Agent target" })
+          .getByRole("radiogroup", { name: "Agent target" });
+        await targets.getByRole("radio", {
+          name: /^Psychevo · Psychevo \(Native\)$/
+        }).click();
+      }
       await composer.fill(prompt);
-      await page.getByRole("button", { name: "Send" }).click();
+      await expect(send).toBeEnabled();
+      await send.click();
       await captureAndAssert(page, testInfo, server.dbPath, screenshotDir, sample++, "submitted");
 
       const deadline = Date.now() + timeoutMs;

@@ -219,7 +219,7 @@ export async function openRuntimeProfilePopover() {
 
 export async function selectMainAgent(value: string) {
   const popover = await openAgentRuntimePopover();
-  const label = value || "Default Agent";
+  const label = value || "Psychevo";
   fireEvent.click(within(popover).getByRole("radio", { name: label }));
   return popover;
 }

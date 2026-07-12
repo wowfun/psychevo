@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Inbox, RefreshCw, Trash2 } from "lucide-react";
+import { Inbox, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   GatewayRequestScope,
@@ -27,6 +27,7 @@ export function AgentSessionImportDialog({
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [importingId, setImportingId] = useState<string | null>(null);
+  const [managingBackendId, setManagingBackendId] = useState<string | null>(null);
   const [selectedTargets, setSelectedTargets] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -43,7 +44,10 @@ export function AgentSessionImportDialog({
         setError(nextError instanceof Error ? nextError.message : String(nextError));
       }
     }).finally(() => {
-      if (!cancelled) setLoading(false);
+      if (!cancelled) {
+        setLoading(false);
+        if (refreshKey > 0) setManagingBackendId(null);
+      }
     });
     if (!client) {
       setLoading(false);
@@ -79,22 +83,35 @@ export function AgentSessionImportDialog({
     }
   }
 
+  async function installCodex() {
+    if (!client) return;
+    setManagingBackendId("codex");
+    setError(null);
+    try {
+      await client.request("backend/install", { id: "codex", scope });
+      setRefreshKey((value) => value + 1);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setManagingBackendId(null);
+    }
+  }
+
   return (
     <div className="modalBackdrop agentSessionImportBackdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget && !importingId) onClose();
+      if (event.target === event.currentTarget && !importingId && !managingBackendId) onClose();
     }}>
       <CreatePanel
         className="agentSessionImportDialog"
         description="Bring an Agent-owned conversation into Psychevo. Opening this window is the only action that scans external Agent sessions."
         icon={<Inbox size={18} />}
         layout="dialog"
-        onClose={importingId ? undefined : onClose}
+        onClose={importingId || managingBackendId ? undefined : onClose}
         title="Import Agent session"
         footer={
           <>
             <span className="agentSessionImportCount">{loading ? "Scanning Agent profiles…" : `${sessionCount} available`}</span>
             <ActionButton
-              disabled={disabled || loading || Boolean(importingId)}
+              disabled={disabled || loading || Boolean(importingId) || Boolean(managingBackendId)}
               icon={<RefreshCw size={15} />}
               onClick={() => setRefreshKey((value) => value + 1)}
               variant="ghost"
@@ -126,7 +143,7 @@ export function AgentSessionImportDialog({
                       <span>Import as</span>
                       <select
                         aria-label={`Agent target for ${profile.profileLabel}`}
-                        disabled={Boolean(importingId)}
+                        disabled={Boolean(importingId) || Boolean(managingBackendId)}
                         onChange={(event) => setSelectedTargets((current) => ({
                           ...current,
                           [profile.runtimeProfileRef]: event.target.value
@@ -142,7 +159,22 @@ export function AgentSessionImportDialog({
                     </label>
                   ) : null}
                 </header>
-                {profile.error ? <p className="agentSessionImportError">{profile.error.message}</p> : null}
+                {profile.error ? (
+                  <div className="agentSessionImportRecovery">
+                    <p className="agentSessionImportError">{profile.error.message}</p>
+                    {profile.runtimeProfileRef === "codex" && profile.error.recoveryAction === "backend/install" ? (
+                      <ActionButton
+                        disabled={disabled || loading || Boolean(importingId) || Boolean(managingBackendId)}
+                        icon={<Plus size={14} />}
+                        onClick={() => void installCodex()}
+                        size="compact"
+                        variant="primary"
+                      >
+                        {managingBackendId === "codex" ? "Installing…" : "Install Codex ACP"}
+                      </ActionButton>
+                    ) : null}
+                  </div>
+                ) : null}
                 {profile.status === "ready" && profile.sessions.length === 0 ? (
                   <p className="agentSessionImportEmpty">
                     {profile.alreadyImportedCount > 0
@@ -154,7 +186,7 @@ export function AgentSessionImportDialog({
                   {profile.sessions.map((session) => (
                     <button
                       className="agentSessionImportRow"
-                      disabled={disabled || Boolean(importingId) || !selectedTarget}
+                      disabled={disabled || Boolean(importingId) || Boolean(managingBackendId) || !selectedTarget}
                       key={session.candidateId}
                       onClick={() => void importSession(profile, session.candidateId)}
                       type="button"

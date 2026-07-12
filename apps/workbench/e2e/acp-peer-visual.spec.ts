@@ -48,13 +48,13 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await openPanel(page, isMobile, "Transcript");
       const targetControl = page.getByRole("button", { name: "Agent target", exact: true });
-      await expect(targetControl).toContainText("Default Agent");
+      await expect(targetControl).toContainText("Psychevo");
       await expect(targetControl).not.toContainText("Psychevo (Native)");
-      await expect(targetControl).toHaveAttribute("title", "Default Agent · Psychevo (Native)");
+      await expect(targetControl).toHaveAttribute("title", "Psychevo · Psychevo (Native)");
       await targetControl.click();
       const popover = page.getByRole("dialog", { name: "Agent target" });
       const targetGroup = popover.getByRole("radiogroup", { name: "Agent target" });
-      await expect(targetGroup.getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toHaveAttribute("aria-checked", "true");
+      await expect(targetGroup.getByRole("radio", { name: "Psychevo · Psychevo (Native)" })).toHaveAttribute("aria-checked", "true");
       const acpTarget = targetGroup.getByRole("radio", { name: "visual-acp · visual-acp (ACP)" });
       await expect(acpTarget).toBeVisible();
       await acpTarget.click();
@@ -67,10 +67,12 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       await page.getByRole("button", { name: "Send message" }).click();
 
       const assistantMessage = page.locator(".pevo-message.is-assistant").last();
-      await expect(page.locator(".pevo-reasoning")).toContainText("stable v1 reasoning", { timeout: 60_000 });
       await expect(assistantMessage).toContainText("Codex ACP response");
       await expect(assistantMessage).toContainText("model=fixture/default");
       await expect(assistantMessage).toContainText("mode=build");
+      const reasoning = page.locator(".pevo-reasoning").last();
+      const reasoningHeader = reasoning.getByRole("button", { name: "Thinking", exact: true });
+      await expect(reasoningHeader).toHaveAttribute("aria-expanded", "false");
       await expect(page.locator(".pevo-evidence").filter({ hasText: "Inspect ACP fixture" })).toBeVisible();
       await expect(page.locator(".pevo-evidence").filter({ hasText: "Plan" })).toContainText(
         "Project through the common application path"
@@ -78,6 +80,8 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       await assertNoHorizontalOverflow(page, page.getByRole("region", { name: "Transcript" }));
       await assertTranscriptRowsFit(page);
       await capture(page, testInfo, `03-stable-v1-stream-${projectSuffix(isMobile)}`);
+      await reasoningHeader.click();
+      await expect(reasoning).toContainText("stable v1 reasoning");
 
       const initialize = await expect.poll(() => traceEvents(fixture.logPath).find((event) => event.type === "initialize"), {
         timeout: 30_000

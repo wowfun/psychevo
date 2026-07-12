@@ -185,13 +185,18 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 }
 
 .agentSessionImportDialog {
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(720px, calc(100vw - 32px));
-  max-height: min(760px, calc(100vh - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
+  min-height: 0;
+  overflow: hidden;
 }
 
 .agentSessionImportDialog .pevo-createPanelBody {
   min-height: 180px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .agentSessionImportDialog .pevo-createPanelFooter {
@@ -317,6 +322,18 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   font-size: 0.8rem;
 }
 
+.agentSessionImportRecovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agentSessionImportRecovery .agentSessionImportError {
+  min-width: 0;
+  margin: 0;
+}
+
 .agentSessionImportError {
   color: var(--pevo-danger);
 }
@@ -345,7 +362,7 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 
   .agentSessionImportDialog {
     width: 100%;
-    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
   }
 
   .agentSessionImportProfile > header {
@@ -355,6 +372,11 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 
   .agentSessionImportProfile label {
     min-width: 0;
+  }
+
+  .agentSessionImportRecovery {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .agentSessionImportRow {

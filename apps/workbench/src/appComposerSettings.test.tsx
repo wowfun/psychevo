@@ -1056,7 +1056,7 @@ describe("Workbench settings and backend controls", () => {
 
     const popover = await openAgentRuntimePopover();
     const targets = within(popover).getByRole("radiogroup", { name: "Agent target" });
-    expect(within(targets).getByRole("radio", { name: "Default Agent · Psychevo (Native)" })).toBeTruthy();
+    expect(within(targets).getByRole("radio", { name: "Psychevo · Psychevo (Native)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "translate · Psychevo (Native)" })).toBeTruthy();
     expect(within(targets).queryByRole("radio", { name: /cursor/i })).toBeNull();
     expect(within(targets).queryByRole("radio", { name: /opencode/i })).toBeNull();

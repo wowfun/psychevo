@@ -49,7 +49,7 @@ export function ModelReasoningSelector({
   reasoningPresentation?: "selectable" | "readOnly" | "hidden";
   reasoningValues?: string[] | undefined;
   showChevron?: boolean;
-  variant: string;
+  variant: string | null;
   variantOptions?: string[];
   onModelChange(value: string | null): void;
   onSelectionChange?: ((model: string | null, variant: string) => void) | undefined;
@@ -66,13 +66,13 @@ export function ModelReasoningSelector({
     ? projectedReasoningValues === undefined
       ? reasoningEffortsForModelOption(selected, variantOptions)
       : authoritativeReasoningEfforts(projectedReasoningValues)
-    : [];
-  const selectedReasoning = reasoningPresentation === "readOnly"
-    ? variant || "none"
-    : reasoningValues.includes(variant) ? variant : reasoningValues[0] ?? "none";
+    : reasoningPresentation === "readOnly" && variant
+      ? [variant]
+      : [];
+  const selectedReasoning = variant && reasoningValues.includes(variant) ? variant : null;
   const showReasoning = reasoningPresentation !== "hidden";
   const popoverReasoningValues = reasoningPresentation === "readOnly"
-    ? [selectedReasoning]
+    ? selectedReasoning ? [selectedReasoning] : []
     : reasoningValues;
   const filteredOptions = useMemo(
     () => filterAndOrderModelOptions(options, model, optimisticRecentModels, modelFilter),
@@ -90,12 +90,12 @@ export function ModelReasoningSelector({
   }) as CSSProperties, [emptyLabel, filteredOptions, modelGroups, popoverReasoningValues, resetLabel]);
   const resetSelected = Boolean(resetLabel) && !selected && !model;
   const displayLabel = selected
-    ? `${modelShortLabel(selected)}${showReasoning ? ` ${reasoningLabel(selectedReasoning)}` : ""}`
+    ? `${modelShortLabel(selected)}${reasoningDisplaySuffix(showReasoning, selectedReasoning)}`
     : resetSelected
       ? resetLabel
       : emptyLabel;
   const title = selected
-    ? `${selected.value}${showReasoning ? ` / ${reasoningLabel(selectedReasoning)}` : ""}`
+    ? `${selected.value}${showReasoning ? ` / ${selectedReasoning ? reasoningLabel(selectedReasoning) : "Reasoning unavailable"}` : ""}`
     : resetSelected
       ? resetLabel
       : emptyLabel;
@@ -128,7 +128,7 @@ export function ModelReasoningSelector({
       return;
     }
     if (selected) {
-      if (!reasoningValues.includes(variant)) {
+      if (projectedReasoningValues === undefined && (!variant || !reasoningValues.includes(variant))) {
         const fallback = reasoningValues[0];
         if (fallback !== undefined) {
           onVariantChange(fallback);
@@ -136,7 +136,7 @@ export function ModelReasoningSelector({
       }
       return;
     }
-    if (variant !== "none") {
+    if (projectedReasoningValues === undefined && variant !== "none") {
       onVariantChange("none");
     }
   }, [onVariantChange, reasoningPresentation, reasoningValues, selected, variant]);
@@ -148,8 +148,8 @@ export function ModelReasoningSelector({
         : authoritativeReasoningEfforts(projectedReasoningValues)
       : [];
     const nextVariant = reasoningPresentation === "selectable"
-      ? nextReasoningValues.includes(variant) ? variant : nextReasoningValues[0] ?? "none"
-      : variant;
+      ? variant && nextReasoningValues.includes(variant) ? variant : nextReasoningValues[0] ?? "none"
+      : variant ?? "none";
     setOptimisticRecentModels((current) => recordRecentModel(option.value, current));
     if (onSelectionChange) {
       onSelectionChange(option.value, nextVariant);
@@ -268,11 +268,11 @@ export function ModelReasoningSelector({
                 </div>
               ) : (
                 <div
-                  aria-label={`Reasoning: ${reasoningLabel(selectedReasoning)} (read-only)`}
+                  aria-label={`Reasoning: ${selectedReasoning ? reasoningLabel(selectedReasoning) : "Unavailable"} (read-only)`}
                   className="modelReasoningReadOnly"
                 >
-                  <strong>{reasoningLabel(selectedReasoning)}</strong>
-                  <Check size={13} aria-hidden="true" />
+                  <strong>{selectedReasoning ? reasoningLabel(selectedReasoning) : "Unavailable"}</strong>
+                  {selectedReasoning && <Check size={13} aria-hidden="true" />}
                 </div>
               ) : (
                 <div className="modelReasoningHint">Select a model first</div>
@@ -287,6 +287,11 @@ export function ModelReasoningSelector({
 
 function authoritativeReasoningEfforts(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function reasoningDisplaySuffix(showReasoning: boolean, value: string | null): string {
+  if (!showReasoning) return "";
+  return value ? ` ${reasoningLabel(value)}` : " Unavailable";
 }
 
 function ModelReasoningRow({

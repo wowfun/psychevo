@@ -19,7 +19,10 @@ const options: ModelOptionView[] = [{
   reasoningEfforts: ["none", "high"]
 }];
 
-function renderPicker(reasoningPresentation: "selectable" | "readOnly" | "hidden") {
+function renderPicker(
+  reasoningPresentation: "selectable" | "readOnly" | "hidden",
+  variant: string | null = "high"
+) {
   return render(
     <ModelReasoningSelector
       model="fixture/default"
@@ -27,7 +30,7 @@ function renderPicker(reasoningPresentation: "selectable" | "readOnly" | "hidden
       reasoningPresentation={reasoningPresentation}
       reasoningValues={["none", "high"]}
       showChevron={false}
-      variant="high"
+      variant={variant}
       onModelChange={vi.fn()}
       onVariantChange={vi.fn()}
     />
@@ -51,6 +54,20 @@ describe("ModelReasoningSelector capability presentation", () => {
 
     expect(screen.getByLabelText("Reasoning: High (read-only)")).toBeTruthy();
     expect(screen.queryByRole("radiogroup", { name: "Reasoning" })).toBeNull();
+  });
+
+  it("does not invent a reasoning default when the authoritative value is missing", () => {
+    renderPicker("selectable", null);
+    expect(screen.getByRole("button", { name: "Model" }).textContent).toContain("Unavailable");
+
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    const reasoning = screen.getByRole("radiogroup", { name: "Reasoning" });
+    expect(within(reasoning).getAllByRole("radio").every((radio) => radio.getAttribute("aria-checked") !== "true")).toBe(true);
+  });
+
+  it("renders Default only when the authoritative reasoning value is none", () => {
+    renderPicker("selectable", "none");
+    expect(screen.getByRole("button", { name: "Model" }).textContent).toContain("Fixture default Default");
   });
 
   it("omits reasoning when the selected Agent does not expose it", () => {

@@ -162,9 +162,13 @@ function partKinds(prompt) {
 function replayHistory(sessionId) {
   const session = sessionState(sessionId);
   for (const message of session.messages) {
-    if (message.role !== "assistant") continue;
+    if (message.update) {
+      update(sessionId, message.update);
+      continue;
+    }
+    if (message.role !== "assistant" && message.role !== "user") continue;
     update(sessionId, {
-      sessionUpdate: "agent_message_chunk",
+      sessionUpdate: message.role === "user" ? "user_message_chunk" : "agent_message_chunk",
       content: { type: "text", text: message.text },
       messageId: message.id
     });

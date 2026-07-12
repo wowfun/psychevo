@@ -100,9 +100,9 @@ function compatibleRuntimeTargets(): Array<Record<string, unknown>> {
           targetId: `target:default:${runtimeProfileRef}`,
           agentRef: null,
           runtimeProfileRef,
-          agentLabel: "Default Agent",
+          agentLabel: "Psychevo",
           profileLabel: label,
-          label: `Default Agent · ${label}`,
+          label: `Psychevo · ${label}`,
           ready: true,
           unavailableReason: null
         },
