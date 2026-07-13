@@ -332,6 +332,11 @@ recent smart denial with `/approve once|session|always`.
 
 ## Related Topics
 
+`WebSearch(pattern)` matches the actual search query. Hosted web search may be
+declared only when effective rules statically prove an unconditional allow;
+query-specific ask or deny remains enforceable through the local lane. See
+[111 Web Search](../111-web-search/spec.md).
+
 - [040 Environment](../040-environment/spec.md) defines local host environment
   and authority boundaries that permission policy specializes.
 - [004 Runtime Contract](../004-runtime-contract/spec.md) defines runtime

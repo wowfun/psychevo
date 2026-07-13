@@ -243,11 +243,7 @@ pub(crate) fn openai_chat_token_count_splits_context_categories() {
             json!({"role":"user","content":[{"text":"selected skill body"}],"metadata":{"context_category":"turn_context"}}),
             json!({"role":"assistant","content":[{"type":"text","text":"ok"}]}),
         ],
-        tools: vec![ToolDeclaration::new(
-            "read",
-            "read file",
-            json!({"type":"object"}),
-        )],
+        tools: vec![ToolDeclaration::new("read", "read file", json!({"type":"object"})).into()],
         metadata: json!({
             "context_counting": {
                 "system_prompt_message_count": 1,

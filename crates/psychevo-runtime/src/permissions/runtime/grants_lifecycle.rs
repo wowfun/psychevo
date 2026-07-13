@@ -69,6 +69,15 @@ impl PermissionRuntime {
                         &fallback_extends,
                     )
                 }
+                PersistentPermissionGrant::WebSearch { query, access } => {
+                    crate::config::append_local_web_search_grant_with_extends(
+                        self.inner.project_config_dir.clone(),
+                        query,
+                        *access,
+                        format!("web_search:{query}"),
+                        &fallback_extends,
+                    )
+                }
                 PersistentPermissionGrant::Exec { prefix, decision } => {
                     append_local_exec_policy_rule(
                         self.inner.project_config_dir.clone(),

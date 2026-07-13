@@ -5,6 +5,8 @@ pub(crate) struct AssistantBuildState<'a> {
     pub(crate) reasoning: &'a str,
     pub(crate) reasoning_provider_evidence: Option<Value>,
     pub(crate) tool_builders: &'a BTreeMap<(usize, usize), ToolCallBuilder>,
+    pub(crate) provider_tools: &'a BTreeMap<String, ProviderToolBlock>,
+    pub(crate) sources: &'a [AssistantSource],
     pub(crate) timestamp_ms: i64,
     pub(crate) finish_reason: Option<String>,
     pub(crate) outcome: Outcome,
@@ -42,6 +44,14 @@ pub(crate) fn build_assistant_message(
             call_index: builder.call_index,
         }));
     }
+    content.extend(
+        state
+            .provider_tools
+            .values()
+            .cloned()
+            .map(AssistantBlock::ProviderTool),
+    );
+    content.extend(state.sources.iter().cloned().map(AssistantBlock::Source));
     Message::Assistant {
         content,
         timestamp_ms: state.timestamp_ms,

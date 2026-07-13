@@ -240,7 +240,10 @@ pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
 
     let requests = requests.lock().expect("requests");
     let tool = requests[0].tools.first().expect("tool declaration");
-    let value = serde_json::to_value(tool).expect("tool declaration json");
+    let psychevo_ai::GenerationTool::Function { declaration } = tool else {
+        panic!("expected function declaration");
+    };
+    let value = serde_json::to_value(declaration).expect("tool declaration json");
     assert_eq!(value["name"], "display_only");
     assert!(value.get("display").is_none(), "{value}");
 }

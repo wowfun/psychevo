@@ -93,8 +93,9 @@ pub use config::{
     set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value, set_default_model,
     set_default_model_with_reasoning, set_local_toolset_enabled, set_mcp_server_enabled,
     set_mcp_server_tool_policy, set_provider_api_key, set_provider_model_config,
-    setup_channel_connection, toolsets_value, update_channel_connection, upsert_channel_connection,
-    upsert_mcp_server, validate_runtime_profile_backend_ref, voice_config_value,
+    setup_channel_connection, toolsets_value, update_channel_connection,
+    update_global_web_search_settings, upsert_channel_connection, upsert_mcp_server,
+    validate_runtime_profile_backend_ref, voice_config_value, web_search_settings_value,
     write_cached_model_catalog,
 };
 pub use context::prune_context;
@@ -154,8 +155,8 @@ pub use prompt_image::{
 };
 pub use prompt_templates::side_conversation_boundary_prompt;
 pub use psychevo_agent_core::{
-    AssistantBlock, Message, PendingInputId, TerminalReason, ToolCallBlock, ToolDisplayBodyPolicy,
-    ToolDisplayCategory, ToolDisplaySpec, UserContentBlock,
+    AssistantBlock, Message, PendingInputId, ProviderToolBlock, TerminalReason, ToolCallBlock,
+    ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, UserContentBlock,
 };
 pub use psychevo_ai::AbortSignal;
 pub use psychevo_ai::Outcome;

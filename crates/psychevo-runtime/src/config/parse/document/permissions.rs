@@ -148,12 +148,31 @@ pub(crate) fn parse_permission_profile(
             .map(|value| parse_network_domains(value, name))
             .transpose()?
             .unwrap_or_default(),
+        web_search_queries: object
+            .get("web_search")
+            .map(|value| parse_web_search_queries(value, name))
+            .transpose()?
+            .unwrap_or_default(),
         skill_tools: object
             .get("tools")
             .map(|value| parse_tool_grants(value, name))
             .transpose()?
             .unwrap_or_default(),
     })
+}
+
+pub(crate) fn parse_web_search_queries(
+    value: &Value,
+    profile: &str,
+) -> Result<BTreeMap<String, PermissionAccess>> {
+    let object = value.as_object().ok_or_else(|| {
+        Error::Config(format!("permissions.{profile}.web_search must be an object"))
+    })?;
+    object
+        .get("queries")
+        .map(|value| parse_access_map(value, &format!("permissions.{profile}.web_search.queries")))
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 pub(crate) fn parse_network_domains(

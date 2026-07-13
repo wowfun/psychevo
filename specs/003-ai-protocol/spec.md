@@ -94,7 +94,13 @@ formats into bounded mainstream image data URLs. A local image that cannot be
 read during historical context replay should degrade to visible text explaining
 the missing attachment instead of aborting request construction.
 
-The tool declaration snapshot describes what the model may request for this generation request. [007 Tool Surface](../007-tool-surface/spec.md) defines declaration snapshot and execution binding semantics. Tool declarations do not define concrete tool behavior, resource gate semantics, permission rules, or execution scheduling.
+The generation-tool snapshot is a provider-neutral union of function tools and
+provider-executed hosted tools. Function declarations require a matching
+runtime execution binding. Hosted declarations deliberately have no local
+binding, and their lifecycle must never enter the runtime tool router. [007 Tool
+Surface](../007-tool-surface/spec.md) defines function declaration snapshot and
+execution binding semantics. Tool declarations do not define concrete tool
+behavior, resource gate semantics, permission rules, or execution scheduling.
 
 A provider-neutral tool declaration may carry a canonical tool identity made of
 an optional namespace and a local tool name. The canonical identity is the
@@ -119,6 +125,7 @@ The stream categories are:
 - assistant text/content progress
 - assistant reasoning/thinking progress when available
 - assistant-requested tool-call progress
+- provider-executed hosted-tool progress
 - optional usage metadata
 - optional extension metadata
 - terminal outcome
@@ -131,6 +138,11 @@ projected into default visible assistant output. Interfaces may expose it
 through explicit folded/debug views.
 
 Assistant-requested tool-call progress identifies tool requests produced by the model. [002 Agent Execution](../002-agent-execution/spec.md), [004 Runtime Contract](../004-runtime-contract/spec.md), and [007 Tool Surface](../007-tool-surface/spec.md) define downstream execution and tool-result boundaries.
+
+Provider-executed progress identifies hosted lifecycle and action data reported
+by the provider. Normalized assistant output may attach provider-neutral source
+blocks, including indexed URL citations and remote image-source metadata.
+Sources are assistant evidence, not function tool results.
 
 Usage metadata may describe consumption reported by a provider. Usage metadata is optional. Pricing, accounting, provider-specific token fields, and billing policy belong outside this spec.
 

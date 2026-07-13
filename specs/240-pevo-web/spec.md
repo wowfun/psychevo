@@ -300,6 +300,11 @@ export rather than isolated Workbench literals.
 
 ## Validation
 
+Workbench Settings includes a compact profile-scoped Web Search section and
+never receives raw search credentials. Assistant URL citations are clickable;
+remote image results load thumbnails only after expansion. See
+[111 Web Search](../111-web-search/spec.md).
+
 Frontend validation uses deterministic local harnesses by default. Unit tests
 cover generated protocol validators, client reconnect/pending request behavior,
 host storage, and component rendering. Browser tests use Playwright against the

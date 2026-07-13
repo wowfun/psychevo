@@ -36,6 +36,7 @@ pub(crate) struct RunConfig {
     pub(crate) project_context: ProjectContextConfig,
     pub(crate) workspaces: WorkspacesConfig,
     pub(crate) tools: ToolSelectionConfig,
+    pub(crate) web: WebConfig,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) agent_backends: BTreeMap<String, AgentBackendConfig>,
@@ -109,3 +110,7 @@ pub use config_voice::*;
 #[path = "config/image_generation.rs"]
 pub(crate) mod config_image_generation;
 pub use config_image_generation::*;
+#[path = "config/web_search.rs"]
+pub(crate) mod config_web_search;
+pub(crate) use config_web_search::*;
+pub use config_web_search::{update_global_web_search_settings, web_search_settings_value};

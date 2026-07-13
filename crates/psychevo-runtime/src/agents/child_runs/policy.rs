@@ -165,6 +165,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         home: Some(child.context.home.clone()),
         image_input_enabled: child.context.image_input_enabled,
         image_generation: child.context.image_generation.clone(),
+        web_search: child.context.web_search.clone(),
         tool_selection: child.context.tool_selection.clone(),
         custom_toolsets: child.context.custom_toolsets.clone(),
         contributed_toolsets: child.context.extension_inputs.toolsets.clone(),

@@ -52,6 +52,9 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     if let Some(tools) = object.get("tools") {
         config.tools = parse_tool_selection_config(tools)?;
     }
+    if let Some(web) = object.get("web") {
+        config.web = parse_web_config(web)?;
+    }
     if let Some(toolsets) = object.get("toolsets") {
         config.toolsets = parse_custom_toolsets(toolsets)?;
     }

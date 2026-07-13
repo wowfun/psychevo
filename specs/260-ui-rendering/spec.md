@@ -38,6 +38,11 @@ Rendering surfaces consume typed transcript entries and blocks from
 raw runtime/provider records, unclassified stream events, or surface-local
 debug material as ordinary transcript rows.
 
+Web-search rows use `Searching the web` and `Searched the web`. URL citations
+are visible links, and remote image results show source/caption before an
+explicitly expanded thumbnail. Long queries wrap without changing block
+identity. See [111 Web Search](../111-web-search/spec.md).
+
 User prompts render as prompt material without a generic role label. Visible
 assistant text renders as assistant answer material. Reasoning blocks render as
 Thinking material and must not be copied into assistant text rows. Empty

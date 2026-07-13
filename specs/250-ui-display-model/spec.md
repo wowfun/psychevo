@@ -53,6 +53,12 @@ tool-call blocks follow the original assistant `content[]` order. A later
 `tool_call_id` and carries `resultMessageSeq`, content, error state, status,
 metadata, and timestamps.
 
+Provider-executed hosted-tool blocks and provider-neutral assistant sources are
+message-derived content. They persist and reconcile by stable provider identity
+but do not create local tool-result relationships. URL citations preserve text
+indices; image sources preserve remote metadata. See
+[111 Web Search](../111-web-search/spec.md).
+
 Runtime may emit live `started`, `updated`, and `completed` observations while
 a turn is active. These events are presentation-only. On turn completion the
 Gateway transcript projection materializes the completed turn from the owning

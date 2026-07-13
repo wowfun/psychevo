@@ -17,6 +17,7 @@ pub(crate) fn run_mode_tool_names_enforce_plan_read_only_surface() {
             "exec_command",
             "write_stdin",
             "web_fetch",
+            "web_search",
             "view_image"
         ]
     );
@@ -29,6 +30,7 @@ pub(crate) fn run_mode_tool_names_enforce_plan_read_only_surface() {
             "exec_command",
             "write_stdin",
             "web_fetch",
+            "web_search",
             "view_image",
             "image_generate"
         ]
@@ -110,6 +112,7 @@ pub(crate) fn exec_command_provider_schema_replaces_bash() {
             "exec_command",
             "write_stdin",
             "web_fetch",
+            "web_search",
             "view_image",
             "image_generate"
         ]

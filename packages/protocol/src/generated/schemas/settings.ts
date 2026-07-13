@@ -435,6 +435,75 @@ export const settingsSchemas = {
       ],
       "type": "object"
     },
+    "WebSearchSettingsView": {
+      "properties": {
+        "allowedDomains": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "backgroundStorageAcknowledged": {
+          "type": "boolean"
+        },
+        "blockedDomains": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contentTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contextSize": {
+          "type": "string"
+        },
+        "credentials": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "execution": {
+          "type": "string"
+        },
+        "externalAccess": {
+          "type": "string"
+        },
+        "image": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "location": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "returnTokenBudget": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "backgroundStorageAcknowledged",
+        "contextSize",
+        "credentials",
+        "execution",
+        "externalAccess",
+        "image",
+        "location",
+        "returnTokenBudget"
+      ],
+      "type": "object"
+    },
     "WorkbenchControlsView": {
       "properties": {
         "agent": {
@@ -606,6 +675,17 @@ export const settingsSchemas = {
     "secrets": {
       "additionalProperties": true,
       "type": "object"
+    },
+    "webSearch": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/WebSearchSettingsView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
@@ -614,6 +694,248 @@ export const settingsSchemas = {
     "secrets"
   ],
   "title": "SettingsReadResult",
+  "type": "object"
+},
+  WebSearchSettingsView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "allowedDomains": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "backgroundStorageAcknowledged": {
+      "type": "boolean"
+    },
+    "blockedDomains": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "contentTypes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "contextSize": {
+      "type": "string"
+    },
+    "credentials": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "execution": {
+      "type": "string"
+    },
+    "externalAccess": {
+      "type": "string"
+    },
+    "image": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "location": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "returnTokenBudget": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "backend",
+    "backgroundStorageAcknowledged",
+    "contextSize",
+    "credentials",
+    "execution",
+    "externalAccess",
+    "image",
+    "location",
+    "returnTokenBudget"
+  ],
+  "title": "WebSearchSettingsView",
+  "type": "object"
+},
+  WebSearchSettingsReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "cwd": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "WebSearchSettingsReadParams",
+  "type": "object"
+},
+  WebSearchSettingsUpdateParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "WebSearchSettingsView": {
+      "properties": {
+        "allowedDomains": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "backgroundStorageAcknowledged": {
+          "type": "boolean"
+        },
+        "blockedDomains": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contentTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contextSize": {
+          "type": "string"
+        },
+        "credentials": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "execution": {
+          "type": "string"
+        },
+        "externalAccess": {
+          "type": "string"
+        },
+        "image": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "location": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "returnTokenBudget": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "backgroundStorageAcknowledged",
+        "contextSize",
+        "credentials",
+        "execution",
+        "externalAccess",
+        "image",
+        "location",
+        "returnTokenBudget"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "credentialValues": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "type": "object"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "search": {
+      "$ref": "#/definitions/WebSearchSettingsView"
+    }
+  },
+  "required": [
+    "scope",
+    "search"
+  ],
+  "title": "WebSearchSettingsUpdateParams",
   "type": "object"
 },
   WorkbenchProjectView: {

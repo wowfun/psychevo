@@ -68,6 +68,10 @@ pub(crate) enum PersistentPermissionGrant {
         host: String,
         access: PermissionAccess,
     },
+    WebSearch {
+        query: String,
+        access: PermissionAccess,
+    },
     Exec {
         prefix: Vec<String>,
         decision: ExecPolicyDecision,

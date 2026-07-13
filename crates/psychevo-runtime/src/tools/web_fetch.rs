@@ -91,23 +91,50 @@ pub(crate) async fn web_fetch_tool_impl(args: Value, abort: AbortSignal) -> Resu
         .ceil()
         .clamp(1.0, WEB_FETCH_MAX_TIMEOUT_SECS as f64) as u64;
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .timeout(Duration::from_secs(timeout_secs))
-        .user_agent("Mozilla/5.0 (compatible; Psychevo/web_fetch)")
-        .build()?;
-    let request = client
-        .get(url.as_str())
-        .header(
-            reqwest::header::ACCEPT,
-            "text/markdown, text/plain, text/html, application/xhtml+xml, application/json, application/xml, image/*;q=0.8, */*;q=0.1",
-        )
-        .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9");
-    let mut abort_for_send = abort.clone();
-    let response = tokio::select! {
-        _ = abort_for_send.wait_for_abort() => return Err(Error::Message("web_fetch aborted".to_string())),
-        result = request.send() => result?,
-    };
+    let policy = WebUrlPolicy;
+    let mut current = url.clone();
+    let mut response = None;
+    for redirect_count in 0..=10 {
+        let validated = policy.validate(&current).await?;
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(timeout_secs))
+            .user_agent("Mozilla/5.0 (compatible; Psychevo/web_fetch)");
+        for address in &validated.addresses {
+            builder = builder.resolve(&validated.host, *address);
+        }
+        let client = builder.build()?;
+        let request = client.get(validated.url.clone())
+            .header(reqwest::header::ACCEPT, "text/markdown, text/plain, text/html, application/xhtml+xml, application/json, application/xml, image/*;q=0.8, */*;q=0.1")
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9");
+        let mut abort_for_send = abort.clone();
+        let next = tokio::select! {
+            _ = abort_for_send.wait_for_abort() => return Err(Error::Message("web_fetch aborted".to_string())),
+            result = request.send() => result?,
+        };
+        if next.status().is_redirection() {
+            if redirect_count == 10 {
+                return Err(Error::Message("web_fetch redirect limit exceeded".into()));
+            }
+            let location = next
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    Error::Message("web_fetch redirect did not contain a valid Location".into())
+                })?;
+            current = validated
+                .url
+                .join(location)
+                .map_err(|_| Error::Message("web_fetch redirect URL is invalid".into()))?
+                .to_string();
+            continue;
+        }
+        response = Some(next);
+        break;
+    }
+    let response =
+        response.ok_or_else(|| Error::Message("web_fetch did not produce a response".into()))?;
     let status = response.status().as_u16();
     let final_url = response.url().to_string();
     let content_type = response

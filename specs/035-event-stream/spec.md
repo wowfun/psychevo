@@ -52,6 +52,8 @@ The core taxonomy includes:
 - message and block lifecycle
 - reasoning or thinking progress
 - tool call, execution, stdout, stderr, and result materialization
+- provider-executed hosted-tool lifecycle and assistant source material; these
+  retain provider call identity but never imply a local execution request
 - generation start, completion, retryable stream errors, and failed generation
 - unified blocking actions for permission, clarify, custom tool, and user input
 - usage, accounting, warnings, and terminal errors

@@ -42,8 +42,50 @@ pub struct ModelTarget {
 pub struct GenerationRequest {
     pub model: ModelTarget,
     pub messages: Vec<Value>,
-    pub tools: Vec<ToolDeclaration>,
+    pub tools: Vec<GenerationTool>,
     pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HostedWebSearchTool {
+    pub config: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GenerationTool {
+    Function { declaration: ToolDeclaration },
+    WebSearch(HostedWebSearchTool),
+}
+
+impl From<ToolDeclaration> for GenerationTool {
+    fn from(declaration: ToolDeclaration) -> Self {
+        Self::Function { declaration }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UrlCitationSource {
+    pub url: String,
+    pub title: String,
+    pub start_index: Option<usize>,
+    pub end_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImageSearchSource {
+    pub image_url: String,
+    pub thumbnail_url: Option<String>,
+    pub source_website_url: String,
+    pub caption: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AssistantSource {
+    UrlCitation(UrlCitationSource),
+    Image(ImageSearchSource),
+    Provider { kind: String, data: Value },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -78,7 +120,7 @@ impl ToolName {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolDeclaration {
     /// Provider-visible fallback name for adapter families that do not support
     /// tool namespaces.
@@ -148,6 +190,20 @@ pub enum StreamEvent {
     ToolCallEnd {
         content_index: usize,
         call_index: usize,
+    },
+    ProviderToolStart {
+        id: String,
+        name: String,
+        action: Option<Value>,
+    },
+    ProviderToolEnd {
+        id: String,
+        name: String,
+        action: Option<Value>,
+        status: String,
+    },
+    Source {
+        source: AssistantSource,
     },
     Usage {
         usage: Value,

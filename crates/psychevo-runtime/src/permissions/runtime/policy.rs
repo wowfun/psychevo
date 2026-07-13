@@ -344,6 +344,7 @@ impl PermissionRuntime {
             PermissionAction::Skill { .. } => granular.skill,
             PermissionAction::McpStartup { .. } | PermissionAction::Mcp { .. } => granular.mcp,
             PermissionAction::WebFetch { .. } => granular.network,
+            PermissionAction::WebSearch { .. } => granular.network,
         }
     }
 }

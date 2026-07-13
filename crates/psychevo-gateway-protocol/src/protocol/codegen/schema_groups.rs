@@ -227,7 +227,7 @@ fn schema_group_module(name: &str) -> &'static str {
     {
         return "interaction";
     }
-    if name.starts_with("Settings") || name.starts_with("Workbench") {
+    if name.starts_with("Settings") || name.starts_with("Workbench") || name.starts_with("WebSearchSettings") {
         return "settings";
     }
     if matches!(name, "InitializeParams" | "InitializeResult" | "GatewayProfileView" | "ReadyzResult") {

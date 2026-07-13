@@ -1366,3 +1366,24 @@
   border-radius: 999px;
   font-size: var(--pevo-font-size-xsmall);
 }
+.pevo-webCitation,
+.pevo-webImageSource {
+  align-items: center;
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.25rem 0;
+}
+
+.pevo-webCitation a,
+.pevo-webImageSource a {
+  color: var(--pevo-color-accent, currentColor);
+  overflow-wrap: anywhere;
+}
+
+.pevo-webImageSource { align-items: flex-start; flex-wrap: wrap; }
+.pevo-webImageSource > button { align-items: center; display: inline-flex; gap: 0.35rem; }
+.pevo-webImageThumbnail { flex-basis: 100%; max-width: 28rem; min-height: 4rem; position: relative; }
+.pevo-webImageThumbnail img { display: block; height: auto; max-height: 18rem; max-width: 100%; opacity: 0; }
+.pevo-webImageThumbnail.is-loaded img { opacity: 1; }
+.pevo-webImageThumbnail.is-loaded > span { display: none; }

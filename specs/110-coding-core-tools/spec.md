@@ -9,7 +9,7 @@ Define the required `coding-core` toolset for the built-in coding-agent capabili
 
 - `coding-core` toolset semantics
 - core coding tools: `read`, `edit`, `write`, `exec_command`, and `write_stdin`
-- adjacent core-managed web toolset containing `web_fetch`
+- adjacent core-managed web toolset containing `web_fetch` and lane-selected `web_search`
 - model-visible JSON result contracts for those tools
 - working-context and resource-boundary expectations for core tools
 - observable failure, truncation, timeout, abort, and conflict behavior
@@ -20,9 +20,9 @@ Out of scope:
 - CLI commands, terminal rendering, or durable process registry behavior outside
   the in-process exec session model
 - approval UX, sandbox behavior, deny lists, dangerous-command policy, or concrete resource policy, except for surfacing permission denial as normal tool-result failure
-- binary/image file reading, append/delete/rename tools, dedicated search/list
-  tools, memory tools, skill adjunct tools, web search/provider extraction
-  tools, or self-evolution tools
+- binary/image file reading, append/delete/rename tools, filesystem search/list
+  tools, memory tools, skill adjunct tools, provider-backed extraction tools,
+  or self-evolution tools
 - storage schemas, evidence record shapes, or replay formats
 
 ## Toolset Contract
@@ -41,13 +41,11 @@ must prefer dedicated file tools for reads and writes. Optional skill tools are
 adjacent runtime tools defined by [055 Skills](../055-skills/spec.md), not
 members of `coding-core`.
 
-The built-in `web` toolset is adjacent to `coding-core` and contains the
-read-only `web_fetch` tool. Default coding-agent invocations enable both
-`coding-core` and `web` unless configuration disables `web`. `web_fetch` is not
-a web search or provider-backed extraction tool; it reads a known `http(s)` URL
-through the runtime HTTP client. Runtime mode system prompts do not include
-dedicated `web_fetch` guidance; its availability and parameter contract are
-communicated through the model-visible tool declaration.
+The built-in `web` toolset is adjacent to `coding-core` and contains read-only
+`web_fetch` plus one lane-selected `web_search`. Default coding-agent invocations
+enable both `coding-core` and `web` unless configuration disables `web`.
+`web_fetch` reads a known `http(s)` URL; `web_search` discovers URLs and current
+information under [111 Web Search](../111-web-search/spec.md).
 
 When the runtime exposes a Plan-mode coding surface, its core tools are the
 non-mutating subset `read`, `exec_command`, and `write_stdin`. Plan mode does
@@ -269,8 +267,9 @@ and optional `timeout` in seconds. It follows bounded redirects and reports the
 final URL.
 
 The tool is read-only and default-allowed by permission policy, while explicit
-`WebFetch(pattern)` allow/ask/deny rules may override it. It does not hard-block
-localhost or private addresses in this slice.
+`WebFetch(pattern)` allow/ask/deny rules may override it. The shared URL policy
+always rejects local, private, metadata, and other non-public targets and
+revalidates every redirect as defined by [111 Web Search](../111-web-search/spec.md).
 
 Successful text results return stable fields including `url`, `final_url`,
 `status`, `content_type`, `format`, `content`, `truncated`, `original_bytes`,
@@ -284,6 +283,14 @@ runtime-originated image context message when the selected model supports image
 input; otherwise the tool result contains a visible warning. PDF, archive, and
 other unsupported binary responses return structured errors rather than base64
 text.
+
+## `web_search`
+
+The built-in `web` toolset expands to `web_fetch` plus one lane-selected
+`web_search`. Local search is a permission-gated runtime binding; hosted search
+is a provider-executed generation tool and is not routed locally. Configuration,
+selection, schemas, result envelopes, hosted sources, and URL security are owned
+by [111 Web Search](../111-web-search/spec.md).
 
 ## Attachments
 

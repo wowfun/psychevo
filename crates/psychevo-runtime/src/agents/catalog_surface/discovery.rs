@@ -142,6 +142,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) home: PathBuf,
     pub(crate) image_input_enabled: bool,
     pub(crate) image_generation: Option<crate::config::ResolvedImageGenerationConfig>,
+    pub(crate) web_search: crate::config::WebSearchConfig,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) extension_inputs: crate::extensions::AcceptedExtensionInputs,

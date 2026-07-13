@@ -102,6 +102,7 @@ pub(crate) fn permission_rule_tool(tool: &str) -> &str {
         "mcp_startup" => "McpStartup",
         "mcp" => "Mcp",
         "web_fetch" => "WebFetch",
+        "web_search" => "WebSearch",
         other => other,
     }
 }

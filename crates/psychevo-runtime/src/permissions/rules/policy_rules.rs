@@ -632,6 +632,7 @@ pub(crate) fn parse_rule(raw: &str) -> Option<PermissionRule> {
         "McpStartup" | "mcp_startup" => "mcp_startup",
         "Mcp" | "mcp" => "mcp",
         "WebFetch" | "web_fetch" => "web_fetch",
+        "WebSearch" | "web_search" => "web_search",
         _ => return None,
     };
     Some(PermissionRule {

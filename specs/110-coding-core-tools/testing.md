@@ -12,8 +12,8 @@ Define acceptance expectations and validation scenarios for the `coding-core` to
 - Plan-mode core tools expand to `read`, `exec_command`, and `write_stdin`;
   dedicated `list` and `search` tools are not registered, normalized, or
   specially handled.
-- The adjacent `web` toolset expands to `web_fetch`; default Plan and Default
-  surfaces include it unless disabled by toolset configuration.
+- The adjacent `web` toolset expands to `web_fetch` and lane-selected
+  `web_search`; default Plan and Default surfaces include it unless disabled.
 - Each exposed tool declaration has a matching execution binding for the same agent invocation and generation-request tool declaration snapshot.
 - Each tool operates only through the runtime-resolved working context and resource surface accepted for the coding-agent invocation.
 - Each tool returns model-visible JSON results with the stable fields defined by [110 Coding Core Tools](spec.md).

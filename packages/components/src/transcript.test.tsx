@@ -630,6 +630,39 @@ describe("TranscriptPanel generated image artifacts", () => {
   });
 });
 
+describe("TranscriptPanel web search sources", () => {
+  it("renders URL citations as external links", () => {
+    const block = transcriptBlock({
+      kind: "web",
+      title: "Rust",
+      metadata: { projection: "url_citation", title: "Rust", url: "https://example.com/rust" }
+    });
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+    expect(screen.getByRole("link", { name: "Rust" }).getAttribute("href")).toBe("https://example.com/rust");
+  });
+
+  it("loads image-result thumbnails only after expansion and shows failure state", () => {
+    const block = transcriptBlock({
+      kind: "web",
+      title: "Ferris",
+      metadata: {
+        projection: "web_image_source",
+        caption: "Ferris",
+        image_url: "https://images.example/ferris.png",
+        thumbnail_url: "https://images.example/ferris-thumb.png",
+        source_website_url: "https://example.com/ferris"
+      }
+    });
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+    expect(screen.queryByRole("img", { name: "Ferris" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ferris" }));
+    const image = screen.getByRole("img", { name: "Ferris" });
+    expect(image.getAttribute("src")).toBe("https://images.example/ferris-thumb.png");
+    fireEvent.error(image);
+    expect(screen.getByText("Image preview unavailable.")).toBeTruthy();
+  });
+});
+
 describe("TranscriptPanel session scroll behavior", () => {
   const scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
   const clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");

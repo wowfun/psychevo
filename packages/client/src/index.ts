@@ -132,6 +132,9 @@ import {
   type SettingsReadParams,
   type SettingsReadResult,
   type SettingsUpdateParams,
+  type WebSearchSettingsReadParams,
+  type WebSearchSettingsUpdateParams,
+  type WebSearchSettingsView,
   type ShellStartParams,
   type SkillInstallParams,
   type SkillListParams,
@@ -338,6 +341,8 @@ export interface GatewayRequestParams {
   "runtime/profile/write": RuntimeProfileWriteParams;
   "settings/read": SettingsReadParams;
   "settings/update": SettingsUpdateParams;
+  "web/search/settings/read": WebSearchSettingsReadParams;
+  "web/search/settings/update": WebSearchSettingsUpdateParams;
   "shell/start": ShellStartParams;
   "slash/settings/read": SlashSettingsReadParams;
   "slash/settings/update": SlashSettingsUpdateParams;
@@ -474,6 +479,8 @@ export interface GatewayRequestResults {
   "runtime/profile/write": RuntimeProfileWriteResult;
   "settings/read": SettingsReadResult;
   "settings/update": SettingsReadResult;
+  "web/search/settings/read": WebSearchSettingsView;
+  "web/search/settings/update": WebSearchSettingsView;
   "shell/start": ShellStartResult;
   "slash/settings/read": SlashSettingsResult;
   "slash/settings/update": SlashSettingsResult;

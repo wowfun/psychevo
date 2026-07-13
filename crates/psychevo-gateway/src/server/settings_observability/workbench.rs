@@ -8,6 +8,7 @@ fn settings_read_value(
     let controls = workbench_controls_value(state, cwd, thread_id)?;
     let project = workbench_project_value(cwd);
     let channels = channel_list_result_for_cwd(state, cwd).unwrap_or_default();
+    let web_search = web_search_settings_value(state, cwd)?;
     Ok(json!({
         "cwd": cwd.display().to_string(),
         "project": project,
@@ -15,7 +16,64 @@ fn settings_read_value(
         "memoryResources": {"mode": "status_only", "available": true},
         "secrets": {"frontendPersistence": "disabled"},
         "controls": controls
+        ,"webSearch": web_search
     }))
+}
+
+fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo_runtime::Result<Value> {
+    let options = state.run_options(cwd.to_path_buf(), None);
+    let value = psychevo_runtime::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
+        json!({
+            "execution": "auto", "backend": "auto", "external_access": "live",
+            "context_size": "medium", "return_token_budget": "default",
+            "content_types": ["text"], "allowed_domains": [], "blocked_domains": [],
+            "background_storage_acknowledged": false,
+            "location": {"country":"", "region":"", "city":"", "timezone":""},
+            "image": {"max_results": 3, "caption": true},
+            "credentials": {"exa":"missing", "parallel":"missing", "brave":"missing", "searxng":"missing"}
+        })
+    });
+    Ok(json!({
+        "execution": value["execution"],
+        "backend": value["backend"],
+        "externalAccess": value["external_access"],
+        "contextSize": value["context_size"],
+        "returnTokenBudget": value["return_token_budget"],
+        "contentTypes": value["content_types"],
+        "allowedDomains": value["allowed_domains"],
+        "blockedDomains": value["blocked_domains"],
+        "backgroundStorageAcknowledged": value["background_storage_acknowledged"],
+        "location": value["location"],
+        "image": value["image"],
+        "credentials": value["credentials"],
+    }))
+}
+
+fn web_search_settings_update_value(
+    state: &WebState,
+    cwd: &Path,
+    params: wire::WebSearchSettingsUpdateParams,
+) -> psychevo_runtime::Result<Value> {
+    let search = params.search;
+    let value = json!({
+        "execution": search.execution,
+        "backend": search.backend,
+        "external_access": search.external_access,
+        "context_size": search.context_size,
+        "return_token_budget": search.return_token_budget,
+        "content_types": search.content_types,
+        "allowed_domains": search.allowed_domains,
+        "blocked_domains": search.blocked_domains,
+        "background_storage_acknowledged": search.background_storage_acknowledged,
+        "location": search.location,
+        "image": search.image,
+    });
+    psychevo_runtime::update_global_web_search_settings(
+        &state.inner.home,
+        value,
+        params.credential_values,
+    )?;
+    web_search_settings_value(state, cwd)
 }
 
 fn workbench_controls_value(

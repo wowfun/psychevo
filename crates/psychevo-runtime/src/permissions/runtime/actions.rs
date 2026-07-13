@@ -25,6 +25,9 @@ pub(crate) enum PermissionAction {
     WebFetch {
         url: String,
     },
+    WebSearch {
+        query: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +108,10 @@ impl PermissionAction {
                 .map(|url| Self::WebFetch {
                     url: url.to_string(),
                 }),
+            "web_search" => args
+                .get("query")
+                .and_then(Value::as_str)
+                .map(|query| Self::WebSearch { query: query.to_string() }),
             "mcp_startup" => {
                 args.get("server")
                     .and_then(Value::as_str)
@@ -154,6 +161,9 @@ impl PermissionAction {
             Self::WebFetch { url } => {
                 rule.tool == "web_fetch" && wildcard_match(&rule.pattern, url)
             }
+            Self::WebSearch { query } => {
+                rule.tool == "web_search" && wildcard_match(&rule.pattern, query)
+            }
         }
     }
 
@@ -178,6 +188,7 @@ impl PermissionAction {
             Self::McpStartup { server, .. } => format!("mcp_startup:{server}"),
             Self::Mcp { server, tool } => format!("mcp:{server}/{tool}"),
             Self::WebFetch { url } => format!("web_fetch:{url}"),
+            Self::WebSearch { query } => format!("web_search:{query}"),
         }
     }
 
@@ -193,6 +204,7 @@ impl PermissionAction {
             Self::McpStartup { server, .. } => Some(format!("McpStartup({server})")),
             Self::Mcp { server, tool } => Some(format!("Mcp({server}/{tool})")),
             Self::WebFetch { url } => Some(format!("WebFetch({url})")),
+            Self::WebSearch { query } => Some(format!("WebSearch({query})")),
         }
     }
 
@@ -205,6 +217,7 @@ impl PermissionAction {
                 | Self::McpStartup { .. }
                 | Self::Mcp { .. }
                 | Self::WebFetch { .. }
+                | Self::WebSearch { .. }
         )
     }
 
@@ -248,6 +261,10 @@ impl PermissionAction {
                     }]
                 })
                 .unwrap_or_default(),
+            Self::WebSearch { query } => vec![PersistentPermissionGrant::WebSearch {
+                query: query.clone(),
+                access: PermissionAccess::Allow,
+            }],
             Self::McpStartup { .. } | Self::Mcp { .. } => Vec::new(),
         }
     }
@@ -266,6 +283,7 @@ impl PermissionAction {
             Self::Skill { .. } => "skill",
             Self::McpStartup { .. } | Self::Mcp { .. } => "mcp",
             Self::WebFetch { .. } => "network",
+            Self::WebSearch { .. } => "network",
         }
     }
 

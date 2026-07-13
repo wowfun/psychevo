@@ -20,6 +20,7 @@ pub(crate) fn hardline_deny(action: &PermissionAction) -> Option<String> {
         PermissionAction::McpStartup { .. } => None,
         PermissionAction::Mcp { .. } => None,
         PermissionAction::WebFetch { .. } => None,
+        PermissionAction::WebSearch { .. } => None,
     }
 }
 
@@ -51,6 +52,7 @@ pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
             Some(format!("MCP tool `{server}/{tool}` requires approval"))
         }
         PermissionAction::WebFetch { .. } => None,
+        PermissionAction::WebSearch { .. } => None,
     }
 }
 
@@ -129,6 +131,7 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
             persistent_grants: action.persistent_grants(),
         },
         PermissionAction::WebFetch { .. } => ActionPolicyEvaluation::Allow,
+        PermissionAction::WebSearch { .. } => ActionPolicyEvaluation::Allow,
     }
 }
 
@@ -178,6 +181,14 @@ pub(crate) fn explicit_profile_decision(
                 || action.persistent_grants(),
             )
         }),
+        PermissionAction::WebSearch { query } => profile_access_decision(
+            profile_name,
+            "web_search.queries",
+            &profile.web_search_queries,
+            query,
+            || format!("web search for `{query}` requires approval"),
+            || action.persistent_grants(),
+        ),
         PermissionAction::Skill { tool, action } => {
             let key = format!("{tool}/{action}");
             profile_access_decision(

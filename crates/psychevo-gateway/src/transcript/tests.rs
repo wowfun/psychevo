@@ -186,6 +186,27 @@
     }
 
     #[test]
+    fn projector_preserves_hosted_web_lifecycle_and_clickable_sources() {
+        let entries = project_transcript_entries("thread-1", &[summary(1, Message::Assistant {
+            content: vec![
+                AssistantBlock::ProviderTool(psychevo_runtime::ProviderToolBlock {
+                    id: "ws_1".into(), name: "web_search".into(),
+                    action: Some(json!({"type":"search","query":"rust news"})), status: "completed".into(),
+                }),
+                AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(psychevo_ai::UrlCitationSource {
+                    url: "https://example.com/rust".into(), title: "Rust".into(), start_index: Some(0), end_index: Some(4),
+                })),
+            ], timestamp_ms: 10, finish_reason: Some("completed".into()), outcome: Outcome::Normal,
+            model: Some("gpt-5".into()), provider: Some("openai".into()),
+        })]);
+        assert_eq!(entries[0].blocks.len(), 2);
+        assert_eq!(entries[0].blocks[0].kind, TranscriptBlockKind::Web);
+        assert_eq!(entries[0].blocks[0].title.as_deref(), Some("Searched the web"));
+        assert_eq!(entries[0].blocks[1].metadata.as_ref().unwrap()["projection"], "url_citation");
+        assert_eq!(entries[0].blocks[1].metadata.as_ref().unwrap()["url"], "https://example.com/rust");
+    }
+
+    #[test]
     fn projector_materializes_acp_plan_metadata_as_a_display_only_status_block() {
         let mut assistant = summary(
             1,

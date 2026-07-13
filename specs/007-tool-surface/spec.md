@@ -53,6 +53,11 @@ Runtime assembles the initial tool surface for an accepted agent invocation befo
 
 Runtime must expose a tool declaration in a generation-request snapshot only when the same agent invocation has a matching execution binding for that request. Runtime may omit unavailable tools from a snapshot or from the agent-invocation scoped tool surface.
 
+This binding invariant applies to function declarations. A selected hosted tool
+is a provider-executed generation declaration, not a runtime tool-surface entry,
+and has no execution binding. When local and hosted variants share a provider-
+visible name, runtime selects exactly one variant for each generation.
+
 Runtime selects the agent-invocation scoped tool surface from available inputs. Capability extensions may declare tool candidates or toolset candidates, but [050 Capability Extensions](../050-capability-extensions/spec.md) owns source, declaration, activation, availability, conflict, and registry boundaries. This spec does not define source discovery, selection precedence, or plugin mechanics.
 
 When an agent definition is selected, runtime applies that definition's tool

@@ -191,6 +191,117 @@ pub(crate) struct ToolModeConfig {
     pub(crate) disabled_toolsets: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchExecution {
+    #[default]
+    Auto,
+    Local,
+    Hosted,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchBackend {
+    #[default]
+    Auto,
+    Searxng,
+    Brave,
+    Exa,
+    Parallel,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchExternalAccess {
+    #[default]
+    Live,
+    Cached,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchContextSize {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchTokenBudget {
+    #[default]
+    Default,
+    Unlimited,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchContentType {
+    Text,
+    Image,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WebSearchLocation {
+    pub country: String,
+    pub region: String,
+    pub city: String,
+    pub timezone: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WebSearchImageConfig {
+    pub max_results: usize,
+    pub caption: bool,
+}
+
+impl Default for WebSearchImageConfig {
+    fn default() -> Self {
+        Self {
+            max_results: 3,
+            caption: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WebSearchConfig {
+    pub execution: WebSearchExecution,
+    pub backend: WebSearchBackend,
+    pub external_access: WebSearchExternalAccess,
+    pub context_size: WebSearchContextSize,
+    pub return_token_budget: WebSearchTokenBudget,
+    pub content_types: Vec<WebSearchContentType>,
+    pub allowed_domains: Vec<String>,
+    pub blocked_domains: Vec<String>,
+    pub background_storage_acknowledged: bool,
+    pub location: WebSearchLocation,
+    pub image: WebSearchImageConfig,
+}
+
+impl Default for WebSearchConfig {
+    fn default() -> Self {
+        Self {
+            execution: WebSearchExecution::Auto,
+            backend: WebSearchBackend::Auto,
+            external_access: WebSearchExternalAccess::Live,
+            context_size: WebSearchContextSize::Medium,
+            return_token_budget: WebSearchTokenBudget::Default,
+            content_types: vec![WebSearchContentType::Text],
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+            background_storage_acknowledged: false,
+            location: WebSearchLocation::default(),
+            image: WebSearchImageConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WebConfig {
+    pub search: WebSearchConfig,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CustomToolsetConfig {
     pub(crate) description: Option<String>,

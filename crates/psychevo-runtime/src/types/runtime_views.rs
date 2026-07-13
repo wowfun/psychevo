@@ -163,6 +163,7 @@ impl ModelCostTier {
 pub struct ModelCapabilities {
     pub reasoning: Option<bool>,
     pub tool_call: Option<bool>,
+    pub web_search: Option<bool>,
     pub developer_role: Option<bool>,
     pub temperature: Option<bool>,
     pub attachment: Option<bool>,
@@ -180,6 +181,9 @@ impl ModelCapabilities {
         }
         if let Some(value) = self.tool_call {
             object.insert("tool_call".to_string(), Value::Bool(value));
+        }
+        if let Some(value) = self.web_search {
+            object.insert("web_search".to_string(), Value::Bool(value));
         }
         if let Some(value) = self.developer_role {
             object.insert("developer_role".to_string(), Value::Bool(value));

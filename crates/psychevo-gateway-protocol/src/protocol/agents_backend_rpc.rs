@@ -1893,6 +1893,10 @@ pub enum ClientRequest {
     SettingsUpdate(SettingsUpdateParams),
     #[serde(rename = "settings/read")]
     SettingsRead(SettingsReadParams),
+    #[serde(rename = "web/search/settings/read")]
+    WebSearchSettingsRead(WebSearchSettingsReadParams),
+    #[serde(rename = "web/search/settings/update")]
+    WebSearchSettingsUpdate(WebSearchSettingsUpdateParams),
     #[serde(rename = "model/settings/read")]
     ModelSettingsRead(ModelSettingsReadParams),
     #[serde(rename = "model/provider/save")]

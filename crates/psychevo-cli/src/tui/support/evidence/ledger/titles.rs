@@ -8,6 +8,14 @@ pub(crate) fn tool_title(tool: &str, value: &Value) -> String {
     if tool == "clarify" {
         return clarify_tool_title(value);
     }
+    if tool == "web_search" {
+        let query = value
+            .get("args")
+            .and_then(|args| args.get("query"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return tool_name_title("Searched the web", (!query.is_empty()).then_some(query));
+    }
     if is_user_shell_value(value) {
         let command = value
             .get("args")
@@ -55,6 +63,14 @@ pub(crate) fn active_tool_title(tool: &str, value: &Value) -> String {
     }
     if tool == "clarify" {
         return "Questions pending".to_string();
+    }
+    if tool == "web_search" {
+        let query = value
+            .get("args")
+            .and_then(|args| args.get("query"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return tool_name_title("Searching the web", (!query.is_empty()).then_some(query));
     }
     if is_user_shell_value(value) {
         let command = value

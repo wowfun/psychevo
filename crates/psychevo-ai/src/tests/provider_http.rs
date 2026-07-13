@@ -392,11 +392,7 @@ pub(crate) fn chat_request_maps_messages_and_tools() {
                 "timestamp_ms": 3
             }),
         ],
-        tools: vec![ToolDeclaration::new(
-            "read",
-            "read file",
-            json!({ "type": "object" }),
-        )],
+        tools: vec![ToolDeclaration::new("read", "read file", json!({ "type": "object" })).into()],
         metadata: json!({ "reasoning_effort": "medium" }),
     };
 

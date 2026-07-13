@@ -320,6 +320,12 @@
       "$ref": "ClientRequest/settings-read.json"
     },
     {
+      "$ref": "ClientRequest/web-search-settings-read.json"
+    },
+    {
+      "$ref": "ClientRequest/web-search-settings-update.json"
+    },
+    {
       "$ref": "ClientRequest/model-settings-read.json"
     },
     {

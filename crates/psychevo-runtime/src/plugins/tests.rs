@@ -1095,6 +1095,7 @@ for line in sys.stdin:
         home: None,
         image_input_enabled: true,
         image_generation: None,
+        web_search: Default::default(),
         tool_selection: ToolSelectionConfig::default(),
         custom_toolsets: BTreeMap::new(),
         contributed_toolsets: assembly.toolsets,

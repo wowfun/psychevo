@@ -217,6 +217,16 @@ pub enum AssistantBlock {
         provider_evidence: Option<Value>,
     },
     ToolCall(ToolCallBlock),
+    ProviderTool(ProviderToolBlock),
+    Source(AssistantSource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProviderToolBlock {
+    pub id: String,
+    pub name: String,
+    pub action: Option<Value>,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -284,6 +294,7 @@ impl ToolDisplaySpec {
             "write" | "edit" => Self::update(),
             "clarify" => Self::status(),
             "web_fetch" => Self::web_fetch(),
+            "web_search" => Self::web_search(),
             _ => Self::generic(),
         }
     }
@@ -364,6 +375,17 @@ impl ToolDisplaySpec {
             ]),
             body_keys: string_keys(["content"]),
             body_policy: ToolDisplayBodyPolicy::Summary,
+        }
+    }
+
+    pub fn web_search() -> Self {
+        Self {
+            category: ToolDisplayCategory::Explore,
+            title_arg_keys: string_keys(["query"]),
+            title_result_keys: string_keys(["query", "provider"]),
+            summary_keys: string_keys(["provider", "truncated", "error"]),
+            body_keys: string_keys(["payload", "error"]),
+            body_policy: ToolDisplayBodyPolicy::Body,
         }
     }
 }

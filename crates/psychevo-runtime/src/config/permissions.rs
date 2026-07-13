@@ -219,6 +219,22 @@ pub fn append_local_network_grant_with_extends(
     })
 }
 
+pub(crate) fn append_local_web_search_grant_with_extends(
+    config_dir: PathBuf,
+    query: &str,
+    access: PermissionAccess,
+    label: String,
+    fallback_extends: &str,
+) -> Result<PermissionRuleMutationResult> {
+    mutate_local_config(config_dir, "web_search", label, |parsed| {
+        ensure_local_profile(parsed, fallback_extends)?;
+        let profile = local_profile_object_mut(parsed)?;
+        let web_search = object_entry_mut(profile, "web_search")?;
+        let queries = object_entry_mut(web_search, "queries")?;
+        set_string_entry(queries, query, access.as_str())
+    })
+}
+
 pub fn append_local_skill_grant(
     config_dir: PathBuf,
     key: &str,

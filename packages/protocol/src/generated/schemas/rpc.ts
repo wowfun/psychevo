@@ -106,6 +106,8 @@ import { clientRequestTerminalTerminateSchema } from './rpc/client-request/termi
 import { clientRequestSourceResetSchema } from './rpc/client-request/source-reset';
 import { clientRequestSettingsUpdateSchema } from './rpc/client-request/settings-update';
 import { clientRequestSettingsReadSchema } from './rpc/client-request/settings-read';
+import { clientRequestWebSearchSettingsReadSchema } from './rpc/client-request/web-search-settings-read';
+import { clientRequestWebSearchSettingsUpdateSchema } from './rpc/client-request/web-search-settings-update';
 import { clientRequestModelSettingsReadSchema } from './rpc/client-request/model-settings-read';
 import { clientRequestModelProviderSaveSchema } from './rpc/client-request/model-provider-save';
 import { clientRequestModelProviderCatalogSchema } from './rpc/client-request/model-provider-catalog';
@@ -659,6 +661,12 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/settings-read.json"
     },
     {
+      "$ref": "ClientRequest/web-search-settings-read.json"
+    },
+    {
+      "$ref": "ClientRequest/web-search-settings-update.json"
+    },
+    {
       "$ref": "ClientRequest/model-settings-read.json"
     },
     {
@@ -899,6 +907,8 @@ export const rpcSchemaRefs = [
   clientRequestSourceResetSchema,
   clientRequestSettingsUpdateSchema,
   clientRequestSettingsReadSchema,
+  clientRequestWebSearchSettingsReadSchema,
+  clientRequestWebSearchSettingsUpdateSchema,
   clientRequestModelSettingsReadSchema,
   clientRequestModelProviderSaveSchema,
   clientRequestModelProviderCatalogSchema,

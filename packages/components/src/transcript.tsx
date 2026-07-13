@@ -551,6 +551,17 @@ function TranscriptBlockView({
       </article>
     );
   }
+  const webCitation = webCitationFromBlock(block);
+  if (webCitation) {
+    return (
+      <article className="pevo-webCitation" {...transcriptBlockDataAttributes(entry, block)}>
+        <ExternalLink size={13} aria-hidden />
+        <a href={webCitation.url} rel="noreferrer" target="_blank">{webCitation.title || webCitation.url}</a>
+      </article>
+    );
+  }
+  const webImage = webImageFromBlock(block);
+  if (webImage) return <WebSearchImageView block={block} entry={entry} image={webImage} />;
   const generatedImage = generatedImageArtifact(block);
   if (generatedImage) {
     return (
@@ -615,6 +626,48 @@ function TranscriptBlockView({
           {artifactIds.map((artifactId) => <span key={artifactId}>{artifactId}</span>)}
         </div>
       )}
+    </article>
+  );
+}
+
+type WebCitation = { title: string; url: string };
+type WebSearchImage = { caption: string | null; imageUrl: string; sourceUrl: string; thumbnailUrl: string | null };
+
+function webCitationFromBlock(block: TranscriptBlock): WebCitation | null {
+  const metadata = asRecord(block.metadata);
+  if (metadata.projection !== "url_citation") return null;
+  const url = stringValue(metadata.url);
+  if (!url) return null;
+  return { title: stringValue(metadata.title) ?? "", url };
+}
+
+function webImageFromBlock(block: TranscriptBlock): WebSearchImage | null {
+  const metadata = asRecord(block.metadata);
+  if (metadata.projection !== "web_image_source") return null;
+  const imageUrl = stringValue(metadata.image_url);
+  const sourceUrl = stringValue(metadata.source_website_url);
+  if (!imageUrl || !sourceUrl) return null;
+  return { caption: stringValue(metadata.caption), imageUrl, sourceUrl, thumbnailUrl: stringValue(metadata.thumbnail_url) };
+}
+
+function WebSearchImageView({ block, entry, image }: { block: TranscriptBlock; entry: TranscriptEntry; image: WebSearchImage }) {
+  const [expanded, setExpanded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const src = image.thumbnailUrl ?? image.imageUrl;
+  useEffect(() => { setExpanded(false); setFailed(false); setLoaded(false); }, [block.id, src]);
+  return (
+    <article className="pevo-webImageSource" {...transcriptBlockDataAttributes(entry, block)}>
+      <button aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} type="button">
+        {expanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+        <span>{image.caption ?? "Image result"}</span>
+      </button>
+      <a href={image.sourceUrl} rel="noreferrer" target="_blank">Source</a>
+      {expanded && !failed && <div className={`pevo-webImageThumbnail ${loaded ? "is-loaded" : "is-loading"}`}>
+        {!loaded && <span>Loading image…</span>}
+        <img alt={image.caption ?? "Web search image result"} onError={() => setFailed(true)} onLoad={() => setLoaded(true)} src={src} />
+      </div>}
+      {expanded && failed && <p>Image preview unavailable.</p>}
     </article>
   );
 }

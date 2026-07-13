@@ -183,6 +183,7 @@ pub(crate) fn parse_config_model_metadata(
     }
     metadata.capabilities.reasoning = optional_bool_field(object, "reasoning")?;
     metadata.capabilities.tool_call = optional_bool_field(object, "tool_call")?;
+    metadata.capabilities.web_search = optional_bool_field(object, "web_search")?;
     metadata.capabilities.developer_role = optional_bool_field(object, "developer_role")?;
     metadata.capabilities.temperature = optional_bool_field(object, "temperature")?;
     metadata.capabilities.attachment = optional_bool_field(object, "attachment")?;
@@ -203,6 +204,7 @@ pub(crate) fn parse_config_model_metadata(
         || metadata.cost.is_some()
         || metadata.capabilities.reasoning.is_some()
         || metadata.capabilities.tool_call.is_some()
+        || metadata.capabilities.web_search.is_some()
         || metadata.capabilities.developer_role.is_some()
         || metadata.capabilities.temperature.is_some()
         || metadata.capabilities.attachment.is_some()

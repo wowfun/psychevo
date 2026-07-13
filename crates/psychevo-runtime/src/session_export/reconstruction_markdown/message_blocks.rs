@@ -35,6 +35,20 @@ pub(crate) fn render_markdown_message(out: &mut String, record: &ExportMessageRe
                         );
                         push_fenced_json(out, &call.arguments);
                     }
+                    AssistantBlock::ProviderTool(call) => {
+                        push_line(out, "");
+                        push_line(out, &format!("#### Hosted tool: `{}` (`{}`, {})", call.name, call.id, call.status));
+                        if let Some(action) = &call.action { push_fenced_json(out, action); }
+                    }
+                    AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => {
+                        push_line(out, &format!("- Source: [{}]({})", source.title, source.url));
+                    }
+                    AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => {
+                        push_line(out, &format!("- Image source: {}", source.source_website_url));
+                    }
+                    AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { kind, .. }) => {
+                        push_line(out, &format!("- Provider source: {kind}"));
+                    }
                 }
             }
         }

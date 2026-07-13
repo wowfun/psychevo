@@ -725,7 +725,10 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
     let names = requests[0]
         .tools
         .iter()
-        .map(|tool| tool.name.clone())
+        .filter_map(|tool| match tool {
+            psychevo_ai::GenerationTool::Function { declaration } => Some(declaration.name.clone()),
+            psychevo_ai::GenerationTool::WebSearch(_) => None,
+        })
         .collect::<Vec<_>>();
     assert!(names.contains(&"read".to_string()), "{names:?}");
     assert!(names.contains(&"tool_search".to_string()), "{names:?}");

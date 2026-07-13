@@ -62,6 +62,10 @@ pub(crate) fn openai_chat_request_body_with_image_mode(
             request
                 .tools
                 .iter()
+                .filter_map(|tool| match tool {
+                    GenerationTool::Function { declaration: tool } => Some(tool),
+                    GenerationTool::WebSearch(_) => None,
+                })
                 .map(|tool| {
                     json!({
                         "type": "function",

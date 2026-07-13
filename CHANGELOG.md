@@ -2,9 +2,11 @@
 
 ## 2026-07-13
 
-- Fixed ACP Agent history replay to report incomplete projections as partial,
-  preserve projectable content order, and keep synthetic replay identities out
-  of delivery reconciliation.
+- Added permission-gated Web Search adapters, OpenAI Responses search,
+  persistent citations/images, Workbench settings, and hardened `web_fetch`
+  URL policy.
+- Fixed ACP Agent replay ordering, partial projection reporting, and synthetic
+  delivery identities.
 
 ## 2026-07-12
 

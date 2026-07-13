@@ -154,6 +154,64 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                             *timestamp_ms,
                         ))
                     }
+                    AssistantBlock::ProviderTool(call) => {
+                        let query = call.action.as_ref().and_then(|action| action.get("query")).and_then(Value::as_str);
+                        let block_status = match call.status.as_str() {
+                            "in_progress" | "searching" => TranscriptBlockStatus::Running,
+                            "failed" | "incomplete" => TranscriptBlockStatus::Failed,
+                            _ => TranscriptBlockStatus::Completed,
+                        };
+                        Some(block(
+                            format!("provider-tool:{}", call.id),
+                            TranscriptBlockKind::Web,
+                            block_status,
+                            index as i64,
+                            "provider.web_search",
+                            Some(if block_status == TranscriptBlockStatus::Running { "Searching the web".to_string() } else { "Searched the web".to_string() }),
+                            query.map(str::to_owned),
+                            query.map(str::to_owned),
+                            Some(json!({
+                                "projection": "provider_tool", "execution_owner": "provider",
+                                "tool_name": call.name, "provider_tool_id": call.id,
+                                "action": call.action, "status": call.status,
+                            })),
+                            *timestamp_ms,
+                        ))
+                    }
+                    AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => Some(block(
+                        format!("message:{}:source:{index}", summary.session_seq),
+                        TranscriptBlockKind::Web,
+                        TranscriptBlockStatus::Completed,
+                        index as i64,
+                        "provider.source",
+                        Some(if source.title.is_empty() { "Web source".to_string() } else { source.title.clone() }),
+                        Some(format!("[{}]({})", if source.title.is_empty() { source.url.as_str() } else { source.title.as_str() }, source.url)),
+                        Some(source.url.clone()),
+                        Some(json!({"projection":"url_citation", "url":source.url, "title":source.title, "start_index":source.start_index, "end_index":source.end_index})),
+                        *timestamp_ms,
+                    )),
+                    AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => Some(block(
+                        format!("message:{}:source:{index}", summary.session_seq),
+                        TranscriptBlockKind::Web,
+                        TranscriptBlockStatus::Completed,
+                        index as i64,
+                        "provider.source",
+                        Some(source.caption.clone().unwrap_or_else(|| "Image result".to_string())),
+                        Some(format!("Source: {}", source.source_website_url)),
+                        Some(source.source_website_url.clone()),
+                        Some(json!({"projection":"web_image_source", "image_url":source.image_url, "thumbnail_url":source.thumbnail_url, "source_website_url":source.source_website_url, "caption":source.caption})),
+                        *timestamp_ms,
+                    )),
+                    AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { kind, data }) => Some(block(
+                        format!("message:{}:source:{index}", summary.session_seq),
+                        TranscriptBlockKind::Web,
+                        TranscriptBlockStatus::Completed,
+                        index as i64,
+                        "provider.source",
+                        Some("Web source".to_string()), None, None,
+                        Some(json!({"projection":"provider_source", "kind":kind, "data":data})),
+                        *timestamp_ms,
+                    )),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -218,6 +276,15 @@ fn acp_plan_block(
 }
 
 fn tool_call_title(tool_name: &str, arguments: &Value) -> String {
+    if tool_name == "web_search" {
+        let query = arguments.get("query").and_then(Value::as_str).unwrap_or_default();
+        let title = if query.is_empty() {
+            "Searching the web".to_string()
+        } else {
+            format!("Searching the web {query}")
+        };
+        return compact_text(&title, 180);
+    }
     if tool_name == "exec_command"
         && let Some(command) = arguments
             .get("cmd")

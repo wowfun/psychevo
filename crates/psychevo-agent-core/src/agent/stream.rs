@@ -64,13 +64,23 @@ pub(crate) async fn stream_assistant(
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|err| Error::Agent(err.to_string()))?,
     );
+    let mut generation_tools = tool_router
+        .declarations()
+        .into_iter()
+        .map(GenerationTool::from)
+        .collect::<Vec<_>>();
+    if let Some(config) = request.generation_metadata.get("hosted_web_search") {
+        generation_tools.push(GenerationTool::WebSearch(HostedWebSearchTool {
+            config: config.clone(),
+        }));
+    }
     let generation_request = GenerationRequest {
         model: psychevo_ai::ModelTarget {
             provider: request.model_provider.clone(),
             model: request.model.clone(),
         },
         messages,
-        tools: tool_router.declarations(),
+        tools: generation_tools,
         metadata: request.generation_metadata.clone(),
     };
 
@@ -117,6 +127,8 @@ pub(crate) async fn stream_assistant(
     let mut metadata = None;
     let mut emitted_inline_reasoning_len = 0usize;
     let mut tool_builders: BTreeMap<(usize, usize), ToolCallBuilder> = BTreeMap::new();
+    let mut provider_tools: BTreeMap<String, ProviderToolBlock> = BTreeMap::new();
+    let mut sources: Vec<AssistantSource> = Vec::new();
     let mut finish_reason = None;
     let mut outcome = Outcome::Normal;
     let timestamp_ms = now_ms();
@@ -255,6 +267,41 @@ pub(crate) async fn stream_assistant(
                 visible_changed = true;
             }
             StreamEvent::ToolCallEnd { .. } => {}
+            StreamEvent::ProviderToolStart { id, name, action } => {
+                provider_tools.insert(
+                    id.clone(),
+                    ProviderToolBlock {
+                        id,
+                        name,
+                        action,
+                        status: "in_progress".into(),
+                    },
+                );
+                visible_changed = true;
+            }
+            StreamEvent::ProviderToolEnd {
+                id,
+                name,
+                action,
+                status,
+            } => {
+                provider_tools.insert(
+                    id.clone(),
+                    ProviderToolBlock {
+                        id,
+                        name,
+                        action,
+                        status,
+                    },
+                );
+                visible_changed = true;
+            }
+            StreamEvent::Source { source } => {
+                if !sources.contains(&source) {
+                    sources.push(source);
+                }
+                visible_changed = true;
+            }
             StreamEvent::Usage { usage: reported } => {
                 merge_object(&mut usage, normalize_usage(&reported));
             }
@@ -278,6 +325,8 @@ pub(crate) async fn stream_assistant(
                 reasoning: &reasoning,
                 reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
                 tool_builders: &tool_builders,
+                provider_tools: &provider_tools,
+                sources: &sources,
                 timestamp_ms,
                 finish_reason: finish_reason.clone(),
                 outcome,
@@ -310,6 +359,8 @@ pub(crate) async fn stream_assistant(
             reasoning: &reasoning,
             reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
             tool_builders: &tool_builders,
+            provider_tools: &provider_tools,
+            sources: &sources,
             timestamp_ms,
             finish_reason,
             outcome,

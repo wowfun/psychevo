@@ -100,6 +100,18 @@ pub(crate) async fn run_live_internal(
         resolved_options.reasoning_effort = Some(effort);
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
+    let mut effective_web_search = loaded.config.web.search.clone();
+    effective_web_search.execution = crate::config::resolve_web_search_execution(
+        &effective_web_search,
+        &resolved.provider,
+        &resolved.metadata.capabilities,
+        &loaded.config.permissions,
+    )?;
+    let web_search_selected = crate::tools::effective_tool_names_for_mode_with_config(
+        options.mode,
+        &loaded.config.tools,
+        &loaded.config.toolsets,
+    ).iter().any(|name| name == "web_search");
     let image_generation = crate::config::resolve_image_generation_config_from_loaded(
         &loaded, None, None, None, None,
     )
@@ -344,17 +356,17 @@ pub(crate) async fn run_live_internal(
         .filter(|record| record.delivered_at_ms.is_some())
         .map(|record| agent_mailbox_event_message(&record))
         .collect::<Vec<_>>();
-    let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
         resolved.base_url.clone(),
         resolved.api_key.clone(),
         resolved.provider.clone(),
-    ));
+    );
     let title_resolved = resolve_title_generation_provider(&resolved_options, &loaded, &resolved)?;
-    let provider_for_title: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+    let provider_for_title: Arc<dyn GenerationProvider> = crate::run::generation_provider(
         title_resolved.base_url.clone(),
         title_resolved.api_key.clone(),
         title_resolved.provider.clone(),
-    ));
+    );
     let context_recorder = ContextRecorder::default();
     let provider: Arc<dyn GenerationProvider> = Arc::new(ContextRecordingProvider::new(
         Arc::clone(&provider),
@@ -381,6 +393,15 @@ pub(crate) async fn run_live_internal(
     let mut generation_metadata = json!({
         "model_metadata": resolved.metadata.public_json(),
     });
+    if web_search_selected
+        && effective_web_search.execution == crate::config::WebSearchExecution::Hosted
+        && let Some(object) = generation_metadata.as_object_mut()
+    {
+        object.insert(
+            "hosted_web_search".to_string(),
+            crate::config::hosted_web_search_value(&effective_web_search),
+        );
+    }
     if let Some(effort) = &resolved.reasoning_effort
         && let Some(object) = generation_metadata.as_object_mut()
     {
@@ -429,6 +450,7 @@ pub(crate) async fn run_live_internal(
             home: home.clone(),
             image_input_enabled,
             image_generation: image_generation.clone(),
+            web_search: effective_web_search.clone(),
             tool_selection: loaded.config.tools.clone(),
             custom_toolsets: loaded.config.toolsets.clone(),
             extension_inputs: extension_assembly.accepted_inputs(),
@@ -513,6 +535,7 @@ pub(crate) async fn run_live_internal(
         home: Some(home.clone()),
         image_input_enabled,
         image_generation,
+        web_search: effective_web_search.clone(),
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
         contributed_toolsets: extension_assembly.toolsets.clone(),

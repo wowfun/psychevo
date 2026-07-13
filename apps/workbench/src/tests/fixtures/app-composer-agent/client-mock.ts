@@ -1995,7 +1995,7 @@ vi.mock("@psychevo/client", async () => {
         return {
           modes: {
             default: { enabled_toolsets: ["coding-core"], disabled_toolsets: [], effective_tools: ["read", "write", "edit", "exec_command", "write_stdin"] },
-            plan: { enabled_toolsets: ["coding-core", "web"], disabled_toolsets: [], effective_tools: ["read", "exec_command", "write_stdin", "web_fetch"] }
+            plan: { enabled_toolsets: ["coding-core", "web"], disabled_toolsets: [], effective_tools: ["read", "exec_command", "write_stdin", "web_fetch", "web_search"] }
           },
           toolsets: [
             {
@@ -2012,7 +2012,7 @@ vi.mock("@psychevo/client", async () => {
               name: "web",
               source: "built_in",
               description: "Web tools",
-              tools: ["web_fetch"],
+              tools: ["web_fetch", "web_search"],
               includes: [],
               unknown_tools: [],
               mode_mutable: true,

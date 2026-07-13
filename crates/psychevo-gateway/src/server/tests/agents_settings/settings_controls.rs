@@ -127,6 +127,61 @@ reasoning = false
 }
 
 #[tokio::test]
+async fn web_search_settings_store_secrets_in_profile_env_and_only_return_status() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope").to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let result = handle_rpc(state.clone(), AuthContext::Bearer, tx, RpcRequest {
+        jsonrpc: wire::JSONRPC_VERSION.to_string(), id: Some(json!("web-search")),
+        method: "web/search/settings/update".to_string(), params: Some(json!({
+            "scope": scope,
+            "search": {
+                "execution":"local", "backend":"brave", "externalAccess":"live",
+                "contextSize":"medium", "returnTokenBudget":"default", "contentTypes":["text"],
+                "allowedDomains":[], "blockedDomains":[], "backgroundStorageAcknowledged":false,
+                "location": {"country":"", "region":"", "city":"", "timezone":""},
+                "image": {"max_results":3, "caption":true},
+                "credentials": {"brave":"missing"}
+            },
+            "credentialValues": {"BRAVE_SEARCH_API_KEY":"super-secret"}
+        })),
+    }).await.expect("web search settings update");
+    assert_eq!(result["backend"], "brave");
+    assert_eq!(result["credentials"]["brave"], "present");
+    assert!(!result.to_string().contains("super-secret"));
+    assert!(!std::fs::read_to_string(state.inner.home.join("config.toml")).unwrap().contains("super-secret"));
+    assert!(std::fs::read_to_string(state.inner.home.join(".env")).unwrap().contains("BRAVE_SEARCH_API_KEY="));
+}
+
+#[tokio::test]
+async fn settings_read_projects_web_search_with_protocol_field_names() {
+    let (_temp, state) = web_state();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("web-search-settings-read")),
+            method: "settings/read".to_string(),
+            params: None,
+        },
+    )
+    .await
+    .expect("settings read");
+
+    let search = &result["webSearch"];
+    assert_eq!(search["externalAccess"], "live");
+    assert_eq!(search["contextSize"], "medium");
+    assert_eq!(search["returnTokenBudget"], "default");
+    assert_eq!(search["backgroundStorageAcknowledged"], false);
+    assert!(search.get("external_access").is_none());
+}
+
+#[tokio::test]
 async fn settings_read_reports_model_resolution_errors_without_failing() {
     let (_temp, state) = web_state();
     std::fs::create_dir_all(&state.inner.home).expect("home");

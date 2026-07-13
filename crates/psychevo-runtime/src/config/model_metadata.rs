@@ -57,6 +57,9 @@ pub(crate) fn merge_capabilities(base: &mut ModelCapabilities, overlay: ModelCap
     if overlay.tool_call.is_some() {
         base.tool_call = overlay.tool_call;
     }
+    if overlay.web_search.is_some() {
+        base.web_search = overlay.web_search;
+    }
     if overlay.developer_role.is_some() {
         base.developer_role = overlay.developer_role;
     }
@@ -402,6 +405,7 @@ pub(crate) fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
     let mut capabilities = ModelCapabilities {
         reasoning: bool_from_keys(value, &["reasoning"]),
         tool_call: bool_from_keys(value, &["tool_call", "toolcall", "tools"]),
+        web_search: bool_from_keys(value, &["web_search", "websearch"]),
         developer_role: bool_from_keys(value, &["developer_role", "developer"]),
         temperature: bool_from_keys(value, &["temperature"]),
         attachment: bool_from_keys(value, &["attachment", "attachments"]),
@@ -419,7 +423,6 @@ pub(crate) fn parse_metadata_capabilities(value: &Value) -> ModelCapabilities {
 pub(crate) fn built_in_model_metadata(provider: &str, model: &str) -> Option<ModelMetadata> {
     let provider = normalize_provider_id(provider);
     let lower = model.to_lowercase();
-
     let context = match provider.as_str() {
         "deepseek"
             if lower.contains("deepseek-v4")
@@ -429,9 +432,25 @@ pub(crate) fn built_in_model_metadata(provider: &str, model: &str) -> Option<Mod
             1_000_000
         }
         "openai" if lower.contains("gpt-4.1") || lower.contains("gpt-4o") => 128_000,
-        _ => return None,
+        _ => 0,
     };
-    Some(built_in_limits_metadata(context, None))
+    let hosted_web_search = provider == "openai"
+        && (lower.starts_with("gpt-5")
+            || lower.starts_with("gpt-4.1")
+            || lower.starts_with("o4-mini"));
+    if context == 0 && !hosted_web_search {
+        return None;
+    }
+    let mut metadata = if context == 0 {
+        ModelMetadata::default()
+    } else {
+        built_in_limits_metadata(context, None)
+    };
+    if hosted_web_search {
+        metadata.capabilities.web_search = Some(true);
+        metadata.source = Some("built-in".to_string());
+    }
+    Some(metadata)
 }
 
 pub(crate) fn built_in_limits_metadata(context: u64, output: Option<u64>) -> ModelMetadata {

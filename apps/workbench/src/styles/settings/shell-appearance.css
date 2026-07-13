@@ -311,3 +311,22 @@
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
 }
+
+.webSearchSettings select,
+.webSearchSettings input[type="text"],
+.webSearchSettings input[type="password"] {
+  min-width: 12rem;
+  max-width: 22rem;
+}
+
+.webSearchCredentialStatus,
+.webSearchChecks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.webSearchChecks label { display: inline-flex; gap: 0.3rem; }
+.webSearchSettings .settingsActions { align-items: center; display: flex; gap: 0.75rem; justify-content: flex-end; padding: 0.5rem 0; }

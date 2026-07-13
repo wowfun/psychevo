@@ -7,7 +7,7 @@ pub(crate) use psychevo_agent_core::{
     UserContentBlock,
 };
 pub(crate) use psychevo_ai::{
-    GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider, ToolDeclaration,
+    GenerationProvider, GenerationRequest, ModelTarget, ToolDeclaration,
     openai_chat_completions_endpoint, openai_chat_request_body,
 };
 pub(crate) use serde::Serialize;

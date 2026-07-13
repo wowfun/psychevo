@@ -144,11 +144,8 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let model_metadata = session_model_metadata(&metadata);
     let agent_tools = if !options.no_agents {
-        let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
-            String::new(),
-            String::new(),
-            summary.provider.clone(),
-        ));
+        let provider: Arc<dyn GenerationProvider> =
+            crate::run::generation_provider(String::new(), String::new(), summary.provider.clone());
         Some(AgentToolContext {
             provider,
             model_provider: summary.provider.clone(),
@@ -202,6 +199,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
                     &model_metadata,
                 ),
             image_generation: None,
+            web_search: Default::default(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
             extension_inputs: extension_assembly.accepted_inputs(),
@@ -242,6 +240,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             &model_metadata,
         ),
         image_generation: None,
+        web_search: Default::default(),
         tool_selection: Default::default(),
         custom_toolsets: BTreeMap::new(),
         contributed_toolsets: extension_assembly.toolsets.clone(),
@@ -506,11 +505,11 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             .ok();
     let image_input_enabled =
         !crate::prompt_image::model_metadata_explicitly_disallows_image_input(&resolved.metadata);
-    let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
         resolved.base_url.clone(),
         resolved.api_key.clone(),
         resolved.provider.clone(),
-    ));
+    );
     let context = AgentToolContext {
         provider,
         model_provider: resolved.provider.clone(),
@@ -551,6 +550,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         home,
         image_input_enabled,
         image_generation,
+        web_search: loaded.config.web.search.clone(),
         tool_selection: loaded.config.tools.clone(),
         custom_toolsets: loaded.config.toolsets.clone(),
         extension_inputs: extension_assembly.accepted_inputs(),

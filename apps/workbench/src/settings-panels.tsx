@@ -7,6 +7,7 @@ import {
   Bug,
   Keyboard,
   MessageCircle,
+  Globe2,
   Moon,
   Palette,
   Search,
@@ -27,12 +28,14 @@ import type {
 import { ChannelsSettingsPanel } from "./settings-panels/channels";
 import { ModelsSettingsPanel } from "./settings-panels/models";
 import { SlashCommandsSettingsPanel } from "./settings-panels/slash";
+import { WebSearchSettingsPanel } from "./settings-panels/web-search";
 import { ArchivedSessionsPanel, UsageSettingsPanel } from "./settings-panels/usage";
 import type { ChannelSettingsControls, ChannelUpdateDraft } from "./settings-panels/types";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
   { id: "appearance", label: "Appearance", description: "Theme" },
   { id: "models", label: "Models", description: "Providers and auxiliary models" },
+  { id: "web-search", label: "Web Search", description: "Execution, backends, and hosted controls" },
   { id: "slash", label: "Slash Commands", description: "Aliases and TUI shortcuts" },
   { id: "usage", label: "Usage", description: "Tokens and cost" },
   { id: "debug", label: "Debug", description: "Developer diagnostics" },
@@ -331,6 +334,8 @@ function SettingsSectionPanel({
           cwd={cwd}
         />
       );
+    case "web-search":
+      return <WebSearchSettingsPanel client={client} cwd={cwd} disabled={disabled} />;
     case "archived":
       return (
         <ArchivedSessionsPanel
@@ -404,6 +409,8 @@ function settingsSectionIcon(section: SettingsSection, size: number): ReactNode 
       return <Sun size={size} />;
     case "models":
       return <BrainCircuit size={size} />;
+    case "web-search":
+      return <Globe2 size={size} />;
     case "slash":
       return <Keyboard size={size} />;
     case "usage":

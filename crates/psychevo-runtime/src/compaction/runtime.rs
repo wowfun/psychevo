@@ -6,10 +6,7 @@ use futures::StreamExt;
 use psychevo_agent_core::{
     AssistantBlock, ControlHandle, Message, ToolCallBlock, UserContentBlock, user_text_message,
 };
-use psychevo_ai::{
-    GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider, Outcome, StreamEvent,
-    ToolDeclaration,
-};
+use psychevo_ai::{GenerationProvider, GenerationRequest, ModelTarget, Outcome, StreamEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -192,11 +189,11 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
 
     let compression = resolve_compression_config(&run_options, &loaded, &current)?;
 
-    let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
         compression.provider.base_url.clone(),
         compression.provider.api_key.clone(),
         compression.provider.provider.clone(),
-    ));
+    );
     let summary_text = generate_summary(
         provider,
         &compression.provider,
@@ -510,7 +507,7 @@ pub(crate) async fn generate_summary(
                 "content": summary_user_prompt(previous, messages, instructions),
             }),
         ],
-        tools: Vec::<ToolDeclaration>::new(),
+        tools: Vec::new(),
         metadata,
     };
     let (_handle, receivers) = ControlHandle::new();
@@ -593,6 +590,10 @@ pub(crate) fn message_summary_text(message: &Message) -> String {
                 AssistantBlock::Text { text } => Some(text.clone()),
                 AssistantBlock::Reasoning { .. } => None,
                 AssistantBlock::ToolCall(call) => Some(tool_call_summary(call)),
+                AssistantBlock::ProviderTool(call) => Some(format!("Hosted {} ({})", call.name, call.status)),
+                AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => Some(format!("Source: {}", source.url)),
+                AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => Some(format!("Image source: {}", source.source_website_url)),
+                AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { .. }) => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),

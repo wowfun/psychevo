@@ -388,6 +388,23 @@ print(len(data))""#;
     }
 
     #[test]
+    fn web_search_permissions_match_the_actual_query() {
+        let mut profiles = BTreeMap::new();
+        profiles.insert("local".to_string(), PermissionProfileConfig {
+            extends: Some(":workspace".to_string()),
+            web_search_queries: BTreeMap::from([
+                ("private *".to_string(), PermissionAccess::Deny),
+                ("current *".to_string(), PermissionAccess::Prompt),
+            ]),
+            ..Default::default()
+        });
+        let runtime = runtime(PermissionConfig { default_permissions: "local".into(), profiles, ..Default::default() }, PermissionMode::Default);
+        assert!(matches!(runtime.evaluate("web_search", &json!({"query":"private roadmap"})), PermissionDecision::Deny { .. }));
+        assert!(matches!(runtime.evaluate("web_search", &json!({"query":"current weather"})), PermissionDecision::Ask { .. }));
+        assert_eq!(runtime.evaluate("web_search", &json!({"query":"rust language"})), PermissionDecision::Allow);
+    }
+
+    #[test]
     fn mcp_tools_default_to_ask_and_match_rules() {
         let default_runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
         let decision = default_runtime.evaluate("mcp__repo_tools__read_file", &json!({}));

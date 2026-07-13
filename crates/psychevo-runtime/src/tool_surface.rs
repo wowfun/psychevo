@@ -61,6 +61,7 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) home: Option<PathBuf>,
     pub(crate) image_input_enabled: bool,
     pub(crate) image_generation: Option<crate::config::ResolvedImageGenerationConfig>,
+    pub(crate) web_search: crate::config::WebSearchConfig,
     pub(crate) tool_selection: ToolSelectionConfig,
     pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub(crate) contributed_toolsets: Vec<ToolsetContribution>,
@@ -101,6 +102,7 @@ pub(crate) fn assemble_tool_surface_with_warnings(
         home: input.home.clone(),
         image_input_enabled: input.image_input_enabled,
         image_generation: input.image_generation.clone(),
+        web_search: input.web_search.clone(),
     };
 
     for name in tool_names_for_mode(input.mode) {
@@ -825,6 +827,7 @@ mod tests {
             home: None,
             image_input_enabled: true,
             image_generation: None,
+            web_search: Default::default(),
             tool_selection: ToolSelectionConfig::default(),
             custom_toolsets: BTreeMap::new(),
             contributed_toolsets: Vec::new(),

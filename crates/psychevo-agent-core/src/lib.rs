@@ -5,8 +5,9 @@ pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) use futures::StreamExt;
 pub(crate) use futures::future::{BoxFuture, join_all};
 pub(crate) use psychevo_ai::{
-    AbortSignal, GenerationProvider, GenerationRequest, Outcome, StreamEvent, ToolDeclaration,
-    allowlisted_provider_metadata, normalize_usage,
+    AbortSignal, AssistantSource, GenerationProvider, GenerationRequest, GenerationTool,
+    HostedWebSearchTool, Outcome, StreamEvent, ToolDeclaration, allowlisted_provider_metadata,
+    normalize_usage,
 };
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};

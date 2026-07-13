@@ -1381,6 +1381,16 @@ async fn handle_rpc(
             };
             settings_read_value(&state, &cwd, thread_id.as_deref())
         }
+        "web/search/settings/read" => {
+            let params = request.params::<wire::WebSearchSettingsReadParams>()?;
+            let cwd = resolve_cwd_filter(&state, &auth, params.cwd)?;
+            web_search_settings_value(&state, &cwd)
+        }
+        "web/search/settings/update" => {
+            let params = request.required_params::<wire::WebSearchSettingsUpdateParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            web_search_settings_update_value(&state, &scope.cwd, params)
+        }
         "settings/update" => {
             let params = request.required_params::<wire::SettingsUpdateParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;

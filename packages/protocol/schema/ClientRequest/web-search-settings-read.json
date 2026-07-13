@@ -1,0 +1,35 @@
+{
+  "$id": "ClientRequest/web-search-settings-read.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WebSearchSettingsReadParams": {
+      "properties": {
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "method": {
+      "enum": [
+        "web/search/settings/read"
+      ],
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/WebSearchSettingsReadParams"
+    }
+  },
+  "required": [
+    "method",
+    "params"
+  ],
+  "title": "ClientRequest web/search/settings/read",
+  "type": "object"
+}

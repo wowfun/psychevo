@@ -515,7 +515,7 @@ pub(crate) fn reconstruct_last_provider_request(
                 model: summary.model.clone(),
             },
             messages: provider_messages,
-            tools,
+            tools: tools.into_iter().map(Into::into).collect(),
             metadata: generation_metadata.clone(),
         };
         let body = openai_chat_request_body(&request, &base_url);

@@ -17,6 +17,7 @@ pub(crate) use tokio::time;
 
 pub(crate) use crate::config::{
     CustomToolsetConfig, LspConfig, ResolvedImageGenerationConfig, ToolSelectionConfig,
+    WebSearchConfig,
 };
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::prompt_templates;
@@ -62,6 +63,7 @@ pub(crate) struct ToolRuntimeContext {
     pub(crate) home: Option<PathBuf>,
     pub(crate) image_input_enabled: bool,
     pub(crate) image_generation: Option<ResolvedImageGenerationConfig>,
+    pub(crate) web_search: WebSearchConfig,
 }
 
 impl Default for ToolRuntimeContext {
@@ -79,6 +81,7 @@ impl Default for ToolRuntimeContext {
             home: None,
             image_input_enabled: true,
             image_generation: None,
+            web_search: WebSearchConfig::default(),
         }
     }
 }
@@ -152,6 +155,7 @@ pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
             "exec_command",
             "write_stdin",
             "web_fetch",
+            "web_search",
             "view_image",
         ],
         RunMode::Default => vec![
@@ -161,6 +165,7 @@ pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
             "exec_command",
             "write_stdin",
             "web_fetch",
+            "web_search",
             "view_image",
             "image_generate",
         ],
@@ -240,7 +245,7 @@ pub(crate) fn builtin_toolset_description(name: &str) -> Option<&'static str> {
         "coding-core" => {
             Some("Local coding tools for reading files, editing files, and running shell commands.")
         }
-        "web" => Some("Read-only URL fetch tools for known web resources."),
+        "web" => Some("Read-only tools for searching the web and fetching known URLs."),
         "vision" => Some("Image inspection and deterministic image generation tools."),
         _ => None,
     }
@@ -249,7 +254,7 @@ pub(crate) fn builtin_toolset_description(name: &str) -> Option<&'static str> {
 pub(crate) fn builtin_toolset_tools(name: &str) -> Option<&'static [&'static str]> {
     match name {
         "coding-core" => Some(&["read", "write", "edit", "exec_command", "write_stdin"]),
-        "web" => Some(&["web_fetch"]),
+        "web" => Some(&["web_fetch", "web_search"]),
         "vision" => Some(&["view_image", "image_generate"]),
         _ => None,
     }
@@ -259,7 +264,7 @@ pub(crate) fn tool_allowed_in_mode(name: &str, mode: RunMode) -> bool {
     match mode {
         RunMode::Plan => matches!(
             name,
-            "read" | "exec_command" | "write_stdin" | "web_fetch" | "view_image"
+            "read" | "exec_command" | "write_stdin" | "web_fetch" | "web_search" | "view_image"
         ),
         RunMode::Default => matches!(
             name,
@@ -269,6 +274,7 @@ pub(crate) fn tool_allowed_in_mode(name: &str, mode: RunMode) -> bool {
                 | "exec_command"
                 | "write_stdin"
                 | "web_fetch"
+                | "web_search"
                 | "view_image"
                 | "image_generate"
                 | "image_generation.generate"
@@ -285,6 +291,7 @@ pub(crate) fn known_tool_name(name: &str) -> bool {
             | "exec_command"
             | "write_stdin"
             | "web_fetch"
+            | "web_search"
             | "view_image"
             | "image_generate"
             | "image_generation.generate"
@@ -359,6 +366,14 @@ pub(crate) fn tool_by_name(
         "exec_command" => Some(Arc::new(ExecCommandTool::new(cwd.to_path_buf(), context))),
         "write_stdin" => Some(Arc::new(WriteStdinTool::new())),
         "web_fetch" => Some(Arc::new(WebFetchTool::new())),
+        "web_search" => (context.web_search.execution != crate::config::WebSearchExecution::Hosted)
+            .then(|| {
+                Arc::new(WebSearchTool::new(
+                    context.web_search.clone(),
+                    context.env.clone(),
+                    context.task_id.clone(),
+                )) as Arc<dyn ToolBinding>
+            }),
         "view_image" => Some(Arc::new(ViewImageTool::new(cwd.to_path_buf(), context))),
         "image_generate" | "image_generation.generate" => {
             Some(Arc::new(ImageGenerateTool::new(cwd.to_path_buf(), context)))
@@ -436,6 +451,14 @@ pub(crate) use truncation::*;
 pub(crate) mod web_fetch;
 #[allow(unused_imports)]
 pub(crate) use web_fetch::*;
+#[path = "web_search.rs"]
+pub(crate) mod web_search;
+#[allow(unused_imports)]
+pub(crate) use web_search::*;
+#[path = "web_url_policy.rs"]
+pub(crate) mod web_url_policy;
+#[allow(unused_imports)]
+pub(crate) use web_url_policy::*;
 #[path = "image_tools.rs"]
 pub(crate) mod image_tools;
 #[allow(unused_imports)]

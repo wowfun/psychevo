@@ -348,11 +348,11 @@ pub(crate) fn reconstructed_tool_declarations(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let provider: Arc<dyn GenerationProvider> = Arc::new(OpenAiChatProvider::new(
+    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
         base_url.clone(),
         String::new(),
         summary.provider.clone(),
-    ));
+    );
     let tools = assemble_tool_surface(ToolSurfaceAssembly {
         cwd: cwd.to_path_buf(),
         task_id: summary.id.clone(),
@@ -367,6 +367,7 @@ pub(crate) fn reconstructed_tool_declarations(
         home: Some(cwd.join(".psychevo")),
         image_input_enabled: true,
         image_generation: None,
+        web_search: Default::default(),
         tool_selection: Default::default(),
         custom_toolsets: BTreeMap::new(),
         contributed_toolsets: Vec::new(),
@@ -423,6 +424,7 @@ pub(crate) fn reconstructed_tool_declarations(
             home: cwd.join(".psychevo"),
             image_input_enabled: true,
             image_generation: None,
+            web_search: Default::default(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
             extension_inputs: Default::default(),

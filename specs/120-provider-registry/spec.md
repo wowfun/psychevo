@@ -112,7 +112,7 @@ Configuration may define:
   `cache_read`, `cache_write`, optional USD-per-request `request`, and
   optional `context_over_200k` tier
 - optional model capability overrides using `reasoning`, `tool_call`,
-  `temperature`, `attachment`, `structured_output`, `interleaved`, and
+  `web_search`, `temperature`, `attachment`, `structured_output`, `interleaved`, and
   `modalities.input`/`modalities.output`
 - optional top-level `compression` object for context compaction defaults:
   `enabled`, `auto`, `threshold_percent`, `reserve_tokens`,
@@ -129,7 +129,9 @@ The legacy model `context_limit` field is rejected. Configurations must use
 Model capability facts come from explicit configuration overrides, fetched or
 cached provider catalogs, and models.dev-derived metadata. Built-in provider
 registry entries must not hard-code capability metadata for specific model
-names. When metadata is absent, capability is unknown; request translation and
+names except the narrow hosted-web-search family fallback defined by
+[111 Web Search](../111-web-search/spec.md). Explicit `web_search` metadata is
+authoritative. When metadata is absent, capability is unknown; request translation and
 provider recovery handle mismatches without modifying user configuration,
 catalog caches, or model metadata.
 

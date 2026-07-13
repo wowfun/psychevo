@@ -30,6 +30,39 @@ pub struct SettingsReadResult {
     pub secrets: BTreeMap<String, Value>,
     #[serde(default)]
     pub controls: Option<WorkbenchControlsView>,
+    #[serde(default)]
+    pub web_search: Option<WebSearchSettingsView>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsView {
+    pub execution: String,
+    pub backend: String,
+    pub external_access: String,
+    pub context_size: String,
+    pub return_token_budget: String,
+    #[serde(default)] pub content_types: Vec<String>,
+    #[serde(default)] pub allowed_domains: Vec<String>,
+    #[serde(default)] pub blocked_domains: Vec<String>,
+    pub background_storage_acknowledged: bool,
+    #[ts(type = "Record<string, unknown>")] pub location: BTreeMap<String, Value>,
+    #[ts(type = "Record<string, unknown>")] pub image: BTreeMap<String, Value>,
+    #[ts(type = "Record<string, string>")] pub credentials: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsReadParams { #[serde(default)] pub cwd: Option<String> }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSearchSettingsUpdateParams {
+    pub scope: GatewayRequestScope,
+    pub search: WebSearchSettingsView,
+    #[serde(default)]
+    #[ts(type = "Record<string, string>")]
+    pub credential_values: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

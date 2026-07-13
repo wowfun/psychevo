@@ -8,8 +8,8 @@ pub(crate) use psychevo_agent_core::{
     run_agent_loop, user_text_message,
 };
 pub(crate) use psychevo_ai::{
-    AbortSignal, GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider, Outcome,
-    StreamEvent,
+    AbortSignal, GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider,
+    OpenAiResponsesProvider, Outcome, StreamEvent,
 };
 pub(crate) use serde_json::{Value, json};
 pub(crate) use tokio::time;
@@ -84,3 +84,18 @@ pub use execution::*;
 mod titles;
 #[allow(unused_imports)]
 pub use titles::*;
+
+pub(crate) fn generation_provider(
+    base_url: impl Into<String>,
+    api_key: impl Into<String>,
+    provider: impl Into<String>,
+) -> Arc<dyn GenerationProvider> {
+    let base_url = base_url.into();
+    let api_key = api_key.into();
+    let provider = provider.into();
+    if crate::config::normalize_provider_id(&provider) == "openai" {
+        Arc::new(OpenAiResponsesProvider::new(base_url, api_key))
+    } else {
+        Arc::new(OpenAiChatProvider::new(base_url, api_key, provider))
+    }
+}

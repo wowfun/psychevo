@@ -223,3 +223,26 @@ pub(crate) fn tool_attachment_messages(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod provider_tool_tests {
+    use super::*;
+
+    #[test]
+    fn provider_executed_blocks_never_become_router_calls() {
+        let message = Message::Assistant {
+            content: vec![AssistantBlock::ProviderTool(ProviderToolBlock {
+                id: "ws_1".into(),
+                name: "web_search".into(),
+                action: Some(json!({"type":"search","query":"rust"})),
+                status: "completed".into(),
+            })],
+            timestamp_ms: 0,
+            finish_reason: Some("completed".into()),
+            outcome: Outcome::Normal,
+            model: Some("gpt-5".into()),
+            provider: Some("openai".into()),
+        };
+        assert!(assistant_tool_calls(&message).is_empty());
+    }
+}

@@ -26,6 +26,9 @@ pub use control::*;
 #[path = "openai/provider.rs"]
 pub(crate) mod openai_provider;
 pub use openai_provider::*;
+#[path = "openai/responses.rs"]
+pub(crate) mod openai_responses;
+pub use openai_responses::*;
 #[path = "openai/request.rs"]
 pub(crate) mod openai_request;
 pub use openai_request::*;

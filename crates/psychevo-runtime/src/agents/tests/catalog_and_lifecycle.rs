@@ -77,6 +77,7 @@ Coordinate.
             home: tmp.path().join(".psychevo"),
             image_input_enabled: true,
             image_generation: None,
+            web_search: Default::default(),
             tool_selection: Default::default(),
             custom_toolsets: BTreeMap::new(),
             extension_inputs: Default::default(),

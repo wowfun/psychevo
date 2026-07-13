@@ -611,6 +611,7 @@ pub struct PermissionProfileConfig {
     pub extends: Option<String>,
     pub filesystem: BTreeMap<String, PermissionAccess>,
     pub network_domains: BTreeMap<String, PermissionAccess>,
+    pub web_search_queries: BTreeMap<String, PermissionAccess>,
     pub skill_tools: BTreeMap<String, PermissionAccess>,
 }
 

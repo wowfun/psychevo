@@ -376,7 +376,10 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             model: summary.model.clone(),
         },
         messages: request_messages,
-        tools: tool_declarations(&tools),
+        tools: tool_declarations(&tools)
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         metadata: json!({
             "context_counting": {
                 "system_prompt_message_count": 2,

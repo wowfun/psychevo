@@ -323,6 +323,75 @@
       ],
       "type": "object"
     },
+    "WebSearchSettingsView": {
+      "properties": {
+        "allowedDomains": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "backgroundStorageAcknowledged": {
+          "type": "boolean"
+        },
+        "blockedDomains": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contentTypes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contextSize": {
+          "type": "string"
+        },
+        "credentials": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "execution": {
+          "type": "string"
+        },
+        "externalAccess": {
+          "type": "string"
+        },
+        "image": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "location": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "returnTokenBudget": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "backgroundStorageAcknowledged",
+        "contextSize",
+        "credentials",
+        "execution",
+        "externalAccess",
+        "image",
+        "location",
+        "returnTokenBudget"
+      ],
+      "type": "object"
+    },
     "WorkbenchControlsView": {
       "properties": {
         "agent": {
@@ -494,6 +563,17 @@
     "secrets": {
       "additionalProperties": true,
       "type": "object"
+    },
+    "webSearch": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/WebSearchSettingsView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
