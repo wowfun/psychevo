@@ -1,4 +1,3 @@
-const INTERNAL_SESSION_SOURCES: &[&str] = SIDE_CONVERSATION_SESSION_SOURCES;
 const RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(6);
 const RUNTIME_FORCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(4);
 const SERVER_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -14,6 +13,7 @@ pub struct GatewayWebServerConfig {
     pub bind_port_fallbacks: u16,
     pub token: String,
     pub managed_state_path: Option<PathBuf>,
+    pub managed_instance_id: Option<String>,
 }
 
 impl GatewayWebServerConfig {
@@ -36,6 +36,7 @@ impl GatewayWebServerConfig {
             bind_port_fallbacks: 0,
             token: Uuid::now_v7().to_string(),
             managed_state_path: None,
+            managed_instance_id: None,
         }
     }
 
@@ -58,6 +59,7 @@ impl GatewayWebServerConfig {
             bind_port_fallbacks: 0,
             token,
             managed_state_path: None,
+            managed_instance_id: None,
         }
     }
 }
@@ -68,6 +70,7 @@ pub struct BoundGatewayWebServer {
     gateway: Gateway,
     local_addr: SocketAddr,
     token: String,
+    managed_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 impl BoundGatewayWebServer {
@@ -84,15 +87,7 @@ impl BoundGatewayWebServer {
     }
 
     pub async fn run(self) -> psychevo_runtime::Result<()> {
-        let result = axum::serve(self.listener, self.app.into_make_service()).await;
-        let shutdown = shutdown_runtimes_with_deadlines(
-            &self.gateway,
-            RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
-            RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
-        )
-        .await;
-        result?;
-        shutdown
+        self.run_with_shutdown_signal(std::future::pending()).await
     }
 
     pub async fn run_with_shutdown_signal<F>(
@@ -106,6 +101,7 @@ impl BoundGatewayWebServer {
             listener,
             app,
             gateway,
+            managed_shutdown_rx,
             ..
         } = self;
         let (server_shutdown_tx, server_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -115,6 +111,26 @@ impl BoundGatewayWebServer {
             }),
         );
         tokio::pin!(server);
+        let managed_shutdown_signal = async move {
+            let Some(mut receiver) = managed_shutdown_rx else {
+                std::future::pending::<()>().await;
+                return;
+            };
+            if *receiver.borrow() {
+                return;
+            }
+            while receiver.changed().await.is_ok() {
+                if *receiver.borrow() {
+                    return;
+                }
+            }
+        };
+        let shutdown_signal = async move {
+            tokio::select! {
+                _ = shutdown_signal => {}
+                _ = managed_shutdown_signal => {}
+            }
+        };
         tokio::pin!(shutdown_signal);
 
         tokio::select! {
@@ -180,8 +196,13 @@ pub async fn bind_gateway_web_server(
         write_managed_state(path, local_addr, &config)?;
     }
     let gateway = config.gateway.clone();
-    let state = WebState::new(config);
-    let app = Router::new()
+    let managed = config.managed_instance_id.is_some();
+    let (managed_shutdown_tx, managed_shutdown_rx) = tokio::sync::watch::channel(false);
+    let state = WebState::new_with_managed_shutdown(
+        config,
+        managed.then_some(managed_shutdown_tx),
+    );
+    let mut app = Router::new()
         .route("/readyz", get(readyz))
         .route("/health", get(readyz))
         .route("/_gateway/launch", post(create_launch))
@@ -191,15 +212,20 @@ pub async fn bind_gateway_web_server(
             "/download/session/{session_id}/{kind}",
             get(download_session),
         )
-        .route("/_gateway/media/{artifact_id}", get(read_media_artifact))
-        .fallback(get(static_asset))
-        .with_state(state);
+        .route("/_gateway/media/{artifact_id}", get(read_media_artifact));
+    if managed {
+        app = app
+            .route("/_gateway/managed/identity", get(managed_identity))
+            .route("/_gateway/managed/shutdown", post(managed_shutdown));
+    }
+    let app = app.fallback(get(gateway_fallback)).with_state(state);
     Ok(BoundGatewayWebServer {
         listener,
         app,
         gateway,
         local_addr,
         token,
+        managed_shutdown_rx: managed.then_some(managed_shutdown_rx),
     })
 }
 
@@ -241,6 +267,7 @@ fn write_managed_state(
 ) -> psychevo_runtime::Result<()> {
     let executable = executable_fingerprint(&std::env::current_exe()?)?;
     let state = wire::ManagedServerState {
+        instance_id: config.managed_instance_id.clone(),
         pid: std::process::id(),
         base_url: format!("http://{local_addr}"),
         readyz_url: format!("http://{local_addr}/readyz"),
@@ -259,7 +286,7 @@ fn write_managed_state(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_vec_pretty(&state)?)?;
+    psychevo_runtime::host_process::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
     Ok(())
 }
 
@@ -318,6 +345,8 @@ struct WebStateInner {
     inherited_env: BTreeMap<String, String>,
     static_dir: Option<PathBuf>,
     token: String,
+    managed_instance_id: Option<String>,
+    managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     source: GatewaySource,
     launches: Mutex<HashMap<String, LaunchEntry>>,
     browser_sessions: Mutex<HashMap<String, BrowserSession>>,
@@ -451,7 +480,15 @@ impl AuthContext {
 }
 
 impl WebState {
+    #[cfg(test)]
     fn new(config: GatewayWebServerConfig) -> Self {
+        Self::new_with_managed_shutdown(config, None)
+    }
+
+    fn new_with_managed_shutdown(
+        config: GatewayWebServerConfig,
+        managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    ) -> Self {
         let state = config.gateway.state().clone();
         let source = cwd_source(&config.cwd);
         let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
@@ -465,6 +502,8 @@ impl WebState {
                 inherited_env: config.inherited_env,
                 static_dir: config.static_dir,
                 token: config.token,
+                managed_instance_id: config.managed_instance_id,
+                managed_shutdown_tx,
                 source,
                 launches: Mutex::new(HashMap::new()),
                 browser_sessions: Mutex::new(HashMap::new()),

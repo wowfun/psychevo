@@ -6,6 +6,59 @@ async fn readyz() -> impl IntoResponse {
     })
 }
 
+async fn managed_identity(State(state): State<WebState>, headers: HeaderMap) -> impl IntoResponse {
+    if !state
+        .auth_from_headers(&headers)
+        .is_some_and(|auth| auth.is_bearer())
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(instance_id) = state.inner.managed_instance_id.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    Json(json!({
+        "ok": true,
+        "instanceId": instance_id,
+        "pid": std::process::id(),
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedShutdownParams {
+    instance_id: String,
+}
+
+async fn managed_shutdown(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    Json(params): Json<ManagedShutdownParams>,
+) -> impl IntoResponse {
+    if !state
+        .auth_from_headers(&headers)
+        .is_some_and(|auth| auth.is_bearer())
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(instance_id) = state.inner.managed_instance_id.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if params.instance_id != instance_id {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"ok": false, "error": "managed instance mismatch"})),
+        )
+            .into_response();
+    }
+    let Some(shutdown) = state.inner.managed_shutdown_tx.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let _ = shutdown.send(true);
+    Json(json!({"ok": true, "instanceId": instance_id})).into_response()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchQuery {

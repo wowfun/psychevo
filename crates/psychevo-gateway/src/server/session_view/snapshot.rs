@@ -3,12 +3,22 @@ fn thread_snapshot(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
+    let store = state.inner.state.store();
     let thread = thread_id
         .map(|thread_id| {
+            let forked_from_thread_id = store
+                .session_metadata(thread_id)?
+                .and_then(|metadata| {
+                    metadata
+                        .get("forkedFromThreadId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                });
             Ok::<GatewayThread, Error>(GatewayThread {
                 id: thread_id.to_string(),
                 backend: gateway_backend_info_for_thread(state, thread_id)?,
                 source_key: Some(scope.source.source_key()),
+                forked_from_thread_id,
             })
         })
         .transpose()?;
@@ -22,6 +32,10 @@ fn thread_snapshot(
         .transpose()?
         .unwrap_or_default();
     let history = authoritative_history_view(state, thread_id)?;
+    let history_editing = thread_id
+        .map(|thread_id| thread_history_editing_value(store, thread_id))
+        .transpose()?
+        .flatten();
     Ok(json!({
         "source": scope.source,
         "scope": scope.to_wire_scope(),
@@ -30,7 +44,51 @@ fn thread_snapshot(
         "entries": entries,
         "activity": activity,
         "pendingActions": pending_actions,
+        "historyEditing": history_editing,
     }))
+}
+
+fn thread_history_editing_value(
+    store: &psychevo_runtime::SqliteStore,
+    thread_id: &str,
+) -> psychevo_runtime::Result<Option<Value>> {
+    let Some(revert) = store.session_revert_state(thread_id)? else {
+        return Ok(None);
+    };
+    let hidden_entry_count = store.messages_from_count(thread_id, revert.start_seq)?;
+    Ok(Some(match revert.kind {
+        SessionRevertKind::WorkspaceUndo { .. } => json!({
+            "kind": "workspaceUndo",
+            "boundaryMessageId": format!("message:{}", revert.start_seq),
+            "hiddenEntryCount": hidden_entry_count,
+            "replacementDraft": null,
+            "availableActions": ["redoWorkspace"],
+        }),
+        SessionRevertKind::ConversationEdit {
+            boundary_message_id,
+            draft,
+        } => json!({
+            "kind": "conversationEdit",
+            "boundaryMessageId": boundary_message_id,
+            "hiddenEntryCount": hidden_entry_count,
+            "replacementDraft": {
+                "parts": draft.into_iter().map(conversation_draft_part_value).collect::<Vec<_>>(),
+            },
+            "availableActions": ["restoreHistory"],
+        }),
+    }))
+}
+
+fn conversation_draft_part_value(part: ConversationDraftPart) -> Value {
+    match part {
+        ConversationDraftPart::Text { text } => json!({"type": "text", "text": text}),
+        ConversationDraftPart::LocalImage { path } => {
+            json!({"type": "image", "input": {"kind": "localPath", "path": path}})
+        }
+        ConversationDraftPart::ImageUrl { url } => {
+            json!({"type": "image", "input": {"kind": "url", "url": url}})
+        }
+    }
 }
 
 async fn thread_snapshot_live(

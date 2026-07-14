@@ -37,19 +37,19 @@ use psychevo_runtime::{
     AgentTeamDefinition, AgentTeamMember, AgentTeamRunInput, AgentTeamSource,
     AutomationRunFinishInput, AutomationRunRecord, AutomationSchedule, AutomationTaskInput,
     AutomationTaskRecord, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyResponse, ClarifyResult,
-    ConfigScope, ContextOptions, Error, ExecutableResolveOptions, GatewayRuntimeBindingOwnership,
-    GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch,
-    GatewaySourceLaneInput, HostPlatform, InstallOptions, ListSkillsOptions, LoadedMainAgent,
-    MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP, McpServerConfigInput,
-    McpToolPolicyInput, Message as RuntimeMessage, ModelCatalogEntry, ModelCatalogProvider,
-    ModelState, PermissionApprovalDecision, PermissionApprovalOutcome, PermissionMode,
-    PluginAdapterMode, PluginInspectOptions, PluginInstallOptions, PluginMarketplaceEntry,
-    PluginScope, PluginSourceKind, REASONING_EFFORT_VALUES, RunMode, RunOptions,
-    RunSandboxOverride, RuntimeProfileConfig, RuntimeProfileKind,
+    ConfigScope, ContextOptions, ConversationDraftPart, Error, ExecutableResolveOptions,
+    GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
+    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, HostPlatform, InstallOptions,
+    ListSkillsOptions, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP,
+    McpServerConfigInput, McpToolPolicyInput, Message as RuntimeMessage, ModelCatalogEntry,
+    ModelCatalogProvider, ModelState, PermissionApprovalDecision, PermissionApprovalOutcome,
+    PermissionMode, PluginAdapterMode, PluginInspectOptions, PluginInstallOptions,
+    PluginMarketplaceEntry, PluginScope, PluginSourceKind, REASONING_EFFORT_VALUES, RunMode,
+    RunOptions, RunSandboxOverride, RuntimeProfileConfig, RuntimeProfileKind,
     SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
-    SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
-    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, SessionExportOptions,
-    SessionSummary, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
+    SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY, SessionArtifactKind,
+    SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionListProjection,
+    SessionRevertKind, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
     SkillDiscoveryOptions, SkillTarget, StateRuntime, UsageReadOptions, UserContentBlock,
     UserShellContextOptions, WEB_SIDE_CONVERSATION_SESSION_SOURCE, agent_spawn_paused,
     agent_status_records, auth_status_value, canonicalize_cwd, clear_mcp_oauth_access_token,
@@ -151,8 +151,9 @@ use runtime_profiles::{
     write_runtime_profile,
 };
 use session_lifecycle::{
-    archive_thread, delete_thread, fork_thread, import_agent_session,
+    archive_thread, delete_thread, fork_acp_thread, fork_native_thread, import_agent_session,
     list_importable_agent_sessions, reconcile_acknowledged_session_deletes, restore_thread,
+    typed_thread_snapshot,
 };
 use terminal::TerminalManager;
 use thread_application::{
@@ -160,6 +161,7 @@ use thread_application::{
     authoritative_history_projection, authoritative_history_view,
     pending_interactions as thread_pending_interactions,
     read_history as thread_history_read_result,
+    read_history_draft as thread_history_draft_read_result,
     respond_to_interaction as thread_interaction_respond_result,
     respond_to_routed_interaction_for_selector as thread_routed_interaction_respond_for_selector,
     run_action as thread_action_run_result, run_routed_action as run_routed_thread_action,
@@ -204,5 +206,7 @@ mod tests {
     include!("server/tests/voice_rpc.rs");
     include!("server/tests/terminal_launch.rs");
     include!("server/tests/session_lifecycle.rs");
+    include!("server/tests/history_editing.rs");
+    include!("server/tests/managed_lifecycle.rs");
     include!("server/tests/helpers.rs");
 }

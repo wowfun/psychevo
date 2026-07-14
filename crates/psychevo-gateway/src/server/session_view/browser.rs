@@ -11,124 +11,65 @@ fn thread_browser_value(
         .iter()
         .filter(|id| !id.trim().is_empty())
         .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    let store = state.inner.state.store();
-    let sessions = if params.archived.unwrap_or(false) {
-        match cwd.as_ref() {
-            Some(cwd) => store.list_archived_sessions_for_cwd_with_sources(cwd, &[])?,
-            None => store.list_archived_sessions_with_sources(&[])?,
-        }
-    } else {
-        match cwd.as_ref() {
-            Some(cwd) => store.list_sessions_for_cwd_with_sources(cwd, &[])?,
-            None => store.list_sessions_with_sources(&[])?,
-        }
-    };
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let activity_snapshot = state.inner.gateway.session_activity_snapshot()?;
+    let active_ids = activity_snapshot
+        .iter()
+        .filter(|(_, activity)| activity.running || activity.takeover_state.is_some())
+        .map(|(thread_id, _)| thread_id.clone())
+        .collect::<Vec<_>>();
+    let cwd = cwd.map(|cwd| cwd.to_string_lossy().into_owned());
     let cursor_cwd = params.cursor.as_ref().map(|cursor| cursor.cwd.as_str());
     let cursor_offset = params
         .cursor
         .as_ref()
         .map(|cursor| cursor.offset)
         .unwrap_or(0);
-    let mut groups: BTreeMap<String, Vec<SessionSummary>> = BTreeMap::new();
-    for session in sessions
-        .into_iter()
-        .filter(|session| human_visible_session(state, session))
-    {
-        if cursor_cwd.is_some_and(|cwd| cwd != session.cwd) {
-            continue;
-        }
-        groups
-            .entry(session.cwd.clone())
-            .or_default()
-            .push(session);
-    }
+    let projections = state.inner.state.store().browse_human_sessions(
+        psychevo_runtime::SessionBrowserRequest {
+            cwd: cwd.as_deref(),
+            archived: params.archived.unwrap_or(false),
+            cursor_cwd,
+            cursor_offset,
+            limit,
+            recent_since_ms,
+            include_session_ids: &include_ids,
+            active_session_ids: &active_ids,
+        },
+    )?;
 
-    let mut workspaces = Vec::new();
-    for (cwd, mut sessions) in groups {
-        sessions.sort_by(|left, right| {
-            right
-                .updated_at_ms
-                .cmp(&left.updated_at_ms)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        let mut exception_ids = std::collections::BTreeSet::new();
-        if params.cursor.is_none() {
-            for session in &sessions {
-                let activity = state
-                    .inner
-                    .gateway
-                    .activity_for_selector(GatewayThreadSelector::thread_id(&session.id));
-                if include_ids.contains(&session.id)
-                    || activity.running
-                    || activity.takeover_state.is_some()
-                {
-                    exception_ids.insert(session.id.clone());
-                }
-            }
-        }
-        let normal_sessions = sessions
-            .iter()
-            .filter(|session| !exception_ids.contains(&session.id))
-            .collect::<Vec<_>>();
-        let (page_sessions, next_offset) = if params.cursor.is_some() {
-            let page = normal_sessions
-                .iter()
-                .skip(cursor_offset)
-                .take(limit)
-                .copied()
-                .cloned()
+    let mut workspaces = projections
+        .into_iter()
+        .map(|workspace| {
+            let cwd = workspace.cwd;
+            let sessions = workspace
+                .sessions
+                .into_iter()
+                .map(|projection| {
+                    let activity = activity_snapshot
+                        .get(&projection.summary.id)
+                        .cloned()
+                        .unwrap_or_default();
+                    session_summary_value(projection, activity)
+                })
                 .collect::<Vec<_>>();
-            let next_offset = cursor_offset.saturating_add(page.len());
-            (page, next_offset)
-        } else {
-            let page = normal_sessions
-                .iter()
-                .take_while(|session| session.updated_at_ms >= recent_since_ms)
-                .take(limit)
-                .copied()
-                .cloned()
-                .collect::<Vec<_>>();
-            let next_offset = page.len();
-            let mut page_ids = page
-                .iter()
-                .map(|session| session.id.clone())
-                .collect::<std::collections::BTreeSet<_>>();
-            let mut with_exceptions = page;
-            for session in sessions
-                .iter()
-                .filter(|session| exception_ids.contains(&session.id))
-            {
-                if page_ids.insert(session.id.clone()) {
-                    with_exceptions.push(session.clone());
-                }
-            }
-            with_exceptions.sort_by(|left, right| {
-                right
-                    .updated_at_ms
-                    .cmp(&left.updated_at_ms)
-                    .then_with(|| left.id.cmp(&right.id))
+            let next_cursor = workspace.next_offset.map(|offset| {
+                json!({
+                    "cwd": cwd,
+                    "offset": offset,
+                })
             });
-            (with_exceptions, next_offset)
-        };
-        let hidden_count = normal_sessions.len().saturating_sub(next_offset);
-        let next_cursor = (hidden_count > 0).then(|| {
             json!({
                 "cwd": cwd,
-                "offset": next_offset,
+                "project": session_project_value(&cwd),
+                "sessions": sessions,
+                "hiddenCount": workspace.hidden_count,
+                "nextCursor": next_cursor,
             })
-        });
-        workspaces.push(json!({
-            "cwd": cwd,
-            "project": session_project_value(&cwd),
-            "sessions": page_sessions
-                .into_iter()
-                .map(|session| session_summary_value(state, session))
-                .collect::<psychevo_runtime::Result<Vec<_>>>()?,
-            "hiddenCount": hidden_count,
-            "nextCursor": next_cursor,
-        }));
-    }
+        })
+        .collect::<Vec<_>>();
     workspaces.sort_by(|left, right| {
         let left_latest = browser_workspace_latest_at(left);
         let right_latest = browser_workspace_latest_at(right);
@@ -158,27 +99,4 @@ fn browser_workspace_latest_at(workspace: &Value) -> i64 {
                 .max()
         })
         .unwrap_or_default()
-}
-
-fn human_visible_session(state: &WebState, summary: &SessionSummary) -> bool {
-    if summary.parent_session_id.is_some() {
-        return false;
-    }
-    if INTERNAL_SESSION_SOURCES.contains(&summary.source.as_str()) {
-        return false;
-    }
-    if state
-        .inner
-        .state
-        .store()
-        .session_metadata(&summary.id)
-        .ok()
-        .flatten()
-        .as_ref()
-        .and_then(|metadata| metadata.get("agentSessionImportState"))
-        .is_some()
-    {
-        return false;
-    }
-    true
 }

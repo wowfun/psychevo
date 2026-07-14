@@ -47,10 +47,16 @@ fn apply_input_parts(
     }
     let mut prompt_parts = Vec::new();
     let mut image_inputs = Vec::new();
+    let mut editable_parts = Vec::new();
+    let mut editable_text_parts = Vec::new();
     let mut has_structured_input = false;
     for part in input {
         match part {
-            GatewayInputPart::Text { text } => prompt_parts.push(text.clone()),
+            GatewayInputPart::Text { text } => {
+                prompt_parts.push(text.clone());
+                editable_text_parts.push(text.clone());
+                editable_parts.push(StoredEditableInputPart::Text { text: text.clone() });
+            }
             GatewayInputPart::Context {
                 text,
                 visible_to_model,
@@ -58,7 +64,9 @@ fn apply_input_parts(
             } if *visible_to_model => prompt_parts.push(text.clone()),
             GatewayInputPart::Context { .. } => {}
             GatewayInputPart::Image { input } => {
-                image_inputs.push(gateway_image_input_into_runtime(input.clone()))
+                let image_block_index = image_inputs.len();
+                image_inputs.push(gateway_image_input_into_runtime(input.clone()));
+                editable_parts.push(StoredEditableInputPart::Image { image_block_index });
             }
             GatewayInputPart::Resource { text, blob, .. } => {
                 if text.is_some() == blob.is_some() {
@@ -90,6 +98,14 @@ fn apply_input_parts(
     }
     options.prompt = prompt_parts.join("\n");
     options.image_inputs = image_inputs;
+    options.prompt_display = Some(PromptDisplayMetadata {
+        content_text: editable_text_parts.join("\n"),
+        attachments: Vec::new(),
+        editable_input: Some(StoredEditableInputEnvelope {
+            version: 1,
+            parts: editable_parts,
+        }),
+    });
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() && !has_structured_input
     {
         return Err(Error::Message("gateway turn input is empty".to_string()));

@@ -1,22 +1,23 @@
 fn session_summary_value(
-    state: &WebState,
-    summary: SessionSummary,
-) -> psychevo_runtime::Result<Value> {
-    let activity = state
-        .inner
-        .gateway
-        .activity_for_selector(GatewayThreadSelector::thread_id(&summary.id));
-    let entries = state.inner.gateway.thread_transcript(&summary.id)?;
-    let preview = session_preview(&entries);
+    projection: SessionListProjection,
+    activity: GatewayActivity,
+) -> Value {
+    let lifecycle = session_lifecycle_value(&projection);
+    let summary = projection.summary;
     let display_title = summary
         .title
         .clone()
         .filter(|title| !title.trim().is_empty())
-        .or_else(|| preview.clone())
+        .or_else(|| projection.first_user_text.as_deref().map(compact_display_text))
+        .filter(|title| !title.is_empty())
         .unwrap_or_else(|| short_thread_id(&summary.id));
     let project = session_project_value(&summary.cwd);
-    let lifecycle = session_lifecycle_value(state, &summary.id)?;
-    Ok(json!({
+    let forked_from_thread_id = projection
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("forkedFromThreadId"))
+        .and_then(Value::as_str);
+    json!({
         "id": summary.id,
         "cwd": summary.cwd,
         "project": project,
@@ -29,46 +30,73 @@ fn session_summary_value(
         "archivedAtMs": summary.archived_at_ms,
         "messageCount": summary.message_count,
         "toolCallCount": summary.tool_call_count,
-        "visibleEntryCount": entries.len(),
         "activity": activity,
         "title": summary.title,
         "displayTitle": display_title,
-        "preview": preview,
         "lifecycle": lifecycle,
-    }))
+        "forkedFromThreadId": forked_from_thread_id,
+    })
 }
 
-fn session_lifecycle_value(state: &WebState, thread_id: &str) -> psychevo_runtime::Result<Value> {
-    let binding = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(thread_id)?;
-    if binding
-        .as_ref()
-        .is_none_or(|binding| binding.backend_kind.as_deref() != Some("acp"))
-    {
-        return Ok(json!({
+fn session_lifecycle_value(projection: &SessionListProjection) -> Value {
+    if projection.runtime_backend_kind.as_deref() == Some("native") {
+        let staged = projection
+            .metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.get("revert").is_some());
+        let side = projection
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get(psychevo_runtime::SIDE_CONVERSATION_METADATA_KEY))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let eligible = projection.summary.parent_session_id.is_none()
+            && matches!(projection.summary.source.as_str(), "web" | "tui")
+            && !side
+            && !staged;
+        let unavailable_reason = (!eligible).then_some({
+            if staged {
+                "Run, restore, or redo the staged history state before forking."
+            } else {
+                "Only root Workbench and TUI Native Threads can be forked."
+            }
+        });
+        return json!({
             "targetLabel": "Psychevo (Native)",
             "actions": [
                 {
                     "id": "fork",
-                    "enabled": false,
-                    "unavailableReason": "This Agent does not expose session fork."
+                    "enabled": eligible,
+                    "unavailableReason": unavailable_reason
                 },
                 {"id": "delete", "enabled": true}
             ]
-        }));
+        });
     }
-    let metadata = state.inner.state.store().session_metadata(thread_id)?;
-    let lifecycle = metadata
+    if projection.runtime_backend_kind.as_deref() != Some("acp") {
+        return json!({
+            "targetLabel": "Psychevo",
+            "actions": [
+                {
+                    "id": "fork",
+                    "enabled": false,
+                    "unavailableReason": "Fork requires a resolved Native or ACP binding."
+                },
+                {"id": "delete", "enabled": true}
+            ]
+        });
+    }
+    let lifecycle = projection
+        .metadata
         .as_ref()
         .and_then(|metadata| metadata.get("agentSessionLifecycle"));
-    let session_projection = metadata
+    let session_projection = projection
+        .metadata
         .as_ref()
         .and_then(|metadata| metadata.get(ACP_PEER_METADATA_KEY))
         .and_then(|peer| peer.get("sessionProjection"));
-    let pending_delete = metadata
+    let pending_delete = projection
+        .metadata
         .as_ref()
         .and_then(|metadata| metadata.get("agentSessionDeleteIntent"))
         .is_some();
@@ -81,7 +109,7 @@ fn session_lifecycle_value(state: &WebState, thread_id: &str) -> psychevo_runtim
                 .and_then(|agent| agent.get("title").or_else(|| agent.get("name")))
                 .and_then(Value::as_str)
         })
-        .or_else(|| binding.as_ref().and_then(|binding| binding.runtime_ref.as_deref()));
+        .or(projection.runtime_ref.as_deref());
     let fork = lifecycle
         .and_then(|value| value.get("fork"))
         .and_then(Value::as_bool)
@@ -101,7 +129,7 @@ fn session_lifecycle_value(state: &WebState, thread_id: &str) -> psychevo_runtim
         })
         .unwrap_or(false)
         && !pending_delete;
-    Ok(json!({
+    json!({
         "targetLabel": target_label,
         "actions": [
             {
@@ -121,7 +149,7 @@ fn session_lifecycle_value(state: &WebState, thread_id: &str) -> psychevo_runtim
                 })
             }
         ]
-    }))
+    })
 }
 
 fn session_project_value(cwd: &str) -> Value {
@@ -140,23 +168,6 @@ fn project_label(cwd: &Path) -> String {
         .filter(|name| !name.trim().is_empty())
         .unwrap_or("cwd")
         .to_string()
-}
-
-fn session_preview(entries: &[TranscriptEntry]) -> Option<String> {
-    entries
-        .iter()
-        .find(|entry| entry.role == TranscriptEntryRole::User)
-        .and_then(entry_preview)
-        .or_else(|| entries.iter().find_map(entry_preview))
-}
-
-fn entry_preview(entry: &TranscriptEntry) -> Option<String> {
-    entry
-        .blocks
-        .iter()
-        .filter_map(|block| block.preview.as_deref().or(block.body.as_deref()))
-        .map(compact_display_text)
-        .find(|text| !text.is_empty())
 }
 
 fn compact_display_text(text: &str) -> String {

@@ -23,12 +23,15 @@ fn guard_session_mutation(
 }
 
 fn session_summary_by_id(state: &WebState, session_id: &str) -> psychevo_runtime::Result<Value> {
-    state
+    let projection = state
         .inner
         .state
         .store()
-        .session_summary(session_id)?
-        .map(|summary| session_summary_value(state, summary))
-        .transpose()?
-        .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))
+        .session_list_projection(session_id)?
+        .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
+    let activity = state
+        .inner
+        .gateway
+        .activity_for_selector(GatewayThreadSelector::thread_id(session_id));
+    Ok(session_summary_value(projection, activity))
 }

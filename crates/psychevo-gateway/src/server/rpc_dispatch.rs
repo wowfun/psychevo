@@ -89,25 +89,24 @@ async fn handle_rpc(
             let params = request.params::<wire::ThreadListParams>()?;
             let limit = params.limit.unwrap_or(50).clamp(1, 200);
             let cwd = resolve_session_cwd_filter(&state, &auth, params.cwd)?;
-            let store = state.inner.state.store();
-            let sessions = if params.archived.unwrap_or(false) {
-                match cwd.as_ref() {
-                    Some(cwd) => store.list_archived_sessions_for_cwd_with_sources(cwd, &[])?,
-                    None => store.list_archived_sessions_with_sources(&[])?,
-                }
-            } else {
-                match cwd.as_ref() {
-                    Some(cwd) => store.list_sessions_for_cwd_with_sources(cwd, &[])?,
-                    None => store.list_sessions_with_sources(&[])?,
-                }
-            };
+            let cwd = cwd.map(|cwd| cwd.to_string_lossy().into_owned());
+            let activity_snapshot = state.inner.gateway.session_activity_snapshot()?;
+            let sessions = state.inner.state.store().list_human_session_projections(
+                cwd.as_deref(),
+                params.archived.unwrap_or(false),
+                limit,
+            )?;
             Ok(json!({
                 "sessions": sessions
                     .into_iter()
-                    .filter(|session| human_visible_session(&state, session))
-                    .take(limit)
-                    .map(|session| session_summary_value(&state, session))
-                    .collect::<psychevo_runtime::Result<Vec<_>>>()?,
+                    .map(|projection| {
+                        let activity = activity_snapshot
+                            .get(&projection.summary.id)
+                            .cloned()
+                            .unwrap_or_default();
+                        session_summary_value(projection, activity)
+                    })
+                    .collect::<Vec<_>>(),
             }))
         }
         "thread/browser" => {
@@ -232,6 +231,13 @@ async fn handle_rpc(
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
             Ok(serde_json::to_value(
                 thread_history_read_result(&state, &auth, &scope, params).await?,
+            )?)
+        }
+        "thread/history/draft/read" => {
+            let params = request.required_params::<wire::ThreadHistoryDraftReadParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            Ok(serde_json::to_value(
+                thread_history_draft_read_result(&state, &auth, &scope, params).await?,
             )?)
         }
         "runtime/profile/list" => {
@@ -534,6 +540,7 @@ async fn handle_rpc(
                         native_id: None,
                     },
                     source_key: Some(scope.source.source_key()),
+                    forked_from_thread_id: None,
                 },
             })?)
         }

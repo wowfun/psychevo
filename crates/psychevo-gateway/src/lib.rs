@@ -1,3 +1,4 @@
+pub mod history_editing;
 pub mod im;
 pub mod protocol;
 pub mod server;
@@ -22,8 +23,9 @@ use psychevo_runtime::{
     GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, GatewaySourceLaneInput,
     GatewayTurnDeliveryInput, GatewayTurnTerminalInput, ImageInput, Outcome,
     PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
-    PermissionMode, RunControl, RunControlHandle, RunMode, RunOptions, RunResult, RunStreamEvent,
-    RunStreamSink, RuntimeProfileConfig, RuntimeProfileKind, StateRuntime, UserShellContextOptions,
+    PermissionMode, PromptDisplayMetadata, RunControl, RunControlHandle, RunMode, RunOptions,
+    RunResult, RunStreamEvent, RunStreamSink, RuntimeProfileConfig, RuntimeProfileKind,
+    StateRuntime, StoredEditableInputEnvelope, StoredEditableInputPart, UserShellContextOptions,
     UserShellOptions, UserShellResult, discover_agents, load_agent_backend_configs,
     resolve_agent_definition, resolve_skills_home, run_control, run_live, run_live_streaming,
     run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
@@ -42,8 +44,9 @@ pub use protocol::{
     GatewayActivityView, GatewayBackendInfo, GatewayEvent, GatewayImageInput, GatewayInputPart,
     GatewaySelectedSkill, GatewaySource, GatewaySourceLifetime, GatewayThread,
     GatewayThreadSelector, GatewayTurn, GatewayTurnError, GatewayTurnStatus, PendingActionView,
-    PermissionDecision, SourceKey, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
-    TranscriptEntry, TranscriptEntryRole, TranscriptToolResult,
+    PermissionDecision, SourceKey, ThreadEditableDraft, ThreadEditableDraftFidelity,
+    ThreadEditableInputPart, ThreadHistoryDraftReadResult, TranscriptBlock, TranscriptBlockKind,
+    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole, TranscriptToolResult,
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};
 

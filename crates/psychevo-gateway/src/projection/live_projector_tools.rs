@@ -11,7 +11,13 @@ impl GatewayLiveProjector {
         let tool_call_id = if tool_name == "spawn_agent" {
             self.strict_agent_tool_call_id(turn_id, &raw_tool_call_id, value)
         } else {
-            self.canonical_tool_call_id(turn_id, &raw_tool_call_id, tool_name, args.as_ref())
+            self.canonical_tool_call_id(
+                turn_id,
+                &raw_tool_call_id,
+                tool_name,
+                args.as_ref(),
+                value,
+            )
         };
         if tool_call_id != raw_tool_call_id
             && let Some(args) = args.clone()
@@ -291,9 +297,19 @@ impl GatewayLiveProjector {
         raw_tool_call_id: &str,
         tool_name: &str,
         args: Option<&Value>,
+        value: &Value,
     ) -> String {
         if raw_tool_call_id.is_empty() || tool_name == "write_stdin" {
             return raw_tool_call_id.to_string();
+        }
+        if tool_position_key(self.assistant_segment, value).is_some() {
+            return self.canonical_tool_content_id_for_segment(
+                turn_id,
+                self.assistant_segment,
+                raw_tool_call_id,
+                tool_name,
+                value,
+            );
         }
         if let Some(canonical) = self.tool_aliases.get(raw_tool_call_id) {
             return canonical.clone();
@@ -455,16 +471,17 @@ impl GatewayLiveProjector {
         } else {
             raw_tool_call_id.to_string()
         };
-        if let Some(canonical) = self.tool_aliases.get(&raw_tool_call_id) {
-            return canonical.clone();
-        }
-        if self.tool_owners.contains_key(&raw_tool_call_id) {
-            return raw_tool_call_id;
-        }
         let Some(position_key) = tool_position_key(segment, metadata) else {
+            if let Some(canonical) = self.tool_aliases.get(&raw_tool_call_id) {
+                return canonical.clone();
+            }
+            if self.tool_owners.contains_key(&raw_tool_call_id) {
+                return raw_tool_call_id;
+            }
             return raw_tool_call_id;
         };
         let Some(existing) = self.tool_positions.get(&position_key).cloned() else {
+            self.tool_aliases.remove(&raw_tool_call_id);
             self.tool_positions
                 .insert(position_key, raw_tool_call_id.clone());
             return raw_tool_call_id;

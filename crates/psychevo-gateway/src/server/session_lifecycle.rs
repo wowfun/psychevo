@@ -431,7 +431,7 @@ fn persist_lifecycle_projection(
     )
 }
 
-pub(super) async fn fork_thread(
+pub(super) async fn fork_acp_thread(
     state: &WebState,
     scope: &ResolvedScope,
     source_thread_id: &str,
@@ -534,6 +534,42 @@ pub(super) async fn fork_thread(
             snapshot: Box::new(typed_thread_snapshot(
                 thread_snapshot_live(state, scope, Some(&thread_id)).await?,
             )?),
+        })
+    }
+    .await;
+    if result.is_err() {
+        let _ = state.inner.state.delete_session(&thread_id);
+    }
+    result
+}
+
+pub(super) async fn fork_native_thread(
+    state: &WebState,
+    scope: &ResolvedScope,
+    source_thread_id: &str,
+    before_session_seq: Option<i64>,
+) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+    let thread_id = crate::history_editing::fork_native_history(
+        &state.inner.state,
+        source_thread_id,
+        before_session_seq,
+        &scope.source.kind,
+    )?;
+    let result = async {
+        bind_source_to_thread(state, scope, &thread_id)?;
+        let snapshot = Box::new(typed_thread_snapshot(
+            thread_snapshot_live(state, scope, Some(&thread_id)).await?,
+        )?);
+        Ok(if before_session_seq.is_some() {
+            wire::ThreadActionRunResult::ForkBefore {
+                source_thread_id: source_thread_id.to_string(),
+                snapshot,
+            }
+        } else {
+            wire::ThreadActionRunResult::Fork {
+                source_thread_id: source_thread_id.to_string(),
+                snapshot,
+            }
         })
     }
     .await;
@@ -782,7 +818,9 @@ pub(super) fn reconcile_acknowledged_session_deletes(state: &WebState) {
     }
 }
 
-fn typed_thread_snapshot(value: Value) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
+pub(super) fn typed_thread_snapshot(
+    value: Value,
+) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
     serde_json::from_value(value)
         .map_err(|error| Error::Message(format!("invalid Thread snapshot projection: {error}")))
 }

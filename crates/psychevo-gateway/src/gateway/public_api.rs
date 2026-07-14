@@ -436,6 +436,40 @@ impl Gateway {
         activity
     }
 
+    pub fn session_activity_snapshot(
+        &self,
+    ) -> psychevo_runtime::Result<BTreeMap<String, GatewayActivity>> {
+        let active = self.active.lock().expect("gateway active map poisoned");
+        let aliases = self
+            .active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned");
+        let mut snapshot = BTreeMap::new();
+        for (key, state) in active.iter() {
+            if let Some(thread_id) = key.strip_prefix("thread:") {
+                merge_in_memory_activity(snapshot.entry(thread_id.to_string()).or_default(), state);
+            }
+        }
+        for (alias, primary) in aliases.iter() {
+            let Some(thread_id) = alias.strip_prefix("thread:") else {
+                continue;
+            };
+            let Some(state) = active.get(primary) else {
+                continue;
+            };
+            merge_in_memory_activity(snapshot.entry(thread_id.to_string()).or_default(), state);
+        }
+        drop(aliases);
+        drop(active);
+        for record in self.state.store().active_gateway_activities()? {
+            let Some(thread_id) = record.thread_id.clone() else {
+                continue;
+            };
+            self.merge_durable_activity(snapshot.entry(thread_id).or_default(), record);
+        }
+        Ok(snapshot)
+    }
+
     fn durable_activity_for_key(
         &self,
         key: &str,
@@ -933,4 +967,12 @@ impl Gateway {
         }
         count
     }
+}
+
+fn merge_in_memory_activity(activity: &mut GatewayActivity, state: &ActiveThreadState) {
+    activity.running |= state.running;
+    if activity.active_turn_id.is_none() {
+        activity.active_turn_id = state.active_turn_id.clone();
+    }
+    activity.queued_turns = activity.queued_turns.max(state.queued.len());
 }

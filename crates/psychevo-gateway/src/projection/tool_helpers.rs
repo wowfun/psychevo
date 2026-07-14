@@ -41,6 +41,16 @@ fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
     {
         return display.to_string();
     }
+    if tool_name == "web_search" {
+        return metadata
+            .get("args")
+            .and_then(|args| args.get("query"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .map(|query| compact_text(&format!("Searching the web {query}"), 180))
+            .unwrap_or_else(|| "Searching the web".to_string());
+    }
     if tool_name == "exec_command"
         && let Some(command) = metadata
             .get("args")

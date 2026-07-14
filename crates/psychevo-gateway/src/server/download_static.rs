@@ -308,3 +308,13 @@ fn launch_expired_page(status: StatusCode) -> Response<Body> {
     );
     response
 }
+async fn gateway_fallback(
+    State(state): State<WebState>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> impl IntoResponse {
+    if uri.path().starts_with("/_gateway/managed/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    static_asset(State(state), headers, uri).await.into_response()
+}

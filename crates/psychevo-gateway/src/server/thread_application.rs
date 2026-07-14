@@ -124,17 +124,28 @@ pub(super) fn action_descriptors(
     };
     let activity = snapshot_activity(state, &scope.source, Some(thread_id))?;
     let active = activity.running || activity.queued_turns > 0;
+    let binding = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(thread_id)?;
+    let acp = binding
+        .as_ref()
+        .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"));
+    let revert = state.inner.state.store().session_revert_state(thread_id)?;
+    let native_history_reason = native_history_action_unavailable_reason(state, scope, thread_id)?;
     let stability = stability.unwrap_or(wire::RuntimeStabilityView::Stable);
-    let descriptor = |id, label: &str, enabled: bool, unavailable_reason: Option<String>| {
-        wire::ThreadActionDescriptorView {
-            id,
-            label: label.to_string(),
-            enabled,
-            stability,
-            channel_safe: true,
-            unavailable_reason,
-        }
-    };
+    let descriptor =
+        |id, label: &str, enabled: bool, channel_safe: bool, unavailable_reason: Option<String>| {
+            wire::ThreadActionDescriptorView {
+                id,
+                label: label.to_string(),
+                enabled,
+                stability,
+                channel_safe,
+                unavailable_reason,
+            }
+        };
     let inactive_reason = || Some("No turn is currently running on this Thread.".to_string());
     let actions = supported_actions
         .iter()
@@ -143,6 +154,7 @@ pub(super) fn action_descriptors(
                 *action,
                 "Interrupt",
                 active,
+                true,
                 (!active).then(inactive_reason).flatten(),
             ),
             wire::ThreadActionKind::Steer => {
@@ -151,6 +163,7 @@ pub(super) fn action_descriptors(
                     *action,
                     "Steer",
                     enabled,
+                    true,
                     (!enabled).then(inactive_reason).flatten(),
                 )
             }
@@ -158,20 +171,100 @@ pub(super) fn action_descriptors(
                 *action,
                 "Compact context",
                 selected_ready,
+                true,
                 (!selected_ready)
                     .then(|| "This Agent target is currently unavailable.".to_string()),
             ),
-            wire::ThreadActionKind::Fork => descriptor(
-                *action,
-                "Fork session",
-                selected_ready && !active,
-                (!selected_ready)
+            wire::ThreadActionKind::Fork => {
+                let staged = revert.is_some();
+                let unavailable_reason = (!selected_ready)
                     .then(|| "This Agent target is currently unavailable.".to_string())
-                    .or_else(|| active.then(|| "A running Thread cannot be forked.".to_string())),
-            ),
+                    .or_else(|| active.then(|| "A running Thread cannot be forked.".to_string()))
+                    .or_else(|| {
+                        staged.then(|| {
+                            "Run, restore, or redo the staged history state before forking."
+                                .to_string()
+                        })
+                    })
+                    .or_else(|| (!acp).then(|| native_history_reason.clone()).flatten());
+                descriptor(
+                    *action,
+                    "Fork session",
+                    unavailable_reason.is_none(),
+                    false,
+                    unavailable_reason,
+                )
+            }
+            wire::ThreadActionKind::ForkBefore => {
+                let unavailable_reason = (!selected_ready)
+                    .then(|| "This Agent target is currently unavailable.".to_string())
+                    .or_else(|| active.then(|| "A running Thread cannot be forked.".to_string()))
+                    .or_else(|| {
+                        revert.is_some().then(|| {
+                            "Run, restore, or redo the staged history state before forking."
+                                .to_string()
+                        })
+                    })
+                    .or_else(|| native_history_reason.clone());
+                descriptor(
+                    *action,
+                    "Fork before message",
+                    unavailable_reason.is_none(),
+                    false,
+                    unavailable_reason,
+                )
+            }
+            wire::ThreadActionKind::RevertConversation => {
+                let workspace_undo_staged = matches!(
+                    revert.as_ref().map(|revert| &revert.kind),
+                    Some(SessionRevertKind::WorkspaceUndo { .. })
+                );
+                let unavailable_reason = (!selected_ready)
+                    .then(|| "This Agent target is currently unavailable.".to_string())
+                    .or_else(|| active.then(|| "A running Thread cannot be edited.".to_string()))
+                    .or_else(|| {
+                        workspace_undo_staged.then(|| {
+                            "Redo the staged workspace files before editing conversation history."
+                                .to_string()
+                        })
+                    })
+                    .or_else(|| native_history_reason.clone());
+                descriptor(
+                    *action,
+                    "Edit message",
+                    unavailable_reason.is_none(),
+                    false,
+                    unavailable_reason,
+                )
+            }
+            wire::ThreadActionKind::UnrevertConversation => {
+                let enabled = matches!(
+                    revert.as_ref().map(|revert| &revert.kind),
+                    Some(SessionRevertKind::ConversationEdit { .. })
+                );
+                descriptor(
+                    *action,
+                    "Restore history",
+                    enabled,
+                    false,
+                    (!enabled).then(|| "No conversation edit is staged.".to_string()),
+                )
+            }
         })
         .collect();
     Ok(actions)
+}
+
+fn native_history_action_unavailable_reason(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: &str,
+) -> psychevo_runtime::Result<Option<String>> {
+    crate::history_editing::native_history_action_unavailable_reason(
+        &state.inner.state,
+        thread_id,
+        &scope.source.kind,
+    )
 }
 
 pub(super) fn pending_interactions(
@@ -283,6 +376,41 @@ pub(super) async fn read_history(
         entries: page,
         next_cursor,
     })
+}
+
+pub(super) async fn read_history_draft(
+    state: &WebState,
+    auth: &AuthContext,
+    requested_scope: &ResolvedScope,
+    params: wire::ThreadHistoryDraftReadParams,
+) -> psychevo_runtime::Result<wire::ThreadHistoryDraftReadResult> {
+    authorize_thread(state, auth, &params.thread_id)?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    if scope.cwd != requested_scope.cwd {
+        return Err(agent_session_error(
+            "thread_scope_mismatch",
+            AgentErrorStage::History,
+            "user_action",
+            "not_delivered",
+            "The requested Thread does not belong to this workspace scope.",
+            Some(format!("thread:{}", params.thread_id)),
+        ));
+    }
+    read_history_draft_for_scope(state, &scope, params)
+}
+
+fn read_history_draft_for_scope(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadHistoryDraftReadParams,
+) -> psychevo_runtime::Result<wire::ThreadHistoryDraftReadResult> {
+    crate::history_editing::read_native_editable_draft(
+        &state.inner.state,
+        &state.inner.gateway,
+        &params.thread_id,
+        &params.message_id,
+        &scope.source.kind,
+    )
 }
 
 pub(super) async fn run_action(
@@ -413,8 +541,90 @@ pub(super) async fn run_routed_action(
                 result: Box::new(result),
             })
         }
-        wire::ThreadActionInput::Fork => fork_thread(state, scope, &params.thread_id).await,
+        wire::ThreadActionInput::Fork => {
+            let native = state
+                .inner
+                .state
+                .store()
+                .gateway_runtime_binding(&params.thread_id)?
+                .is_some_and(|binding| binding.backend_kind.as_deref() == Some("native"));
+            if native {
+                fork_native_thread(state, scope, &params.thread_id, None).await
+            } else {
+                fork_acp_thread(state, scope, &params.thread_id).await
+            }
+        }
+        wire::ThreadActionInput::ForkBefore { message_id } => {
+            let draft = read_history_draft_for_scope(
+                state,
+                scope,
+                wire::ThreadHistoryDraftReadParams {
+                    scope: scope.to_wire_scope(),
+                    thread_id: params.thread_id.clone(),
+                    message_id,
+                },
+            )?;
+            let message_seq = editable_message_seq(&draft)?;
+            fork_native_thread(state, scope, &params.thread_id, Some(message_seq)).await
+        }
+        wire::ThreadActionInput::RevertConversation { message_id, draft } => {
+            let staged = crate::history_editing::stage_native_conversation_edit(
+                &state.inner.state,
+                &state.inner.gateway,
+                &params.thread_id,
+                &message_id,
+                &draft,
+                &scope.source.kind,
+            )?;
+            let no_op = !staged;
+            Ok(wire::ThreadActionRunResult::RevertConversation {
+                thread_id: params.thread_id.clone(),
+                staged,
+                no_op,
+                snapshot: Box::new(typed_thread_snapshot(
+                    thread_snapshot_live(state, scope, Some(&params.thread_id)).await?,
+                )?),
+            })
+        }
+        wire::ThreadActionInput::UnrevertConversation => {
+            let draft = crate::history_editing::restore_native_conversation_edit(
+                &state.inner.state,
+                &params.thread_id,
+            )?;
+            Ok(wire::ThreadActionRunResult::UnrevertConversation {
+                thread_id: params.thread_id.clone(),
+                draft,
+                snapshot: Box::new(typed_thread_snapshot(
+                    thread_snapshot_live(state, scope, Some(&params.thread_id)).await?,
+                )?),
+            })
+        }
     }
+}
+
+fn editable_message_seq(
+    draft: &wire::ThreadHistoryDraftReadResult,
+) -> psychevo_runtime::Result<i64> {
+    if let Some(reason) = &draft.unavailable_reason {
+        return Err(agent_session_error(
+            "history_message_unavailable",
+            AgentErrorStage::History,
+            "user_action",
+            "not_delivered",
+            reason.clone(),
+            Some(format!("thread:{}", draft.thread_id)),
+        ));
+    }
+    draft.message_seq.ok_or_else(|| {
+        agent_session_error(
+            "history_message_unavailable",
+            AgentErrorStage::History,
+            "user_action",
+            "not_delivered",
+            "The selected message does not have a durable sequence.",
+            Some(format!("thread:{}", draft.thread_id)),
+        )
+    })
 }
 
 pub(super) fn respond_to_interaction(

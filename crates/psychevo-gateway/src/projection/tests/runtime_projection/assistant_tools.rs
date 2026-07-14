@@ -318,6 +318,203 @@ fn live_projector_does_not_collapse_missing_tool_call_ids_by_tool_name() {
 }
 
 #[test]
+fn live_projector_keeps_positioned_parallel_same_name_tool_calls_distinct() {
+    let mut projector = GatewayLiveProjector::default();
+    let _ = projector.project(
+        "turn-1",
+        &RunStreamEvent::value(json!({
+            "type": "tool_call_pending",
+            "tool_name": "web_search",
+            "tool_call_id": "call-search-en",
+            "arguments_json": "",
+            "content_index": 0,
+            "call_index": 0
+        })),
+    );
+
+    let second = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "tool_call_pending",
+                "tool_name": "web_search",
+                "tool_call_id": "call-search-zh",
+                "arguments_json": "",
+                "content_index": 1,
+                "call_index": 1
+            })),
+        )
+        .expect("second pending search");
+
+    let entry = gateway_entry(&second);
+    assert_eq!(entry.blocks.len(), 2, "{entry:#?}");
+    assert!(
+        entry
+            .blocks
+            .iter()
+            .any(|block| block.id == "live:turn-1:tool:call-search-en"),
+        "{entry:#?}"
+    );
+    assert!(
+        entry
+            .blocks
+            .iter()
+            .any(|block| block.id == "live:turn-1:tool:call-search-zh"),
+        "{entry:#?}"
+    );
+    assert_eq!(
+        entry
+            .blocks
+            .iter()
+            .filter_map(|block| block.title.as_deref())
+            .collect::<Vec<_>>(),
+        vec!["Searching the web", "Searching the web"]
+    );
+
+    let authoritative = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_call",
+                            "id": "call-search-en",
+                            "name": "web_search",
+                            "arguments": {"query": "trending Rust projects July 2026 GitHub", "limit": 10},
+                            "arguments_json": "{\"query\":\"trending Rust projects July 2026 GitHub\",\"limit\":10}",
+                            "content_index": 0,
+                            "call_index": 0
+                        },
+                        {
+                            "type": "tool_call",
+                            "id": "call-search-zh",
+                            "name": "web_search",
+                            "arguments": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10},
+                            "arguments_json": "{\"query\":\"Rust 开源项目 2026年7月 热门\",\"limit\":10}",
+                            "content_index": 1,
+                            "call_index": 1
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("authoritative tool-call message");
+    let authoritative_entry = gateway_entry(&authoritative);
+    assert_eq!(authoritative_entry.blocks.len(), 2);
+    assert_eq!(
+        authoritative_entry
+            .blocks
+            .iter()
+            .filter_map(|block| block.title.as_deref())
+            .collect::<Vec<_>>(),
+        vec![
+            "Searching the web trending Rust projects July 2026 GitHub",
+            "Searching the web Rust 开源项目 2026年7月 热门"
+        ]
+    );
+
+    for (value, expected_statuses) in [
+        (json!({
+            "type": "tool_execution_start",
+            "tool_name": "web_search",
+            "tool_call_id": "call-search-en",
+            "args": {"query": "trending Rust projects July 2026 GitHub", "limit": 10}
+        }), [TranscriptBlockStatus::Running, TranscriptBlockStatus::Pending]),
+        (json!({
+            "type": "tool_execution_start",
+            "tool_name": "web_search",
+            "tool_call_id": "call-search-zh",
+            "args": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10}
+        }), [TranscriptBlockStatus::Running, TranscriptBlockStatus::Running]),
+        (json!({
+            "type": "tool_execution_end",
+            "tool_name": "web_search",
+            "tool_call_id": "call-search-en",
+            "args": {"query": "trending Rust projects July 2026 GitHub", "limit": 10},
+            "result": {"query": "trending Rust projects July 2026 GitHub", "provider": "exa"},
+            "outcome": "normal",
+            "elapsed_ms": 3_223
+        }), [TranscriptBlockStatus::Completed, TranscriptBlockStatus::Running]),
+        (json!({
+            "type": "tool_execution_end",
+            "tool_name": "web_search",
+            "tool_call_id": "call-search-zh",
+            "args": {"query": "Rust 开源项目 2026年7月 热门", "limit": 10},
+            "result": {"query": "Rust 开源项目 2026年7月 热门", "provider": "exa"},
+            "outcome": "normal",
+            "elapsed_ms": 4_106
+        }), [TranscriptBlockStatus::Completed, TranscriptBlockStatus::Completed]),
+    ] {
+        let projected = projector
+            .project("turn-1", &RunStreamEvent::value(value))
+            .expect("projected tool execution update");
+        let entry = gateway_entry(&projected);
+        assert_eq!(entry.blocks.len(), 2, "{entry:#?}");
+        let tool_ids = entry
+            .blocks
+            .iter()
+            .filter_map(|block| {
+                block
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.get("tool_call_id"))
+                    .and_then(Value::as_str)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tool_ids,
+            vec!["call-search-en", "call-search-zh"],
+            "{entry:#?}"
+        );
+        assert_eq!(
+            entry
+                .blocks
+                .iter()
+                .map(|block| block.status)
+                .collect::<Vec<_>>(),
+            expected_statuses,
+            "{entry:#?}"
+        );
+        assert_eq!(
+            entry
+                .blocks
+                .iter()
+                .filter_map(|block| block.title.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                "Searching the web trending Rust projects July 2026 GitHub",
+                "Searching the web Rust 开源项目 2026年7月 热门"
+            ],
+            "{entry:#?}"
+        );
+        assert_eq!(
+            entry
+                .blocks
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.get("args"))
+                        .and_then(|args| args.get("query"))
+                        .and_then(Value::as_str)
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                "trending Rust projects July 2026 GitHub",
+                "Rust 开源项目 2026年7月 热门"
+            ],
+            "{entry:#?}"
+        );
+    }
+}
+
+#[test]
 fn live_projector_message_end_tool_call_does_not_downgrade_completed_tool_block() {
     let mut projector = GatewayLiveProjector::default();
     let _ = projector.project(

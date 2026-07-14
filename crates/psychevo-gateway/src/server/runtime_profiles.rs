@@ -2866,6 +2866,10 @@ fn native_agent_surface_descriptor(
             wire::ThreadActionKind::Interrupt,
             wire::ThreadActionKind::Steer,
             wire::ThreadActionKind::Compact,
+            wire::ThreadActionKind::Fork,
+            wire::ThreadActionKind::ForkBefore,
+            wire::ThreadActionKind::RevertConversation,
+            wire::ThreadActionKind::UnrevertConversation,
         ],
         history: if bound {
             wire::ThreadHistoryView {

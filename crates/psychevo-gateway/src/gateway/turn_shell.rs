@@ -586,6 +586,7 @@ impl Gateway {
                 id: result.session_id.clone(),
                 backend: backend_info,
                 source_key: bind_source.as_ref().map(GatewaySource::source_key),
+                forked_from_thread_id: None,
             },
             turn: GatewayTurn {
                 id: turn_id,
@@ -1108,6 +1109,7 @@ impl Gateway {
                 id: session_id,
                 backend,
                 source_key: bind_source.as_ref().map(GatewaySource::source_key),
+                forked_from_thread_id: None,
             },
             result,
             committed_entries,
