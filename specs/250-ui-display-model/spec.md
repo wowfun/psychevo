@@ -174,6 +174,13 @@ Projection must preserve stable call identity fields, including arguments,
 content index, call index, assistant message sequence, and result message
 sequence, so display surfaces can associate terminal updates with the block
 created when the tool call first appeared.
+Within one assistant segment, a positioned tool observation is identified by
+its `content_index` and `call_index` before any tool-name fallback is applied.
+Different positions remain different calls even when they have the same tool
+name, both already carry provider call ids, and their initial argument JSON is
+empty or incomplete. A temporary id may migrate to a provider id only within
+the same position. Tool-name matching is reserved for observations that carry
+no usable position and must never collapse simultaneous same-name calls.
 When a tool result carries execution timing, projection normalizes it onto the
 tool block as `metadata.elapsed_ms`. Message metadata `elapsed_ms` is
 authoritative; otherwise stable result fields such as `elapsed_ms` or

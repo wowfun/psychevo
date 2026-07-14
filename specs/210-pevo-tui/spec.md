@@ -59,8 +59,9 @@ Out of scope:
 - approvals, auth, provider login, or model probing
 - structured `@file` references, automatic file-content attachment, custom
   slash commands, or command-template files
-- transcript review overlay, compaction, rollback, fork UI, remote session
-  publishing, or external editor integration
+- transcript review overlay, remote session publishing, or external editor
+  integration; history Edit and user-owned Fork are defined by
+  [290 History Editing and Thread Fork](../290-history-editing-and-thread-fork/spec.md)
 
 ## Command
 

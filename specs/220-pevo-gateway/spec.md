@@ -44,10 +44,14 @@ the default workspace cwd instead of the launcher cwd.
 
 Managed state lives under `$PSYCHEVO_HOME/gateway/`:
 
-- `server.json`: non-secret pid, address, version, executable fingerprint,
-  static asset directory, asset mode, and timestamps
+- `server.json`: non-secret instance id, pid, address, version, executable
+  fingerprint, static asset directory, asset mode, and timestamps
 - `token`: the managed server bearer token, owner-readable only
-- `lock`: lifecycle mutual-exclusion lock
+- `lock`: lifecycle transaction lock; mutating lifecycle commands hold it
+  exclusively from the first state read through launch or shutdown completion,
+  while `status` holds a shared lock
+- `instance.lock`: the managed `serve` instance lease, held exclusively by the
+  child from before binding until process exit
 - `server.log`: appended stdout/stderr from the background server
 
 The directory is owner-only. `server.json` must not contain the token.
@@ -73,7 +77,15 @@ to terminal stderr together with the full `server.log` path. Because
 `server.log` is append-only across launches, the excerpt must start at the
 current attempt rather than replaying output from older managed servers. If no
 new output can be read, the failure still reports the full log path.
-`stop` sends the managed `serve` child SIGTERM and waits for its bounded
+Managed mode exposes a bearer-authenticated internal control plane that is not
+registered by public `pevo serve`: identity returns the instance id, pid, and
+version, while shutdown accepts the expected instance id and rejects a
+mismatch without stopping the process. `open` validates that identity before
+launching a workspace. A recoverable launch connect, timeout, or authentication
+failure may trigger one ownership recheck, safe replacement, and one retry; it
+must not enter an unbounded restart loop.
+
+`stop` first requests authenticated managed shutdown and waits for the bounded
 signal-aware cleanup before reporting success and removing managed state. That
 cleanup gracefully shuts down the Agent Session Host and its resident ACP
 process pool with a forced fallback, so managed Agent adapter children cannot
@@ -88,20 +100,44 @@ actual bound address is persisted in `server.json` and reported through
 `baseUrl`/`readyzUrl`. An explicit `--bind` disables fallback and must either
 reuse a matching managed server or start exactly on the requested address.
 
-Managed server reuse must prove that the running process is the same local
-build and asset set that the caller would start now. `open` and `start` may
-reuse an existing server only when the pid is alive, `server.json` includes an
+Managed server reuse must prove that the running process is the same owned
+instance, local build, and asset set that the caller would start now. Every new
+managed state includes an `instanceId`; old state without one is stale and its
+recorded pid is never terminated unless ownership can be proven independently.
+`open` and `start` may reuse an existing server only when the instance lease is
+held, the OS-specific process identity matches the recorded pid and instance,
+the authenticated identity endpoint agrees, `server.json` includes an
 executable fingerprint, that fingerprint matches the current `pevo` executable,
 the running process executable is not a deleted Unix inode, and the recorded
 static asset directory matches the directory resolved for the current command.
 Default-bind callers may reuse only a server bound inside the managed fallback
 range. Explicit-bind callers may reuse only a server whose recorded address
 matches the requested address.
-Old-style `server.json` files without those fields are stale. A stale managed
-server is stopped, its token/state are rotated, and a new `serve` child is
-started. `gateway status` reports stale managed state with `stale: true` and a
-machine-readable `staleReason` instead of reporting a live pid as healthy only
-because it still exists.
+On Windows, ownership additionally requires a live process handle and membership
+in the named Job Object `Local\\PsychevoGateway-<instanceId>`; the handle remains
+open through inspection and termination so PID reuse cannot redirect a signal.
+The managed child creates that Job Object, enables
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and assigns itself before binding. Failure
+to create or join the Job is a startup failure, never a fallback to `taskkill`.
+On Unix, ownership combines the lease, pid/process group, and executable
+identity, and forced shutdown targets only the verified process group.
+
+Token and `server.json` replacement is atomic. Old-style or invalid state,
+missing leases, exited owned processes, build/static/bind mismatches, and
+unhealthy identity endpoints are reported stale. Ownership that is proven but
+stale may be stopped precisely and replaced. If the lease is held but ownership
+cannot be tied to state and OS identity, or the OS denies inspection, lifecycle
+commands fail closed: they preserve state and token, start no second server, and
+send no signal. `gateway status` sets `running` only when OS ownership and
+liveness are proven; an owned process with an unhealthy identity endpoint may
+be both `running: true` and `stale: true`.
+
+Lifecycle JSON for `open`, `start`, `status`, and `restart` includes
+`instanceId`. Machine-readable stale reasons include `invalid_state`,
+`missing_instance_id`, `instance_lease_missing`, `process_identity_mismatch`,
+`process_identity_unavailable`, `gateway_identity_mismatch`, and
+`gateway_identity_unavailable`, in addition to executable/static/bind and
+`pid_not_running` reasons.
 
 ## Launch Bootstrap
 

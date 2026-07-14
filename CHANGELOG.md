@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-14
+
+- Added conversation-only message editing and Native Thread forking across
+  Gateway, Workbench, and TUI.
+- Improved session browsing and transcript/tool presentation with bounded
+  history queries, deterministic tool identity/title handling, and compact
+  web-search context.
+- Hardened managed Gateway lifecycle and CLI/Desktop startup with leases,
+  authenticated identity and shutdown, cross-platform process ownership,
+  atomic state replacement, and Rust 1.97 minimum support.
+
 ## 2026-07-13
 
 - Added permission-gated Web Search adapters, OpenAI Responses search,

@@ -136,6 +136,11 @@ Workbench loads a thumbnail only after explicit expansion.
 
 The existing transcript `Web` kind owns both web tools. `web_search` uses
 `Searching the web` while active and `Searched the web` when terminal.
+Local live projection and committed history use the same query-bearing title
+shape for one call. A running local search therefore renders as
+`Searching the web <query>` once the query is known, and the resolved backend
+or provider remains result/detail metadata rather than a secondary header that
+reduces the query title width.
 Workbench Settings writes global-profile search configuration and profile
 environment variables. Project TOML may override non-secret fields.
 

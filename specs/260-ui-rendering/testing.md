@@ -101,6 +101,13 @@ gate.
   transcript projection and model-visible history.
 - Context usage remains visible before lower-priority observability segments
   on compact surfaces.
+- Evidence rows without a secondary summary give the title all remaining text
+  width, while rows with a summary preserve the summary/status columns. Both
+  layouts expose the complete title through native hover disclosure, including
+  tool, status, failure, and diagnostic titles.
+- Parallel live Web Search rows use their query-bearing titles as the sole
+  title column on desktop and mobile widths; provider metadata stays in detail,
+  titles truncate within the row, and elapsed/status content does not overflow.
 
 ## Validation Boundaries
 

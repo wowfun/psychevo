@@ -79,7 +79,10 @@ semantics.
 When `cargo` or `rustc` is missing, the script fails with a manual Rust
 installation hint. It must not install Rust automatically. When `cargo` is
 present, the script checks `rustc --version` against the root `Cargo.toml`
-`rust-version`; outdated Rust is a hard failure.
+`rust-version`; outdated Rust is a hard failure. Psychevo's first-party root
+workspace and Desktop workspace require Rust 1.97.0 or newer. The repository
+does not pin an exact development toolchain, so later stable Rust releases
+remain supported.
 
 Unix, macOS, and WSL source builds require a native C compiler/linker toolchain
 before `cargo install` runs. The script must fail early when no `cc`, `gcc`, or

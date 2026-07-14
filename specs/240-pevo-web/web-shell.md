@@ -374,6 +374,13 @@ session activity. Runtime `source` may appear in diagnostics but must not appear
 in history rows/search or decide whether GUI, TUI, ACP, Web, or Desktop
 sessions are visible by default.
 
+Workbench issues exactly one initial `thread/browser` request during boot and
+awaits it before deriving the startup scope. Until that request succeeds, the
+Sessions browser is busy and must not render the successful-empty `No sessions`
+state. A failed first request uses the existing error presentation; later
+refreshes keep the current rows visible instead of reverting to an initial
+loading or empty state.
+
 Each workspace group initially shows sessions updated within the last 7 days,
 capped to 20 rows. Current, running, and pinned sessions remain visible even
 when older than that default window. Sessions outside the default set are
@@ -504,6 +511,26 @@ and workspace-derived views after either action; `/undo` places the restored
 prompt in the composer and `/redo` clears it. If a turn is running, Gateway
 does not restore snapshots and instead returns a local interrupt action with
 bounded feedback asking the user to rerun the command after the turn settles.
+Conversation history Edit and user-owned Thread Fork are defined by
+[290 History Editing and Thread Fork](../290-history-editing-and-thread-fork/spec.md).
+Workbench adds one Edit action to the existing persisted user-message action
+row. It replaces the selected bubble with an inline Text/Image editor using the
+existing transcript and composer visual tokens; it does not introduce a new
+card, palette, or typography layer. The editor exposes `Cancel`,
+`Update & run`, and `Fork` with distinct accessible labels.
+
+`Update & run` stages a conversation-only revert before normal turn admission.
+Workbench renders staged state as one compact strip above the composer with the
+hidden-message count and `Restore history`. Admission failure leaves the strip
+and draft available; restoring returns the draft to the composer without
+changing workspace files. Best-effort legacy drafts show a persistent,
+non-blocking provenance warning inside the editor.
+
+Point fork waits for the authoritative child snapshot, enters the child, and
+preloads the edited Text/Image draft without submitting or persisting that
+unsent draft. Full fork enters the copied child without a draft. Child headers
+and History rows show compact `Forked from` provenance derived from typed Thread
+metadata; a deleted source is rendered as an inactive identifier.
 Composer-triggered help or browse actions for commands and agents use closeable
 overlays over the current transcript so the active session and composer remain
 visible. Composer-triggered inspect feedback may be mirrored near the composer

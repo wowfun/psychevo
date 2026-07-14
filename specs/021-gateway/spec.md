@@ -456,12 +456,13 @@ session summary. Human-facing lists include top-level sessions, exclude
 internal/noisy sessions such as `tui-side-conversation`, and keep empty top-level sessions
 manageable instead of using message count as a visibility gate. They also
 include per-session activity so multi-client shells can show background
-running state. A `SessionSummaryView` carries enough display projection for
-every surface to render the same row: stable id, cwd/project metadata,
-title, fallback display title, preview, visible-entry count, persisted counts,
-archive timestamp, activity, Agent target label, and lifecycle action
-availability. Availability is a product projection with an explanatory reason;
-clients do not infer it from runtime names.
+running state. A `SessionSummaryView` is a lightweight list and action
+projection: stable id, cwd/project metadata, title, fallback display title,
+persisted counts, archive timestamp, activity, Agent target label, and lifecycle
+action availability. It does not carry transcript preview or derived visible
+entry counts; content search and transcript rendering use the authoritative
+thread read instead. Availability is a product projection with an explanatory
+reason; clients do not infer it from runtime names.
 
 After the first successful turn of a newly created human-visible top-level
 session, Gateway/runtime persists a concise `title` when the title is still
@@ -487,7 +488,12 @@ default it groups sessions by workspace, shows sessions updated within the last
 per-workspace cursor plus hidden count for older rows. Current, running, and
 explicitly included session ids remain visible even when they fall outside the
 default window. Each cursor fetch returns 20 additional sessions for that
-workspace without mutating session recency.
+workspace without mutating session recency. The Store owns visibility filtering,
+workspace grouping, ordering, and pagination. Gateway projects the selected rows
+with bounded batch reads plus one in-memory activity snapshot; list latency and
+Store read count scale with the returned page, not with the total candidate set.
+Title fallback may use the first displayable user text without loading the full
+transcript.
 
 Explicit `thread/resume` may target a session from a different cwd than
 the caller's current scope. In that case Gateway rebinds the caller's source to

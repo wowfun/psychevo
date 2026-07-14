@@ -58,8 +58,9 @@ normative order:
 5. skill index
 6. AGENTS/project context
 7. history
-8. turn-scoped hints and selected skill body
-9. current prompt
+8. runtime time context
+9. other turn-scoped hints and selected skill body
+10. current prompt
 
 `base/mode`, runtime environment, selected main agent, agent catalog, skill
 index, and AGENTS/project context are instruction slots. Runtime environment
@@ -67,7 +68,11 @@ context identifies the canonical cwd and path-resolution boundary for model
 planning; it is not a permission grant. AGENTS/project context is policy context
 rather than user task input and is placed before retained history to keep the
 prefix stable. Selected skill bodies and required `@agent` call hints are
-turn-scoped and appear after history and before the current prompt.
+turn-scoped and appear after history and before the current prompt. Runtime
+time context is the first turn-scoped instruction: it supplies the current
+local date as `YYYY-MM-DD` and local UTC offset as `+HH:MM` or `-HH:MM`, and is
+rebuilt for every main or child agent invocation rather than stored in the
+session prefix.
 
 Provider projection must preserve the semantic separation between instruction
 slots, contextual-user project context, retained transcript history,
@@ -149,6 +154,10 @@ remain turn-scoped and are not part of the session-stable prefix.
 Runtime environment uses the same developer-policy provider-role fallback as
 other runtime-owned instruction slots.
 
+Runtime time context uses the same provider-role fallback. Its semantic role
+is base policy, its tier is `turn`, and its durable source identity is runtime
+time context rather than user-authored prompt material.
+
 ## Usage Categories
 
 Context usage projections use these top-level categories:
@@ -165,7 +174,9 @@ Context usage projections use these top-level categories:
 Selected-agent text is counted as `developer_prompt`, not as skills. Skill
 index entries and AGENTS/project instructions are counted as
 `developer_prompt`; runtime environment is counted as `base_policy`; selected
-skill body text is counted as `turn_context`.
+skill body text is counted as `turn_context`. Runtime time context is a
+turn-scoped message for request counting while retaining its `base_policy`
+semantic role in durable prompt evidence.
 
 ## Export And Share
 

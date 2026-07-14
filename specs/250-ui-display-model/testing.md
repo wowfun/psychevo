@@ -57,6 +57,9 @@ validation.
 - Tool execution observations that arrive before final assistant message
   content are reconciled into the same ordered assistant segment once final
   content is known.
+- Positioned simultaneous tool calls with the same name remain independent
+  through pending, authoritative assistant content, and interleaved execution
+  updates even when their initial argument JSON is empty.
 - Running assistant `message_update` snapshots replace the current live
   assistant segment block set, so a visible text block that moves after a
   reasoning block or tool call does not leave a stale duplicate text block

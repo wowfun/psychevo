@@ -191,6 +191,9 @@ come from the focused command and smoke tests below.
   Git Bash native build-tool diagnostics, and unusable pnpm/Corepack shims
   without installing, initializing, network access, provider credentials, or
   global Psychevo state.
+- Rust-version boundary coverage verifies that the installer rejects Rust
+  1.96.1 and older toolchains, accepts the exact 1.97.0 minimum, and
+  continues to accept later stable releases.
 - Normal install preflight coverage verifies stderr progress breadcrumbs before
   Cargo/Rust, native build-tool, Node.js, and pnpm checks so a hang can be
   localized from the last printed stage.

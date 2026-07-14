@@ -121,6 +121,23 @@ Mouse wheel events route by the pointer row: transcript hover scrolls the
 transcript, bottom-pane hover scrolls the pane, and composer/status/other
 non-scrollable hover does not trigger composer history recall. Mouse clicks on
 expandable rows toggle details unless the click is part of text selection.
+Mouse click on an eligible persisted user-message row opens the History Message
+Actions panel instead of toggling the row. In transcript focus, `Enter` opens the
+same panel when the selected row is an eligible user message; `Space` retains
+the ordinary expand/collapse behavior.
+
+The History Message Actions panel offers `Edit` and `Fork`. Both load the
+structured Text/Image draft defined by
+[290 History Editing and Thread Fork](../290-history-editing-and-thread-fork/spec.md).
+Edit opens an image-capable bottom editor with `Cancel`, `Update & run`, and
+`Fork`. A best-effort legacy draft shows a compact non-blocking warning. A
+staged conversation edit shows its hidden-message count and `Restore history`;
+restoring moves the edited draft to the main composer.
+
+The sessions action mode uses `F` for full user-owned Thread fork. Successful
+full and point forks switch to the authoritative child Thread. Point fork
+preloads but does not submit the edited draft. `/fork` remains reserved for
+child-agent execution.
 
 ## Permission, Clarify, And Agent Controls
 

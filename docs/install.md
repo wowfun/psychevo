@@ -54,7 +54,7 @@ The source installer expects these tools:
 | Requirement | Needed for |
 |-------------|------------|
 | `git` | Cloning Psychevo before running the checkout-local installer. |
-| Rust/Cargo | Building `pevo`. The workspace uses Rust 1.94 and edition 2024. |
+| Rust/Cargo | Building `pevo`. First-party workspaces require Rust 1.97.0 or newer and use edition 2024. |
 | Native C compiler/linker | Source builds on Unix, macOS, WSL, and Windows Git Bash. |
 | Node.js and `pnpm` | Workbench Web UI asset builds. |
 

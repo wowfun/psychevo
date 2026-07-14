@@ -38,6 +38,10 @@ They must not discover or consume real user credentials.
 - check protocol schema/code generation;
 - cover Settings update, credential presence projection, secret non-return,
   project override, and unlimited acknowledgement;
+- replay simultaneous positioned local searches with empty initial arguments and
+  prove every live snapshot keeps both calls, query-bearing titles, and states;
+- render parallel live searches at desktop and mobile widths, keeping provider
+  metadata out of the title summary while preserving title hover disclosure;
 - reconcile hosted lifecycle/sources and cover citations, TUI links, query
   wrapping, and image lazy-load/failure.
 

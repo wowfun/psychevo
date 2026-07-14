@@ -132,17 +132,17 @@ Floating close is a dismiss action: Desktop hides the native Floating window and
 does not leave a renderer-only logo restore surface visible. Floating park
 remains the recoverable minimized-logo state.
 
-Persisted managed Gateway state is only a reuse candidate. Desktop must verify
-that the recorded endpoint still accepts the managed bearer token and that the
-recorded executable fingerprint still matches the `pevo` executable Desktop
-would use to start managed Gateway before reusing it; stale state falls back to
-starting a fresh managed Gateway. This prevents a newly built Desktop renderer
-from talking to an older still-running `pevo serve` whose RPC result shapes may
-lag the current client.
+The CLI is the sole authority for managed Gateway lifecycle and process
+ownership. Outside explicit overrides, Desktop always invokes the idempotent
+`pevo gateway start` command and consumes its `baseUrl` plus the owner-only
+token file; it does not read `server.json`, mirror `ManagedServerState`, compare
+executable fingerprints, or decide whether a recorded pid is reusable. This
+keeps Windows Job/HANDLE and Unix process-group ownership policy in one place.
 Within a single Tauri process, managed Gateway resolution is serialized and the
 verified endpoint is cached so concurrent Workbench and Floating startup calls
 cannot race each other into multiple cold-start attempts or observe different
-Gateway generations.
+Gateway generations. When a cached endpoint becomes unhealthy, Desktop
+delegates to the CLI again instead of reusing persisted state itself.
 Explicit `PSYCHEVO_GATEWAY_BASE_URL` and `PSYCHEVO_GATEWAY_TOKEN` overrides are
 treated as caller-owned and must fail closed instead of starting a different
 Gateway.
@@ -242,10 +242,11 @@ the Browser session.
 
 Default validation is deterministic and local:
 
-- Desktop bridge tests for managed token file handling, bearer WebSocket
-  request construction, managed Gateway executable-fingerprint reuse guards,
-  multi-window connection routing, per-instance bridge id routing, and
-  disconnect cleanup
+- Desktop bridge tests for CLI-authoritative managed startup, owner-only token
+  file handling, bearer WebSocket request construction, serialized/cached
+  resolution with CLI re-delegation after health failure, explicit override
+  fail-closed behavior, multi-window connection routing, per-instance bridge
+  id routing, and disconnect cleanup
 - Desktop host tests using fake Tauri command adapters
 - Workbench tests proving browser defaults still work and injected Desktop
   runtime can be supplied without forking Workbench UI

@@ -15,7 +15,8 @@ Define acceptance expectations and validation scenarios for the managed
 - Lifecycle commands emit exactly one machine-readable JSON object to stdout.
 - Managed state under `$PSYCHEVO_HOME/gateway/` separates non-secret server
   metadata from owner-readable bearer token material.
-- Managed server reuse proves pid liveness, executable fingerprint,
+- Managed server reuse proves the instance lease, instance id, OS process
+  ownership, authenticated Gateway identity, executable fingerprint,
   non-deleted executable state, static asset directory, asset mode, bind
   address, and active profile compatibility.
 - Default managed binds prefer `127.0.0.1:58080` and may fall back through the
@@ -25,8 +26,9 @@ Define acceptance expectations and validation scenarios for the managed
   Web Shell URL.
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
-- `stop` waits for the managed SIGTERM cleanup path and proves both the managed
-  server pid and an exercised fake ACP Agent child have exited before
+- `stop` requests authenticated shutdown, waits for managed cleanup, uses only
+  the verified process group or Windows Job Object as fallback, and proves both
+  the managed server and an exercised fake ACP Agent child have exited before
   reporting success.
 
 ## Current Implementation Slice
@@ -46,6 +48,16 @@ Manual real-provider validation is not required for this lifecycle topic.
   `pevo web` preserve the JSON stdout contract.
 - Managed state with missing, stale, mismatched, or deleted executable metadata
   is rotated or reported stale instead of reused as healthy.
+- Invalid state, a missing instance id, a free instance lease, an exited
+  process, process identity mismatch/unavailability, and Gateway identity
+  mismatch/unavailability produce their specified machine-readable stale
+  reasons. A held lease whose owner cannot be proven fails closed without
+  rotating state/token, starting another server, or signaling the recorded pid.
+- A stale Windows state whose pid was reused by an unrelated test process does
+  not terminate that process. A proven managed Job is stopped as a tree and
+  leaves neither the server nor its deterministic child alive.
+- Two concurrent managed open calls serialize through the lifecycle lock and
+  return the same pid, instance id, and base URL.
 - Managed startup failure leaves stdout unpolluted and reports both the bounded
   current-attempt child output and the full `server.log` path on stderr without
   replaying earlier appended log entries.
@@ -63,6 +75,11 @@ Manual real-provider validation is not required for this lifecycle topic.
 - The final managed-stop fallback targets the exact process group/tree created
   for the managed server and kills a deterministic child even when both parent
   and child ignore graceful SIGTERM.
+- Managed identity and shutdown require the owner token; shutdown with a
+  mismatched instance id returns conflict without triggering cleanup, and the
+  routes are absent from non-managed `pevo serve`.
+- A recoverable launch failure performs at most one ownership recheck,
+  replacement, and retry; a second recoverable failure is returned.
 
 ## Validation Boundaries
 
@@ -71,4 +88,8 @@ Manual real-provider validation is not required for this lifecycle topic.
   Gateway state.
 - Tests should assert lifecycle JSON, managed state, bind, token, and launch
   invariants rather than private server implementation details.
+- Windows Git Bash smoke covers dead-state recovery (including the former
+  connection-refused/10061 case), PID reuse safety, and Job-tree cleanup on a
+  modern Windows host. Host-specific tests may be target-gated, but their
+  deterministic helpers remain covered on every platform.
 - Browser-visible Workbench behavior is validated by `240`.

@@ -73,6 +73,19 @@ without surfacing read-result metadata as ordinary transcript detail.
 When no separate summary is present, the invocation title uses the row's
 available title width before applying renderer-specific truncation.
 
+Every evidence-row title remains inspectable when renderer-specific truncation
+is applied. Web renderers expose the complete title through native hover
+disclosure for tool, status, failure, and diagnostic rows. An evidence row with
+no secondary summary gives its title all remaining text width; a row with a
+secondary summary may preserve a split title/summary layout so the summary and
+terminal status remain visible.
+
+Live and committed projections of one tool call use the same invocation-title
+shape and therefore the same title/summary layout. In particular, a local Web
+Search backend or provider label is detail metadata, not a secondary row
+summary; the query-bearing `Searching the web <query>` title receives all
+remaining width while status or elapsed state remains visible.
+
 Display-only command output and observational artifacts, including `/diff`,
 command feedback, previews, and debug panels, must not become model-visible
 history, exports, usage/cost accounting, or ordinary transcript projection.

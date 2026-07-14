@@ -45,6 +45,15 @@ canonical runtime cwd and the path-resolution boundary for local tools. It
 is model-visible for every agent invocation and is distinct from permission or
 sandbox enforcement.
 
+Runtime time context is turn-scoped instruction context that supplies the
+current local calendar date and UTC offset for relative-time planning. It is
+refreshed for every main or child agent invocation, uses date-only precision to
+avoid needless prompt volatility, and directs the model to interpret terms such
+as today, latest, recent, and current against that date while verifying
+time-sensitive facts with available tools. Runtime time context is durable
+context evidence for the accepted prompt, but is not part of the
+session-stable prefix or its hash.
+
 Runtime-owned model prompt text should be maintained as embedded template
 resources owned by the runtime implementation. Moving prompt text into template
 resources must not change the semantic ordering of prompt slots, provider-role
