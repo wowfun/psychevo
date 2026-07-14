@@ -2793,6 +2793,7 @@ dependencies = [
  "serde_json",
  "supports-color",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "tungstenite 0.28.0",
@@ -2880,6 +2881,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-bash",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

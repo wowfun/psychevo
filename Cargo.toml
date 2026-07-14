@@ -13,7 +13,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.97.0"
 license = "MIT"
 
 [workspace.dependencies]
@@ -68,3 +68,4 @@ tree-sitter-bash = "0.25"
 ts-rs = { version = "10.1", features = ["serde-json-impl", "no-serde-warnings"] }
 unicode-width = "0.2"
 uuid = { version = "1.11", features = ["v7", "serde"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_SystemServices", "Win32_System_Threading"] }
