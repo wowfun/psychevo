@@ -264,6 +264,11 @@ pub(crate) fn cli_web_opens_current_cwd_with_json_output() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("web json");
     assert_eq!(value["ok"], true);
+    assert!(
+        value["instanceId"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(value["openedBrowser"], false);
     assert_eq!(value["cwd"], cwd.display().to_string());
     assert!(
@@ -277,6 +282,198 @@ pub(crate) fn cli_web_opens_current_cwd_with_json_output() {
     assert!(
         value["openUrlExpiresAtMs"].as_i64().unwrap_or_default() > 0,
         "{value}"
+    );
+}
+
+#[test]
+pub(crate) fn cli_web_replaces_free_lease_stale_state_instead_of_reusing_dead_url() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+    assert!(
+        pevo_cmd(temp.path())
+            .env("PSYCHEVO_HOME", &psychevo_home)
+            .arg("init")
+            .status()
+            .expect("init")
+            .success()
+    );
+    let gateway = psychevo_home.join("gateway");
+    std::fs::create_dir_all(&gateway).expect("gateway");
+    std::fs::write(gateway.join("token"), "stale-token").expect("token");
+    std::fs::write(
+        gateway.join("server.json"),
+        serde_json::to_vec(&json!({
+            "instanceId": "stale-instance",
+            "pid": u32::MAX,
+            "baseUrl": "http://127.0.0.1:1",
+            "readyzUrl": "http://127.0.0.1:1/readyz",
+            "startedAtMs": 1,
+            "version": "0.1.0",
+            "executablePath": null,
+            "executableModifiedMs": null,
+            "executableSize": null,
+            "executableInode": null,
+            "staticDir": null
+        }))
+        .expect("state json"),
+    )
+    .expect("state");
+
+    let output = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .env("PSYCHEVO_WEB_DIST", &dist)
+        .current_dir(&cwd)
+        .args(["web", "start", "--bind", "127.0.0.1:0"])
+        .output()
+        .expect("start");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("start json");
+    assert_ne!(value["instanceId"], "stale-instance");
+    assert_ne!(value["baseUrl"], "http://127.0.0.1:1");
+
+    let stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .args(["gateway", "stop"])
+        .output()
+        .expect("stop");
+    assert!(
+        stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+}
+
+#[test]
+pub(crate) fn cli_stop_fails_closed_when_lease_owner_cannot_match_recorded_process() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    assert!(
+        pevo_cmd(temp.path())
+            .env("PSYCHEVO_HOME", &psychevo_home)
+            .arg("init")
+            .status()
+            .expect("init")
+            .success()
+    );
+    let gateway = psychevo_home.join("gateway");
+    std::fs::create_dir_all(&gateway).expect("gateway");
+    let lease = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(gateway.join("instance.lock"))
+        .expect("lease file");
+    lease.lock().expect("hold lease");
+    std::fs::write(gateway.join("token"), "preserve-token").expect("token");
+    let state = serde_json::to_vec(&json!({
+        "instanceId": "not-this-process",
+        "pid": std::process::id(),
+        "baseUrl": "http://127.0.0.1:1",
+        "readyzUrl": "http://127.0.0.1:1/readyz",
+        "startedAtMs": 1,
+        "version": "0.1.0",
+        "executablePath": null,
+        "executableModifiedMs": null,
+        "executableSize": null,
+        "executableInode": null,
+        "staticDir": null
+    }))
+    .expect("state json");
+    std::fs::write(gateway.join("server.json"), &state).expect("state");
+
+    let output = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .args(["gateway", "stop"])
+        .output()
+        .expect("stop");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ownership cannot be proven"));
+    assert_eq!(
+        std::fs::read(gateway.join("server.json")).expect("preserved state"),
+        state
+    );
+    assert_eq!(
+        std::fs::read_to_string(gateway.join("token")).expect("preserved token"),
+        "preserve-token"
+    );
+    drop(lease);
+}
+
+#[test]
+pub(crate) fn concurrent_cli_web_calls_reuse_one_managed_instance() {
+    let temp = tempdir().expect("temp");
+    let psychevo_home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    let dist = temp.path().join("dist");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    std::fs::create_dir_all(&dist).expect("dist");
+    std::fs::write(dist.join("index.html"), "<html></html>").expect("index");
+    assert!(
+        pevo_cmd(temp.path())
+            .env("PSYCHEVO_HOME", &psychevo_home)
+            .arg("init")
+            .status()
+            .expect("init")
+            .success()
+    );
+
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let barrier = Arc::clone(&barrier);
+        let test_home = temp.path().to_path_buf();
+        let psychevo_home = psychevo_home.clone();
+        let cwd = cwd.clone();
+        let dist = dist.clone();
+        workers.push(thread::spawn(move || {
+            barrier.wait();
+            pevo_cmd(&test_home)
+                .env("PSYCHEVO_HOME", &psychevo_home)
+                .env("PSYCHEVO_WEB_DIST", &dist)
+                .current_dir(&cwd)
+                .args(["web", "--no-browser"])
+                .output()
+                .expect("web")
+        }));
+    }
+    barrier.wait();
+    let outputs = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("worker"))
+        .collect::<Vec<_>>();
+    for output in &outputs {
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let first: Value = serde_json::from_slice(&outputs[0].stdout).expect("first json");
+    let second: Value = serde_json::from_slice(&outputs[1].stdout).expect("second json");
+    assert_eq!(first["pid"], second["pid"]);
+    assert_eq!(first["instanceId"], second["instanceId"]);
+    assert_eq!(first["baseUrl"], second["baseUrl"]);
+
+    let stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .args(["gateway", "stop"])
+        .output()
+        .expect("stop");
+    assert!(
+        stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stop.stderr)
     );
 }
 
@@ -335,6 +532,8 @@ pub(crate) fn cli_web_start_failure_surfaces_current_managed_log_output() {
     );
     assert!(stderr.contains(&log_path.display().to_string()), "{stderr}");
     assert!(!stderr.contains("old launch sentinel"), "{stderr}");
+    assert!(!gateway_dir.join("server.json").exists());
+    assert!(!gateway_dir.join("token").exists());
 }
 
 #[test]

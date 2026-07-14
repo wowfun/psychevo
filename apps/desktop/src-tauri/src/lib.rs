@@ -3,9 +3,8 @@
 mod capture;
 
 use std::env;
+#[cfg(feature = "native-runtime")]
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "native-runtime")]
 use std::time::Duration;
@@ -57,24 +56,6 @@ struct ManagedGatewayResolver {
 struct ManagedGateway {
     base_url: String,
     token: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ManagedServerState {
-    base_url: String,
-    executable_inode: Option<u64>,
-    executable_modified_ms: Option<i64>,
-    executable_path: Option<String>,
-    executable_size: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ExecutableFingerprint {
-    inode: Option<u64>,
-    modified_ms: i64,
-    path: String,
-    size: u64,
 }
 
 #[cfg(feature = "native-runtime")]
@@ -703,28 +684,29 @@ async fn resolve_managed_gateway(
 
 #[cfg(feature = "native-runtime")]
 async fn resolve_managed_gateway_uncached() -> Result<ManagedGateway, DesktopError> {
-    if let (Ok(base_url), Ok(token)) = (
-        env::var("PSYCHEVO_GATEWAY_BASE_URL"),
-        env::var("PSYCHEVO_GATEWAY_TOKEN"),
-    ) && !base_url.trim().is_empty()
-        && !token.trim().is_empty()
-    {
-        let managed = ManagedGateway { base_url, token };
-        ensure_managed_gateway_healthy(&managed)
-            .await
-            .map_err(|err| format!("configured Gateway endpoint is unavailable: {err}"))?;
-        return Ok(managed);
+    let explicit_base = env::var("PSYCHEVO_GATEWAY_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    let explicit_token = env::var("PSYCHEVO_GATEWAY_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    match (explicit_base, explicit_token) {
+        (Some(base_url), Some(token)) => {
+            let managed = ManagedGateway { base_url, token };
+            ensure_managed_gateway_healthy(&managed)
+                .await
+                .map_err(|err| format!("configured Gateway endpoint is unavailable: {err}"))?;
+            return Ok(managed);
+        }
+        (None, None) => {}
+        _ => {
+            return Err(
+                "PSYCHEVO_GATEWAY_BASE_URL and PSYCHEVO_GATEWAY_TOKEN must be set together".into(),
+            );
+        }
     }
 
     let home = psychevo_home()?;
-    let expected_executable = managed_gateway_executable_fingerprint()?;
-    if let Ok((managed, state)) = read_managed_gateway_state(&home) {
-        if managed_gateway_stale_reason(&state, &expected_executable).is_none()
-            && ensure_managed_gateway_healthy(&managed).await.is_ok()
-        {
-            return Ok(managed);
-        }
-    }
     let managed = start_managed_gateway(&home)?;
     ensure_managed_gateway_healthy(&managed)
         .await
@@ -748,14 +730,13 @@ async fn ensure_managed_gateway_healthy(managed: &ManagedGateway) -> Result<(), 
 enum ManagedGatewayDecision {
     StartManaged,
     UseExplicit,
-    UsePersisted,
 }
 
 #[cfg(test)]
 fn managed_gateway_decision(
     explicit_healthy: Option<bool>,
-    persisted_healthy: Option<bool>,
-    persisted_stale: bool,
+    _persisted_healthy: Option<bool>,
+    _persisted_stale: bool,
 ) -> Result<ManagedGatewayDecision, &'static str> {
     if let Some(healthy) = explicit_healthy {
         return if healthy {
@@ -763,9 +744,6 @@ fn managed_gateway_decision(
         } else {
             Err("configured Gateway endpoint is unavailable")
         };
-    }
-    if persisted_healthy == Some(true) && !persisted_stale {
-        return Ok(ManagedGatewayDecision::UsePersisted);
     }
     Ok(ManagedGatewayDecision::StartManaged)
 }
@@ -951,32 +929,6 @@ fn percent_encode_component(value: &str) -> String {
     encoded
 }
 
-#[cfg(test)]
-fn read_managed_gateway(home: &Path) -> Result<ManagedGateway, DesktopError> {
-    read_managed_gateway_state(home).map(|(managed, _state)| managed)
-}
-
-fn read_managed_gateway_state(
-    home: &Path,
-) -> Result<(ManagedGateway, ManagedServerState), DesktopError> {
-    let gateway_dir = home.join("gateway");
-    let state: ManagedServerState =
-        serde_json::from_str(&fs::read_to_string(gateway_dir.join("server.json"))?)?;
-    let token = fs::read_to_string(gateway_dir.join("token"))?
-        .trim()
-        .to_string();
-    if token.is_empty() {
-        return Err("managed Gateway token is empty".into());
-    }
-    Ok((
-        ManagedGateway {
-            base_url: state.base_url.clone(),
-            token,
-        },
-        state,
-    ))
-}
-
 #[cfg(feature = "native-runtime")]
 fn start_managed_gateway(home: &Path) -> Result<ManagedGateway, DesktopError> {
     let pevo = managed_gateway_executable()?;
@@ -1004,10 +956,6 @@ fn start_managed_gateway(home: &Path) -> Result<ManagedGateway, DesktopError> {
     })
 }
 
-fn managed_gateway_executable_fingerprint() -> Result<ExecutableFingerprint, DesktopError> {
-    executable_fingerprint(&managed_gateway_executable()?)
-}
-
 fn managed_gateway_executable() -> Result<PathBuf, DesktopError> {
     if let Ok(pevo) = env::var("PSYCHEVO_PEVO_BIN")
         && !pevo.trim().is_empty()
@@ -1015,45 +963,6 @@ fn managed_gateway_executable() -> Result<PathBuf, DesktopError> {
         return Ok(PathBuf::from(pevo));
     }
     resolve_executable_on_path("pevo")
-}
-
-fn executable_fingerprint(path: &Path) -> Result<ExecutableFingerprint, DesktopError> {
-    let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let metadata = fs::metadata(&path)?;
-    let modified_ms = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or_default();
-    Ok(ExecutableFingerprint {
-        inode: executable_inode(&metadata),
-        modified_ms,
-        path: path.display().to_string(),
-        size: metadata.len(),
-    })
-}
-
-fn managed_gateway_stale_reason(
-    state: &ManagedServerState,
-    expected: &ExecutableFingerprint,
-) -> Option<&'static str> {
-    let Some(state_executable) = state_executable_fingerprint(state) else {
-        return Some("missing_executable_fingerprint");
-    };
-    if &state_executable != expected {
-        return Some("executable_fingerprint_mismatch");
-    }
-    None
-}
-
-fn state_executable_fingerprint(state: &ManagedServerState) -> Option<ExecutableFingerprint> {
-    Some(ExecutableFingerprint {
-        inode: state.executable_inode,
-        modified_ms: state.executable_modified_ms?,
-        path: state.executable_path.clone()?,
-        size: state.executable_size?,
-    })
 }
 
 fn resolve_executable_on_path(name: &str) -> Result<PathBuf, DesktopError> {
@@ -1090,16 +999,6 @@ fn executable_candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
         );
     }
     candidates
-}
-
-#[cfg(unix)]
-fn executable_inode(metadata: &fs::Metadata) -> Option<u64> {
-    Some(metadata.ino())
-}
-
-#[cfg(not(unix))]
-fn executable_inode(_metadata: &fs::Metadata) -> Option<u64> {
-    None
 }
 
 #[cfg(feature = "native-runtime")]
@@ -1182,34 +1081,10 @@ mod tests {
     }
 
     #[test]
-    fn read_managed_gateway_reads_state_and_token() {
-        let temp = tempfile_dir();
-        let gateway = temp.join("gateway");
-        fs::create_dir_all(&gateway).expect("gateway dir");
-        fs::write(
-            gateway.join("server.json"),
-            r#"{"baseUrl":"http://127.0.0.1:58080"}"#,
-        )
-        .expect("state");
-        fs::write(gateway.join("token"), "token\n").expect("token");
-
-        let managed = read_managed_gateway(&temp).expect("managed gateway");
-
-        assert_eq!(
-            managed,
-            ManagedGateway {
-                base_url: "http://127.0.0.1:58080".to_string(),
-                token: "token".to_string(),
-            }
-        );
-        let _ = fs::remove_dir_all(temp);
-    }
-
-    #[test]
-    fn managed_gateway_decision_reuses_healthy_persisted_state() {
+    fn managed_gateway_decision_delegates_persisted_state_to_cli() {
         assert_eq!(
             managed_gateway_decision(None, Some(true), false).expect("decision"),
-            ManagedGatewayDecision::UsePersisted
+            ManagedGatewayDecision::StartManaged
         );
     }
 
@@ -1242,47 +1117,6 @@ mod tests {
     }
 
     #[test]
-    fn managed_gateway_stale_reason_rejects_mismatched_executable_fingerprint() {
-        let state = managed_server_state_with_executable(executable_fingerprint_fixture(
-            "/old/pevo",
-            10,
-            100,
-            Some(1),
-        ));
-        let expected = executable_fingerprint_fixture("/new/pevo", 20, 200, Some(2));
-
-        assert_eq!(
-            managed_gateway_stale_reason(&state, &expected),
-            Some("executable_fingerprint_mismatch")
-        );
-    }
-
-    #[test]
-    fn managed_gateway_stale_reason_rejects_missing_executable_fingerprint() {
-        let state = ManagedServerState {
-            base_url: "http://127.0.0.1:58080".to_string(),
-            executable_inode: None,
-            executable_modified_ms: None,
-            executable_path: None,
-            executable_size: None,
-        };
-        let expected = executable_fingerprint_fixture("/new/pevo", 20, 200, Some(2));
-
-        assert_eq!(
-            managed_gateway_stale_reason(&state, &expected),
-            Some("missing_executable_fingerprint")
-        );
-    }
-
-    #[test]
-    fn managed_gateway_stale_reason_accepts_matching_executable_fingerprint() {
-        let expected = executable_fingerprint_fixture("/current/pevo", 20, 200, Some(2));
-        let state = managed_server_state_with_executable(expected.clone());
-
-        assert_eq!(managed_gateway_stale_reason(&state, &expected), None);
-    }
-
-    #[test]
     fn download_session_url_preserves_format_include_and_filename_options() {
         let request = DownloadSessionRequest {
             filename: Some("provider response.json".to_string()),
@@ -1299,32 +1133,6 @@ mod tests {
             download_session_url("http://127.0.0.1:58080/", &request).expect("url"),
             "http://127.0.0.1:58080/download/session/thread%2Fid/export?format=json&include=last-provider-request%2Clast-provider-response&filename=provider%20response.json"
         );
-    }
-
-    fn executable_fingerprint_fixture(
-        path: &str,
-        modified_ms: i64,
-        size: u64,
-        inode: Option<u64>,
-    ) -> ExecutableFingerprint {
-        ExecutableFingerprint {
-            inode,
-            modified_ms,
-            path: path.to_string(),
-            size,
-        }
-    }
-
-    fn managed_server_state_with_executable(
-        executable: ExecutableFingerprint,
-    ) -> ManagedServerState {
-        ManagedServerState {
-            base_url: "http://127.0.0.1:58080".to_string(),
-            executable_inode: executable.inode,
-            executable_modified_ms: Some(executable.modified_ms),
-            executable_path: Some(executable.path),
-            executable_size: Some(executable.size),
-        }
     }
 
     #[test]
@@ -1468,11 +1276,5 @@ mod tests {
             desktop_fallback_cwd_from_env(Some(" "), Some(PathBuf::from("/tmp/process-cwd"))),
             "/tmp/process-cwd"
         );
-    }
-
-    fn tempfile_dir() -> PathBuf {
-        let path = env::temp_dir().join(format!("psychevo-desktop-test-{}", now_ms()));
-        fs::create_dir_all(&path).expect("temp dir");
-        path
     }
 }

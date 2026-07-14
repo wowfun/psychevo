@@ -80,6 +80,21 @@ pub(crate) enum PendingInputAction {
     Undo,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HistoryMessageAction {
+    UpdateAndRun,
+    Fork,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HistoryMessageEdit {
+    pub(crate) thread_id: String,
+    pub(crate) message_id: String,
+    pub(crate) message_seq: i64,
+    pub(crate) action: HistoryMessageAction,
+    pub(crate) original_parts: Vec<ThreadEditableInputPart>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TranscriptRenderBlock {
     pub(crate) index: usize,

@@ -162,6 +162,7 @@ impl TuiApp {
                     if let Some(target) = click_target {
                         if let Some(agent_target) = ui.agent_target_for_target(target) {
                             self.open_agent_target_session(ui, &agent_target)?;
+                        } else if self.open_history_message_actions(ui, target)? {
                         } else {
                             ui.toggle_target(target);
                         }

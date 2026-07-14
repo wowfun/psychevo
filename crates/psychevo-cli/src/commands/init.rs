@@ -20,7 +20,7 @@ pub(crate) const STARTER_ENV: &str = r#"# Psychevo live provider credentials.
 # DEEPSEEK_API_KEY=sk-...
 "#;
 
-pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
+pub(crate) async fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
@@ -47,7 +47,7 @@ pub(crate) fn run_init_command(args: InitArgs) -> Result<ExitCode> {
     }
     protect_env_file(&env_file)?;
     if args.reset_state {
-        let _ = stop_managed_for_home(&home)?;
+        let _ = stop_managed_for_home(&home).await?;
         backup_state_files(&home, &state)?;
     }
     SqliteStore::open(&state)?;

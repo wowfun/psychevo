@@ -57,7 +57,7 @@ pub(crate) async fn run() -> Result<ExitCode> {
     profiles::set_cli_profile_override(cli.profile.clone())?;
     match cli.command {
         None => run_default_command().await,
-        Some(Commands::Init(args)) => run_init_command(args),
+        Some(Commands::Init(args)) => run_init_command(args).await,
         Some(Commands::Profile(args)) => run_profile_command(args),
         Some(Commands::Agent(args)) => run_agent_command(args).await,
         Some(Commands::Skill(args)) => run_skills_command(args),

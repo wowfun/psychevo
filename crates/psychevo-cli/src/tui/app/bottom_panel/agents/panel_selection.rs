@@ -383,6 +383,9 @@ impl TuiApp {
         selected: Option<BottomSelectionValue>,
     ) -> Result<()> {
         match selected {
+            Some(BottomSelectionValue::HistoryMessageAction { message_id, action }) => {
+                self.begin_history_message_edit(ui, message_id, action)?;
+            }
             Some(BottomSelectionValue::Session(session_id)) => {
                 let archived = ui
                     .bottom_panel

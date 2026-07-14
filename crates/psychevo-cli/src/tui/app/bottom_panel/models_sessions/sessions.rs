@@ -19,11 +19,12 @@ impl TuiApp {
         };
         match (view, action.to_ascii_lowercase()) {
             (SessionListView::Active, 'a') => self.archive_session_from_panel(ui, session_id),
+            (SessionListView::Active, 'f') => self.fork_session_from_panel(ui, session_id),
             (SessionListView::Archived, 'r') => self.restore_session_from_panel(ui, session_id),
             (_, 'd') => self.delete_session_from_panel(ui, session_id),
             (SessionListView::Active, _) => {
                 if let Some(BottomPanel::Sessions(panel)) = &mut ui.bottom_panel {
-                    panel.notice = Some("action: A archive  D delete".to_string());
+                    panel.notice = Some("action: F fork  A archive  D delete".to_string());
                 }
                 Ok(())
             }

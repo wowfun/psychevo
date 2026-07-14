@@ -3,7 +3,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use psychevo_gateway::{Gateway, GatewayWebServerConfig, bind_gateway_web_server};
 use psychevo_runtime::{StateRuntime, canonicalize_cwd};
 use serde_json::json;
@@ -41,6 +41,38 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
         .as_deref()
         .map(|path| resolve_explicit_path(path, &env_map, &cwd))
         .transpose()?;
+    let managed_lease_path = args
+        .managed_lease
+        .as_deref()
+        .map(|path| resolve_explicit_path(path, &env_map, &cwd))
+        .transpose()?;
+    let managed_instance = match (
+        managed_state.as_deref(),
+        args.managed_instance.as_deref(),
+        managed_lease_path.as_deref(),
+    ) {
+        (Some(_), Some(instance), Some(lease)) if !instance.trim().is_empty() => {
+            Some((instance, lease))
+        }
+        (None, None, None) => None,
+        _ => {
+            return Err(anyhow!(
+                "managed serve requires --internal-managed-state, --internal-managed-instance, and --internal-managed-lease together"
+            ));
+        }
+    };
+    let (_managed_lease, _managed_process_tree) = if let Some((instance, lease_path)) =
+        managed_instance
+    {
+        let lease = psychevo_runtime::host_process::InstanceLease::try_acquire(lease_path)
+            .with_context(|| format!("acquire managed instance lease {}", lease_path.display()))?
+            .ok_or_else(|| anyhow!("managed instance lease is already held"))?;
+        let process_tree = psychevo_runtime::host_process::enter_managed_process_tree(instance)
+            .context("enter managed process ownership domain")?;
+        (Some(lease), Some(process_tree))
+    } else {
+        (None, None)
+    };
 
     let profile_home = home.clone();
     let state = StateRuntime::open(&db_path)?;
@@ -53,20 +85,22 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     config.bind_port_fallbacks = args.bind_fallbacks;
     config.static_dir = static_dir;
     config.managed_state_path = managed_state;
+    config.managed_instance_id = args.managed_instance.clone();
 
     let bound = bind_gateway_web_server(config).await?;
-    println!(
-        "{}",
-        serde_json::to_string(&json!({
-            "ready": true,
-            "baseUrl": bound.url(),
-            "readyzUrl": format!("{}/readyz", bound.url()),
-            "pid": std::process::id(),
-            "version": env!("CARGO_PKG_VERSION"),
-            "profile": profile_name,
-            "profileHome": profile_home,
-        }))?
-    );
+    let mut ready = json!({
+        "ready": true,
+        "baseUrl": bound.url(),
+        "readyzUrl": format!("{}/readyz", bound.url()),
+        "pid": std::process::id(),
+        "version": env!("CARGO_PKG_VERSION"),
+        "profile": profile_name,
+        "profileHome": profile_home,
+    });
+    if let Some(instance_id) = args.managed_instance {
+        ready["instanceId"] = serde_json::Value::String(instance_id);
+    }
+    println!("{}", serde_json::to_string(&ready)?);
     bound
         .run_with_shutdown_signal(serve_shutdown_signal())
         .await?;

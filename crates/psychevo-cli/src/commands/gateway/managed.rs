@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 #[cfg(unix)]
@@ -9,6 +9,9 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
+use psychevo_runtime::host_process::{
+    ManagedProcess, ProcessIdentityError, atomic_replace_private, instance_lease_is_held,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -22,6 +25,7 @@ const MANAGED_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const MANAGED_STARTUP_LOG_EXCERPT_BYTES: u64 = 16 * 1024;
 const MANAGED_STOP_GRACE_TIMEOUT: Duration = Duration::from_secs(15);
 const MANAGED_STOP_FORCE_TIMEOUT: Duration = Duration::from_secs(2);
+const MANAGED_IDENTITY_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub(super) struct ManagedPaths {
@@ -29,12 +33,14 @@ pub(super) struct ManagedPaths {
     server_json: PathBuf,
     token: PathBuf,
     lock: PathBuf,
+    instance_lock: PathBuf,
     log: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ManagedServerState {
+    pub(super) instance_id: Option<String>,
     pub(super) pid: u32,
     pub(super) base_url: String,
     pub(super) readyz_url: String,
@@ -63,7 +69,26 @@ struct ManagedReuseTarget {
 
 struct ManagedLaunch {
     child: Child,
+    instance_id: String,
     log_offset: u64,
+}
+
+pub(super) struct ManagedLifecycleLock {
+    _file: File,
+}
+
+#[derive(Debug)]
+enum StateSnapshot {
+    Missing,
+    Invalid,
+    Valid(Box<ManagedServerState>),
+}
+
+#[derive(Debug)]
+enum ProcessOwnership {
+    Owned(ManagedProcess),
+    Stale(&'static str),
+    Unavailable(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,27 +149,86 @@ pub(super) async fn ensure_started(
     static_dir: &Path,
 ) -> Result<ManagedServerState> {
     let target = managed_reuse_target(static_dir)?;
-    if let Some(state) = read_state(&ctx.paths)? {
-        let process = process_executable(state.pid);
-        let stale_reason = managed_stale_reason(
-            &state,
-            pid_alive(state.pid),
-            Some(&target.executable),
-            Some(target.static_dir.as_str()),
-            Some(&bind_policy),
-            process.as_ref(),
-        );
-        if stale_reason.is_none() {
-            return Ok(state);
+    match read_state_snapshot(&ctx.paths)? {
+        StateSnapshot::Missing => {
+            ensure_idle_lease(&ctx.paths, "managed state is missing")?;
         }
-        if pid_alive(state.pid) {
-            stop_pid_bounded(state.pid)?;
+        StateSnapshot::Invalid => {
+            ensure_idle_lease(&ctx.paths, "managed state is invalid")?;
+        }
+        StateSnapshot::Valid(state) => {
+            let state = *state;
+            let Some(instance_id) = state.instance_id.as_deref() else {
+                ensure_idle_lease(&ctx.paths, "managed state is missing instanceId")?;
+                return start_new_instance(ctx, bind_policy, static_dir).await;
+            };
+            match inspect_process_ownership(&ctx.paths, &state, instance_id)? {
+                ProcessOwnership::Stale(_) => {}
+                ProcessOwnership::Unavailable(reason) => {
+                    return Err(anyhow!(
+                        "managed gateway ownership cannot be proven ({reason}); refusing to signal the recorded pid or start a second instance"
+                    ));
+                }
+                ProcessOwnership::Owned(process) => {
+                    let process_executable = process_executable(state.pid);
+                    let stale_reason = managed_stale_reason(
+                        &state,
+                        true,
+                        Some(&target.executable),
+                        Some(target.static_dir.as_str()),
+                        Some(&bind_policy),
+                        process_executable.as_ref(),
+                    )
+                    .or(gateway_identity_stale_reason(&state, &ctx.paths).await);
+                    if stale_reason.is_none() {
+                        return Ok(state);
+                    }
+                    stop_owned_instance(&state, &ctx.paths, &process).await?;
+                }
+            }
         }
     }
+    start_new_instance(ctx, bind_policy, static_dir).await
+}
+
+async fn start_new_instance(
+    ctx: &GatewayContext,
+    bind_policy: ManagedBindPolicy,
+    static_dir: &Path,
+) -> Result<ManagedServerState> {
     cleanup_state(&ctx.paths)?;
     rotate_token(&ctx.paths)?;
     let launch = spawn_serve(ctx, bind_policy, static_dir)?;
     wait_for_state(&ctx.paths, launch).await
+}
+
+fn ensure_idle_lease(paths: &ManagedPaths, context: &str) -> Result<()> {
+    if instance_lease_is_held(&paths.instance_lock)? {
+        return Err(anyhow!(
+            "{context} while the managed instance lease is held; refusing to start a second instance"
+        ));
+    }
+    Ok(())
+}
+
+fn inspect_process_ownership(
+    paths: &ManagedPaths,
+    state: &ManagedServerState,
+    instance_id: &str,
+) -> Result<ProcessOwnership> {
+    if !instance_lease_is_held(&paths.instance_lock)? {
+        return Ok(ProcessOwnership::Stale("instance_lease_missing"));
+    }
+    Ok(match ManagedProcess::inspect(state.pid, instance_id) {
+        Ok(process) => ProcessOwnership::Owned(process),
+        Err(ProcessIdentityError::Dead) => ProcessOwnership::Unavailable("pid_not_running"),
+        Err(ProcessIdentityError::Mismatch(_)) => {
+            ProcessOwnership::Unavailable("process_identity_mismatch")
+        }
+        Err(ProcessIdentityError::Unavailable(_)) => {
+            ProcessOwnership::Unavailable("process_identity_unavailable")
+        }
+    })
 }
 
 fn spawn_serve(
@@ -152,6 +236,7 @@ fn spawn_serve(
     bind_policy: ManagedBindPolicy,
     static_dir: &Path,
 ) -> Result<ManagedLaunch> {
+    let instance_id = Uuid::now_v7().to_string();
     let exe = env::current_exe().context("resolve pevo executable")?;
     let log = OpenOptions::new()
         .create(true)
@@ -169,7 +254,11 @@ fn spawn_serve(
         .arg("--internal-static-dir")
         .arg(static_dir)
         .arg("--internal-managed-state")
-        .arg(&ctx.paths.server_json);
+        .arg(&ctx.paths.server_json)
+        .arg("--internal-managed-instance")
+        .arg(&instance_id)
+        .arg("--internal-managed-lease")
+        .arg(&ctx.paths.instance_lock);
     if bind_policy.fallback_ports() > 0 {
         command
             .arg("--internal-bind-fallbacks")
@@ -187,7 +276,11 @@ fn spawn_serve(
         command.process_group(0);
     }
     let child = command.spawn().context("spawn pevo serve")?;
-    Ok(ManagedLaunch { child, log_offset })
+    Ok(ManagedLaunch {
+        child,
+        instance_id,
+        log_offset,
+    })
 }
 
 async fn wait_for_state(
@@ -196,16 +289,23 @@ async fn wait_for_state(
 ) -> Result<ManagedServerState> {
     let started = Instant::now();
     while started.elapsed() < MANAGED_STARTUP_TIMEOUT {
-        if let Some(state) = read_state(paths)?
-            && pid_alive(state.pid)
+        if let StateSnapshot::Valid(state) = read_state_snapshot(paths)?
+            && state.instance_id.as_deref() == Some(launch.instance_id.as_str())
+            && state.pid == launch.child.id()
+            && matches!(
+                inspect_process_ownership(paths, &state, &launch.instance_id)?,
+                ProcessOwnership::Owned(_)
+            )
+            && gateway_identity_stale_reason(&state, paths).await.is_none()
         {
-            return Ok(state);
+            return Ok(*state);
         }
         if let Some(status) = launch
             .child
             .try_wait()
             .context("poll managed gateway process")?
         {
+            cleanup_server_state_for_instance(paths, &launch.instance_id)?;
             return Err(managed_startup_error(
                 paths,
                 launch.log_offset,
@@ -214,7 +314,50 @@ async fn wait_for_state(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    Err(managed_startup_error(paths, launch.log_offset, None))
+    let startup_error = managed_startup_error(paths, launch.log_offset, None);
+    let termination = terminate_launch(&mut launch);
+    let cleanup = cleanup_server_state_for_instance(paths, &launch.instance_id);
+    if let Err(error) = termination {
+        return Err(anyhow!(
+            "{startup_error}\nfailed to terminate timed-out managed instance: {error:#}"
+        ));
+    }
+    cleanup?;
+    Err(startup_error)
+}
+
+fn terminate_launch(launch: &mut ManagedLaunch) -> Result<()> {
+    if let Ok(process) = ManagedProcess::inspect(launch.child.id(), &launch.instance_id) {
+        process.terminate_tree(1)?;
+        if !process.wait_for_exit(MANAGED_STOP_FORCE_TIMEOUT)?
+            || !process.wait_for_tree_exit(MANAGED_STOP_FORCE_TIMEOUT)?
+        {
+            return Err(anyhow!(
+                "managed startup process tree did not exit after forced termination"
+            ));
+        }
+    } else {
+        launch
+            .child
+            .kill()
+            .context("terminate exact managed startup child")?;
+    }
+    let _ = launch.child.wait();
+    Ok(())
+}
+
+fn cleanup_server_state_for_instance(paths: &ManagedPaths, instance_id: &str) -> Result<()> {
+    if let StateSnapshot::Valid(state) = read_state_snapshot(paths)?
+        && state.instance_id.as_deref() != Some(instance_id)
+    {
+        return Ok(());
+    }
+    for path in [&paths.server_json, &paths.token] {
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn managed_startup_error(
@@ -265,6 +408,58 @@ pub(super) struct LaunchResponse {
     pub(super) open_url: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedIdentityResponse {
+    ok: bool,
+    instance_id: String,
+    pid: u32,
+    version: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct RecoverableLaunchError(String);
+
+pub(super) fn is_recoverable_launch_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<RecoverableLaunchError>().is_some()
+}
+
+async fn gateway_identity_stale_reason(
+    state: &ManagedServerState,
+    paths: &ManagedPaths,
+) -> Option<&'static str> {
+    let Ok(token) = fs::read_to_string(&paths.token) else {
+        return Some("gateway_identity_unavailable");
+    };
+    let request = reqwest::Client::new()
+        .get(format!(
+            "{}/_gateway/managed/identity",
+            state.base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(token.trim())
+        .timeout(MANAGED_IDENTITY_TIMEOUT)
+        .send()
+        .await;
+    let Ok(response) = request else {
+        return Some("gateway_identity_unavailable");
+    };
+    if !response.status().is_success() {
+        return Some("gateway_identity_unavailable");
+    }
+    let Ok(identity) = response.json::<ManagedIdentityResponse>().await else {
+        return Some("gateway_identity_unavailable");
+    };
+    if !identity.ok
+        || Some(identity.instance_id.as_str()) != state.instance_id.as_deref()
+        || identity.pid != state.pid
+        || identity.version != state.version
+    {
+        return Some("gateway_identity_mismatch");
+    }
+    None
+}
+
 pub(super) async fn create_launch(
     state: &ManagedServerState,
     paths: &ManagedPaths,
@@ -286,9 +481,23 @@ pub(super) async fn create_launch(
                 "visibleName": cwd.file_name().and_then(|name| name.to_str()).unwrap_or("cwd"),
             }
         }))
+        .timeout(MANAGED_IDENTITY_TIMEOUT)
         .send()
         .await
-        .context("request managed gateway launch")?;
+        .map_err(|error| {
+            anyhow::Error::new(RecoverableLaunchError(format!(
+                "request managed gateway launch: {error}"
+            )))
+        })?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err(anyhow::Error::new(RecoverableLaunchError(format!(
+            "managed gateway launch failed with status {}",
+            response.status()
+        ))));
+    }
     if !response.status().is_success() {
         return Err(anyhow!(
             "managed gateway launch failed with status {}",
@@ -298,19 +507,51 @@ pub(super) async fn create_launch(
     response.json::<LaunchResponse>().await.map_err(Into::into)
 }
 
-pub(super) fn managed_status(paths: &ManagedPaths) -> Result<Value> {
-    if let Some(state) = read_state(paths)? {
-        let running = pid_alive(state.pid);
-        let executable = current_executable_fingerprint().ok();
-        let process = process_executable(state.pid);
+pub(super) async fn managed_status(paths: &ManagedPaths) -> Result<Value> {
+    let state = match read_state_snapshot(paths)? {
+        StateSnapshot::Missing => return Ok(json!({"ok": true, "running": false})),
+        StateSnapshot::Invalid => {
+            return Ok(json!({
+                "ok": true,
+                "running": false,
+                "stale": true,
+                "staleReason": "invalid_state",
+            }));
+        }
+        StateSnapshot::Valid(state) => *state,
+    };
+    let executable = current_executable_fingerprint().ok();
+    let process_executable = process_executable(state.pid);
+    let Some(instance_id) = state.instance_id.as_deref() else {
         return Ok(managed_status_value(
             &state,
-            running,
+            false,
             executable.as_ref(),
-            process.as_ref(),
+            process_executable.as_ref(),
         ));
+    };
+    let (running, ownership_reason) = match inspect_process_ownership(paths, &state, instance_id)? {
+        ProcessOwnership::Owned(_) => (true, None),
+        ProcessOwnership::Stale(reason) | ProcessOwnership::Unavailable(reason) => {
+            (false, Some(reason))
+        }
+    };
+    let mut value = managed_status_value(
+        &state,
+        running,
+        executable.as_ref(),
+        process_executable.as_ref(),
+    );
+    let identity_reason = if running {
+        gateway_identity_stale_reason(&state, paths).await
+    } else {
+        None
+    };
+    if let Some(reason) = ownership_reason.or(identity_reason) {
+        value["stale"] = Value::Bool(true);
+        value["staleReason"] = Value::String(reason.to_string());
     }
-    Ok(json!({"ok": true, "running": false}))
+    Ok(value)
 }
 
 pub(super) fn read_channel_runtime_status(paths: &ManagedPaths) -> Option<Value> {
@@ -373,8 +614,11 @@ pub(super) fn channel_runtime_summary(runtime: &Value) -> Value {
     })
 }
 
-pub(crate) fn managed_status_for_home(home: &Path) -> Result<Value> {
-    managed_status(&managed_paths(home))
+pub(crate) async fn managed_status_for_home(home: &Path) -> Result<Value> {
+    let paths = managed_paths(home);
+    ensure_managed_dir(&paths)?;
+    let _lock = lock_managed_shared(&paths)?;
+    managed_status(&paths).await
 }
 
 fn managed_reuse_target(static_dir: &Path) -> Result<ManagedReuseTarget> {
@@ -401,6 +645,7 @@ pub(super) fn managed_status_value(
     json!({
         "ok": true,
         "running": running,
+        "instanceId": state.instance_id,
         "pid": state.pid,
         "baseUrl": state.base_url,
         "readyzUrl": state.readyz_url,
@@ -452,6 +697,9 @@ pub(super) fn managed_stale_reason(
     expected_bind_policy: Option<&ManagedBindPolicy>,
     process_executable: Option<&ProcessExecutable>,
 ) -> Option<&'static str> {
+    if state.instance_id.is_none() {
+        return Some("missing_instance_id");
+    }
     if !pid_running {
         return Some("pid_not_running");
     }
@@ -544,55 +792,116 @@ fn executable_inode(_metadata: &fs::Metadata) -> Option<u64> {
     None
 }
 
-pub(super) fn stop_managed(paths: &ManagedPaths) -> Result<bool> {
-    let Some(state) = read_state(paths)? else {
+pub(super) async fn stop_managed(paths: &ManagedPaths) -> Result<bool> {
+    let state = match read_state_snapshot(paths)? {
+        StateSnapshot::Missing => {
+            ensure_idle_lease(paths, "managed state is missing")?;
+            cleanup_state(paths)?;
+            return Ok(false);
+        }
+        StateSnapshot::Invalid => {
+            ensure_idle_lease(paths, "managed state is invalid")?;
+            cleanup_state(paths)?;
+            return Ok(false);
+        }
+        StateSnapshot::Valid(state) => *state,
+    };
+    let Some(instance_id) = state.instance_id.as_deref() else {
+        ensure_idle_lease(paths, "managed state is missing instanceId")?;
         cleanup_state(paths)?;
         return Ok(false);
     };
-    let stopped = if pid_alive(state.pid) {
-        stop_pid_bounded(state.pid)?;
-        true
-    } else {
-        false
-    };
-    cleanup_state(paths)?;
-    Ok(stopped)
+    match inspect_process_ownership(paths, &state, instance_id)? {
+        ProcessOwnership::Stale(_) => {
+            cleanup_state(paths)?;
+            Ok(false)
+        }
+        ProcessOwnership::Unavailable(reason) => Err(anyhow!(
+            "managed gateway ownership cannot be proven ({reason}); refusing to signal pid {}",
+            state.pid
+        )),
+        ProcessOwnership::Owned(process) => {
+            stop_owned_instance(&state, paths, &process).await?;
+            cleanup_state(paths)?;
+            Ok(true)
+        }
+    }
 }
 
-fn stop_pid_bounded(pid: u32) -> Result<()> {
-    if let Err(error) = kill_pid(pid) {
-        if !pid_alive(pid) {
-            return Ok(());
-        }
-        return Err(error);
+async fn stop_owned_instance(
+    state: &ManagedServerState,
+    paths: &ManagedPaths,
+    process: &ManagedProcess,
+) -> Result<()> {
+    let requested = request_managed_shutdown(state, paths).await;
+    #[cfg(unix)]
+    if !requested {
+        process
+            .request_graceful_termination()
+            .context("send SIGTERM to verified managed gateway")?;
     }
-    if wait_for_pid_exit(pid, MANAGED_STOP_GRACE_TIMEOUT) {
+    if (requested || cfg!(unix))
+        && process.wait_for_exit(MANAGED_STOP_GRACE_TIMEOUT)?
+        && process.wait_for_tree_exit(Duration::ZERO)?
+    {
         return Ok(());
     }
-    if let Err(error) = force_kill_pid(pid) {
-        if !pid_alive(pid) {
-            return Ok(());
-        }
-        return Err(error);
-    }
-    if wait_for_pid_exit(pid, MANAGED_STOP_FORCE_TIMEOUT) {
+    process
+        .terminate_tree(1)
+        .context("terminate verified managed process tree")?;
+    if process.wait_for_exit(MANAGED_STOP_FORCE_TIMEOUT)?
+        && process.wait_for_tree_exit(MANAGED_STOP_FORCE_TIMEOUT)?
+    {
         return Ok(());
     }
     Err(anyhow!(
-        "managed gateway pid {pid} did not exit after SIGTERM and forced termination"
+        "managed gateway pid {} did not exit after graceful and forced termination",
+        state.pid
     ))
 }
 
-pub(crate) fn stop_managed_for_home(home: &Path) -> Result<bool> {
-    stop_managed(&managed_paths(home))
+async fn request_managed_shutdown(state: &ManagedServerState, paths: &ManagedPaths) -> bool {
+    let Some(instance_id) = state.instance_id.as_deref() else {
+        return false;
+    };
+    let Ok(token) = fs::read_to_string(&paths.token) else {
+        return false;
+    };
+    reqwest::Client::new()
+        .post(format!(
+            "{}/_gateway/managed/shutdown",
+            state.base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(token.trim())
+        .json(&json!({"instanceId": instance_id}))
+        .timeout(MANAGED_IDENTITY_TIMEOUT)
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
 }
 
-fn read_state(paths: &ManagedPaths) -> Result<Option<ManagedServerState>> {
+pub(crate) async fn stop_managed_for_home(home: &Path) -> Result<bool> {
+    let paths = managed_paths(home);
+    ensure_managed_dir(&paths)?;
+    let _lock = lock_managed_exclusive(&paths)?;
+    stop_managed(&paths).await
+}
+
+fn read_state_snapshot(paths: &ManagedPaths) -> Result<StateSnapshot> {
     if !paths.server_json.exists() {
-        return Ok(None);
+        return Ok(StateSnapshot::Missing);
     }
-    let text = fs::read_to_string(&paths.server_json)?;
-    Ok(Some(serde_json::from_str(&text)?))
+    let text = match fs::read_to_string(&paths.server_json) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StateSnapshot::Missing);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    Ok(match serde_json::from_str(&text) {
+        Ok(state) => StateSnapshot::Valid(Box::new(state)),
+        Err(_) => StateSnapshot::Invalid,
+    })
 }
 
 fn cleanup_state(paths: &ManagedPaths) -> Result<()> {
@@ -610,6 +919,7 @@ pub(super) fn managed_paths(home: &Path) -> ManagedPaths {
         server_json: dir.join("server.json"),
         token: dir.join("token"),
         lock: dir.join("lock"),
+        instance_lock: dir.join("instance.lock"),
         log: dir.join("server.log"),
         dir,
     }
@@ -619,8 +929,16 @@ pub(super) fn ensure_managed_dir(paths: &ManagedPaths) -> Result<()> {
     fs::create_dir_all(&paths.dir)?;
     let _ = OpenOptions::new()
         .create(true)
-        .append(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
         .open(&paths.lock)?;
+    let _ = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&paths.instance_lock)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -629,68 +947,29 @@ pub(super) fn ensure_managed_dir(paths: &ManagedPaths) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn lock_managed_exclusive(paths: &ManagedPaths) -> Result<ManagedLifecycleLock> {
+    let file = open_lifecycle_lock(paths)?;
+    file.lock()?;
+    Ok(ManagedLifecycleLock { _file: file })
+}
+
+pub(super) fn lock_managed_shared(paths: &ManagedPaths) -> Result<ManagedLifecycleLock> {
+    let file = open_lifecycle_lock(paths)?;
+    file.lock_shared()?;
+    Ok(ManagedLifecycleLock { _file: file })
+}
+
+fn open_lifecycle_lock(paths: &ManagedPaths) -> Result<File> {
+    Ok(OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&paths.lock)?)
+}
+
 fn rotate_token(paths: &ManagedPaths) -> Result<()> {
     let token = Uuid::now_v7().to_string();
-    fs::write(&paths.token, token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&paths.token, fs::Permissions::from_mode(0o600))?;
-    }
+    atomic_replace_private(&paths.token, token.as_bytes())?;
     Ok(())
-}
-
-#[cfg(unix)]
-fn pid_alive(pid: u32) -> bool {
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn pid_alive(_pid: u32) -> bool {
-    true
-}
-
-#[cfg(unix)]
-fn kill_pid(pid: u32) -> Result<()> {
-    let result = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error().into())
-    }
-}
-
-#[cfg(unix)]
-pub(super) fn force_kill_pid(pid: u32) -> Result<()> {
-    let process_group = -(pid as libc::pid_t);
-    let result = unsafe { libc::kill(process_group, libc::SIGKILL) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error().into())
-    }
-}
-
-#[cfg(not(unix))]
-fn kill_pid(pid: u32) -> Result<()> {
-    Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .status()?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-pub(super) fn force_kill_pid(pid: u32) -> Result<()> {
-    kill_pid(pid)
-}
-
-fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
-    let started = Instant::now();
-    while started.elapsed() < timeout {
-        if !pid_alive(pid) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    !pid_alive(pid)
 }

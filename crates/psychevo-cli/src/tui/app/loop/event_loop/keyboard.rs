@@ -84,7 +84,13 @@ impl TuiApp {
                     if let Some(target) = agent_target {
                         self.open_agent_target_session(ui, &target)?;
                     } else {
-                        ui.toggle_selected();
+                        let history_opened = match ui.selected_target {
+                            Some(target) => self.open_history_message_actions(ui, target)?,
+                            None => false,
+                        };
+                        if !history_opened {
+                            ui.toggle_selected();
+                        }
                     }
                 }
                 KeyCode::Char(' ') => {
@@ -244,6 +250,9 @@ impl TuiApp {
                 ui.textarea.insert_newline();
             }
             KeyCode::Enter => {
+                if self.submit_history_message_edit(ui)? {
+                    return Ok(false);
+                }
                 ui.sync_pending_images_with_textarea();
                 let line = textarea_text(&ui.textarea);
                 if !ui.shell_mode && line.trim().is_empty() && ui.pending_images.is_empty() {
@@ -304,6 +313,12 @@ impl TuiApp {
                 ui.clear_slash_menu_dismissal();
             }
             KeyCode::Esc => {
+                if self.cancel_history_message_edit(ui)? {
+                    return Ok(false);
+                }
+                if self.restore_staged_conversation_edit(ui)? {
+                    return Ok(false);
+                }
                 if ui.shell_mode && textarea_text(&ui.textarea).trim().is_empty() {
                     ui.exit_shell_mode();
                     ui.textarea = new_textarea();

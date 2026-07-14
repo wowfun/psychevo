@@ -25,8 +25,9 @@ pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayActionKind, GatewayActionOutcome, GatewayActivity, GatewayEvent,
     GatewayEventSink, GatewayImageInput, GatewayInputPart, GatewaySource, GatewayThreadSelector,
-    GatewayTurnStatus, ThreadTurnRequest, TranscriptBlock, TranscriptBlockKind,
-    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
+    GatewayTurnStatus, ThreadEditableDraft, ThreadEditableDraftFidelity, ThreadEditableInputPart,
+    ThreadTurnRequest, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+    TranscriptEntry, TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::{
     AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentMissionRunInput,

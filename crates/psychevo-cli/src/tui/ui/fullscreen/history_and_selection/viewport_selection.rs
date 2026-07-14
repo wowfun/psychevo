@@ -92,6 +92,7 @@ impl<'a> FullscreenUi<'a> {
             queued_inputs: VecDeque::new(),
             pending_steers: VecDeque::new(),
             pending_input_edit: None,
+            history_message_edit: None,
             pending_input_sequence: 0,
             pending_images: Vec::new(),
             history_search: false,

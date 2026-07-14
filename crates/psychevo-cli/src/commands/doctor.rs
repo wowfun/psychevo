@@ -71,6 +71,7 @@ async fn doctor_report(args: &DoctorArgs) -> Result<Value> {
         "installCommand": static_dir_install_command(),
     });
     let gateway = managed_status_for_home(&home)
+        .await
         .unwrap_or_else(|err| json!({ "ok": false, "error": format!("{err:#}") }));
     let tools = json!({
         "git": tool_value("git", &env_map),

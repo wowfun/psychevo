@@ -228,7 +228,9 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
         .expect("query")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("evidence");
-    assert_eq!(evidence_slots, prefix_slots);
+    let mut expected_evidence_slots = prefix_slots.clone();
+    expected_evidence_slots.push("runtime_time".to_string());
+    assert_eq!(evidence_slots, expected_evidence_slots);
 
     let export = isolated_tui_cmd(temp.path(), &psychevo_home, &config, &db)
         .args([
@@ -270,6 +272,20 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
             .as_str()
             .is_some_and(|content| content.contains("You are running as a child agent"))
     }));
+    let runtime_time = exported_messages
+        .iter()
+        .find(|message| {
+            message["content"]
+                .as_str()
+                .is_some_and(|content| content.starts_with("Runtime time context:"))
+        })
+        .expect("runtime time provider message");
+    assert_eq!(runtime_time["role"], "system");
+    assert!(runtime_time["content"].as_str().is_some_and(
+        |content| content.contains("Current date:")
+            && content.contains("Local UTC offset:")
+            && content.contains("latest, recent, and current")
+    ));
 }
 
 #[test]

@@ -249,6 +249,20 @@ pub(crate) struct ServeArgs {
     )]
     pub(crate) managed_state: Option<PathBuf>,
     #[arg(
+        long = "internal-managed-instance",
+        hide = true,
+        value_name = "UUID",
+        help = "Identify the managed Gateway instance"
+    )]
+    pub(crate) managed_instance: Option<String>,
+    #[arg(
+        long = "internal-managed-lease",
+        hide = true,
+        value_name = "FILE",
+        help = "Hold the managed Gateway instance lease until process exit"
+    )]
+    pub(crate) managed_lease: Option<PathBuf>,
+    #[arg(
         long = "internal-bind-fallbacks",
         hide = true,
         default_value_t = 0,

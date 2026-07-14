@@ -15,7 +15,8 @@ use crate::env::resolve_explicit_path;
 
 use super::context::GatewayContext;
 use super::managed::{
-    ManagedBindPolicy, channel_runtime_summary, create_launch, ensure_started, managed_status,
+    ManagedBindPolicy, channel_runtime_summary, create_launch, ensure_started,
+    is_recoverable_launch_error, lock_managed_exclusive, lock_managed_shared, managed_status,
     merge_channel_runtime_status, read_channel_runtime_status, stop_managed,
 };
 use super::output::{open_browser, print_json, print_json_code, workbench_dist_missing};
@@ -58,14 +59,23 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
         return print_json_code(workbench_dist_missing(&static_dir));
     }
     let bind_policy = ManagedBindPolicy::new(args.bind);
-    let state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
+    let _lock = lock_managed_exclusive(&ctx.paths)?;
+    let mut state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
     let cwd = resolve_open_cwd(&ctx, &args)?;
-    let launch = create_launch(&state, &ctx.paths, &cwd).await?;
+    let launch = match create_launch(&state, &ctx.paths, &cwd).await {
+        Ok(launch) => launch,
+        Err(error) if is_recoverable_launch_error(&error) => {
+            state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
+            create_launch(&state, &ctx.paths, &cwd).await?
+        }
+        Err(error) => return Err(error),
+    };
     if !args.no_browser {
         let _ = open_browser(launch.open_url.as_str());
     }
     let mut output = json!({
         "ok": true,
+        "instanceId": state.instance_id,
         "pid": state.pid,
         "baseUrl": state.base_url,
         "cwd": cwd,
@@ -105,10 +115,12 @@ async fn start(args: GatewayStartArgs) -> Result<ExitCode> {
         return print_json_code(workbench_dist_missing(&static_dir));
     }
     let bind_policy = ManagedBindPolicy::new(args.bind);
+    let _lock = lock_managed_exclusive(&ctx.paths)?;
     let state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
     print_json(json!({
         "ok": true,
         "running": true,
+        "instanceId": state.instance_id,
         "pid": state.pid,
         "baseUrl": state.base_url,
         "readyzUrl": state.readyz_url,
@@ -121,7 +133,8 @@ async fn start(args: GatewayStartArgs) -> Result<ExitCode> {
 
 async fn status() -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
-    let mut status = managed_status(&ctx.paths)?;
+    let _lock = lock_managed_shared(&ctx.paths)?;
+    let mut status = managed_status(&ctx.paths).await?;
     status["profile"] = Value::String(ctx.profile_name.clone());
     status["profileHome"] = Value::String(ctx.home.display().to_string());
     let options = ctx.run_options(ctx.cwd.clone())?;
@@ -153,7 +166,8 @@ async fn status() -> Result<ExitCode> {
 
 async fn stop() -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
-    let stopped = stop_managed(&ctx.paths)?;
+    let _lock = lock_managed_exclusive(&ctx.paths)?;
+    let stopped = stop_managed(&ctx.paths).await?;
     print_json(json!({
         "ok": true,
         "stopped": stopped,
@@ -164,7 +178,8 @@ async fn stop() -> Result<ExitCode> {
 
 async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
     let ctx = GatewayContext::load()?;
-    let _ = stop_managed(&ctx.paths)?;
+    let _lock = lock_managed_exclusive(&ctx.paths)?;
+    let _ = stop_managed(&ctx.paths).await?;
     let static_dir = resolve_static_dir_diagnostic(None, &ctx.env_map, &ctx.cwd)?;
     if !static_dir.found() {
         return print_json_code(workbench_dist_missing(&static_dir));
@@ -174,6 +189,7 @@ async fn restart(args: GatewayStartArgs) -> Result<ExitCode> {
     print_json(json!({
         "ok": true,
         "running": true,
+        "instanceId": state.instance_id,
         "pid": state.pid,
         "baseUrl": state.base_url,
         "readyzUrl": state.readyz_url,

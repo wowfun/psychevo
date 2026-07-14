@@ -89,6 +89,7 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) queued_inputs: VecDeque<QueuedInput>,
     pub(crate) pending_steers: VecDeque<PendingSteerInput>,
     pub(crate) pending_input_edit: Option<PendingInputEdit<'a>>,
+    pub(crate) history_message_edit: Option<HistoryMessageEdit>,
     pub(crate) pending_input_sequence: u64,
     pub(crate) pending_images: Vec<PendingImageAttachment>,
     pub(crate) history_search: bool,

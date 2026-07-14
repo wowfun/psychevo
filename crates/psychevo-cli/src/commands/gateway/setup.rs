@@ -361,10 +361,12 @@ async fn discover_wechat_dm_sender(
 
 async fn setup_gateway_action(ctx: &GatewayContext, args: &GatewaySetupArgs) -> Result<Value> {
     if !args.start && !args.restart {
-        return managed_status(&ctx.paths);
+        let _lock = super::managed::lock_managed_shared(&ctx.paths)?;
+        return managed_status(&ctx.paths).await;
     }
+    let _lock = super::managed::lock_managed_exclusive(&ctx.paths)?;
     if args.restart {
-        let _ = stop_managed(&ctx.paths)?;
+        let _ = stop_managed(&ctx.paths).await?;
     }
     let static_dir = resolve_static_dir_diagnostic(None, &ctx.env_map, &ctx.cwd)?;
     if !static_dir.found() {
@@ -375,6 +377,7 @@ async fn setup_gateway_action(ctx: &GatewayContext, args: &GatewaySetupArgs) -> 
     Ok(json!({
         "ok": true,
         "running": true,
+        "instanceId": state.instance_id,
         "pid": state.pid,
         "baseUrl": state.base_url,
         "readyzUrl": state.readyz_url,

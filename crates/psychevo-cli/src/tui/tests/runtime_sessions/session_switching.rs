@@ -845,7 +845,10 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
         panic!("expected sessions panel");
     };
     assert_eq!(panel.query, "");
-    assert_eq!(panel.notice.as_deref(), Some("action: A archive  D delete"));
+    assert_eq!(
+        panel.notice.as_deref(),
+        Some("action: F fork  A archive  D delete")
+    );
 
     app.handle_bottom_panel_key(
         &mut ui,

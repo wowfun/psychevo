@@ -571,18 +571,27 @@ fn tui_session_selection_row(
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| short_session(&summary.id).to_string());
     let provider_model = format!("{}/{}", summary.provider, summary.model);
+    let fork_provenance = session
+        .forked_from_thread_id
+        .as_deref()
+        .map(|source| format!("  forked from {}", short_session(source)))
+        .unwrap_or_default();
     let description = Some(format!(
-        "{}  {}  messages={}",
-        session.project_display_path, provider_model, session.visible_message_count
+        "{}  {}  messages={}{}",
+        session.project_display_path,
+        provider_model,
+        session.visible_message_count,
+        fork_provenance
     ));
     let search_text = format!(
-        "{} {} {} {} {} {}",
+        "{} {} {} {} {} {} {}",
         summary.id,
         title,
         session.project_label,
         session.project_display_path,
         summary.provider,
-        summary.model
+        summary.model,
+        session.forked_from_thread_id.as_deref().unwrap_or_default()
     );
     BottomSelectionRow {
         label: title,

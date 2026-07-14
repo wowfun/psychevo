@@ -663,7 +663,7 @@ impl BottomSelectionPanel {
         }
         if self.action_armed {
             return match self.session_view.unwrap_or(SessionListView::Active) {
-                SessionListView::Active => "A archive  D delete  Esc cancel".to_string(),
+                SessionListView::Active => "F fork  A archive  D delete  Esc cancel".to_string(),
                 SessionListView::Archived => "R restore  D delete  Esc cancel".to_string(),
             };
         }
@@ -744,7 +744,7 @@ impl BottomSelectionPanel {
         self.action_armed = true;
         if self.delete_confirm.is_none() {
             self.notice = Some(match self.session_view.unwrap_or(SessionListView::Active) {
-                SessionListView::Active => "action: A archive  D delete".to_string(),
+                SessionListView::Active => "action: F fork  A archive  D delete".to_string(),
                 SessionListView::Archived => "action: R restore  D delete".to_string(),
             });
         }
@@ -768,6 +768,9 @@ impl BottomSelectionPanel {
 impl BottomSelectionValue {
     pub(crate) fn key(&self) -> String {
         match self {
+            BottomSelectionValue::HistoryMessageAction { message_id, action } => {
+                format!("history-message:{message_id}:{action:?}")
+            }
             BottomSelectionValue::Session(id) => format!("session:{id}"),
             BottomSelectionValue::LoadOlderSessions(cwd) => {
                 format!("sessions:load-older:{cwd}")

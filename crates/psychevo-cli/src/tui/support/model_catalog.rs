@@ -5,6 +5,7 @@ pub(crate) struct TuiSessionDisplaySummary {
     pub(crate) project_label: String,
     pub(crate) project_display_path: String,
     pub(crate) visible_message_count: usize,
+    pub(crate) forked_from_thread_id: Option<String>,
 }
 
 pub(crate) type ClipboardSink = Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;

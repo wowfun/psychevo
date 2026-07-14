@@ -43,7 +43,7 @@ pub(crate) async fn run_setup_command(args: SetupArgs) -> Result<ExitCode> {
     }
 
     println!("Psychevo setup");
-    let _ = run_init_command(InitArgs { reset_state: false })?;
+    let _ = run_init_command(InitArgs { reset_state: false }).await?;
 
     let env_map = inherited_env();
     let cwd = env::current_dir()?;

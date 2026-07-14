@@ -100,7 +100,8 @@ impl TuiApp {
     }
 
     pub(crate) fn session_sidebar_title(&self) -> String {
-        self.current_session_title
+        let title = self
+            .current_session_title
             .clone()
             .or_else(|| {
                 self.current_session
@@ -108,7 +109,24 @@ impl TuiApp {
                     .map(short_session)
                     .map(str::to_string)
             })
-            .unwrap_or_else(|| "New session".to_string())
+            .unwrap_or_else(|| "New session".to_string());
+        let forked_from = self.current_session.as_deref().and_then(|session_id| {
+            self.state_runtime
+                .store()
+                .session_metadata(session_id)
+                .ok()
+                .flatten()
+                .and_then(|metadata| {
+                    metadata
+                        .get("forkedFromThreadId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+        });
+        match forked_from {
+            Some(source) => format!("{title} · forked from {}", short_session(&source)),
+            None => title,
+        }
     }
 
     #[cfg(test)]
@@ -300,6 +318,7 @@ impl TuiApp {
         self.load_current_session_history(ui)?;
         self.replay_session_live_event_backlog(ui, session_id);
         self.replay_agent_child_event_backlog(ui, session_id);
+        self.show_staged_history_status(ui, session_id)?;
         ui.refresh_sidebar(self);
         Ok(())
     }
@@ -708,12 +727,14 @@ impl TuiApp {
         let active_tool_call_ids = history_active_tool_call_ids_for_reload(&summaries, live_owner)?;
         let mut history_prompts = Vec::new();
         for (index, summary) in summaries.into_iter().enumerate() {
+            let session_seq = summary.session_seq;
             let value = serde_json::to_value(summary.message)?;
-            if value.get("role").and_then(Value::as_str) == Some("user")
-                && let Some(text) = user_text_from_message(&value, summary.metadata.as_ref())
+            let is_user = value.get("role").and_then(Value::as_str) == Some("user");
+            if is_user && let Some(text) = user_text_from_message(&value, summary.metadata.as_ref())
             {
                 history_prompts.push(text);
             }
+            let first_new_row = ui.transcript.len();
             ui.push_history_message_with_projection_options(
                 &value,
                 summary.usage.as_ref(),
@@ -722,6 +743,14 @@ impl TuiApp {
                 suppress_latest_terminal_meta && index + 1 == summary_count,
                 Some(&active_tool_call_ids),
             );
+            if is_user
+                && let Some(row) = ui.transcript[first_new_row..]
+                    .iter_mut()
+                    .find(|row| row.kind == TranscriptKind::Prompt)
+            {
+                row.transcript_entry_id = Some(format!("message:{session_seq}"));
+                row.transcript_message_seq = Some(session_seq);
+            }
         }
         let agent_catalog = self.current_agent_catalog();
         let agent_edges = self
@@ -786,11 +815,18 @@ pub(crate) fn tui_sessions_for_store(
         }
         let messages = store.load_tui_message_summaries(&summary.id)?;
         let visible_message_count = visible_tui_message_count(&messages)?;
+        let forked_from_thread_id = store.session_metadata(&summary.id)?.and_then(|metadata| {
+            metadata
+                .get("forkedFromThreadId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
         visible.push(TuiSessionDisplaySummary {
             project_label: session_project_label(&summary.cwd),
             project_display_path: session_project_display_path(&summary.cwd),
             summary,
             visible_message_count,
+            forked_from_thread_id,
         });
     }
     Ok(visible)

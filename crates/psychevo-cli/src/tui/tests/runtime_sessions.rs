@@ -13,3 +13,7 @@ pub use history_reload::*;
 mod session_switching;
 #[allow(unused_imports)]
 pub use session_switching::*;
+#[path = "runtime_sessions/history_editing.rs"]
+mod history_editing;
+#[allow(unused_imports)]
+pub use history_editing::*;

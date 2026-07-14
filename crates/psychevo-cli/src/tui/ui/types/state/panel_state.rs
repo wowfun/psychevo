@@ -191,6 +191,10 @@ pub(crate) struct BottomSelectionRow {
 
 #[derive(Debug, Clone)]
 pub(crate) enum BottomSelectionValue {
+    HistoryMessageAction {
+        message_id: String,
+        action: HistoryMessageAction,
+    },
     Session(String),
     LoadOlderSessions(String),
     AgentRunning {

@@ -179,12 +179,12 @@ impl X11CaptureBackend {
             let (connection, screen_num) = x11rb::connect(self.display.as_deref()).ok()?;
             let root = connection.setup().roots.get(screen_num)?.root;
             let pointer = connection.query_pointer(root).ok()?.reply().ok()?;
-            return Some(Rect {
+            Some(Rect {
                 x: f64::from(pointer.root_x),
                 y: f64::from(pointer.root_y),
                 width: 1.0,
                 height: 1.0,
-            });
+            })
         }
         #[cfg(not(all(feature = "linux-capture", target_os = "linux")))]
         {
@@ -763,10 +763,10 @@ impl WaylandCaptureBackend {
 fn wayland_portal_snapshot() -> CapabilitySnapshot {
     #[cfg(all(feature = "linux-capture", target_os = "linux"))]
     {
-        return match query_wayland_available_targets().and_then(require_wayland_area_target) {
+        match query_wayland_available_targets().and_then(require_wayland_area_target) {
             Ok(()) => available_snapshot(),
             Err((reason, message)) => failure_snapshot(reason, message),
-        };
+        }
     }
     #[cfg(not(all(feature = "linux-capture", target_os = "linux")))]
     {

@@ -1,19 +1,9 @@
 use std::net::SocketAddr;
 
 use super::managed::{
-    ExecutableFingerprint, ManagedBindPolicy, ManagedServerState, ProcessExecutable,
-    force_kill_pid, managed_paths, managed_stale_reason, managed_startup_error,
-    managed_status_value,
+    ExecutableFingerprint, ManagedBindPolicy, ManagedServerState, ProcessExecutable, managed_paths,
+    managed_stale_reason, managed_startup_error, managed_status, managed_status_value,
 };
-
-#[cfg(target_os = "linux")]
-use std::os::unix::process::CommandExt;
-
-#[cfg(target_os = "linux")]
-use std::process::Command;
-
-#[cfg(target_os = "linux")]
-use std::time::{Duration, Instant};
 
 #[test]
 fn managed_state_executable_mismatch_is_stale() {
@@ -29,6 +19,7 @@ fn managed_state_executable_mismatch_is_stale() {
 #[test]
 fn old_style_managed_state_without_executable_fingerprint_is_stale() {
     let state = ManagedServerState {
+        instance_id: Some("instance-a".to_string()),
         pid: 42,
         base_url: "http://127.0.0.1:1".to_string(),
         readyz_url: "http://127.0.0.1:1/readyz".to_string(),
@@ -45,6 +36,18 @@ fn old_style_managed_state_without_executable_fingerprint_is_stale() {
     assert_eq!(
         managed_stale_reason(&state, true, Some(&expected), Some("/static"), None, None),
         Some("missing_executable_fingerprint")
+    );
+}
+
+#[test]
+fn old_managed_state_without_instance_id_is_stale_before_pid_checks() {
+    let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
+    let mut state = test_state(executable.clone(), "/static");
+    state.instance_id = None;
+
+    assert_eq!(
+        managed_stale_reason(&state, true, Some(&executable), Some("/static"), None, None),
+        Some("missing_instance_id")
     );
 }
 
@@ -143,6 +146,55 @@ fn managed_status_reports_stale_reason() {
     assert_eq!(value["staleReason"], "pid_not_running");
 }
 
+#[tokio::test]
+async fn managed_status_reports_invalid_state_without_treating_it_as_running() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let paths = managed_paths(temp.path());
+    std::fs::create_dir_all(temp.path().join("gateway")).expect("gateway dir");
+    std::fs::write(temp.path().join("gateway/server.json"), "not json").expect("state");
+
+    let value = managed_status(&paths).await.expect("status");
+
+    assert_eq!(value["running"], false);
+    assert_eq!(value["stale"], true);
+    assert_eq!(value["staleReason"], "invalid_state");
+}
+
+#[tokio::test]
+async fn managed_status_reports_a_free_instance_lease_as_stale() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let paths = managed_paths(temp.path());
+    std::fs::create_dir_all(temp.path().join("gateway")).expect("gateway dir");
+    let state = test_state(
+        test_fingerprint("/current/pevo", 20, 200, Some(2)),
+        "/static",
+    );
+    std::fs::write(
+        temp.path().join("gateway/server.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "instanceId": state.instance_id,
+            "pid": state.pid,
+            "baseUrl": state.base_url,
+            "readyzUrl": state.readyz_url,
+            "startedAtMs": state.started_at_ms,
+            "version": state.version,
+            "executablePath": state.executable_path,
+            "executableModifiedMs": state.executable_modified_ms,
+            "executableSize": state.executable_size,
+            "executableInode": state.executable_inode,
+            "staticDir": state.static_dir,
+        }))
+        .expect("state json"),
+    )
+    .expect("state");
+
+    let value = managed_status(&paths).await.expect("status");
+
+    assert_eq!(value["running"], false);
+    assert_eq!(value["stale"], true);
+    assert_eq!(value["staleReason"], "instance_lease_missing");
+}
+
 #[test]
 fn managed_startup_error_reports_only_the_current_launch_output() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -204,85 +256,9 @@ fn deleted_process_executable_is_stale() {
     );
 }
 
-#[cfg(target_os = "linux")]
-#[test]
-fn forced_managed_stop_kills_the_exact_process_group_tree() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let child_pid_path = temp.path().join("child.pid");
-    let mut leader = Command::new("sh");
-    leader
-        .arg("-c")
-        .arg("trap '' TERM; sleep 60 & echo $! > \"$CHILD_PID_FILE\"; wait")
-        .env("CHILD_PID_FILE", &child_pid_path)
-        .process_group(0);
-    let mut leader = leader.spawn().expect("spawn managed process-group leader");
-    let leader_pid = leader.id();
-    let cleanup = ProcessGroupCleanup(leader_pid);
-    let child_pid = wait_for_test_child_pid(&child_pid_path);
-
-    assert_eq!(
-        unsafe { libc::getpgid(leader_pid as libc::pid_t) },
-        leader_pid as i32
-    );
-    assert_eq!(
-        unsafe { libc::getpgid(child_pid as libc::pid_t) },
-        leader_pid as i32
-    );
-    force_kill_pid(leader_pid).expect("kill exact managed process group");
-    let _ = leader.wait().expect("reap process-group leader");
-    assert!(
-        wait_for_linux_test_pid_exit(child_pid, Duration::from_secs(2)),
-        "managed child {child_pid} survived process-group fallback"
-    );
-    std::mem::forget(cleanup);
-}
-
-#[cfg(target_os = "linux")]
-struct ProcessGroupCleanup(u32);
-
-#[cfg(target_os = "linux")]
-impl Drop for ProcessGroupCleanup {
-    fn drop(&mut self) {
-        unsafe {
-            libc::kill(-(self.0 as libc::pid_t), libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn wait_for_test_child_pid(path: &std::path::Path) -> u32 {
-    let started = Instant::now();
-    loop {
-        if let Ok(text) = std::fs::read_to_string(path)
-            && let Ok(pid) = text.trim().parse::<u32>()
-        {
-            return pid;
-        }
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "managed process-group child did not start"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn wait_for_linux_test_pid_exit(pid: u32, timeout: Duration) -> bool {
-    let started = Instant::now();
-    while started.elapsed() < timeout {
-        let running = std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok()
-            .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"));
-        if !running {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    false
-}
-
 fn test_state(executable: ExecutableFingerprint, static_dir: &str) -> ManagedServerState {
     ManagedServerState {
+        instance_id: Some("instance-a".to_string()),
         pid: 42,
         base_url: "http://127.0.0.1:1".to_string(),
         readyz_url: "http://127.0.0.1:1/readyz".to_string(),

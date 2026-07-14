@@ -246,7 +246,8 @@ pub(crate) fn prompt_display_metadata(
     attachments: &[PendingImageAttachment],
     cwd: &Path,
 ) -> Option<PromptDisplayMetadata> {
-    (!attachments.is_empty()).then(|| PromptDisplayMetadata {
+    let editable_input = tui_editable_input_envelope(&content_text, attachments);
+    Some(PromptDisplayMetadata {
         content_text,
         attachments: attachments
             .iter()
@@ -256,5 +257,37 @@ pub(crate) fn prompt_display_metadata(
                 source: display_image_source(&attachment.image, cwd),
             })
             .collect(),
+        editable_input: Some(editable_input),
     })
+}
+
+fn tui_editable_input_envelope(
+    content_text: &str,
+    attachments: &[PendingImageAttachment],
+) -> psychevo_runtime::StoredEditableInputEnvelope {
+    let mut parts = Vec::new();
+    let mut cursor = 0usize;
+    for (image_block_index, attachment) in attachments.iter().enumerate() {
+        let Some(relative) = content_text[cursor..].find(&attachment.placeholder) else {
+            continue;
+        };
+        let placeholder_start = cursor + relative;
+        if placeholder_start > cursor {
+            parts.push(psychevo_runtime::StoredEditableInputPart::Text {
+                text: content_text[cursor..placeholder_start].to_string(),
+            });
+        }
+        parts.push(psychevo_runtime::StoredEditableInputPart::Image { image_block_index });
+        cursor = placeholder_start + attachment.placeholder.len();
+    }
+    if cursor < content_text.len() {
+        parts.push(psychevo_runtime::StoredEditableInputPart::Text {
+            text: content_text[cursor..].to_string(),
+        });
+    } else if parts.is_empty() {
+        parts.push(psychevo_runtime::StoredEditableInputPart::Text {
+            text: content_text.to_string(),
+        });
+    }
+    psychevo_runtime::StoredEditableInputEnvelope { version: 1, parts }
 }

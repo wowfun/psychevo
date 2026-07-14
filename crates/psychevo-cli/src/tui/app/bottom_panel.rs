@@ -13,3 +13,7 @@ pub use models_sessions::*;
 mod clipboard_editor;
 #[allow(unused_imports)]
 pub use clipboard_editor::*;
+#[path = "bottom_panel/history_messages.rs"]
+mod history_messages;
+#[allow(unused_imports)]
+pub use history_messages::*;

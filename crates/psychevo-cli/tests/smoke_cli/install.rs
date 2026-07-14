@@ -148,8 +148,8 @@ pub(crate) fn install_check_reports_missing_tools_without_mutation() {
 pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "printf 'cargo 1.96.0\\n'");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cargo", "printf 'cargo 1.97.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -181,11 +181,55 @@ pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
 
 #[cfg(unix)]
 #[test]
+pub(crate) fn install_check_enforces_rust_1_97_0_boundary() {
+    for (version, accepted) in [
+        ("1.96.0", false),
+        ("1.96.1", false),
+        ("1.97.0", true),
+        ("1.98.0", true),
+    ] {
+        let temp = tempdir().expect("temp");
+        let bin = temp.path().join("bin");
+        write_fake_command(&bin, "cargo", "printf 'cargo 1.97.0\n'");
+        write_fake_command(&bin, "rustc", &format!("printf 'rustc {version}\\n'"));
+        write_fake_command(&bin, "cc", "exit 0");
+        write_fake_command(&bin, "node", "printf 'v24.0.0\n'");
+        write_fake_command(
+            &bin,
+            "pnpm",
+            "case \"$1\" in\n  --version) printf '11.8.0\\n'; exit 0 ;;\n  config) printf 'https://registry.npmjs.org/\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+        );
+
+        let output = install_preflight_command(&bin, &temp.path().join("home"))
+            .arg("--check")
+            .output()
+            .expect("install check");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        assert_eq!(output.status.success(), accepted, "{version}: {stdout}");
+        if accepted {
+            assert!(
+                stdout.contains(&format!("rustc: ok - {version}, requires 1.97.0")),
+                "{stdout}"
+            );
+        } else {
+            assert!(
+                stdout.contains(&format!(
+                    "rustc: outdated - found {version}, requires 1.97.0"
+                )),
+                "{stdout}"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
 pub(crate) fn install_preflight_reports_missing_native_compiler() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     let output = install_preflight_command(&bin, &temp.path().join("home"))
         .output()
         .expect("install preflight");
@@ -212,7 +256,7 @@ pub(crate) fn install_preflight_reports_missing_node_for_full_install() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     let output = install_preflight_command(&bin, &temp.path().join("home"))
         .output()
@@ -237,7 +281,7 @@ pub(crate) fn install_preflight_reports_missing_pnpm_for_full_install() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     let output = install_preflight_command(&bin, &temp.path().join("home"))
@@ -265,12 +309,12 @@ pub(crate) fn install_preflight_prints_progress_breadcrumbs() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'fake cargo reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
     write_fake_command(
         &bin,
         "rustc",
-        "case \"$1\" in\n  --version) printf 'rustc 1.94.0\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'rustc 1.97.0\\n'; exit 0 ;;\n  *) exit 0 ;;\nesac",
     );
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
@@ -323,7 +367,7 @@ pub(crate) fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
     let home = temp.path().join("home");
     write_fake_pevo(&home);
     write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -356,7 +400,7 @@ pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
     let home = temp.path().join("home");
     write_fake_pevo(&home);
     write_fake_command(&bin, "cargo", "exit 0");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -398,9 +442,9 @@ pub(crate) fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'fake cargo reached\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -429,8 +473,8 @@ pub(crate) fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
 pub(crate) fn install_check_reports_unusable_pnpm_as_failure() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
-    write_fake_command(&bin, "cargo", "printf 'cargo 1.96.0\\n'");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "cargo", "printf 'cargo 1.97.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -465,7 +509,7 @@ pub(crate) fn install_windows_preflight_reports_missing_build_tools_before_cargo
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
     write_fake_command(&bin, "cargo", "printf 'fake cargo reached\\n' >&2\nexit 42");
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     let output = install_preflight_command(&bin, &temp.path().join("home"))
         .output()
         .expect("install preflight");
@@ -493,9 +537,9 @@ pub(crate) fn install_windows_cargo_install_defaults_revocation_check_off() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = false ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = false ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -525,9 +569,9 @@ pub(crate) fn install_windows_cargo_install_preserves_explicit_revocation_settin
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = true ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ \"${CARGO_HTTP_CHECK_REVOKE:-}\" = true ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -554,9 +598,9 @@ pub(crate) fn install_windows_locked_pevo_exe_failure_gets_targeted_guidance() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf '   Replacing C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\pevo.exe\\n' >&2; printf 'error: failed to move `C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\cargo-installU8ZJRb\\\\pevo.exe` to `C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\pevo.exe`\\n\\nCaused by:\\n  Access is denied. (os error 5)\\n' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf '   Replacing C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\pevo.exe\\n' >&2; printf 'error: failed to move `C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\cargo-installU8ZJRb\\\\pevo.exe` to `C:\\\\Users\\\\c00845592\\\\.cargo\\\\bin\\\\pevo.exe`\\n\\nCaused by:\\n  Access is denied. (os error 5)\\n' >&2; exit 101 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -606,9 +650,9 @@ pub(crate) fn install_windows_preflight_stops_existing_managed_gateway() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo failed\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'fake cargo failed\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -643,9 +687,9 @@ pub(crate) fn install_unix_cargo_install_does_not_force_revocation_setting() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ -z \"${CARGO_HTTP_CHECK_REVOKE+x}\" ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'cargo revoke=%s\\n' \"${CARGO_HTTP_CHECK_REVOKE-unset}\" >&2; [ -z \"${CARGO_HTTP_CHECK_REVOKE+x}\" ] || exit 43; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -670,9 +714,9 @@ pub(crate) fn install_cargo_install_defaults_timeout_and_retry() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo timeout=%s retry=%s\\n' \"${CARGO_HTTP_TIMEOUT-unset}\" \"${CARGO_NET_RETRY-unset}\" >&2; [ \"${CARGO_HTTP_TIMEOUT:-}\" = 120 ] || exit 43; [ \"${CARGO_NET_RETRY:-}\" = 10 ] || exit 44; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'cargo timeout=%s retry=%s\\n' \"${CARGO_HTTP_TIMEOUT-unset}\" \"${CARGO_NET_RETRY-unset}\" >&2; [ \"${CARGO_HTTP_TIMEOUT:-}\" = 120 ] || exit 43; [ \"${CARGO_NET_RETRY:-}\" = 10 ] || exit 44; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -697,9 +741,9 @@ pub(crate) fn install_cargo_install_preserves_explicit_timeout_and_retry() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'cargo timeout=%s retry=%s\\n' \"${CARGO_HTTP_TIMEOUT-unset}\" \"${CARGO_NET_RETRY-unset}\" >&2; [ \"${CARGO_HTTP_TIMEOUT:-}\" = 45 ] || exit 43; [ \"${CARGO_NET_RETRY:-}\" = 2 ] || exit 44; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'cargo timeout=%s retry=%s\\n' \"${CARGO_HTTP_TIMEOUT-unset}\" \"${CARGO_NET_RETRY-unset}\" >&2; [ \"${CARGO_HTTP_TIMEOUT:-}\" = 45 ] || exit 43; [ \"${CARGO_NET_RETRY:-}\" = 2 ] || exit 44; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
@@ -726,9 +770,9 @@ pub(crate) fn install_cargo_failure_prints_enterprise_diagnostics() {
     write_fake_command(
         &bin,
         "cargo",
-        "case \"$1\" in\n  --version) printf 'cargo 1.96.0\\n'; exit 0 ;;\n  install) printf 'fake cargo failed\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
+        "case \"$1\" in\n  --version) printf 'cargo 1.97.0\\n'; exit 0 ;;\n  install) printf 'fake cargo failed\\n' >&2; exit 42 ;;\n  *) exit 0 ;;\nesac",
     );
-    write_fake_command(&bin, "rustc", "printf 'rustc 1.94.0\\n'");
+    write_fake_command(&bin, "rustc", "printf 'rustc 1.97.0\\n'");
     write_fake_command(&bin, "cc", "exit 0");
     write_fake_command(&bin, "node", "printf 'v24.0.0\\n'");
     write_fake_command(
