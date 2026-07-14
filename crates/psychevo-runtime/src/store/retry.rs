@@ -1,5 +1,14 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
+
+use rusqlite::Connection;
+
+use crate::error::Result;
+
+use super::SqliteStore;
+use super::store_schema_helpers::is_busy;
+
 impl SqliteStore {
     pub(crate) fn write_retry<T>(
         &self,
@@ -53,8 +62,8 @@ pub(crate) fn should_checkpoint(successful_writes: usize) -> bool {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    pub(crate) use super::*;
+mod tests {
+    use super::should_checkpoint;
 
     #[test]
     fn checkpoint_cadence_is_every_50_successful_writes() {

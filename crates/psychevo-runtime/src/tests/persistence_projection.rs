@@ -1,5 +1,49 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+
+#[test]
+fn editable_input_envelope_is_versioned_and_separate_from_display_metadata() {
+    let display = PromptDisplayMetadata {
+        content_text: "describe image".to_string(),
+        attachments: Vec::new(),
+        editable_input: Some(StoredEditableInputEnvelope {
+            version: 1,
+            parts: vec![
+                StoredEditableInputPart::Text {
+                    text: "describe ".to_string(),
+                },
+                StoredEditableInputPart::Image {
+                    image_block_index: 0,
+                },
+                StoredEditableInputPart::Text {
+                    text: " precisely".to_string(),
+                },
+            ],
+        }),
+    };
+
+    let (metadata, content_override) =
+        crate::events::prompt_user_metadata(None, Some(&display), None);
+    let metadata = metadata.expect("metadata");
+    assert_eq!(content_override.as_deref(), Some("describe image"));
+    assert_eq!(
+        metadata[EDITABLE_INPUT_METADATA_KEY],
+        json!({
+            "version": 1,
+            "parts": [
+                {"type": "text", "text": "describe "},
+                {"type": "image", "imageBlockIndex": 0},
+                {"type": "text", "text": " precisely"}
+            ]
+        })
+    );
+    assert!(
+        metadata[TUI_DISPLAY_METADATA_KEY]
+            .get("editable_input")
+            .is_none()
+    );
+}
+
 #[tokio::test]
 pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_message_end() {
     let temp = tempdir().expect("temp");

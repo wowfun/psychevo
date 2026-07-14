@@ -14,6 +14,7 @@ pub(crate) mod events;
 pub mod extensions;
 pub mod hooks;
 mod host_paths;
+pub mod host_process;
 pub(crate) mod managed_tools;
 pub(crate) mod mcp;
 pub mod media;
@@ -196,7 +197,7 @@ pub use store::{
 };
 pub use store::{
     AutomationRunFinishInput, AutomationRunRecord, AutomationTaskInput, AutomationTaskRecord,
-    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord,
+    ChildSessionSnapshotInput, ContextEvidenceInput, ContextEvidenceRecord, ConversationDraftPart,
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayChannelOutboxInput,
     GatewayChannelOutboxRecord, GatewayControlCommandInput, GatewayControlCommandRecord,
     GatewayLiveEventRecord, GatewayLiveSnapshotInput, GatewayLiveSnapshotRecord,
@@ -204,8 +205,10 @@ pub use store::{
     GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, GatewaySourceBindingInput,
     GatewaySourceBindingRecord, GatewaySourceLaneInput, GatewaySourceLaneRecord,
     GatewayTurnDeliveryInput, GatewayTurnDeliveryRecord, GatewayTurnTerminalInput,
-    GatewayTurnTerminalRecord, SessionCompactionInput, SessionCompactionRecord,
-    SessionMessageRecord, SqliteStore,
+    GatewayTurnTerminalRecord, NativeSessionForkInput, SessionBrowserRequest,
+    SessionBrowserWorkspaceProjection, SessionCompactionInput, SessionCompactionRecord,
+    SessionListProjection, SessionMessageRecord, SessionRevertKind, SessionRevertState,
+    SqliteStore,
 };
 pub use thread_lineage::{
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
@@ -217,9 +220,9 @@ pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,
     ClarifyInteractionOutcome, ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent,
     ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope,
-    ConfiguredModel, CustomProviderInput, CustomProviderResult, ExternalAgentDelegate,
-    ExternalAgentDelegateRequest, ExternalAgentDelegateResult, ImageInput, McpServerInput,
-    McpServerPolicy, McpTransportInput, ModelCatalogEntry, ModelCatalogProvider,
+    ConfiguredModel, CustomProviderInput, CustomProviderResult, EDITABLE_INPUT_METADATA_KEY,
+    ExternalAgentDelegate, ExternalAgentDelegateRequest, ExternalAgentDelegateResult, ImageInput,
+    McpServerInput, McpServerPolicy, McpTransportInput, ModelCatalogEntry, ModelCatalogProvider,
     ModelMetadataCacheTarget, PermissionApprovalDecision, PermissionApprovalOutcome,
     PermissionApprovalRequest, PermissionConfig, PermissionMode, ProjectContextInstructionMode,
     PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult,
@@ -228,9 +231,10 @@ pub use types::{
     RunWarning, RuntimeTool, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
     SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
     SessionUndoResult, SessionUsageOptions, SessionUsageSummary, SmokeControl, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UsageActivity,
-    UsageActivityDay, UsageReadOptions, UsageReadResult, UsageWindowSummary,
-    UserShellContextOptions, UserShellOptions, UserShellResult, run_control,
+    StoredEditableInputEnvelope, StoredEditableInputPart, TUI_DISPLAY_METADATA_KEY,
+    TuiMessageSummary, USER_SHELL_METADATA_KEY, UsageActivity, UsageActivityDay, UsageReadOptions,
+    UsageReadResult, UsageWindowSummary, UserShellContextOptions, UserShellOptions,
+    UserShellResult, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

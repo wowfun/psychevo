@@ -43,10 +43,10 @@ pub(crate) use crate::permissions::PermissionRuntime;
 pub(crate) use crate::project_instructions::load_project_instructions;
 pub(crate) use crate::prompt_assembly::{
     MainPromptPrefixInput, PROMPT_PREFIX_NOTICE_METADATA_KEY, PromptPrefixRecordInput,
-    assemble_main_prompt_prefix, assembly_from_prefix_record, context_evidence_for_request,
-    developer_provider_role, prompt_prefix_record, skill_contextual_user_messages,
-    tool_declarations_hash, tool_declarations_hash_with_search, turn_prefix_notice_instruction,
-    turn_required_agent_instruction,
+    RuntimeTimeContext, assemble_main_prompt_prefix, assembly_from_prefix_record,
+    context_evidence_for_request, developer_provider_role, prompt_prefix_record,
+    skill_contextual_user_messages, tool_declarations_hash, tool_declarations_hash_with_search,
+    turn_prefix_notice_instruction, turn_required_agent_instruction, turn_runtime_time_instruction,
 };
 pub(crate) use crate::prompt_image::prompt_message_from_inputs_with_options;
 pub(crate) use crate::prompt_templates;
@@ -70,20 +70,37 @@ pub(crate) use crate::types::{
 };
 
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 
 #[path = "run/entrypoints.rs"]
 mod entrypoints;
-#[allow(unused_imports)]
-pub use entrypoints::*;
+pub(crate) use entrypoints::{
+    DEFAULT_AGENT_MAX_TURNS, SESSION_TITLE_MAX_CHARS, TITLE_GENERATION_TIMEOUT_SECS,
+};
+pub use entrypoints::{
+    reload_session_context, run_live, run_live_streaming, run_live_streaming_controlled,
+    spawn_agent_background,
+};
 #[path = "run/execution.rs"]
 mod execution;
 #[allow(unused_imports)]
-pub use execution::*;
+pub(crate) use execution::{
+    main_agent_input_from_sources, materialize_first_use_empty_session,
+    maybe_preflight_compact_session, run_live_internal, selected_agent_for_result,
+    selected_skills_for_run, session_model_metadata, should_title_completed_session,
+};
 #[path = "run/titles.rs"]
 mod titles;
+pub use titles::fallback_visible_session_title;
 #[allow(unused_imports)]
-pub use titles::*;
+pub(crate) use titles::{
+    called_agent_names, clean_generated_session_title, emit_warning_events,
+    ensure_new_visible_session_title, fallback_session_title, generate_session_title,
+    normalize_session_title, prompt_without_selected_skill_markers, remove_think_blocks,
+    selected_skill_title_lines, selected_skills_fallback_title, session_title_request,
+    strip_wrapping_title_quotes, truncate_chars, visible_session_source_allows_auto_title,
+    warning_event,
+};
 
 pub(crate) fn generation_provider(
     base_url: impl Into<String>,

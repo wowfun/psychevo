@@ -17,7 +17,6 @@ pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::paths::canonical_cwd;
 pub(crate) use crate::project_instructions::load_project_instructions;
 pub(crate) use crate::prompt_assembly::runtime_environment_prompt;
-pub(crate) use crate::prompt_templates;
 pub(crate) use crate::skills::{
     SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
     skills_visible_for_prompt_with_tools,
@@ -27,14 +26,18 @@ pub(crate) use crate::tool_surface::tool_declarations;
 pub(crate) use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
 pub(crate) use crate::types::{RunMode, RunOptions};
 
-#[allow(unused_imports)]
-pub(crate) use super::*;
-
 #[path = "context_usage/snapshot.rs"]
 mod snapshot;
-#[allow(unused_imports)]
-pub use snapshot::*;
+pub use snapshot::{
+    CONTEXT_BAR_MAX_CELLS, CONTEXT_BAR_MIN_CELLS, ContextAdvice, ContextCategory,
+    ContextFormatOptions, ContextOptions, ContextScope, ContextSnapshot, ContextTokenizer,
+    ContextTotal, context_snapshot, format_context_snapshot_text,
+    format_context_snapshot_text_with_options, format_context_total_value,
+    format_context_total_value_parts,
+};
+pub(crate) use snapshot::{
+    ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
+};
 #[path = "context_usage/presentation.rs"]
 mod presentation;
-#[allow(unused_imports)]
-pub use presentation::*;
+pub use presentation::normalize_context_bar_width;

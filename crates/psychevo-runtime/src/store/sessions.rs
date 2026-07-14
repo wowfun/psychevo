@@ -1,5 +1,24 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use psychevo_agent_core::{now_ms, user_text_message};
+use rusqlite::{OptionalExtension, params};
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::error::{Error, Result};
+use crate::run::normalize_session_title;
+use crate::thread_lineage::SIDE_CONVERSATION_SESSION_SOURCES;
+use crate::types::SessionSummary;
+
+use super::store_message_fields::parse_optional_json;
+use super::store_metadata::{metadata_json_sql, metadata_object_sql};
+use super::store_schema_helpers::session_summary_from_row;
+use super::{
+    ChildSessionSnapshotInput, SessionBrowserRequest, SessionBrowserWorkspaceProjection,
+    SessionListProjection, SqliteStore,
+};
+
 impl SqliteStore {
     pub fn create_session(&self, cwd: &Path) -> Result<String> {
         self.create_session_with_metadata(cwd, "smoke", "fake-coding-model", "fake", None)
@@ -182,6 +201,204 @@ impl SqliteStore {
             }
         }
         Ok(summaries)
+    }
+
+    pub fn browse_human_sessions(
+        &self,
+        request: SessionBrowserRequest<'_>,
+    ) -> Result<Vec<SessionBrowserWorkspaceProjection>> {
+        let internal_sources_json = serde_json::to_string(SIDE_CONVERSATION_SESSION_SOURCES)?;
+        let include_ids_json = serde_json::to_string(request.include_session_ids)?;
+        let active_ids_json = serde_json::to_string(request.active_session_ids)?;
+        let archived = i64::from(request.archived);
+        let has_cursor = i64::from(request.cursor_cwd.is_some());
+        let cursor_offset = request.cursor_offset as i64;
+        let limit = request.limit as i64;
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            WITH visible AS MATERIALIZED (
+                SELECT s.*,
+                       CASE WHEN s.id IN (SELECT value FROM json_each(?4))
+                                  OR s.id IN (SELECT value FROM json_each(?5))
+                            THEN 1 ELSE 0 END AS is_exception
+                FROM sessions s
+                WHERE (?1 IS NULL OR s.cwd = ?1)
+                  AND ((?2 = 0 AND s.archived_at_ms IS NULL)
+                    OR (?2 = 1 AND s.archived_at_ms IS NOT NULL))
+                  AND s.parent_session_id IS NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?3))
+                  AND json_type(s.metadata_json, '$.agentSessionImportState') IS NULL
+            ),
+            ranked AS MATERIALIZED (
+                SELECT visible.*,
+                       SUM(CASE WHEN is_exception = 0 THEN 1 ELSE 0 END) OVER (
+                           PARTITION BY cwd
+                           ORDER BY updated_at_ms DESC, id ASC
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                       ) AS normal_rank,
+                       SUM(CASE WHEN is_exception = 0 THEN 1 ELSE 0 END) OVER (
+                           PARTITION BY cwd
+                       ) AS normal_total
+                FROM visible
+            )
+            SELECT r.id, r.source, r.parent_session_id, r.cwd, r.model, r.provider,
+                   r.started_at_ms, r.updated_at_ms, r.ended_at_ms, r.end_reason,
+                   r.archived_at_ms, r.message_count, r.tool_call_count, r.title,
+                   r.metadata_json,
+                   (
+                       SELECT m.content_text
+                       FROM messages m
+                       WHERE m.session_id = r.id
+                         AND m.role = 'user'
+                         AND trim(COALESCE(m.content_text, '')) != ''
+                       ORDER BY m.session_seq ASC
+                       LIMIT 1
+                   ) AS first_user_text,
+                   b.backend_kind, b.runtime_ref, r.is_exception, r.normal_total
+            FROM ranked r
+            LEFT JOIN gateway_runtime_bindings b ON b.thread_id = r.id
+            WHERE (
+                    ?10 = 0
+                    AND (
+                        r.is_exception = 1
+                        OR (r.updated_at_ms >= ?6 AND r.normal_rank <= ?9)
+                    )
+                  )
+               OR (
+                    ?10 = 1
+                    AND r.cwd = ?7
+                    AND r.is_exception = 0
+                    AND r.normal_rank > ?8
+                    AND r.normal_rank <= (?8 + ?9)
+                  )
+            ORDER BY r.cwd ASC, r.updated_at_ms DESC, r.id ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![
+                request.cwd,
+                archived,
+                internal_sources_json,
+                include_ids_json,
+                active_ids_json,
+                request.recent_since_ms,
+                request.cursor_cwd,
+                cursor_offset,
+                limit,
+                has_cursor,
+            ],
+            session_browser_projection_from_row,
+        )?;
+        let mut grouped: BTreeMap<String, (Vec<SessionListProjection>, usize, usize)> =
+            BTreeMap::new();
+        for row in rows {
+            let (projection, is_exception, normal_total) = projection_from_raw(row?)?;
+            let workspace = grouped.entry(projection.summary.cwd.clone()).or_default();
+            workspace.1 = normal_total;
+            if !is_exception {
+                workspace.2 += 1;
+            }
+            workspace.0.push(projection);
+        }
+        let base_offset = if request.cursor_cwd.is_some() {
+            request.cursor_offset
+        } else {
+            0
+        };
+        Ok(grouped
+            .into_iter()
+            .map(|(cwd, (sessions, normal_total, selected_normal_count))| {
+                let next_offset = base_offset.saturating_add(selected_normal_count);
+                let hidden_count = normal_total.saturating_sub(next_offset);
+                SessionBrowserWorkspaceProjection {
+                    cwd,
+                    sessions,
+                    hidden_count,
+                    next_offset: (hidden_count > 0).then_some(next_offset),
+                }
+            })
+            .collect())
+    }
+
+    pub fn list_human_session_projections(
+        &self,
+        cwd: Option<&str>,
+        archived: bool,
+        limit: usize,
+    ) -> Result<Vec<SessionListProjection>> {
+        let internal_sources_json = serde_json::to_string(SIDE_CONVERSATION_SESSION_SOURCES)?;
+        let archived = i64::from(archived);
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT s.id, s.source, s.parent_session_id, s.cwd, s.model, s.provider,
+                   s.started_at_ms, s.updated_at_ms, s.ended_at_ms, s.end_reason,
+                   s.archived_at_ms, s.message_count, s.tool_call_count, s.title,
+                   s.metadata_json,
+                   (
+                       SELECT m.content_text
+                       FROM messages m
+                       WHERE m.session_id = s.id
+                         AND m.role = 'user'
+                         AND trim(COALESCE(m.content_text, '')) != ''
+                       ORDER BY m.session_seq ASC
+                       LIMIT 1
+                   ) AS first_user_text,
+                   b.backend_kind, b.runtime_ref
+            FROM sessions s
+            LEFT JOIN gateway_runtime_bindings b ON b.thread_id = s.id
+            WHERE (?1 IS NULL OR s.cwd = ?1)
+              AND ((?2 = 0 AND s.archived_at_ms IS NULL)
+                OR (?2 = 1 AND s.archived_at_ms IS NOT NULL))
+              AND s.parent_session_id IS NULL
+              AND s.source NOT IN (SELECT value FROM json_each(?3))
+              AND json_type(s.metadata_json, '$.agentSessionImportState') IS NULL
+            ORDER BY s.updated_at_ms DESC, s.id ASC
+            LIMIT ?4
+            "#,
+        )?;
+        let rows = stmt.query_map(
+            params![cwd, archived, internal_sources_json, limit as i64],
+            session_projection_from_row,
+        )?;
+        rows.map(|row| projection_from_raw(row?).map(|value| value.0))
+            .collect()
+    }
+
+    pub fn session_list_projection(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionListProjection>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let raw = conn
+            .query_row(
+                r#"
+                SELECT s.id, s.source, s.parent_session_id, s.cwd, s.model, s.provider,
+                       s.started_at_ms, s.updated_at_ms, s.ended_at_ms, s.end_reason,
+                       s.archived_at_ms, s.message_count, s.tool_call_count, s.title,
+                       s.metadata_json,
+                       (
+                           SELECT m.content_text
+                           FROM messages m
+                           WHERE m.session_id = s.id
+                             AND m.role = 'user'
+                             AND trim(COALESCE(m.content_text, '')) != ''
+                           ORDER BY m.session_seq ASC
+                           LIMIT 1
+                       ) AS first_user_text,
+                       b.backend_kind, b.runtime_ref
+                FROM sessions s
+                LEFT JOIN gateway_runtime_bindings b ON b.thread_id = s.id
+                WHERE s.id = ?1
+                "#,
+                params![session_id],
+                session_projection_from_row,
+            )
+            .optional()?;
+        raw.map(projection_from_raw)
+            .transpose()
+            .map(|projection| projection.map(|value| value.0))
     }
 
     pub fn session_summary(&self, session_id: &str) -> Result<Option<SessionSummary>> {
@@ -381,4 +598,63 @@ impl SqliteStore {
         }
         Ok(ids)
     }
+}
+
+type RawSessionProjection = (
+    SessionSummary,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    usize,
+);
+
+fn session_projection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSessionProjection> {
+    Ok((
+        session_summary_from_row(row)?,
+        row.get(14)?,
+        row.get(15)?,
+        row.get(16)?,
+        row.get(17)?,
+        false,
+        0,
+    ))
+}
+
+fn session_browser_projection_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<RawSessionProjection> {
+    Ok((
+        session_summary_from_row(row)?,
+        row.get(14)?,
+        row.get(15)?,
+        row.get(16)?,
+        row.get(17)?,
+        row.get::<_, i64>(18)? != 0,
+        row.get::<_, i64>(19)? as usize,
+    ))
+}
+
+fn projection_from_raw(raw: RawSessionProjection) -> Result<(SessionListProjection, bool, usize)> {
+    let (
+        summary,
+        metadata_json,
+        first_user_text,
+        runtime_backend_kind,
+        runtime_ref,
+        exception,
+        total,
+    ) = raw;
+    Ok((
+        SessionListProjection {
+            summary,
+            first_user_text,
+            metadata: parse_optional_json(metadata_json)?,
+            runtime_backend_kind,
+            runtime_ref,
+        },
+        exception,
+        total,
+    ))
 }

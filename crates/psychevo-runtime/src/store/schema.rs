@@ -1,5 +1,18 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::fs;
+use std::path::Path;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use rusqlite::Connection;
+
+use crate::error::{Error, Result};
+
+use super::store_schema_helpers::sqlite_table_exists;
+use super::{
+    MIN_SUPPORTED_SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION, SqliteStore, SqliteStoreInner,
+};
+
 impl SqliteStore {
     pub fn open(path: &Path) -> Result<Self> {
         if path != Path::new(":memory:")
@@ -373,6 +386,12 @@ impl SqliteStore {
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session_seq
                 ON messages(session_id, session_seq);
+            CREATE INDEX IF NOT EXISTS idx_sessions_active_browser
+                ON sessions(cwd, updated_at_ms DESC, id ASC)
+                WHERE archived_at_ms IS NULL AND parent_session_id IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_sessions_archived_browser
+                ON sessions(cwd, updated_at_ms DESC, id ASC)
+                WHERE archived_at_ms IS NOT NULL AND parent_session_id IS NULL;
             CREATE INDEX IF NOT EXISTS idx_context_evidence_prompt
                 ON context_evidence(session_id, prompt_session_seq, context_seq);
             CREATE INDEX IF NOT EXISTS idx_agent_edges_parent

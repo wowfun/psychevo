@@ -1,5 +1,4 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::{BTreeMap, PathBuf, Value};
 
 pub(crate) fn env_path(name: &str, env: &BTreeMap<String, String>) -> Option<PathBuf> {
     env.get(name)

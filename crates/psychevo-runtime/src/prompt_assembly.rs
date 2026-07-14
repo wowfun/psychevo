@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use chrono::Local;
 use psychevo_agent_core::{ContextualUserBlock, ContextualUserMessage, PromptInstruction};
 use psychevo_agent_core::{ToolBinding, ToolRouter, ToolSearchOptions};
 use serde_json::{Value, json};
@@ -17,6 +18,29 @@ use crate::tools::mode_instruction_for_tool_availability;
 use crate::types::{ModelCapabilities, RunMode};
 
 pub(crate) const PROMPT_PREFIX_NOTICE_METADATA_KEY: &str = "prompt_prefix_notice";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeTimeContext {
+    current_date: String,
+    utc_offset: String,
+}
+
+impl RuntimeTimeContext {
+    pub(crate) fn new(current_date: impl Into<String>, utc_offset: impl Into<String>) -> Self {
+        Self {
+            current_date: current_date.into(),
+            utc_offset: utc_offset.into(),
+        }
+    }
+
+    pub(crate) fn local_now() -> Self {
+        let now = Local::now();
+        Self::new(
+            now.format("%Y-%m-%d").to_string(),
+            now.format("%:z").to_string(),
+        )
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct MainPromptAssembly {
@@ -354,6 +378,25 @@ pub(crate) fn turn_required_agent_instruction(
         Some("user_prompt_hint"),
         Some("required_agent_mentions"),
     ))
+}
+
+pub(crate) fn turn_runtime_time_instruction(
+    context: &RuntimeTimeContext,
+    capabilities: &ModelCapabilities,
+    order: usize,
+) -> PromptInstruction {
+    turn_instruction(
+        "runtime_time",
+        "base_policy",
+        developer_provider_role(capabilities),
+        order,
+        format!(
+            "Runtime time context:\n- Current date: {}\n- Local UTC offset: {}\nInterpret relative terms such as today, latest, recent, and current against this date. Verify time-sensitive facts with available tools.",
+            context.current_date, context.utc_offset
+        ),
+        Some("runtime"),
+        Some("time"),
+    )
 }
 
 pub(crate) fn turn_prefix_notice_instruction(

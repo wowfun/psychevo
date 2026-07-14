@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 pub fn config_show_value(options: &RunOptions, scope: ConfigScope) -> Result<Value> {
     let env_map = options
         .inherited_env

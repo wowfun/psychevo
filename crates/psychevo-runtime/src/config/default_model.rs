@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 pub fn set_default_model(home: &Path, cwd: &Path, global: bool, model: &str) -> Result<Value> {
     set_default_model_with_reasoning(home, cwd, global, model, None)
 }

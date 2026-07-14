@@ -736,6 +736,80 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
 }
 
 #[tokio::test]
+pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = SqliteStore::open(&db_path).expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+        shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let provider = ChildRequestCaptureProvider::default();
+    let requests = Arc::clone(&provider.requests);
+    let (_tx, rx) = watch::channel(false);
+
+    spawn_subagent(
+        test_agent_tool_context(&tmp, Arc::new(provider), store, db_path, parent, catalog),
+        SpawnAgentArgs {
+            agent_type: Some("worker".to_string()),
+            message: "Find the latest framework.".to_string(),
+            task_name: "current_child_context".to_string(),
+            background: Some(false),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: Some(1),
+            max_spawn_depth: None,
+            team_member: None,
+        },
+        "call".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("spawn");
+
+    let requests = requests.lock().expect("requests");
+    let messages = &requests[0].messages;
+    let (runtime_time_index, runtime_time) = messages
+        .iter()
+        .enumerate()
+        .find(|(_, message)| message["metadata"]["prompt_slot"] == "runtime_time")
+        .expect("runtime time prompt instruction");
+    assert_eq!(runtime_time["role"], "system");
+    let mut runtime_time_metadata = runtime_time["metadata"]
+        .as_object()
+        .expect("runtime time metadata")
+        .clone();
+    let content_hash = runtime_time_metadata
+        .remove("prompt_content_hash")
+        .and_then(|value| value.as_str().map(str::to_string))
+        .expect("runtime time content hash");
+    assert!(!content_hash.is_empty());
+    assert_eq!(
+        Value::Object(runtime_time_metadata),
+        json!({
+            "prompt_slot": "runtime_time",
+            "prompt_slot_tier": "turn",
+            "prompt_semantic_role": "base_policy",
+            "prompt_order": 0,
+            "source_kind": "runtime",
+            "source_name": "time",
+            "source_path": null,
+        })
+    );
+    let current_prompt_index = messages
+        .iter()
+        .rposition(|message| message["role"] == "user")
+        .expect("current prompt");
+    assert!(runtime_time_index < current_prompt_index);
+}
+
+#[tokio::test]
 pub(crate) async fn background_agent_tool_result_includes_child_session_identity() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");

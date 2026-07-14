@@ -13,3 +13,5 @@ pub use accounting_compaction::*;
 mod automations;
 #[path = "sqlite/gateway_activity.rs"]
 mod gateway_activity;
+#[path = "sqlite/history_fork.rs"]
+mod history_fork;

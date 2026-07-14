@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::snapshot::SnapshotStore;
-use crate::store::SessionRevertState;
+use crate::store::{SessionRevertKind, SessionRevertState};
 use crate::types::{SessionRedoResult, SessionUndoOptions, SessionUndoResult};
 
 pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
@@ -14,7 +14,18 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
         .ok_or_else(|| Error::Message("undo snapshot is unavailable".to_string()))?;
     let snapshots = SnapshotStore::new(options.snapshot_root, options.cwd);
     let original_snapshot = match store.session_revert_state(&options.session_id)? {
-        Some(revert) => revert.original_snapshot,
+        Some(SessionRevertState {
+            kind: SessionRevertKind::WorkspaceUndo { original_snapshot },
+            ..
+        }) => original_snapshot,
+        Some(SessionRevertState {
+            kind: SessionRevertKind::ConversationEdit { .. },
+            ..
+        }) => {
+            return Err(Error::Message(
+                "restore or run the staged conversation edit before using /undo".to_string(),
+            ));
+        }
         None => snapshots
             .track()?
             .ok_or_else(|| Error::Message("Git snapshot is unavailable".to_string()))?,
@@ -23,10 +34,7 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
     let reverted_messages = store.messages_from_count(&options.session_id, target.seq)?;
     store.set_session_revert_state(
         &options.session_id,
-        SessionRevertState {
-            start_seq: target.seq,
-            original_snapshot,
-        },
+        SessionRevertState::workspace_undo(target.seq, original_snapshot),
     )?;
     Ok(SessionUndoResult {
         session_id: options.session_id,
@@ -40,6 +48,9 @@ pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
     let revert = store
         .session_revert_state(&options.session_id)?
         .ok_or_else(|| Error::Message("nothing to redo".to_string()))?;
+    let original_snapshot = revert.original_snapshot().ok_or_else(|| {
+        Error::Message("restore or run the staged conversation edit before using /redo".to_string())
+    })?;
     let snapshots = SnapshotStore::new(options.snapshot_root, options.cwd);
     if let Some(target) = store.next_redo_target(&options.session_id)? {
         let snapshot = target
@@ -51,10 +62,7 @@ pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
         let after = store.messages_from_count(&options.session_id, target.seq)?;
         store.set_session_revert_state(
             &options.session_id,
-            SessionRevertState {
-                start_seq: target.seq,
-                original_snapshot: revert.original_snapshot,
-            },
+            SessionRevertState::workspace_undo(target.seq, original_snapshot.to_string()),
         )?;
         return Ok(SessionRedoResult {
             session_id: options.session_id,
@@ -63,7 +71,7 @@ pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
         });
     }
 
-    snapshots.restore(&revert.original_snapshot)?;
+    snapshots.restore(original_snapshot)?;
     let restored_messages = store.messages_from_count(&options.session_id, revert.start_seq)?;
     store.clear_session_revert_state(&options.session_id)?;
     Ok(SessionRedoResult {

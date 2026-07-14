@@ -1,5 +1,18 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo_agent_core::now_ms;
+use rusqlite::{OptionalExtension, params};
+use serde_json::{Value, json};
+
+use crate::error::{Error, Result};
+
+use super::store_metadata::{
+    json_to_sql, metadata_json_sql, metadata_object_sql, parse_session_revert,
+    parse_session_revert_sql, session_metadata_json,
+};
+use super::store_undo_helpers::session_tool_call_count;
+use super::{
+    SESSION_REVERT_METADATA_KEY, SessionRevertKind, SessionRevertState, SqliteStore, UndoTarget,
+};
+
 impl SqliteStore {
     pub fn session_revert_state(&self, session_id: &str) -> Result<Option<SessionRevertState>> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
@@ -22,13 +35,23 @@ impl SqliteStore {
         let changed = self.write_retry(|conn| {
             let metadata_json = session_metadata_json(conn, session_id)?;
             let mut metadata = metadata_object_sql(metadata_json.as_deref())?;
-            metadata.insert(
-                SESSION_REVERT_METADATA_KEY.to_string(),
-                json!({
+            let value = match &revert.kind {
+                SessionRevertKind::WorkspaceUndo { original_snapshot } => json!({
+                    "kind": "workspaceUndo",
                     "start_seq": revert.start_seq,
-                    "original_snapshot": revert.original_snapshot,
+                    "original_snapshot": original_snapshot,
                 }),
-            );
+                SessionRevertKind::ConversationEdit {
+                    boundary_message_id,
+                    draft,
+                } => json!({
+                    "kind": "conversationEdit",
+                    "start_seq": revert.start_seq,
+                    "boundary_message_id": boundary_message_id,
+                    "draft": draft,
+                }),
+            };
+            metadata.insert(SESSION_REVERT_METADATA_KEY.to_string(), value);
             let metadata_json =
                 serde_json::to_string(&Value::Object(metadata)).map_err(json_to_sql)?;
             conn.execute(

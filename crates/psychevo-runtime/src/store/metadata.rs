@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use rusqlite::{Connection, params};
+use serde_json::{Map, Value};
+
+use crate::error::Result;
+
+use super::{
+    ConversationDraftPart, SESSION_REVERT_METADATA_KEY, SessionRevertKind, SessionRevertState,
+};
+
 pub(crate) fn session_metadata_json(
     conn: &Connection,
     session_id: &str,
@@ -61,6 +68,31 @@ pub(crate) fn parse_session_revert_from_metadata(
     let Some(start_seq) = revert.get("start_seq").and_then(Value::as_i64) else {
         return Ok(None);
     };
+    if revert.get("kind").and_then(Value::as_str) == Some("conversationEdit") {
+        let Some(boundary_message_id) = revert
+            .get("boundary_message_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(None);
+        };
+        let draft = revert
+            .get("draft")
+            .cloned()
+            .map(serde_json::from_value::<Vec<ConversationDraftPart>>)
+            .transpose()
+            .map_err(json_to_sql)?
+            .unwrap_or_default();
+        return Ok(Some(SessionRevertState {
+            start_seq,
+            kind: SessionRevertKind::ConversationEdit {
+                boundary_message_id,
+                draft,
+            },
+        }));
+    }
+
     let Some(original_snapshot) = revert
         .get("original_snapshot")
         .and_then(Value::as_str)
@@ -69,8 +101,8 @@ pub(crate) fn parse_session_revert_from_metadata(
     else {
         return Ok(None);
     };
-    Ok(Some(SessionRevertState {
+    Ok(Some(SessionRevertState::workspace_undo(
         start_seq,
         original_snapshot,
-    }))
+    )))
 }

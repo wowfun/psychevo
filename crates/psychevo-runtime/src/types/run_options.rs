@@ -188,11 +188,27 @@ pub struct AgentSpawnResult {
 
 pub const TUI_DISPLAY_METADATA_KEY: &str = "tui_display";
 pub const USER_SHELL_METADATA_KEY: &str = "user_shell";
+pub const EDITABLE_INPUT_METADATA_KEY: &str = "editable_input";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum StoredEditableInputPart {
+    Text { text: String },
+    Image { image_block_index: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredEditableInputEnvelope {
+    pub version: u32,
+    pub parts: Vec<StoredEditableInputPart>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptDisplayMetadata {
     pub content_text: String,
     pub attachments: Vec<PromptAttachmentDisplay>,
+    #[serde(skip)]
+    pub editable_input: Option<StoredEditableInputEnvelope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

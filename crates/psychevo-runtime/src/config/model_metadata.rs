@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 pub(crate) const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 pub(crate) const MODELS_DEV_CACHE_FILE: &str = "models_dev_cache.json";
 pub(crate) const MODELS_DEV_FETCH_TIMEOUT_SECS: u64 = 15;

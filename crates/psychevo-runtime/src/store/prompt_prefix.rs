@@ -1,5 +1,9 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use rusqlite::{OptionalExtension, params};
+
+use crate::error::Result;
+
+use super::{PromptPrefixRecord, SqliteStore};
+
 impl SqliteStore {
     pub fn load_session_prompt_prefix(
         &self,

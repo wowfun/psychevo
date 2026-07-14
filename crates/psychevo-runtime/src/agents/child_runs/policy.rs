@@ -259,9 +259,15 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         "project_context": prefix_metadata.get("project_context").cloned().unwrap_or_default(),
         "cwd": prefix_metadata.get("cwd").cloned().unwrap_or_default(),
     });
+    let runtime_time_context = RuntimeTimeContext::local_now();
+    let turn_prompt_instructions = vec![turn_runtime_time_instruction(
+        &runtime_time_context,
+        &child.context.model_metadata.capabilities,
+        0,
+    )];
     let prompt_context_evidence = context_evidence_for_request(
         &prompt_assembly.prompt_instructions,
-        &[],
+        &turn_prompt_instructions,
         &prompt_assembly.prefix_contextual_user_messages,
         &[],
     );
@@ -274,7 +280,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         model: child_model,
         generation_metadata,
         prompt_instructions: prompt_assembly.prompt_instructions,
-        turn_prompt_instructions: Vec::new(),
+        turn_prompt_instructions,
         previous_messages,
         context_messages: Vec::new(),
         prefix_contextual_user_messages: prompt_assembly.prefix_contextual_user_messages,

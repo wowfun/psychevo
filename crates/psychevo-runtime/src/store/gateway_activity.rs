@@ -1,5 +1,16 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use std::collections::HashSet;
+
+use psychevo_agent_core::now_ms;
+use rusqlite::{OptionalExtension, params};
+use serde_json::Value;
+
+use crate::error::{Error, Result};
+
+use super::{
+    GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
+    GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
+    GatewayLiveSnapshotRecord, GatewayTurnTerminalInput, GatewayTurnTerminalRecord, SqliteStore,
+};
 
 impl SqliteStore {
     pub fn claim_gateway_activity(
@@ -149,6 +160,30 @@ impl SqliteStore {
         )
         .optional()
         .map_err(Into::into)
+    }
+
+    pub fn active_gateway_activities(&self) -> Result<Vec<GatewayActivityRecord>> {
+        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
+        let mut stmt = conn.prepare(
+            gateway_activity_select_sql(
+                "WHERE thread_id IS NOT NULL AND status IN ('running', 'queued')
+                 ORDER BY thread_id ASC, generation DESC, updated_at_ms DESC",
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map([], gateway_activity_from_row)?;
+        let mut seen = HashSet::new();
+        let mut activities = Vec::new();
+        for row in rows {
+            let activity = row?;
+            let Some(thread_id) = activity.thread_id.as_ref() else {
+                continue;
+            };
+            if seen.insert(thread_id.clone()) {
+                activities.push(activity);
+            }
+        }
+        Ok(activities)
     }
 
     pub fn update_gateway_activity_thread(

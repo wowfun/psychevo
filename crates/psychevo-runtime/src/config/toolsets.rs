@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolsetMutationResult {
     pub config_path: PathBuf,

@@ -14,8 +14,8 @@ use crate::messages::{
 use crate::session_trace::SessionTraceSink;
 use crate::store::{ContextEvidenceInput, SqliteStore};
 use crate::types::{
-    MessageAccounting, ModelMetadata, PromptDisplayMetadata, RunStreamEvent, RunStreamSink,
-    SelectedAgent, SmokeControl, TUI_DISPLAY_METADATA_KEY,
+    EDITABLE_INPUT_METADATA_KEY, MessageAccounting, ModelMetadata, PromptDisplayMetadata,
+    RunStreamEvent, RunStreamSink, SelectedAgent, SmokeControl, TUI_DISPLAY_METADATA_KEY,
 };
 
 pub(crate) struct PersistenceSink {
@@ -355,6 +355,11 @@ pub(crate) fn prompt_user_metadata(
         );
     }
     let content_text_override = prompt_display.map(|display| display.content_text.clone());
+    if let Some(envelope) = prompt_display.and_then(|display| display.editable_input.as_ref())
+        && let Ok(value) = serde_json::to_value(envelope)
+    {
+        metadata.insert(EDITABLE_INPUT_METADATA_KEY.to_string(), value);
+    }
     if let Some(display) = prompt_display
         && let Ok(value) = serde_json::to_value(display)
     {

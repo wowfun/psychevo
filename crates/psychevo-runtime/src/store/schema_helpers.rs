@@ -1,5 +1,10 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::error::Result;
+use crate::types::SessionSummary;
+
+use super::SqliteStore;
+
 pub(crate) fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",

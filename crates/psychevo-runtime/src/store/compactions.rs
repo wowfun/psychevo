@@ -1,5 +1,13 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo_agent_core::now_ms;
+use rusqlite::{OptionalExtension, params};
+use serde_json::Value;
+
+use crate::error::{Error, Result};
+
+use super::store_message_fields::{optional_json_string, parse_optional_json};
+use super::store_undo_helpers::session_tool_call_count;
+use super::{SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore};
+
 impl SqliteStore {
     pub fn append_session_compaction(
         &self,

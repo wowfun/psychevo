@@ -1,5 +1,8 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use super::Value;
+use super::snapshot::{
+    ADVICE_LIMIT, CATEGORY_ADVICE_PERCENT, CONTEXT_BAR_MAX_CELLS, CONTEXT_BAR_MIN_CELLS,
+    ContextAdvice, ContextScope, ContextSnapshot, TOTAL_CRITICAL_PERCENT, TOTAL_WARNING_PERCENT,
+};
 
 pub(crate) fn context_advice(snapshot: &ContextSnapshot) -> Vec<ContextAdvice> {
     let mut advice = Vec::new();
@@ -170,7 +173,7 @@ pub(crate) fn scope_label(scope: ContextScope) -> &'static str {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    pub(crate) use super::*;
+    use super::super::{BTreeMap, OpenAiChatTokenCount, snapshot::*};
     use psychevo_ai::{OpenAiChatRoleTokenCount, OpenAiChatSkillTokenCount};
 
     fn count(system: u64, tools: u64, skills: u64, messages: u64) -> OpenAiChatTokenCount {

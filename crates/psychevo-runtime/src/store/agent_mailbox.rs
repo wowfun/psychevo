@@ -1,5 +1,12 @@
-#[allow(unused_imports)]
-pub(crate) use super::*;
+use psychevo_agent_core::now_ms;
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::error::Result;
+
+use super::store_message_fields::optional_json_string;
+use super::store_metadata::json_to_sql;
+use super::{AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore};
+
 impl SqliteStore {
     pub fn append_agent_mailbox_event(&self, input: AgentMailboxEventInput) -> Result<i64> {
         let now = now_ms();

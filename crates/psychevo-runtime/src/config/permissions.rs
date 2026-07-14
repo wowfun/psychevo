@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 
 pub fn permission_rules_value(options: &RunOptions, scope: ConfigScope) -> Result<Value> {
     let document = config_show_value(options, scope)?;

@@ -455,6 +455,73 @@ pub(crate) fn prompt_prefix_includes_runtime_cwd_environment() {
 }
 
 #[test]
+pub(crate) fn runtime_time_context_is_turn_scoped_auditable_base_policy() {
+    let capabilities = crate::types::ModelCapabilities {
+        developer_role: Some(true),
+        ..Default::default()
+    };
+    let time_context = crate::prompt_assembly::RuntimeTimeContext::new("2026-07-13", "+08:00");
+    let instruction =
+        crate::prompt_assembly::turn_runtime_time_instruction(&time_context, &capabilities, 0);
+    let content = "Runtime time context:\n- Current date: 2026-07-13\n- Local UTC offset: +08:00\nInterpret relative terms such as today, latest, recent, and current against this date. Verify time-sensitive facts with available tools.";
+
+    assert_eq!(
+        instruction,
+        psychevo_agent_core::PromptInstruction {
+            slot: "runtime_time".to_string(),
+            tier: "turn".to_string(),
+            semantic_role: "base_policy".to_string(),
+            provider_role: "developer".to_string(),
+            order: 0,
+            content: content.to_string(),
+            content_hash: crate::prompt_assembly::stable_hash_hex(content),
+            source_kind: Some("runtime".to_string()),
+            source_name: Some("time".to_string()),
+            source_path: None,
+        }
+    );
+    assert_eq!(
+        crate::prompt_assembly::context_evidence_for_request(&[], &[instruction], &[], &[]),
+        vec![crate::store::ContextEvidenceInput {
+            role: "developer".to_string(),
+            source_kind: "runtime".to_string(),
+            source_name: Some("time".to_string()),
+            source_path: None,
+            provider_group: Some("turn_prompt_instructions".to_string()),
+            provider_block_index: Some(0),
+            context_kind: Some("base_policy".to_string()),
+            content_text: content.to_string(),
+            metadata: Some(json!({
+                "slot": "runtime_time",
+                "tier": "turn",
+                "semantic_role": "base_policy",
+                "content_hash": crate::prompt_assembly::stable_hash_hex(content),
+                "order": 0,
+            })),
+        }]
+    );
+
+    let prefix = crate::prompt_assembly::assemble_main_prompt_prefix(
+        crate::prompt_assembly::MainPromptPrefixInput {
+            mode: RunMode::Default,
+            cwd: &PathBuf::from("/tmp/repo"),
+            selected_agent: None,
+            agents: &[],
+            skills: &[],
+            project_instruction_fragments: &[],
+            capabilities: &capabilities,
+            tools_available: true,
+        },
+    );
+    assert!(
+        prefix
+            .prefix_slots
+            .iter()
+            .all(|slot| slot.slot != "runtime_time")
+    );
+}
+
+#[test]
 pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallback() {
     let fragment = crate::project_instructions::ProjectInstructionFragment {
             source_name: "AGENTS.md".to_string(),

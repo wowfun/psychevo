@@ -136,10 +136,7 @@ pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
     store
         .set_session_revert_state(
             &session,
-            crate::store::SessionRevertState {
-                start_seq: 3,
-                original_snapshot: "snapshot".to_string(),
-            },
+            crate::store::SessionRevertState::workspace_undo(3, "snapshot".to_string()),
         )
         .expect("revert");
     assert_eq!(
@@ -429,10 +426,7 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
     store
         .set_session_revert_state(
             &first,
-            crate::store::SessionRevertState {
-                start_seq: 2,
-                original_snapshot: "snapshot".to_string(),
-            },
+            crate::store::SessionRevertState::workspace_undo(2, "snapshot".to_string()),
         )
         .expect("revert");
 

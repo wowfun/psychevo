@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 
 pub fn resolve_voice_asr_config(
     options: &RunOptions,

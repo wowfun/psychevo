@@ -229,3 +229,119 @@ pub(crate) fn undo_redo_error_paths_do_not_mutate_revert_state() {
     );
     assert_eq!(store.load_messages(&session_id).expect("messages").len(), 1);
 }
+
+#[test]
+pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_snapshots() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let file = cwd.join("tracked.txt");
+    fs::write(&file, "workspace stays current\n").expect("workspace");
+    let store = SqliteStore::open(&db).expect("store");
+    let session_id = store
+        .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .expect("session");
+    store
+        .append_message_with_undo_snapshot(
+            &session_id,
+            &user_message("first prompt", 1),
+            Some("unused-snapshot-one".to_string()),
+        )
+        .expect("first");
+    let boundary = 2;
+    store
+        .append_message_with_undo_snapshot(
+            &session_id,
+            &user_message("second prompt", 2),
+            Some("unused-snapshot-two".to_string()),
+        )
+        .expect("second");
+    let staged = SessionRevertState::conversation_edit(
+        boundary,
+        format!("message:{boundary}"),
+        vec![ConversationDraftPart::Text {
+            text: "edited prompt".to_string(),
+        }],
+    );
+    store
+        .set_session_revert_state(&session_id, staged.clone())
+        .expect("stage conversation edit");
+
+    assert_eq!(
+        fs::read_to_string(&file).expect("workspace"),
+        "workspace stays current\n"
+    );
+    assert_eq!(
+        store
+            .load_tui_message_summaries(&session_id)
+            .expect("visible")
+            .len(),
+        1
+    );
+    drop(store);
+    let restarted = SqliteStore::open(&db).expect("restart");
+    assert_eq!(
+        restarted.session_revert_state(&session_id).expect("revert"),
+        Some(staged)
+    );
+
+    let options = SessionUndoOptions {
+        state: StateRuntime::open(&db).expect("runtime"),
+        cwd: cwd.clone(),
+        snapshot_root: temp.path().join("snapshots"),
+        session_id: session_id.clone(),
+    };
+    assert!(
+        undo_session(options.clone())
+            .expect_err("conversation edit blocks undo")
+            .to_string()
+            .contains("staged conversation edit")
+    );
+    assert!(
+        redo_session(options)
+            .expect_err("conversation edit blocks redo")
+            .to_string()
+            .contains("staged conversation edit")
+    );
+    assert_eq!(
+        fs::read_to_string(&file).expect("workspace"),
+        "workspace stays current\n"
+    );
+    assert_eq!(
+        restarted
+            .cleanup_reverted_messages(&session_id)
+            .expect("accepted replacement cleanup"),
+        1
+    );
+    assert_eq!(
+        restarted
+            .load_messages(&session_id)
+            .expect("messages")
+            .len(),
+        1
+    );
+}
+
+#[test]
+pub(crate) fn legacy_revert_metadata_parses_as_workspace_undo() {
+    let temp = tempdir().expect("temp");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let session_id = store
+        .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .expect("session");
+    store
+        .set_session_metadata_field(
+            &session_id,
+            crate::store::SESSION_REVERT_METADATA_KEY,
+            Some(json!({"start_seq": 7, "original_snapshot": "legacy-snapshot"})),
+        )
+        .expect("legacy metadata");
+    assert_eq!(
+        store
+            .session_revert_state(&session_id)
+            .expect("revert")
+            .and_then(|revert| revert.original_snapshot().map(str::to_string)),
+        Some("legacy-snapshot".to_string())
+    );
+}

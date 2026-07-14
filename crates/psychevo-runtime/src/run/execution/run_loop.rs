@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub(crate) use super::*;
+use super::*;
 use crate::agents::{apply_hook_runtime, build_hook_runtime};
 use crate::config::resolve_title_generation_provider;
 
@@ -695,10 +695,18 @@ pub(crate) async fn run_live_internal(
         (assembly_from_prefix_record(&record), record)
     };
     let prefix_notice = take_prompt_prefix_notice(&store, &session_id)?;
-    let mut turn_prompt_instructions = Vec::new();
+    let runtime_time_context = RuntimeTimeContext::local_now();
+    let mut turn_prompt_instructions = vec![turn_runtime_time_instruction(
+        &runtime_time_context,
+        &resolved.metadata.capabilities,
+        0,
+    )];
     if let Some(notice) = prefix_notice.as_deref()
-        && let Some(instruction) =
-            turn_prefix_notice_instruction(notice, &resolved.metadata.capabilities, 0)
+        && let Some(instruction) = turn_prefix_notice_instruction(
+            notice,
+            &resolved.metadata.capabilities,
+            turn_prompt_instructions.len(),
+        )
     {
         turn_prompt_instructions.push(instruction);
     }

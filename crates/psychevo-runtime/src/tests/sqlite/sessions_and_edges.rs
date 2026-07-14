@@ -1508,10 +1508,7 @@ pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
     store
         .set_session_revert_state(
             &session_id,
-            crate::store::SessionRevertState {
-                start_seq: prompt_seq,
-                original_snapshot: "snapshot".to_string(),
-            },
+            crate::store::SessionRevertState::workspace_undo(prompt_seq, "snapshot".to_string()),
         )
         .expect("revert");
     assert_eq!(
