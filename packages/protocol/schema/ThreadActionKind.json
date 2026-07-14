@@ -4,7 +4,10 @@
     "interrupt",
     "steer",
     "compact",
-    "fork"
+    "fork",
+    "forkBefore",
+    "revertConversation",
+    "unrevertConversation"
   ],
   "title": "ThreadActionKind",
   "type": "string"

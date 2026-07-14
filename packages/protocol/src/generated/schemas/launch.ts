@@ -131,6 +131,12 @@ export const launchSchemas = {
         "null"
       ]
     },
+    "instanceId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "pid": {
       "format": "uint32",
       "minimum": 0.0,

@@ -156,6 +156,9 @@ pub struct GatewayThread {
     pub backend: GatewayBackendInfo,
     #[serde(default)]
     pub source_key: Option<SourceKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub forked_from_thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -327,7 +330,7 @@ pub struct GatewayMention {
     pub target: GatewayMentionTarget,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum GatewayImageInput {
     LocalPath { path: String },

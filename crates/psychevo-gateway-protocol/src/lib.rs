@@ -173,6 +173,27 @@ mod thread_application_contract_tests {
             }) if thread_id == "thread-1" && cursor.as_deref() == Some("message:7")
         ));
 
+        let editable: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/history/draft/read",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "thread-test" }
+                },
+                "threadId": "thread-1",
+                "messageId": "message:7"
+            }
+        }))
+        .expect("typed editable draft read");
+        assert!(matches!(
+            editable,
+            ClientRequest::ThreadHistoryDraftRead(ThreadHistoryDraftReadParams {
+                ref thread_id,
+                ref message_id,
+                ..
+            }) if thread_id == "thread-1" && message_id == "message:7"
+        ));
+
         let open_command = serde_json::from_value::<ClientRequest>(serde_json::json!({
             "method": "thread/action/run",
             "params": {
@@ -309,6 +330,19 @@ mod thread_application_contract_tests {
         assert_eq!(fork.kind(), ThreadActionKind::Fork);
         let value = serde_json::to_value(fork).expect("serialize typed fork action");
         assert!(value.get("nativeSessionId").is_none());
+
+        let edit: ThreadActionInput = serde_json::from_value(serde_json::json!({
+            "kind": "revertConversation",
+            "messageId": "message:7",
+            "draft": {
+                "parts": [
+                    {"type": "text", "text": "updated"},
+                    {"type": "image", "input": {"kind": "url", "url": "data:image/png;base64,AA=="}}
+                ]
+            }
+        }))
+        .expect("typed conversation edit action");
+        assert_eq!(edit.kind(), ThreadActionKind::RevertConversation);
     }
 
     #[test]

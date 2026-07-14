@@ -267,6 +267,12 @@ export const threadSessionSchemas = {
         "null"
       ]
     },
+    "forkedFromThreadId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "id": {
       "type": "string"
     },
@@ -286,13 +292,6 @@ export const threadSessionSchemas = {
       "type": "integer"
     },
     "model": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "preview": {
       "default": null,
       "type": [
         "string",
@@ -332,11 +331,6 @@ export const threadSessionSchemas = {
         "integer",
         "null"
       ]
-    },
-    "visibleEntryCount": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
     }
   },
   "required": [
@@ -345,8 +339,7 @@ export const threadSessionSchemas = {
     "messageCount",
     "project",
     "startedAtMs",
-    "toolCallCount",
-    "visibleEntryCount"
+    "toolCallCount"
   ],
   "title": "SessionSummaryView",
   "type": "object"

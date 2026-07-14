@@ -97,6 +97,12 @@ export const turnResultSchemas = {
         "backend": {
           "$ref": "#/definitions/GatewayBackendInfo"
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },

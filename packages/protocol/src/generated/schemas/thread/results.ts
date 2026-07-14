@@ -181,6 +181,12 @@ export const threadResultSchemas = {
             "null"
           ]
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -200,13 +206,6 @@ export const threadResultSchemas = {
           "type": "integer"
         },
         "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "preview": {
           "default": null,
           "type": [
             "string",
@@ -246,11 +245,6 @@ export const threadResultSchemas = {
             "integer",
             "null"
           ]
-        },
-        "visibleEntryCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
         }
       },
       "required": [
@@ -259,8 +253,7 @@ export const threadResultSchemas = {
         "messageCount",
         "project",
         "startedAtMs",
-        "toolCallCount",
-        "visibleEntryCount"
+        "toolCallCount"
       ],
       "type": "object"
     }
@@ -459,6 +452,12 @@ export const threadResultSchemas = {
             "null"
           ]
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -478,13 +477,6 @@ export const threadResultSchemas = {
           "type": "integer"
         },
         "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "preview": {
           "default": null,
           "type": [
             "string",
@@ -524,11 +516,6 @@ export const threadResultSchemas = {
             "integer",
             "null"
           ]
-        },
-        "visibleEntryCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
         }
       },
       "required": [
@@ -537,8 +524,7 @@ export const threadResultSchemas = {
         "messageCount",
         "project",
         "startedAtMs",
-        "toolCallCount",
-        "visibleEntryCount"
+        "toolCallCount"
       ],
       "type": "object"
     }

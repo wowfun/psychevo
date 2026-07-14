@@ -18,6 +18,7 @@ import { clientRequestThreadControlSetSchema } from './rpc/client-request/thread
 import { clientRequestThreadActionRunSchema } from './rpc/client-request/thread-action-run';
 import { clientRequestThreadInteractionRespondSchema } from './rpc/client-request/thread-interaction-respond';
 import { clientRequestThreadHistoryReadSchema } from './rpc/client-request/thread-history-read';
+import { clientRequestThreadHistoryDraftReadSchema } from './rpc/client-request/thread-history-draft-read';
 import { clientRequestThreadImportListSchema } from './rpc/client-request/thread-import-list';
 import { clientRequestThreadImportSchema } from './rpc/client-request/thread-import';
 import { clientRequestRuntimeProfileListSchema } from './rpc/client-request/runtime-profile-list';
@@ -395,6 +396,9 @@ export const rpcSchemas = {
     },
     {
       "$ref": "ClientRequest/thread-history-read.json"
+    },
+    {
+      "$ref": "ClientRequest/thread-history-draft-read.json"
     },
     {
       "$ref": "ClientRequest/thread-import-list.json"
@@ -819,6 +823,7 @@ export const rpcSchemaRefs = [
   clientRequestThreadActionRunSchema,
   clientRequestThreadInteractionRespondSchema,
   clientRequestThreadHistoryReadSchema,
+  clientRequestThreadHistoryDraftReadSchema,
   clientRequestThreadImportListSchema,
   clientRequestThreadImportSchema,
   clientRequestRuntimeProfileListSchema,

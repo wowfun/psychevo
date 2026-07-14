@@ -107,6 +107,46 @@ export const threadSnapshotSchemas = {
       ],
       "type": "object"
     },
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -203,6 +243,12 @@ export const threadSnapshotSchemas = {
         "backend": {
           "$ref": "#/definitions/GatewayBackendInfo"
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -287,6 +333,107 @@ export const threadSnapshotSchemas = {
       ],
       "type": "object"
     },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadHistoryEditingKind": {
+      "enum": [
+        "workspaceUndo",
+        "conversationEdit"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryEditingView": {
+      "properties": {
+        "availableActions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadHistoryRecoveryActionKind"
+          },
+          "type": "array"
+        },
+        "boundaryMessageId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hiddenEntryCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/ThreadHistoryEditingKind"
+        },
+        "replacementDraft": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadEditableDraft"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
     "ThreadHistoryFidelityView": {
       "enum": [
         "full",
@@ -301,6 +448,13 @@ export const threadSnapshotSchemas = {
         "psychevo",
         "agent",
         "process"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryRecoveryActionKind": {
+      "enum": [
+        "redoWorkspace",
+        "restoreHistory"
       ],
       "type": "string"
     },
@@ -575,6 +729,16 @@ export const threadSnapshotSchemas = {
     },
     "history": {
       "$ref": "#/definitions/ThreadHistoryView"
+    },
+    "historyEditing": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadHistoryEditingView"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "pendingActions": {
       "items": {

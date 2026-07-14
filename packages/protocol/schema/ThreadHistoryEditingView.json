@@ -92,134 +92,61 @@
           "type": "object"
         }
       ]
+    },
+    "ThreadHistoryEditingKind": {
+      "enum": [
+        "workspaceUndo",
+        "conversationEdit"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryRecoveryActionKind": {
+      "enum": [
+        "redoWorkspace",
+        "restoreHistory"
+      ],
+      "type": "string"
     }
   },
-  "oneOf": [
-    {
-      "properties": {
-        "kind": {
-          "enum": [
-            "interrupt"
-          ],
-          "type": "string"
-        }
+  "properties": {
+    "availableActions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadHistoryRecoveryActionKind"
       },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
+      "type": "array"
     },
-    {
-      "properties": {
-        "expected_turn_id": {
-          "type": "string"
-        },
-        "kind": {
-          "enum": [
-            "steer"
-          ],
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "expected_turn_id",
-        "kind",
-        "text"
-      ],
-      "type": "object"
+    "boundaryMessageId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
-    {
-      "properties": {
-        "instructions": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "kind": {
-          "enum": [
-            "compact"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
+    "hiddenEntryCount": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
     },
-    {
-      "properties": {
-        "kind": {
-          "enum": [
-            "fork"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
+    "kind": {
+      "$ref": "#/definitions/ThreadHistoryEditingKind"
     },
-    {
-      "properties": {
-        "kind": {
-          "enum": [
-            "forkBefore"
-          ],
-          "type": "string"
-        },
-        "message_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "message_id"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "draft": {
+    "replacementDraft": {
+      "anyOf": [
+        {
           "$ref": "#/definitions/ThreadEditableDraft"
         },
-        "kind": {
-          "enum": [
-            "revertConversation"
-          ],
-          "type": "string"
-        },
-        "message_id": {
-          "type": "string"
+        {
+          "type": "null"
         }
-      },
-      "required": [
-        "draft",
-        "kind",
-        "message_id"
       ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "kind": {
-          "enum": [
-            "unrevertConversation"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
+      "default": null
     }
+  },
+  "required": [
+    "kind"
   ],
-  "title": "ThreadActionInput"
+  "title": "ThreadHistoryEditingView",
+  "type": "object"
 }

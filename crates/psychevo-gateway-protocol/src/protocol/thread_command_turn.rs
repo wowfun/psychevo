@@ -465,6 +465,34 @@ pub enum ThreadActionKind {
     Steer,
     Compact,
     Fork,
+    ForkBefore,
+    RevertConversation,
+    UnrevertConversation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ThreadEditableInputPart {
+    Text { text: String },
+    Image { input: GatewayImageInput },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadEditableDraft {
+    #[serde(default)]
+    pub parts: Vec<ThreadEditableInputPart>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadEditableDraftFidelity {
+    Exact,
+    BestEffort,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -484,6 +512,14 @@ pub enum ThreadActionInput {
         instructions: Option<String>,
     },
     Fork,
+    ForkBefore {
+        message_id: String,
+    },
+    RevertConversation {
+        message_id: String,
+        draft: ThreadEditableDraft,
+    },
+    UnrevertConversation,
 }
 
 impl ThreadActionInput {
@@ -493,6 +529,9 @@ impl ThreadActionInput {
             Self::Steer { .. } => ThreadActionKind::Steer,
             Self::Compact { .. } => ThreadActionKind::Compact,
             Self::Fork => ThreadActionKind::Fork,
+            Self::ForkBefore { .. } => ThreadActionKind::ForkBefore,
+            Self::RevertConversation { .. } => ThreadActionKind::RevertConversation,
+            Self::UnrevertConversation => ThreadActionKind::UnrevertConversation,
         }
     }
 }
@@ -528,6 +567,23 @@ pub enum ThreadActionRunResult {
     Fork {
         #[serde(rename = "sourceThreadId")]
         source_thread_id: String,
+        snapshot: Box<ThreadSnapshot>,
+    },
+    ForkBefore {
+        #[serde(rename = "sourceThreadId")]
+        source_thread_id: String,
+        snapshot: Box<ThreadSnapshot>,
+    },
+    RevertConversation {
+        thread_id: String,
+        staged: bool,
+        #[serde(rename = "noOp")]
+        no_op: bool,
+        snapshot: Box<ThreadSnapshot>,
+    },
+    UnrevertConversation {
+        thread_id: String,
+        draft: ThreadEditableDraft,
         snapshot: Box<ThreadSnapshot>,
     },
 }
@@ -580,6 +636,30 @@ pub struct ThreadHistoryReadResult {
     pub entries: Vec<TranscriptEntry>,
     #[serde(default)]
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryDraftReadParams {
+    pub scope: GatewayRequestScope,
+    pub thread_id: String,
+    pub message_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryDraftReadResult {
+    pub thread_id: String,
+    pub message_id: String,
+    #[serde(default)]
+    pub message_seq: Option<i64>,
+    #[serde(default)]
+    pub parts: Vec<ThreadEditableInputPart>,
+    pub fidelity: ThreadEditableDraftFidelity,
+    #[serde(default)]
+    pub warning: Option<String>,
+    #[serde(default, rename = "unavailableReason")]
+    pub unavailable_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

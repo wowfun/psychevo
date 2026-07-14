@@ -931,6 +931,46 @@ export const threadControlSchemas = {
   ThreadActionRunParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -1063,6 +1103,112 @@ export const threadControlSchemas = {
           },
           "required": [
             "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "forkBefore"
+              ],
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "message_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "draft": {
+              "$ref": "#/definitions/ThreadEditableDraft"
+            },
+            "kind": {
+              "enum": [
+                "revertConversation"
+              ],
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "draft",
+            "kind",
+            "message_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unrevertConversation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
           ],
           "type": "object"
         }
@@ -1341,6 +1487,91 @@ export const threadControlSchemas = {
     "threadId"
   ],
   "title": "ThreadHistoryReadParams",
+  "type": "object"
+},
+  ThreadHistoryDraftReadParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "messageId": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "messageId",
+    "scope",
+    "threadId"
+  ],
+  "title": "ThreadHistoryDraftReadParams",
   "type": "object"
 },
   ThreadImportListParams: {
@@ -1840,7 +2071,10 @@ export const threadControlSchemas = {
         "interrupt",
         "steer",
         "compact",
-        "fork"
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation"
       ],
       "type": "string"
     }
@@ -1885,13 +2119,299 @@ export const threadControlSchemas = {
     "interrupt",
     "steer",
     "compact",
-    "fork"
+    "fork",
+    "forkBefore",
+    "revertConversation",
+    "unrevertConversation"
   ],
   "title": "ThreadActionKind",
   "type": "string"
 },
+  ThreadEditableInputPart: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "text"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "input": {
+          "$ref": "#/definitions/GatewayImageInput"
+        },
+        "type": {
+          "enum": [
+            "image"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ThreadEditableInputPart"
+},
+  ThreadEditableDraft: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "parts": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadEditableInputPart"
+      },
+      "type": "array"
+    }
+  },
+  "title": "ThreadEditableDraft",
+  "type": "object"
+},
+  ThreadEditableDraftFidelity: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "exact",
+    "bestEffort"
+  ],
+  "title": "ThreadEditableDraftFidelity",
+  "type": "string"
+},
   ThreadActionInput: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
   "oneOf": [
     {
       "properties": {
@@ -1955,6 +2475,60 @@ export const threadControlSchemas = {
         "kind": {
           "enum": [
             "fork"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "forkBefore"
+          ],
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message_id"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "draft": {
+          "$ref": "#/definitions/ThreadEditableDraft"
+        },
+        "kind": {
+          "enum": [
+            "revertConversation"
+          ],
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "draft",
+        "kind",
+        "message_id"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "unrevertConversation"
           ],
           "type": "string"
         }
@@ -2073,6 +2647,46 @@ export const threadControlSchemas = {
       ],
       "type": "object"
     },
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -2168,6 +2782,12 @@ export const threadControlSchemas = {
       "properties": {
         "backend": {
           "$ref": "#/definitions/GatewayBackendInfo"
+        },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "type": "string"
@@ -2392,6 +3012,107 @@ export const threadControlSchemas = {
       ],
       "type": "object"
     },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadHistoryEditingKind": {
+      "enum": [
+        "workspaceUndo",
+        "conversationEdit"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryEditingView": {
+      "properties": {
+        "availableActions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadHistoryRecoveryActionKind"
+          },
+          "type": "array"
+        },
+        "boundaryMessageId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hiddenEntryCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/ThreadHistoryEditingKind"
+        },
+        "replacementDraft": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadEditableDraft"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
     "ThreadHistoryFidelityView": {
       "enum": [
         "full",
@@ -2406,6 +3127,13 @@ export const threadControlSchemas = {
         "psychevo",
         "agent",
         "process"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryRecoveryActionKind": {
+      "enum": [
+        "redoWorkspace",
+        "restoreHistory"
       ],
       "type": "string"
     },
@@ -2451,6 +3179,16 @@ export const threadControlSchemas = {
         },
         "history": {
           "$ref": "#/definitions/ThreadHistoryView"
+        },
+        "historyEditing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadHistoryEditingView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "pendingActions": {
           "items": {
@@ -2808,6 +3546,84 @@ export const threadControlSchemas = {
         "kind",
         "snapshot",
         "sourceThreadId"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "forkBefore"
+          ],
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/ThreadSnapshot"
+        },
+        "sourceThreadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "snapshot",
+        "sourceThreadId"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "revertConversation"
+          ],
+          "type": "string"
+        },
+        "noOp": {
+          "type": "boolean"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/ThreadSnapshot"
+        },
+        "staged": {
+          "type": "boolean"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "noOp",
+        "snapshot",
+        "staged",
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "draft": {
+          "$ref": "#/definitions/ThreadEditableDraft"
+        },
+        "kind": {
+          "enum": [
+            "unrevertConversation"
+          ],
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/ThreadSnapshot"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "draft",
+        "kind",
+        "snapshot",
+        "thread_id"
       ],
       "type": "object"
     }
@@ -3226,6 +4042,145 @@ export const threadControlSchemas = {
     "threadId"
   ],
   "title": "ThreadHistoryReadResult",
+  "type": "object"
+},
+  ThreadHistoryDraftReadResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadEditableDraftFidelity": {
+      "enum": [
+        "exact",
+        "bestEffort"
+      ],
+      "type": "string"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "fidelity": {
+      "$ref": "#/definitions/ThreadEditableDraftFidelity"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "messageSeq": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "parts": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadEditableInputPart"
+      },
+      "type": "array"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "warning": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "fidelity",
+    "messageId",
+    "threadId"
+  ],
+  "title": "ThreadHistoryDraftReadResult",
   "type": "object"
 },
   ThreadImportCandidateView: {
@@ -3763,6 +4718,46 @@ export const threadControlSchemas = {
       ],
       "type": "object"
     },
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -3859,6 +4854,12 @@ export const threadControlSchemas = {
         "backend": {
           "$ref": "#/definitions/GatewayBackendInfo"
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -3943,6 +4944,107 @@ export const threadControlSchemas = {
       ],
       "type": "object"
     },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadHistoryEditingKind": {
+      "enum": [
+        "workspaceUndo",
+        "conversationEdit"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryEditingView": {
+      "properties": {
+        "availableActions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadHistoryRecoveryActionKind"
+          },
+          "type": "array"
+        },
+        "boundaryMessageId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hiddenEntryCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/ThreadHistoryEditingKind"
+        },
+        "replacementDraft": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadEditableDraft"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
     "ThreadHistoryFidelityView": {
       "enum": [
         "full",
@@ -3957,6 +5059,13 @@ export const threadControlSchemas = {
         "psychevo",
         "agent",
         "process"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryRecoveryActionKind": {
+      "enum": [
+        "redoWorkspace",
+        "restoreHistory"
       ],
       "type": "string"
     },
@@ -4002,6 +5111,16 @@ export const threadControlSchemas = {
         },
         "history": {
           "$ref": "#/definitions/ThreadHistoryView"
+        },
+        "historyEditing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadHistoryEditingView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "pendingActions": {
           "items": {
@@ -4276,6 +5395,176 @@ export const threadControlSchemas = {
     "snapshot"
   ],
   "title": "ThreadImportResult",
+  "type": "object"
+},
+  ThreadHistoryEditingKind: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "workspaceUndo",
+    "conversationEdit"
+  ],
+  "title": "ThreadHistoryEditingKind",
+  "type": "string"
+},
+  ThreadHistoryRecoveryActionKind: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "redoWorkspace",
+    "restoreHistory"
+  ],
+  "title": "ThreadHistoryRecoveryActionKind",
+  "type": "string"
+},
+  ThreadHistoryEditingView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadHistoryEditingKind": {
+      "enum": [
+        "workspaceUndo",
+        "conversationEdit"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryRecoveryActionKind": {
+      "enum": [
+        "redoWorkspace",
+        "restoreHistory"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "availableActions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadHistoryRecoveryActionKind"
+      },
+      "type": "array"
+    },
+    "boundaryMessageId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hiddenEntryCount": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "kind": {
+      "$ref": "#/definitions/ThreadHistoryEditingKind"
+    },
+    "replacementDraft": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadEditableDraft"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "ThreadHistoryEditingView",
   "type": "object"
 },
   ThreadSendabilityView: {
@@ -4804,7 +6093,10 @@ export const threadControlSchemas = {
         "interrupt",
         "steer",
         "compact",
-        "fork"
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation"
       ],
       "type": "string"
     },
@@ -5657,7 +6949,10 @@ export const threadControlSchemas = {
         "interrupt",
         "steer",
         "compact",
-        "fork"
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation"
       ],
       "type": "string"
     },
@@ -6532,7 +7827,10 @@ export const threadControlSchemas = {
         "interrupt",
         "steer",
         "compact",
-        "fork"
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation"
       ],
       "type": "string"
     },

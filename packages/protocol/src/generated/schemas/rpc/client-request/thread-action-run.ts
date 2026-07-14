@@ -4,6 +4,46 @@ export const clientRequestThreadActionRunSchema = {
   "$id": "ClientRequest/thread-action-run.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GatewayRequestScope": {
       "properties": {
         "cwd": {
@@ -138,6 +178,60 @@ export const clientRequestThreadActionRunSchema = {
             "kind"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "forkBefore"
+              ],
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "message_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "draft": {
+              "$ref": "#/definitions/ThreadEditableDraft"
+            },
+            "kind": {
+              "enum": [
+                "revertConversation"
+              ],
+              "type": "string"
+            },
+            "message_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "draft",
+            "kind",
+            "message_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unrevertConversation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -159,6 +253,58 @@ export const clientRequestThreadActionRunSchema = {
         "threadId"
       ],
       "type": "object"
+    },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "properties": {

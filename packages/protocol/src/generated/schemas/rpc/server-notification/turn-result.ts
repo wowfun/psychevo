@@ -97,6 +97,12 @@ export const serverNotificationTurnResultSchema = {
         "backend": {
           "$ref": "#/definitions/GatewayBackendInfo"
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },

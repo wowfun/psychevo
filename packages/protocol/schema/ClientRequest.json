@@ -56,6 +56,9 @@
       "$ref": "ClientRequest/thread-history-read.json"
     },
     {
+      "$ref": "ClientRequest/thread-history-draft-read.json"
+    },
+    {
       "$ref": "ClientRequest/thread-import-list.json"
     },
     {

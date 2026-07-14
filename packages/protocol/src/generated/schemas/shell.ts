@@ -155,6 +155,12 @@ export const shellSchemas = {
         "backend": {
           "$ref": "#/definitions/GatewayBackendInfo"
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },

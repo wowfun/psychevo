@@ -181,6 +181,12 @@ export const threadBrowserSchemas = {
             "null"
           ]
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -200,13 +206,6 @@ export const threadBrowserSchemas = {
           "type": "integer"
         },
         "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "preview": {
           "default": null,
           "type": [
             "string",
@@ -246,11 +245,6 @@ export const threadBrowserSchemas = {
             "integer",
             "null"
           ]
-        },
-        "visibleEntryCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
         }
       },
       "required": [
@@ -259,8 +253,7 @@ export const threadBrowserSchemas = {
         "messageCount",
         "project",
         "startedAtMs",
-        "toolCallCount",
-        "visibleEntryCount"
+        "toolCallCount"
       ],
       "type": "object"
     },
@@ -514,6 +507,12 @@ export const threadBrowserSchemas = {
             "null"
           ]
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -533,13 +532,6 @@ export const threadBrowserSchemas = {
           "type": "integer"
         },
         "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "preview": {
           "default": null,
           "type": [
             "string",
@@ -579,11 +571,6 @@ export const threadBrowserSchemas = {
             "integer",
             "null"
           ]
-        },
-        "visibleEntryCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
         }
       },
       "required": [
@@ -592,8 +579,7 @@ export const threadBrowserSchemas = {
         "messageCount",
         "project",
         "startedAtMs",
-        "toolCallCount",
-        "visibleEntryCount"
+        "toolCallCount"
       ],
       "type": "object"
     },

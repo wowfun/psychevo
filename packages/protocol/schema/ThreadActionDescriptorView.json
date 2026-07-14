@@ -14,7 +14,10 @@
         "interrupt",
         "steer",
         "compact",
-        "fork"
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation"
       ],
       "type": "string"
     }

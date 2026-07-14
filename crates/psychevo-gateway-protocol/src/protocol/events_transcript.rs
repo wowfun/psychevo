@@ -308,6 +308,37 @@ pub struct ThreadSnapshot {
     pub entries: Vec<TranscriptEntry>,
     pub activity: GatewayActivityView,
     pub pending_actions: Vec<PendingActionView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub history_editing: Option<ThreadHistoryEditingView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadHistoryEditingKind {
+    WorkspaceUndo,
+    ConversationEdit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadHistoryRecoveryActionKind {
+    RedoWorkspace,
+    RestoreHistory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryEditingView {
+    pub kind: ThreadHistoryEditingKind,
+    #[serde(default, rename = "boundaryMessageId")]
+    pub boundary_message_id: Option<String>,
+    #[serde(default, rename = "hiddenEntryCount")]
+    pub hidden_entry_count: usize,
+    #[serde(default, rename = "replacementDraft")]
+    pub replacement_draft: Option<ThreadEditableDraft>,
+    #[serde(default, rename = "availableActions")]
+    pub available_actions: Vec<ThreadHistoryRecoveryActionKind>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -392,16 +423,16 @@ pub struct SessionSummaryView {
     pub archived_at_ms: Option<i64>,
     pub message_count: usize,
     pub tool_call_count: usize,
-    pub visible_entry_count: usize,
     #[serde(default)]
     pub activity: GatewayActivityView,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
     pub display_title: Option<String>,
-    #[serde(default)]
-    pub preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lifecycle: Option<SessionLifecycleView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub forked_from_thread_id: Option<String>,
 }

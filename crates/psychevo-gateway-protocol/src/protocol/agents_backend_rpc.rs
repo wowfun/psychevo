@@ -1610,6 +1610,9 @@ pub struct CreateLaunchResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagedServerState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub instance_id: Option<String>,
     pub pid: u32,
     pub base_url: String,
     pub readyz_url: String,
@@ -1717,6 +1720,8 @@ pub enum ClientRequest {
     ThreadInteractionRespond(ThreadInteractionRespondParams),
     #[serde(rename = "thread/history/read")]
     ThreadHistoryRead(ThreadHistoryReadParams),
+    #[serde(rename = "thread/history/draft/read")]
+    ThreadHistoryDraftRead(ThreadHistoryDraftReadParams),
     #[serde(rename = "thread/import/list")]
     ThreadImportList(ThreadImportListParams),
     #[serde(rename = "thread/import")]

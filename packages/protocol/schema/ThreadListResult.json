@@ -178,6 +178,12 @@
             "null"
           ]
         },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -197,13 +203,6 @@
           "type": "integer"
         },
         "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "preview": {
           "default": null,
           "type": [
             "string",
@@ -243,11 +242,6 @@
             "integer",
             "null"
           ]
-        },
-        "visibleEntryCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
         }
       },
       "required": [
@@ -256,8 +250,7 @@
         "messageCount",
         "project",
         "startedAtMs",
-        "toolCallCount",
-        "visibleEntryCount"
+        "toolCallCount"
       ],
       "type": "object"
     }

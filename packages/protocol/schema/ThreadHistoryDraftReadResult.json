@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadEditableDraftFidelity": {
+      "enum": [
+        "exact",
+        "bestEffort"
+      ],
+      "type": "string"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "fidelity": {
+      "$ref": "#/definitions/ThreadEditableDraftFidelity"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "messageSeq": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "parts": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadEditableInputPart"
+      },
+      "type": "array"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "unavailableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "warning": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "fidelity",
+    "messageId",
+    "threadId"
+  ],
+  "title": "ThreadHistoryDraftReadResult",
+  "type": "object"
+}
