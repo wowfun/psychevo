@@ -20,6 +20,7 @@ import {
   type ObservabilityReadResult,
   type ThreadContextReadResult,
   type ThreadControlDescriptorView,
+  type ThreadEditableInputPart,
   type SessionSummary,
   type SettingsReadResult,
   type ThreadSnapshot,
@@ -134,6 +135,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [init, setInit] = useState<InitializeResult | null>(null);
   const [activeScope, setActiveScope] = useState<GatewayRequestScope | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
   const [loadingOlderCwd, setLoadingOlderCwd] = useState<string | null>(null);
@@ -172,7 +174,11 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [usageStatsLoading, setUsageStatsLoading] = useState(false);
   const [usageStatsError, setUsageStatsError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const [composerDraftPatch, setComposerDraftPatch] = useState<{ id: number; text: string } | null>(null);
+  const [composerDraftPatch, setComposerDraftPatch] = useState<{
+    id: number;
+    text: string;
+    inputParts?: ThreadEditableInputPart[];
+  } | null>(null);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceAutoSpeak, setVoiceAutoSpeak] = useState(false);
   const [voiceRealtimeSessionId, setVoiceRealtimeSessionId] = useState<string | null>(null);
@@ -545,6 +551,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setError,
     setFallbackCwd,
     setHost,
+    setHistoryLoading,
     setInit,
     setMobilePanel,
     setPinnedSessionIds,
@@ -576,10 +583,11 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     ));
   }
 
-  function patchComposerDraft(text: string) {
+  function patchComposerDraft(text: string, inputParts?: ThreadEditableInputPart[]) {
     setComposerDraftPatch((current) => ({
       id: (current?.id ?? 0) + 1,
-      text
+      text,
+      ...(inputParts ? { inputParts } : {})
     }));
   }
 
@@ -821,10 +829,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     threadId: string,
     text: string,
     mentions: GatewayMention[],
-    displayText?: string | null
-  ) {
+    displayText?: string | null,
+    inputOverride?: ThreadEditableInputPart[]
+  ): Promise<void> {
     const trimmed = text.trim();
-    if (!client || !trimmed) {
+    const input = inputOverride ?? (trimmed ? [{ type: "text" as const, text: trimmed }] : []);
+    if (!client || input.length === 0) {
       return;
     }
     const selectedAtStart = snapshot.thread?.id === threadId;
@@ -843,7 +853,6 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     targetController.setContext(targetContext);
     const binding = targetContext.binding;
     const turnControls = targetController.turnControls(targetContext.targetId, {});
-    const input = [{ type: "text" as const, text: trimmed }];
     const admission = targetController.admitTurn({ controls: turnControls, input, mentions });
     if (!admission.allowed) {
       setCommandFeedback({
@@ -852,10 +861,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
         message: admission.reason ?? "The destination Thread cannot accept this turn.",
         feedbackAnchor: "composer"
       });
-      return;
+      throw new Error(admission.reason ?? "The destination Thread cannot accept this turn.");
     }
     clearCommandTransientUi();
-    const optimisticText = displayText?.trim() || trimmed;
+    const optimisticText = displayText?.trim()
+      || trimmed
+      || input.filter((part) => part.type === "image").map(() => "[Image]").join(" ");
     const turnEpoch = viewEpochRef.current;
     const plan = targetController.beginTurn({
       controls: turnControls,
@@ -1077,10 +1088,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     automations, automationsError, automationsLoading,
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch, capabilitiesTab,
     beginRightResize, changeRuntimeControl, changeRunnableTarget, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
-    channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId,
+    channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId, patchComposerDraft,
     debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, handleAttachment, handleAttachmentFiles, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
-    loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openCapabilitiesTab, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
+    historyLoading, loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openCapabilitiesTab, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifyActions, pendingPermissionActions, pinnedSessionIds, pinnedSessions, pollWechatQrSetup,

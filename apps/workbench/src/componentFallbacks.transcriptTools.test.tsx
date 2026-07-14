@@ -466,7 +466,7 @@ describe("component fallback rendering", () => {
     const runningRow = html.slice(runningRowStart, runningRowEnd);
     expect(runningRow).toContain("pevo-evidenceSpinner");
     expect(runningRow).not.toContain("lucide-chevron");
-    expect(runningRow.indexOf("pevo-evidenceSpinner")).toBeLessThan(runningRow.indexOf("<code>"));
+    expect(runningRow.indexOf("pevo-evidenceSpinner")).toBeLessThan(runningRow.indexOf("<code"));
 
     const subsecondCompletedStart = html.indexOf('data-block-id="subsecond-completed-tool"');
     const subsecondCompletedEnd = html.indexOf("</article>", subsecondCompletedStart);

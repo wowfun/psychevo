@@ -18,6 +18,197 @@ import {
 import { App } from "./App";
 
 describe("Workbench layout and workspace panels", () => {
+  it("runs Native full fork from the session row and opens the authoritative child", async () => {
+    gatewayMock.sessionSummaries = [{
+      ...sessionSummary("thread-1", "Full fork source"),
+      lifecycle: {
+        targetLabel: "Psychevo (Native)",
+        actions: [
+          { id: "fork", enabled: true, unavailableReason: null },
+          { id: "delete", enabled: true, unavailableReason: null }
+        ]
+      }
+    }];
+    gatewayMock.threadActionRun = () => ({
+      kind: "fork",
+      sourceThreadId: "thread-1",
+      snapshot: {
+        ...gatewayMock.snapshot,
+        thread: {
+          id: "fork-child",
+          backend: { kind: "native", sessionHandle: null, runtimeRef: "native" },
+          sourceKey: "source-fork-child",
+          forkedFromThreadId: "thread-1"
+        },
+        entries: []
+      }
+    });
+
+    const { container } = render(<App />);
+    await screen.findByText("Full fork source");
+    fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fork" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/action/run",
+        params: expect.objectContaining({
+          threadId: "thread-1",
+          action: { kind: "fork" }
+        })
+      });
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "fork-child" })
+      });
+    });
+  });
+
+  it("keeps missing fork provenance visible but disables source navigation", async () => {
+    gatewayMock.sessionSummaries = [{
+      ...sessionSummary("fork-child", "Detached fork"),
+      forkedFromThreadId: "deleted-source-thread"
+    }];
+    gatewayMock.snapshot.thread = {
+      id: "fork-child",
+      backend: { kind: "native", sessionHandle: "fork-child", runtimeRef: "native" },
+      sourceKey: "source-fork-child",
+      forkedFromThreadId: "deleted-source-thread"
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Detached fork"));
+
+    const provenance = await screen.findByRole("button", { name: "Forked from deleted-" });
+    expect((provenance as HTMLButtonElement).disabled).toBe(true);
+    expect(provenance.getAttribute("title")).toContain("deleted-source-thread is unavailable");
+  });
+
+  it("keeps the inline edit available when turn admission fails and retries the same staged draft", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Retry history edit")];
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [userTextEntry("Original prompt")];
+    gatewayMock.threadHistoryDraftRead = () => ({
+      threadId: "thread-1",
+      messageId: "message:1",
+      messageSeq: 1,
+      parts: [{ type: "text", text: "Original prompt" }],
+      fidelity: "exact",
+      warning: null,
+      unavailableReason: null
+    });
+    gatewayMock.threadActionRun = () => ({
+      kind: "revertConversation",
+      threadId: "thread-1",
+      staged: true,
+      noOp: false,
+      snapshot: {
+        ...gatewayMock.snapshot,
+        entries: [],
+        historyEditing: {
+          kind: "conversationEdit",
+          boundaryMessageId: "message:1",
+          hiddenEntryCount: 1,
+          replacementDraft: { parts: [{ type: "text", text: "Edited prompt" }] },
+          availableActions: ["restoreHistory"]
+        }
+      }
+    });
+    let turnAttempts = 0;
+    gatewayMock.turnStart = () => {
+      turnAttempts += 1;
+      if (turnAttempts === 1) {
+        throw new Error("The selected model became unavailable.");
+      }
+      return {
+        accepted: true,
+        threadId: "thread-1",
+        turnId: "turn:thread-1",
+        thread: gatewayMock.snapshot.thread
+      };
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Retry history edit"));
+    await screen.findByText("Original prompt");
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this message/ }));
+    const editor = await screen.findByRole("textbox", { name: "Message text 1" });
+    fireEvent.change(editor, { target: { value: "Edited prompt" } });
+    const update = screen.getByRole("button", { name: "Update this message and run in the same thread" });
+    fireEvent.click(update);
+
+    expect(await screen.findByText("The selected model became unavailable.")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Message text 1" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Update this message and run in the same thread" }));
+
+    await waitFor(() => expect(turnAttempts).toBe(2));
+    expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/action/run"
+      && (entry.params as { action?: { kind?: string } }).action?.kind === "revertConversation"
+    ))).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Message text 1" })).toBeNull();
+    });
+  });
+
+  it("restores staged conversation history and keeps the ordered replacement draft in Composer", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "History editing")];
+    gatewayMock.snapshot.historyEditing = {
+      kind: "conversationEdit",
+      boundaryMessageId: "message:1",
+      hiddenEntryCount: 2,
+      replacementDraft: {
+        parts: [
+          { type: "text", text: "edited before" },
+          { type: "image", input: { kind: "url", url: "https://example.test/history.png" } },
+          { type: "text", text: "edited after" }
+        ]
+      },
+      availableActions: ["restoreHistory"]
+    };
+    gatewayMock.threadActionRun = () => ({
+      kind: "unrevertConversation",
+      threadId: "thread-1",
+      snapshot: { ...gatewayMock.snapshot, historyEditing: null },
+      draft: gatewayMock.snapshot.historyEditing?.replacementDraft
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("History editing"));
+    expect(await screen.findByText("2 hidden entries")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Restore history" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/action/run",
+        params: expect.objectContaining({
+          threadId: "thread-1",
+          action: { kind: "unrevertConversation" }
+        })
+      });
+    });
+    expect((screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement).value).toBe(
+      "edited before\nedited after"
+    );
+    expect(screen.getByText("history.png")).toBeTruthy();
+  });
+
+  it("requests initial history once and suppresses the empty state until it resolves", async () => {
+    const browser = deferred<Record<string, unknown>>();
+    gatewayMock.threadBrowser = () => browser.promise;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/browser")).toHaveLength(1);
+    });
+    expect(screen.getByRole("region", { name: "Sessions" }).getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("No sessions")).toBeNull();
+
+    browser.resolve({ workspaces: [] });
+    expect(await screen.findByText("No sessions")).toBeTruthy();
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/browser")).toHaveLength(1);
+  });
+
   it("starts in a hidden draft without rendering a history draft row", async () => {
     const { container } = render(<App />);
 
@@ -690,5 +881,21 @@ function assistantTextEntry(body: string): TranscriptEntry {
     accounting: null,
     createdAtMs: 1,
     updatedAtMs: 1
+  };
+}
+
+function userTextEntry(body: string): TranscriptEntry {
+  return {
+    ...assistantTextEntry(body),
+    id: "message:1",
+    messageSeq: 1,
+    role: "user",
+    blocks: [
+      {
+        ...assistantTextEntry(body).blocks[0]!,
+        id: "message:1:block",
+        body
+      }
+    ]
   };
 }

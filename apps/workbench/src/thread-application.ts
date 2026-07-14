@@ -1,6 +1,7 @@
 import type { GatewayClient } from "@psychevo/client";
 import type {
   GatewayRequestScope,
+  ThreadActionKind,
   ThreadActionDescriptorView,
   ThreadContextReadResult,
   ThreadHistoryView,
@@ -8,7 +9,7 @@ import type {
   TranscriptEntry
 } from "@psychevo/protocol";
 
-export type WorkbenchThreadActionKind = "interrupt" | "steer" | "compact";
+export type WorkbenchThreadActionKind = ThreadActionKind;
 
 export type ThreadApplicationTarget = {
   scope: GatewayRequestScope;

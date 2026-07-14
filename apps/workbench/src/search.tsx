@@ -36,13 +36,13 @@ export function SearchPage({
         for (const session of sessions) {
           const title = session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id);
           const workspace = session.project?.label ?? "";
-          const summaryHaystack = normalizeSearchText(`${session.id} ${title} ${session.preview ?? ""} ${workspace} ${session.cwd}`);
+          const summaryHaystack = normalizeSearchText(`${session.id} ${title} ${workspace} ${session.cwd}`);
           if (summaryHaystack.includes(needle)) {
             next.push({
               excerpt: session.id,
               id: session.id,
               kind: "session",
-              subtitle: `${workspace || "workspace"} · ${session.visibleEntryCount ?? session.messageCount ?? 0} entries`,
+              subtitle: `${workspace || "workspace"} · ${session.messageCount ?? 0} entries`,
               title
             });
             seen.add(`${session.id}:session`);

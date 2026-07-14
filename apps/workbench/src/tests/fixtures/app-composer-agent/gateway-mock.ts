@@ -24,12 +24,14 @@ const gatewayMock = vi.hoisted(() => {
     thread: {
       id: "thread-1",
       backend: { kind: "native" as const, sessionHandle: "thread-1", runtimeRef: "native" },
-      sourceKey: "source-key"
+      sourceKey: "source-key",
+      forkedFromThreadId: undefined as string | undefined
     },
     history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     activity: { running: false, activeTurnId: null as string | null, queuedTurns: 0 },
-    pendingActions: [] as Array<Record<string, unknown>>
+    pendingActions: [] as Array<Record<string, unknown>>,
+    historyEditing: null as Record<string, unknown> | null
   };
   function mergeMockModelOptions(
     current: Array<Record<string, unknown>>,
@@ -63,7 +65,9 @@ const gatewayMock = vi.hoisted(() => {
     commandList: [] as Array<Record<string, unknown>>,
     turnStart: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadStart: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadBrowser: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadActionRun: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadHistoryDraftRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     slashSettings: {
       scope: "global",
       cwd: scope.cwd,

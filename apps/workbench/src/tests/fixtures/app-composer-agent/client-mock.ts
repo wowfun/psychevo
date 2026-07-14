@@ -615,7 +615,10 @@ vi.mock("@psychevo/client", async () => {
             ? {
                 id: threadId,
                 backend: { kind: "native" as const, sessionHandle: threadId, runtimeRef: "native" },
-                sourceKey: `source-${threadId}`
+                sourceKey: `source-${threadId}`,
+                forkedFromThreadId: gatewayMock.snapshot.thread?.id === threadId
+                  ? gatewayMock.snapshot.thread.forkedFromThreadId
+                  : undefined
               }
             : null
         };
@@ -636,11 +639,20 @@ vi.mock("@psychevo/client", async () => {
           nextCursor
         };
       }
+      if (method === "thread/history/draft/read") {
+        if (gatewayMock.threadHistoryDraftRead) {
+          return gatewayMock.threadHistoryDraftRead(params);
+        }
+        throw new Error("thread/history/draft/read mock is not configured");
+      }
       if (method === "thread/list") {
         const record = params as { archived?: boolean } | undefined;
         return { sessions: record?.archived ? gatewayMock.archivedSessionSummaries : gatewayMock.sessionSummaries };
       }
       if (method === "thread/browser") {
+        if (gatewayMock.threadBrowser) {
+          return gatewayMock.threadBrowser(params);
+        }
         return {
           workspaces: gatewayMock.browserWorkspaces ?? [
             {
@@ -1260,6 +1272,38 @@ vi.mock("@psychevo/client", async () => {
               enabled: true,
               stability: "stable",
               channelSafe: true,
+              unavailableReason: null
+            },
+            {
+              id: "fork",
+              label: "Fork Thread",
+              enabled: true,
+              stability: "stable",
+              channelSafe: false,
+              unavailableReason: null
+            },
+            {
+              id: "forkBefore",
+              label: "Fork before message",
+              enabled: true,
+              stability: "stable",
+              channelSafe: false,
+              unavailableReason: null
+            },
+            {
+              id: "revertConversation",
+              label: "Edit and update",
+              enabled: true,
+              stability: "stable",
+              channelSafe: false,
+              unavailableReason: null
+            },
+            {
+              id: "unrevertConversation",
+              label: "Restore history",
+              enabled: true,
+              stability: "stable",
+              channelSafe: false,
               unavailableReason: null
             }
           ] : [],

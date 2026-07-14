@@ -31,7 +31,11 @@ const SESSION_OWNERSHIP = new Set<RuntimeBindingOwnershipView>([
 const THREAD_ACTION_KINDS = new Set<ThreadActionKind>([
   "interrupt",
   "steer",
-  "compact"
+  "compact",
+  "fork",
+  "forkBefore",
+  "revertConversation",
+  "unrevertConversation"
 ]);
 
 export function parseThreadContext(value: unknown): ThreadContextReadResult {

@@ -1,6 +1,6 @@
 import { ArrowUp, Bot, Command, FileText, Folder, Image as ImageIcon, Paperclip, Settings2, Sparkles, X, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction } from "@psychevo/protocol";
+import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction, ThreadEditableInputPart } from "@psychevo/protocol";
 import { IconButton, Switch } from "./primitives";
 
 export interface ComposerProps {
@@ -31,12 +31,13 @@ export interface ComposerProps {
   onRemoveAttachment?(id: string): void;
   onShell?(command: string): void;
   onSteer(text: string): void;
-  onSubmit(text: string, mentions: GatewayMention[]): void;
+  onSubmit(text: string, mentions: GatewayMention[], orderedInput?: ThreadEditableInputPart[]): void;
 }
 
 export interface ComposerDraftPatch {
   id: number;
   text: string;
+  inputParts?: ThreadEditableInputPart[];
 }
 
 export interface ComposerAttachmentView {
@@ -79,6 +80,7 @@ export function Composer({
   onSubmit
 }: ComposerProps) {
   const [draft, setDraft] = useState("");
+  const [draftInputParts, setDraftInputParts] = useState<ThreadEditableInputPart[] | null>(null);
   const [turnMode, setTurnMode] = useState<"turn" | "steer">("steer");
   const [inputMode, setInputMode] = useState<"prompt" | "shell">("prompt");
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -150,6 +152,7 @@ export function Composer({
     cancelCompletion();
     setInputMode("prompt");
     setDraft(draftPatch.text);
+    setDraftInputParts(draftPatch.inputParts?.map((part) => ({ ...part })) ?? null);
     updateMentions([]);
     window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
@@ -197,6 +200,7 @@ export function Composer({
     if (shellMode) {
       onShell?.(trimmed);
       setDraft("");
+      setDraftInputParts(null);
       setInputMode("prompt");
       updateMentions([]);
       return;
@@ -204,6 +208,7 @@ export function Composer({
     if (attachmentItems.length === 0 && slashCommandCandidate && onCommand) {
       onCommand(trimmed);
       setDraft("");
+      setDraftInputParts(null);
       updateMentions([]);
       return;
     }
@@ -212,9 +217,20 @@ export function Composer({
     } else if (promptSubmitDisabled || promptTextBlocked) {
       return;
     } else {
-      onSubmit(trimmed, activeMentionsForDraft(draft, mentionsRef.current));
+      const activeMentions = activeMentionsForDraft(draft, mentionsRef.current);
+      const orderedInput = editedOrderedInput(
+        draftInputParts,
+        trimmed,
+        attachmentItems.length
+      );
+      if (orderedInput) {
+        onSubmit(trimmed, activeMentions, orderedInput);
+      } else {
+        onSubmit(trimmed, activeMentions);
+      }
     }
     setDraft("");
+    setDraftInputParts(null);
     updateMentions([]);
   }
 
@@ -574,6 +590,31 @@ export function Composer({
       </div>
     </form>
   );
+}
+
+function editedOrderedInput(
+  original: ThreadEditableInputPart[] | null,
+  text: string,
+  attachmentCount: number
+): ThreadEditableInputPart[] | undefined {
+  if (!original) return undefined;
+  const imageCount = original.filter((part) => part.type === "image").length;
+  if (imageCount !== attachmentCount) return undefined;
+  const originalText = original
+    .filter((part): part is Extract<ThreadEditableInputPart, { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .trim();
+  if (text === originalText) return original;
+  let insertedText = false;
+  const next = original.flatMap((part): ThreadEditableInputPart[] => {
+    if (part.type === "image") return [part];
+    if (insertedText) return [];
+    insertedText = true;
+    return text ? [{ type: "text", text }] : [];
+  });
+  if (!insertedText && text) next.unshift({ type: "text", text });
+  return next;
 }
 
 function filesFromList(files: FileList | null | undefined): File[] {

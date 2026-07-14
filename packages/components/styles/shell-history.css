@@ -295,6 +295,14 @@
   font-weight: 600;
 }
 
+.pevo-sessionProvenance {
+  overflow: hidden;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pevo-sessionMeta {
   display: inline-flex;
   align-items: center;

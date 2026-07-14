@@ -79,7 +79,7 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
       category: "run",
       defaultOpen: false,
       sections: detail ? [{ code: block.kind === "shell", kind: "text", text: detail, title: "Detail" }] : [],
-      singleTitle: Boolean(invocation),
+      singleTitle: Boolean(invocation || !summary),
       summary: invocation ? null : summary,
       title: invocation ?? title
     };
@@ -95,7 +95,7 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
   const displayTitle = inlineDiff?.title ?? explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
   const summary = inlineDiff || invocation || explicitTitle ? null : toolSummary(spec, result, args);
   const sections = toolSections(toolName, spec, args, result, metadata, block, inlineDiff);
-  const singleTitle = Boolean(inlineDiff || invocation || (toolName === "read" && !summary));
+  const singleTitle = !summary;
 
   return {
     category: spec.category,

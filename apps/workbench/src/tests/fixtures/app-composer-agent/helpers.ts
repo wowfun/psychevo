@@ -41,11 +41,9 @@ export function sessionSummary(id: string, title: string, cwd = gatewayMock.scop
     archivedAtMs: null,
     messageCount: 1,
     toolCallCount: 0,
-    visibleEntryCount: 1,
     activity: { running: false, activeTurnId: null, queuedTurns: 0 },
     title,
-    displayTitle: title,
-    preview: "session preview"
+    displayTitle: title
   };
 }
 

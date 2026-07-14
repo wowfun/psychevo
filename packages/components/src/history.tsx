@@ -29,6 +29,7 @@ export interface HistoryPanelProps {
   draftSession?: HistoryDraftSession | null;
   pinnedSessionIds?: string[];
   browserWorkspaces?: HistoryBrowserWorkspace[];
+  loading?: boolean;
   loadingOlderCwd?: string | null;
   sessions: SessionSummary[];
   onArchive(sessionId: string): void;
@@ -124,7 +125,11 @@ export function HistoryPanel(props: HistoryPanelProps) {
   }
 
   return (
-    <section className="pevo-panel pevo-history" aria-label={props.archived ? "Archived sessions" : "Sessions"}>
+    <section
+      aria-busy={props.loading || undefined}
+      aria-label={props.archived ? "Archived sessions" : "Sessions"}
+      className="pevo-panel pevo-history"
+    >
       <header className="pevo-panelHeader pevo-sessionsHeader">
         <div className="pevo-titleLine">
           <History size={17} aria-hidden />
@@ -165,9 +170,9 @@ export function HistoryPanel(props: HistoryPanelProps) {
         </div>
       </header>
       <div className="pevo-sessionList">
-        {groupedSessions.length === 0 ? (
+        {groupedSessions.length === 0 && !props.loading ? (
           <div className="pevo-empty">No sessions</div>
-        ) : (
+        ) : groupedSessions.length > 0 ? (
           groupedSessions.map((group) => {
             const collapsed = collapsedProjects.has(group.cwd);
             const groupDraftSession = draftSession?.cwd === group.cwd ? draftSession : null;
@@ -222,6 +227,14 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   const pinned = pinnedSessionIds.has(session.id);
                   const forkAction = session.lifecycle?.actions.find((action) => action.id === "fork");
                   const deleteAction = session.lifecycle?.actions.find((action) => action.id === "delete");
+                  const forkSource = session.forkedFromThreadId
+                    ? sessions.find((candidate) => candidate.id === session.forkedFromThreadId) ?? null
+                    : null;
+                  const forkSourceLabel = forkSource
+                    ? forkSource.displayTitle?.trim() || forkSource.title?.trim() || shortId(forkSource.id)
+                    : session.forkedFromThreadId
+                      ? shortId(session.forkedFromThreadId)
+                      : null;
                   return (
                     <article className={`pevo-sessionRow ${active ? "is-active" : ""} ${running ? "is-running" : ""}`} key={session.id}>
                       {editing ? (
@@ -269,6 +282,9 @@ export function HistoryPanel(props: HistoryPanelProps) {
                                 )}
                               </span>
                             </span>
+                            {forkSourceLabel && (
+                              <span className="pevo-sessionProvenance">Forked from {forkSourceLabel}</span>
+                            )}
                           </button>
                           <DismissibleDetails
                             className="pevo-sessionMenu"
@@ -412,7 +428,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
               </section>
             );
           })
-        )}
+        ) : null}
       </div>
     </section>
   );

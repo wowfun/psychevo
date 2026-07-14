@@ -31,10 +31,8 @@ describe("component fallback rendering", () => {
       archivedAtMs: null,
       messageCount: 1,
       toolCallCount: 0,
-      visibleEntryCount: 1,
       activity: { running: false, activeTurnId: null, queuedTurns: 0 },
       displayTitle: "Old session",
-      preview: null,
       title: "Old session"
     } as SessionSummary;
 

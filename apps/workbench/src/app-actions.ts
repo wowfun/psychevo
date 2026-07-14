@@ -208,9 +208,14 @@ export function createAppActions(params: AppActionsParams) {
     params.setMobilePanel("transcript");
   }
 
-  async function submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null) {
+  async function submitTurn(
+    text: string,
+    mentions: GatewayMention[],
+    displayText?: string | null,
+    inputOverride?: GatewayInputPart[]
+  ) {
     if (!params.client) return;
-    const nextInput: GatewayInputPart[] = [
+    const nextInput: GatewayInputPart[] = inputOverride ?? [
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...params.attachments.map((attachment) => attachment.input)
     ];

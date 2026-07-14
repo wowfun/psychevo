@@ -8,38 +8,51 @@ import {
 } from "./workbench.support";
 
 test.describe("pevo Web Workbench", () => {
-  test("keeps long tool headers inside transcript rows", async ({ page, isMobile }) => {
+  test("keeps parallel live web search headers inside transcript rows", async ({ page, isMobile }) => {
     const server = await startPevoWeb({ live: false });
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openPanel(page, isMobile, "Transcript");
 
-      await page.locator(".pevo-threadItems").evaluate((container) => {
-        container.innerHTML = `
-          <article class="pevo-evidence is-running" data-testid="long-tool-row">
-            <button class="pevo-evidenceLine is-singleTitle" type="button">
-              <svg width="15" height="15" aria-hidden="true"></svg>
-              <code>exec_command python /home/kevin/Projects/feedgarden/.agents/skills/x-daily/scripts/fetch.py --project /home/kevin/Projects/feedgarden</code>
-              <em>running</em>
+      const longTitles = [
+        "Searching the web trending Rust projects July 2026 GitHub repositories with sustained community growth and recent releases",
+        "Searching the web 2026 年 7 月最流行的 Rust 开源项目、近期发布、社区增长趋势与 GitHub 活跃度排行"
+      ];
+      await page.locator(".pevo-threadItems").evaluate((container, titles) => {
+        container.innerHTML = titles.map((_, index) => `
+          <article class="pevo-evidence is-running" data-testid="long-tool-row-${index}">
+            <button class="pevo-evidenceLine is-singleTitle is-runningTool" type="button">
+              <span class="pevo-evidenceSpinner" aria-hidden="true">◌</span>
+              <code></code>
+              <em>${index + 3}s</em>
             </button>
           </article>
-        `;
-      });
+        `).join("");
+        container.querySelectorAll("code").forEach((code, index) => {
+          code.textContent = titles[index] ?? "";
+          code.title = titles[index] ?? "";
+        });
+      }, longTitles);
 
-      const row = page.getByTestId("long-tool-row");
-      const status = row.locator(".pevo-evidenceLine em");
-      const title = row.locator(".pevo-evidenceLine code");
-      const rowBox = await row.boundingBox();
-      const statusBox = await status.boundingBox();
-      const titleClipped = await title.evaluate((element) => element.scrollWidth > element.clientWidth);
+      await expect(page.locator('[data-testid^="long-tool-row-"]')).toHaveCount(2);
+      for (const [index, longTitle] of longTitles.entries()) {
+        const row = page.getByTestId(`long-tool-row-${index}`);
+        const line = row.locator(".pevo-evidenceLine");
+        const status = line.locator("em");
+        const title = line.locator("code");
+        const rowBox = await line.boundingBox();
+        const statusBox = await status.boundingBox();
+        const titleClipped = await title.evaluate((element) => element.scrollWidth > element.clientWidth);
 
-      expect(rowBox).not.toBeNull();
-      expect(statusBox).not.toBeNull();
-      await expect(title).toContainText("exec_command python");
-      await expect(row.locator(".pevo-evidenceLine span")).toHaveCount(0);
-      expect(statusBox!.x + statusBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
-      expect(titleClipped).toBe(true);
+        expect(rowBox).not.toBeNull();
+        expect(statusBox).not.toBeNull();
+        await expect(title).toContainText("Searching the web");
+        await expect(title).toHaveAttribute("title", longTitle);
+        await expect(line.locator("span:not(.pevo-evidenceSpinner)")).toHaveCount(0);
+        expect(statusBox!.x + statusBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+        expect(titleClipped).toBe(true);
+      }
     } finally {
       await server.stop();
     }

@@ -6,6 +6,50 @@
   gap: 6px;
 }
 
+.historyEditingStrip {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 10px;
+  color: var(--pevo-muted-strong);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+}
+
+.historyEditingStrip button {
+  padding: 0;
+  color: var(--pevo-accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.forkProvenance {
+  max-width: min(52vw, 420px);
+  overflow: hidden;
+  padding: 0;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  font-size: var(--pevo-font-size-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forkProvenance:not(:disabled) {
+  cursor: pointer;
+}
+
+.forkProvenance:not(:disabled):hover,
+.forkProvenance:not(:disabled):focus-visible {
+  color: var(--pevo-ink);
+}
+
 .composerCommandFeedback {
   margin: 0 2px;
 }

@@ -29,7 +29,6 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     archivedAtMs: null,
     messageCount: 0,
     toolCallCount: 0,
-    visibleEntryCount: 0,
     activity: {
       running: false,
       activeTurnId: null,
@@ -37,7 +36,6 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     },
     title: null,
     displayTitle: "A very long session title that needs persistent hover disclosure",
-    preview: null,
     ...overrides
   };
 }
@@ -61,6 +59,32 @@ function renderHistory(props: Partial<ComponentProps<typeof HistoryPanel>> = {})
 }
 
 describe("HistoryPanel", () => {
+  it("suppresses the successful-empty state while the first history request is pending", () => {
+    const { container, rerender } = renderHistory({ loading: true, sessions: [] });
+
+    const panel = screen.getByRole("region", { name: "Sessions" });
+    expect(panel.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByText("No sessions")).toBeNull();
+
+    rerender(
+      <HistoryPanel
+        archived={false}
+        loading={false}
+        sessions={[]}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onExport={vi.fn()}
+        onNew={vi.fn()}
+        onRename={vi.fn()}
+        onRestore={vi.fn()}
+        onResume={vi.fn()}
+        onShare={vi.fn()}
+      />
+    );
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(screen.getByText("No sessions")).toBeTruthy();
+  });
+
   it("opens Agent import and renders lifecycle actions from product descriptors", () => {
     const onImportSessions = vi.fn();
     const onFork = vi.fn();
@@ -97,6 +121,14 @@ describe("HistoryPanel", () => {
     const title = "A very long session title that needs persistent hover disclosure";
     expect(screen.getByTitle(title)).toBeTruthy();
     expect(container.querySelector(".pevo-sessionTitlePopover")).toBeNull();
+  });
+
+  it("keeps scalar fork provenance visible when the source row is unavailable", () => {
+    renderHistory({
+      sessions: [session({ forkedFromThreadId: "source-thread-abcdef" })]
+    });
+
+    expect(screen.getByText("Forked from source-thr")).toBeTruthy();
   });
 
   it("keeps long session titles separate from time and running status", () => {

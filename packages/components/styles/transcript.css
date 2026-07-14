@@ -631,6 +631,97 @@
   box-shadow: none;
 }
 
+.pevo-message.is-user.pevo-historyEditor {
+  width: min(680px, 100%);
+  box-sizing: border-box;
+  padding: 12px;
+}
+
+.pevo-historyEditorParts {
+  display: grid;
+  gap: 8px;
+}
+
+.pevo-historyEditor textarea {
+  width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px 9px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.pevo-historyEditor textarea:focus {
+  border-color: var(--pevo-accent);
+  outline: 2px solid color-mix(in oklch, var(--pevo-accent), transparent 78%);
+}
+
+.pevo-historyEditorImage {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  color: var(--pevo-muted-strong);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+}
+
+.pevo-historyEditorImage span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-historyEditorWarning,
+.pevo-historyEditorError {
+  margin: 8px 0 0;
+  color: var(--pevo-muted-strong);
+  font-size: var(--pevo-font-size-small);
+}
+
+.pevo-historyEditorError {
+  color: var(--pevo-danger);
+}
+
+.pevo-historyEditorActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.pevo-historyEditorActions button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-sm);
+  cursor: pointer;
+}
+
+.pevo-historyEditorActions button:last-child {
+  color: var(--pevo-accent-ink);
+  background: var(--pevo-accent);
+  border-color: var(--pevo-accent);
+}
+
+.pevo-historyEditorActions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .pevo-message.is-assistant {
   width: 100%;
   margin-right: auto;

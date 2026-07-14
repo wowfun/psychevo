@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 import { TranscriptPanel } from "./transcript";
@@ -118,6 +118,56 @@ describe("TranscriptPanel Markdown rendering", () => {
   });
 });
 
+describe("TranscriptPanel history editing", () => {
+  it("edits ordered text and image parts and distinguishes update from fork", async () => {
+    const entry = {
+      ...transcriptEntry([transcriptBlock({ kind: "text", body: "Original", metadata: null })]),
+      role: "user" as const
+    };
+    const onReadUserMessageDraft = vi.fn().mockResolvedValue({
+      threadId: "thread-1",
+      messageId: "entry-1",
+      messageSeq: 1,
+      parts: [
+        { type: "text" as const, text: "Before" },
+        { type: "image" as const, input: { kind: "url" as const, url: "https://example.test/image.png" } },
+        { type: "text" as const, text: "After" }
+      ],
+      fidelity: "bestEffort" as const,
+      warning: "Older message reconstructed.",
+      unavailableReason: null
+    });
+    const onUpdateUserMessage = vi.fn();
+    const onForkUserMessage = vi.fn();
+
+    render(
+      <TranscriptPanel
+        entries={[entry]}
+        onForkUserMessage={onForkUserMessage}
+        onReadUserMessageDraft={onReadUserMessageDraft}
+        onUpdateUserMessage={onUpdateUserMessage}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit this message/ }));
+    const firstText = await screen.findByRole("textbox", { name: "Message text 1" });
+    expect(screen.getByText("Older message reconstructed.")).toBeTruthy();
+    expect(screen.getByText("https://example.test/image.png")).toBeTruthy();
+    fireEvent.change(firstText, { target: { value: "Updated before" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update this message and run in the same thread" }));
+
+    await waitFor(() => expect(onUpdateUserMessage).toHaveBeenCalledTimes(1));
+    expect(onUpdateUserMessage.mock.calls[0]?.[1]).toEqual({
+      parts: [
+        { type: "text", text: "Updated before" },
+        { type: "image", input: { kind: "url", url: "https://example.test/image.png" } },
+        { type: "text", text: "After" }
+      ]
+    });
+    expect(onForkUserMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("TranscriptPanel Thinking lifecycle", () => {
   function reasoningEntry(status: TranscriptBlock["status"], body = "Inspect the workspace"): TranscriptEntry {
     return transcriptEntry([transcriptBlock({
@@ -171,6 +221,67 @@ describe("TranscriptPanel Thinking lifecycle", () => {
 
     expect(screen.getByRole("button", { name: /Thinking/ }).getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Inspect the workspace")).toBeNull();
+  });
+});
+
+describe("TranscriptPanel evidence titles", () => {
+  it("gives parallel live web search titles the remaining row width without provider summaries", () => {
+    const queries = [
+      "most popular AI agent frameworks 2026",
+      "2026 年最流行的 AI Agent 框架"
+    ];
+    const titles = queries.map((query) => `Searching the web ${query}`);
+    const blocks = queries.map((query, index) => transcriptBlock({
+      id: `block-web-search-${index}`,
+      kind: "web",
+      status: "running",
+      order: index,
+      title: titles[index]!,
+      metadata: {
+        projection: "tool",
+        tool_name: "web_search",
+        tool_call_id: `call-web-search-${index}`,
+        args: { query },
+        display: {
+          category: "explore",
+          title_arg_keys: ["query"],
+          title_result_keys: ["query", "provider"],
+          summary_keys: ["provider", "truncated", "error"],
+          body_keys: ["payload", "error"],
+          body_policy: "body"
+        },
+        result: { query, provider: "exa" }
+      }
+    }));
+
+    const { container } = render(<TranscriptPanel entries={[transcriptEntry(blocks)]} />);
+
+    const titleElements = Array.from(container.querySelectorAll(".pevo-evidenceLine code"));
+    expect(titleElements.map((element) => element.textContent)).toEqual(titles);
+    expect(titleElements.map((element) => element.getAttribute("title"))).toEqual(titles);
+    expect(titleElements.every((element) => element.closest("button")?.classList.contains("is-singleTitle"))).toBe(true);
+    expect(container.querySelectorAll(".pevo-evidenceLine span:not(.pevo-evidenceSpinner)")).toHaveLength(0);
+    expect(container.textContent).not.toContain("exa");
+  });
+
+  it("keeps a status summary in the split layout while disclosing the complete title", () => {
+    const title = "Model request failed after the provider connection closed unexpectedly";
+    const block = transcriptBlock({
+      id: "block-model-failure",
+      kind: "status",
+      status: "failed",
+      title,
+      preview: "Retry with another model or inspect provider settings.",
+      metadata: null
+    });
+
+    const { container } = render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+
+    const titleElement = container.querySelector(".pevo-evidenceLine code");
+    const row = titleElement?.closest("button");
+    expect(titleElement?.getAttribute("title")).toBe(title);
+    expect(row?.classList.contains("is-singleTitle")).toBe(false);
+    expect(screen.getByText("Retry with another model or inspect provider settings.")).toBeTruthy();
   });
 });
 

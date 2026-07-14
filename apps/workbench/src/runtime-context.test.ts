@@ -157,6 +157,32 @@ describe("runtime context projection", () => {
     })).toBe("The projected target is not ready.");
   });
 
+  it("preserves every typed history action while rejecting opaque action ids", () => {
+    const context = parseThreadContext({
+      actions: [
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation",
+        "opaque.history.action"
+      ].map((id) => ({
+        id,
+        label: id,
+        enabled: true,
+        stability: "stable",
+        channelSafe: false,
+        unavailableReason: null
+      }))
+    });
+
+    expect(context.actions.map((action) => action.id)).toEqual([
+      "fork",
+      "forkBefore",
+      "revertConversation",
+      "unrevertConversation"
+    ]);
+  });
+
   it("never coerces public runtime revisions through JavaScript numbers", () => {
     const context = parseThreadContext({
       runtimeProfileRef: "codex",

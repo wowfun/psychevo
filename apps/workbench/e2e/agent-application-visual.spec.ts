@@ -151,8 +151,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
       );
       const opencodeContext = await threadContext(page, server.cwd, await currentThreadId(page, server.cwd));
       expect(opencodeContext.targetId).toBe(opencodeTarget.targetId);
-      await modelButton.click();
-      const modelPicker = page.getByRole("dialog", { name: "Model and reasoning" });
+      const modelPicker = await openModelReasoningPicker(page);
       await expect(modelPicker.getByRole("radiogroup", { name: "Model" })).toBeVisible();
       await expect(modelPicker.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
       await page.keyboard.press("Escape");
@@ -694,11 +693,7 @@ function targetChoice(
 
 async function selectControl(page: Page, label: string, optionLabel: string) {
   if (label === "Model" || /Reasoning/i.test(label)) {
-    const button = page.getByRole("button", { name: "Model" }).first();
-    await expect(button).toBeVisible({ timeout: 30_000 });
-    const existing = page.getByRole("dialog", { name: "Model and reasoning" });
-    if (!await existing.isVisible().catch(() => false)) await button.click();
-    const picker = page.getByRole("dialog", { name: "Model and reasoning" });
+    const picker = await openModelReasoningPicker(page);
     const group = picker.getByRole("radiogroup", { name: label === "Model" ? "Model" : "Reasoning" });
     await group.getByRole("radio", { name: optionLabel }).click();
     return;
@@ -706,6 +701,26 @@ async function selectControl(page: Page, label: string, optionLabel: string) {
   const control = page.getByRole("combobox", { name: label }).first();
   await expect(control).toBeVisible({ timeout: 30_000 });
   await control.selectOption({ label: optionLabel });
+}
+
+async function openModelReasoningPicker(page: Page): Promise<Locator> {
+  const button = page.getByRole("button", { name: "Model" }).first();
+  const picker = page.getByRole("dialog", { name: "Model and reasoning" });
+  await expect(button).toBeVisible({ timeout: 30_000 });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!await picker.isVisible().catch(() => false)) {
+      await button.click();
+    }
+    try {
+      await expect(picker).toBeVisible({ timeout: 2_000 });
+      return picker;
+    } catch {
+      // Thread Context materialization can remount the selector immediately
+      // after a turn. Re-open the new instance instead of acting on stale UI.
+    }
+  }
+  await expect(picker).toBeVisible({ timeout: 10_000 });
+  return picker;
 }
 
 async function runTurn(page: Page, prompt: string, answer: RegExp) {

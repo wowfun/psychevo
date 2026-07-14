@@ -126,6 +126,7 @@ type AppEffectsParams = {
   setError(value: string | null): void;
   setFallbackCwd(value: string): void;
   setHost(value: PsychevoHost | null): void;
+  setHistoryLoading(value: boolean): void;
   setInit(value: InitializeResult | null): void;
   setMobilePanel(value: "history" | "transcript" | "status"): void;
   setPinnedSessionIds(value: string[]): void;
@@ -455,6 +456,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         params.setActiveScope(initialize.scope);
         params.scopeRef.current = initialize.scope;
         const nextSessions = await params.refreshHistory(runtime.client);
+        if (!alive) {
+          return;
+        }
+        params.setHistoryLoading(false);
         const startupScope = startupDraftScope(initialize.scope, nextSessions, runtime.fallbackCwd);
         const epoch = params.beginExplicitViewSwitch();
         const nextSnapshot = parseThreadSnapshot(await runtime.client.request("thread/start", { scope: startupScope }));
@@ -471,6 +476,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         await params.adoptSnapshotScope(runtime.client, nextSnapshot);
       } catch (err) {
         if (alive) {
+          params.setHistoryLoading(false);
           params.setStatus("error");
           params.setError(err instanceof Error ? err.message : String(err));
         }
@@ -495,12 +501,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       void params.refreshWorkspaceSurface(params.client, params.activeScope, params.currentThreadId ?? null);
     }
   }, [params.client, params.activeScope, params.currentThreadId]);
-
-  useEffect(() => {
-    if (params.client) {
-      void params.refreshHistory(params.client);
-    }
-  }, [params.client]);
 
   useEffect(() => {
     if (params.client && params.mainView === "settings" && params.settingsSection === "archived") {

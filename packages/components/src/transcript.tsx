@@ -1,8 +1,10 @@
-import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, Image as ImageIcon, Maximize2, Volume2, X } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, GitFork, Image as ImageIcon, Maximize2, Pencil, Volume2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   sideInheritedMetadataHidden,
   type GatewayActivity,
+  type ThreadEditableDraft,
+  type ThreadHistoryDraftReadResult,
   type ThreadHistoryView,
   type TranscriptBlock,
   type TranscriptEntry
@@ -27,6 +29,9 @@ export interface TranscriptPanelProps {
   entries: TranscriptEntry[];
   history?: TranscriptHistoryView | null | undefined;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
+  onForkUserMessage?: ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
+  onReadUserMessageDraft?: ((entry: TranscriptEntry) => Promise<ThreadHistoryDraftReadResult>) | undefined;
+  onUpdateUserMessage?: ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
   onReadAloudText?: ((text: string) => void | Promise<void>) | undefined;
   threadId?: string | null;
@@ -38,6 +43,8 @@ export type TranscriptHistoryView = ThreadHistoryView;
 type CopyTextHandler = ((text: string) => void | Promise<void>) | undefined;
 type ReadAloudTextHandler = ((text: string) => void | Promise<void>) | undefined;
 type OpenAgentSessionHandler = ((session: TranscriptAgentSession) => void) | undefined;
+type ReadUserMessageDraftHandler = ((entry: TranscriptEntry) => Promise<ThreadHistoryDraftReadResult>) | undefined;
+type MutateUserMessageHandler = ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
 
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const BOTTOM_THRESHOLD_PX = 48;
@@ -49,7 +56,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, history, onCopyText, onOpenAgentSession, onReadAloudText, threadId, workspaceFileLinks }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, history, onCopyText, onForkUserMessage, onOpenAgentSession, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, threadId, workspaceFileLinks }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -137,8 +144,11 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onOpen
               entry={entry}
               key={entry.id}
               onCopyText={onCopyText}
+              onForkUserMessage={onForkUserMessage}
               onOpenAgentSession={onOpenAgentSession}
               onReadAloudText={onReadAloudText}
+              onReadUserMessageDraft={onReadUserMessageDraft}
+              onUpdateUserMessage={onUpdateUserMessage}
               workspaceFileLinks={workspaceFileLinks}
             />
           ))
@@ -351,15 +361,21 @@ function TranscriptEntryView({
   activityTick,
   entry,
   onCopyText,
+  onForkUserMessage,
   onOpenAgentSession,
   onReadAloudText,
+  onReadUserMessageDraft,
+  onUpdateUserMessage,
   workspaceFileLinks
 }: {
   activityTick: number;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
+  onForkUserMessage: MutateUserMessageHandler;
   onOpenAgentSession: OpenAgentSessionHandler;
   onReadAloudText: ReadAloudTextHandler;
+  onReadUserMessageDraft: ReadUserMessageDraftHandler;
+  onUpdateUserMessage: MutateUserMessageHandler;
   workspaceFileLinks: WorkspaceFileLinkContext | undefined;
 }) {
   const blocks = visibleBlocks(entry);
@@ -370,6 +386,30 @@ function TranscriptEntryView({
   ))));
   const hasNativePhases = phaseOrdinals.length > 1;
   const [showNativePhases, setShowNativePhases] = useState(false);
+  const [editor, setEditor] = useState<ThreadHistoryDraftReadResult | null>(null);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const canEdit = entry.role === "user"
+    && entry.status === "completed"
+    && entry.messageSeq !== null
+    && Boolean(onReadUserMessageDraft && onUpdateUserMessage && onForkUserMessage);
+  async function beginEdit() {
+    if (!canEdit || !onReadUserMessageDraft) return;
+    setEditorLoading(true);
+    setEditorError(null);
+    try {
+      const next = await onReadUserMessageDraft(entry);
+      if (next.unavailableReason) {
+        setEditorError(next.unavailableReason);
+        return;
+      }
+      setEditor(next);
+    } catch (cause) {
+      setEditorError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setEditorLoading(false);
+    }
+  }
   const renderedBlocks = (items: TranscriptBlock[]) => items.map((block) => (
     <TranscriptBlockView
       activityTick={activityTick}
@@ -377,11 +417,49 @@ function TranscriptEntryView({
       entry={entry}
       key={block.id}
       onCopyText={onCopyText}
+      onEditUserMessage={canEdit ? beginEdit : undefined}
       onOpenAgentSession={onOpenAgentSession}
       onReadAloudText={onReadAloudText}
       workspaceFileLinks={workspaceFileLinks}
     />
   ));
+  if (editor) {
+    return (
+      <HistoryMessageEditor
+        draft={editor}
+        error={editorError}
+        onCancel={() => {
+          setEditor(null);
+          setEditorError(null);
+        }}
+        onFork={async (draft) => {
+          try {
+            await onForkUserMessage?.(entry, draft);
+            setEditor(null);
+          } catch (cause) {
+            setEditorError(cause instanceof Error ? cause.message : String(cause));
+          }
+        }}
+        onUpdate={async (draft) => {
+          try {
+            await onUpdateUserMessage?.(entry, draft);
+            setEditor(null);
+          } catch (cause) {
+            setEditorError(cause instanceof Error ? cause.message : String(cause));
+          }
+        }}
+      />
+    );
+  }
+  if (editorLoading || editorError) {
+    return (
+      <div className="pevo-messageFrame is-user">
+        <article className="pevo-message is-user pevo-historyEditorStatus" role={editorError ? "alert" : "status"}>
+          {editorError ?? "Loading editable message…"}
+        </article>
+      </div>
+    );
+  }
   if (!hasNativePhases) {
     return <>{renderedBlocks(blocks)}</>;
   }
@@ -431,6 +509,7 @@ function TranscriptBlockView({
   block,
   entry,
   onCopyText,
+  onEditUserMessage,
   onOpenAgentSession,
   onReadAloudText,
   workspaceFileLinks
@@ -439,6 +518,7 @@ function TranscriptBlockView({
   block: TranscriptBlock;
   entry: TranscriptEntry;
   onCopyText: CopyTextHandler;
+  onEditUserMessage: (() => void | Promise<void>) | undefined;
   onOpenAgentSession: OpenAgentSessionHandler;
   onReadAloudText: ReadAloudTextHandler;
   workspaceFileLinks: WorkspaceFileLinkContext | undefined;
@@ -470,12 +550,12 @@ function TranscriptBlockView({
         <article className="pevo-message is-user" {...transcriptBlockDataAttributes(entry, block)}>
           <MarkdownText text={text} />
         </article>
-        {onCopyText && (
+        {(onCopyText || onEditUserMessage) && (
           <MessageMeta
             block={block}
             copied={copied}
             showElapsed={false}
-            onCopy={async () => {
+            {...(onCopyText ? { onCopy: async () => {
               try {
                 await onCopyText(text);
                 setCopied(true);
@@ -483,7 +563,8 @@ function TranscriptBlockView({
               } catch {
                 setCopied(false);
               }
-            }}
+            }} : {})}
+            {...(onEditUserMessage ? { onEdit: onEditUserMessage } : {})}
           />
         )}
       </div>
@@ -596,7 +677,7 @@ function TranscriptBlockView({
       ) : (
         open ? <ChevronDown size={15} aria-hidden /> : <ChevronRight size={15} aria-hidden />
       )}
-      <code>{display.title}</code>
+      <code title={display.title}>{display.title}</code>
       {display.summary && <span>{display.summary}</span>}
       {elapsed ? <em className="pevo-evidenceElapsed">{elapsed}</em> : !runningTool && status && <em>{status}</em>}
     </button>
@@ -1024,12 +1105,14 @@ function MessageMeta({
   block,
   copied,
   onCopy,
+  onEdit,
   onReadAloud,
   showElapsed
 }: {
   block: TranscriptBlock;
   copied: boolean;
   onCopy?: (() => void | Promise<void>) | undefined;
+  onEdit?: (() => void | Promise<void>) | undefined;
   onReadAloud?: (() => void | Promise<void>) | undefined;
   showElapsed: boolean;
 }) {
@@ -1037,6 +1120,12 @@ function MessageMeta({
   const elapsed = showElapsed ? transcriptBlockElapsed(block) : null;
   return (
     <div className="pevo-messageMeta" aria-label="Message actions">
+      {onEdit && (
+        <button className="pevo-messageCopy" onClick={() => void onEdit()} title="Edit message" type="button">
+          <Pencil size={14} aria-hidden />
+          <span className="pevo-srOnly">Edit this message in the same thread or fork a new thread</span>
+        </button>
+      )}
       {onCopy && (
         <button className="pevo-messageCopy" onClick={() => void onCopy()} title="Copy" type="button">
           {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
@@ -1055,6 +1144,84 @@ function MessageMeta({
           {timestamp.label}
         </time>
       )}
+    </div>
+  );
+}
+
+function HistoryMessageEditor({
+  draft,
+  error,
+  onCancel,
+  onFork,
+  onUpdate
+}: {
+  draft: ThreadHistoryDraftReadResult;
+  error: string | null;
+  onCancel(): void;
+  onFork(draft: ThreadEditableDraft): void | Promise<void>;
+  onUpdate(draft: ThreadEditableDraft): void | Promise<void>;
+}) {
+  const [parts, setParts] = useState(() => draft.parts.map((part) => ({ ...part })));
+  const [pending, setPending] = useState<"update" | "fork" | null>(null);
+  const hasPayload = parts.some((part) => part.type === "image" || part.text.trim());
+  async function commit(kind: "update" | "fork") {
+    if (!hasPayload || pending) return;
+    setPending(kind);
+    try {
+      const next = { parts } satisfies ThreadEditableDraft;
+      if (kind === "update") await onUpdate(next);
+      else await onFork(next);
+    } finally {
+      setPending(null);
+    }
+  }
+  return (
+    <div className="pevo-messageFrame is-user">
+      <article className="pevo-message is-user pevo-historyEditor" aria-label="Edit user message">
+        <div className="pevo-historyEditorParts">
+          {parts.map((part, index) => part.type === "text" ? (
+            <textarea
+              aria-label={`Message text ${index + 1}`}
+              autoFocus={index === 0}
+              disabled={Boolean(pending)}
+              key={`text:${index}`}
+              onChange={(event) => setParts((current) => current.map((candidate, candidateIndex) => (
+                candidateIndex === index && candidate.type === "text"
+                  ? { ...candidate, text: event.target.value }
+                  : candidate
+              )))}
+              rows={Math.max(2, Math.min(10, part.text.split("\n").length + 1))}
+              value={part.text}
+            />
+          ) : (
+            <div className="pevo-historyEditorImage" key={`image:${index}`}>
+              <ImageIcon size={15} aria-hidden />
+              <span>{part.input.kind === "localPath" ? part.input.path : part.input.url}</span>
+            </div>
+          ))}
+        </div>
+        {draft.warning && <p className="pevo-historyEditorWarning" role="note">{draft.warning}</p>}
+        {error && <p className="pevo-historyEditorError" role="alert">{error}</p>}
+        <div className="pevo-historyEditorActions">
+          <button disabled={Boolean(pending)} onClick={onCancel} type="button">Cancel</button>
+          <button
+            aria-label="Fork a new thread before this message"
+            disabled={!hasPayload || Boolean(pending)}
+            onClick={() => void commit("fork")}
+            type="button"
+          >
+            <GitFork size={14} aria-hidden /> {pending === "fork" ? "Forking…" : "Fork"}
+          </button>
+          <button
+            aria-label="Update this message and run in the same thread"
+            disabled={!hasPayload || Boolean(pending)}
+            onClick={() => void commit("update")}
+            type="button"
+          >
+            {pending === "update" ? "Updating…" : "Update & run"}
+          </button>
+        </div>
+      </article>
     </div>
   );
 }

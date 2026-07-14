@@ -72,7 +72,6 @@ export function sessionSummary(overrides: Partial<SessionSummary> = {}): Session
     archivedAtMs: null,
     messageCount: 1,
     toolCallCount: 0,
-    visibleEntryCount: 1,
     activity: {
       running: false,
       activeTurnId: null,
@@ -80,7 +79,6 @@ export function sessionSummary(overrides: Partial<SessionSummary> = {}): Session
     },
     title: "Session",
     displayTitle: "Session",
-    preview: null,
     ...overrides
   };
   if (overrides.displayTitle === undefined && overrides.title !== undefined) {

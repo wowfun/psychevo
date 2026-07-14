@@ -194,8 +194,11 @@ afterEach(() => {
   });
   gatewayMock.completionResult = { items: [], replacement: null };
   gatewayMock.threadActionRun = null;
+  gatewayMock.threadHistoryDraftRead = null;
+  gatewayMock.threadBrowser = null;
   gatewayMock.threadStart = null;
   gatewayMock.turnStart = null;
+  gatewayMock.snapshot.historyEditing = null;
   gatewayMock.commandList = [];
   gatewayMock.slashSettings = {
     scope: "global",
@@ -371,7 +374,8 @@ afterEach(() => {
   gatewayMock.snapshot.thread = {
     id: "thread-1",
     backend: { kind: "native" as const, sessionHandle: "thread-1", runtimeRef: "native" },
-    sourceKey: "source-key"
+    sourceKey: "source-key",
+    forkedFromThreadId: undefined
   };
   gatewayMock.snapshot.pendingActions = [];
   gatewayMock.snapshot.entries = [];

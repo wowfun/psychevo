@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
 import { ActionButton, Composer, HistoryPanel, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
+import type { ThreadEditableInputPart } from "@psychevo/protocol";
 import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
 import { ComposerRequests, ComposerStatusLine, ComposerSubmitControls } from "./composer-controls";
@@ -15,7 +16,7 @@ import {
   enabledThreadAction,
   snapshotThreadApplicationTarget
 } from "./thread-application";
-import type { RightWorkspaceTab } from "./types";
+import type { PendingAttachment, RightWorkspaceTab } from "./types";
 import { AgentSessionImportDialog, DeleteSessionDialog } from "./agent-session-import-dialog";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
@@ -70,6 +71,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     handleAttachment,
     handleAttachmentFiles,
     host,
+    historyLoading,
     init,
     leftCollapsed,
     latestGatewayEvent,
@@ -91,6 +93,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     onModelCatalogLoaded,
     pendingClarifyActions,
     pendingPermissionActions,
+    patchComposerDraft,
     pinnedSessionIds,
     pinnedSessions,
     pauseAutomation,
@@ -226,6 +229,13 @@ export function WorkbenchLayout(props: Record<string, any>) {
     && contextMatchesTarget
     && enabledThreadAction(runtimeContext, "steer") !== null;
   const interruptAvailable = enabledThreadAction(runtimeContext, "interrupt") !== null;
+  const historyEditAvailable = enabledThreadAction(runtimeContext, "revertConversation") !== null;
+  const pointForkAvailable = enabledThreadAction(runtimeContext, "forkBefore") !== null;
+  const forkSource = snapshot.thread?.forkedFromThreadId
+    ? [...sessions, ...archivedSessions].find((session: any) => (
+        session.id === snapshot.thread?.forkedFromThreadId
+      )) ?? null
+    : null;
   const [agentSessionImportOpen, setAgentSessionImportOpen] = useState(false);
   const [pendingDeleteSession, setPendingDeleteSession] = useState<any | null>(null);
   const [deleteSessionPending, setDeleteSessionPending] = useState(false);
@@ -353,6 +363,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   pinnedSessionIds={pinnedSessionIds}
                   browserWorkspaces={sessionBrowserWorkspaces}
                   loadingOlderCwd={loadingOlderCwd}
+                  loading={historyLoading}
                   sessions={sessions}
                   onArchive={(threadId) => void runAction(async () => {
                     setDraftSession(null);
@@ -440,6 +451,21 @@ export function WorkbenchLayout(props: Record<string, any>) {
 
         <section className={`conversationColumn ${mobilePanel === "transcript" ? "is-mobileSelected" : ""}`}>
           <div className="conversationChrome">
+            {snapshot.thread?.forkedFromThreadId && (
+              <button
+                className="forkProvenance"
+                disabled={!forkSource}
+                onClick={() => void runAction(async () => {
+                  if (!forkSource) return;
+                  const epoch = beginExplicitViewSwitch();
+                  await refreshSnapshot(client, forkSource.id, undefined, false, epoch);
+                })}
+                title={forkSource ? "Open source thread" : `Source thread ${snapshot.thread.forkedFromThreadId} is unavailable`}
+                type="button"
+              >
+                Forked from {forkSource?.displayTitle ?? forkSource?.title ?? snapshot.thread.forkedFromThreadId.slice(0, 8)}
+              </button>
+            )}
             {showSessionChrome && (
               <button
                 aria-label={rightCollapsed ? "Show right inspector" : "Collapse right inspector"}
@@ -534,6 +560,53 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   entries={transcriptEntries}
                   history={snapshot.history}
                   onCopyText={copyText}
+                  {...(historyEditAvailable && pointForkAvailable ? {
+                    onReadUserMessageDraft: async (entry: any) => {
+                      const target = snapshotThreadApplicationTarget(snapshot);
+                      if (!client || !target) throw new Error("The active Thread is unavailable.");
+                      return client.request("thread/history/draft/read", {
+                        ...target,
+                        messageId: entry.id
+                      });
+                    },
+                    onUpdateUserMessage: async (entry: any, draft: any) => {
+                      const target = snapshotThreadApplicationTarget(snapshot);
+                      if (!client || !target) throw new Error("The active Thread is unavailable.");
+                      const result = await client.request("thread/action/run", {
+                        ...target,
+                        action: { kind: "revertConversation", messageId: entry.id, draft }
+                      });
+                      if (result.kind !== "revertConversation") return;
+                      if (result.noOp) {
+                        setSnapshot(result.snapshot);
+                        return;
+                      }
+                      const text = editableDraftText(draft.parts);
+                      await submitThreadTurn(
+                        target.threadId,
+                        text,
+                        [],
+                        text,
+                        draft.parts
+                      );
+                    },
+                    onForkUserMessage: async (entry: any, draft: any) => {
+                      const target = snapshotThreadApplicationTarget(snapshot);
+                      if (!client || !target) throw new Error("The active Thread is unavailable.");
+                      const result = await client.request("thread/action/run", {
+                        ...target,
+                        action: { kind: "forkBefore", messageId: entry.id }
+                      });
+                      if (result.kind !== "forkBefore" || !result.snapshot.thread?.id) return;
+                      const epoch = beginExplicitViewSwitch();
+                      setSnapshot(result.snapshot);
+                      await refreshSnapshot(client, result.snapshot.thread.id, undefined, false, epoch);
+                      prefillEditableDraft(draft.parts, patchComposerDraft, setAttachments);
+                      await refreshHistory();
+                      updateMainView("transcript");
+                      setMobilePanel("transcript");
+                    }
+                  } : {})}
                   onOpenAgentSession={openAgentSessionTab}
                   threadId={snapshot.thread?.id ?? null}
                   onReadAloudText={onReadAloudText}
@@ -552,6 +625,24 @@ export function WorkbenchLayout(props: Record<string, any>) {
             )}
           </div>
           {showSessionChrome && <div className="composerDock">
+            {snapshot.historyEditing?.kind === "conversationEdit" && (
+              <div className="historyEditingStrip" role="status">
+                <span>{snapshot.historyEditing.hiddenEntryCount} hidden {snapshot.historyEditing.hiddenEntryCount === 1 ? "entry" : "entries"}</span>
+                <button onClick={() => void runAction(async () => {
+                  const target = snapshotThreadApplicationTarget(snapshot);
+                  if (!client || !target) return;
+                  const result = await client.request("thread/action/run", {
+                    ...target,
+                    action: { kind: "unrevertConversation" }
+                  });
+                  if (result.kind !== "unrevertConversation") return;
+                  setSnapshot(result.snapshot);
+                  prefillEditableDraft(result.draft.parts, patchComposerDraft, setAttachments);
+                })} type="button">
+                  Restore history
+                </button>
+              </div>
+            )}
             {(commandFeedback?.feedbackAnchor === "composer" || commandFeedback?.feedbackAnchor === "status") && (
               <CommandFeedbackView
                 className="composerCommandFeedback"
@@ -730,7 +821,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   });
                 }
               })}
-              onSubmit={(text, mentions) => void runAction(async () => submitTurn(text, mentions))}
+              onSubmit={(text, mentions, orderedInput) => void runAction(async () => submitTurn(text, mentions, undefined, orderedInput))}
             />
             <ComposerStatusLine
               branch={settings?.project?.branch ?? null}
@@ -831,6 +922,36 @@ export function WorkbenchLayout(props: Record<string, any>) {
       </div>
     </main>
   );
+}
+
+function editableDraftText(parts: ThreadEditableInputPart[]): string {
+  return parts
+    .filter((part): part is Extract<ThreadEditableInputPart, { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+function prefillEditableDraft(
+  parts: ThreadEditableInputPart[],
+  patchComposerDraft: (text: string, parts?: ThreadEditableInputPart[]) => void,
+  setAttachments: (attachments: PendingAttachment[]) => void
+) {
+  patchComposerDraft(editableDraftText(parts), parts);
+  const attachments = parts.flatMap((part, index): PendingAttachment[] => {
+    if (part.type !== "image") return [];
+    const source = part.input.kind === "localPath" ? part.input.path : part.input.url;
+    const name = source.split(/[\\/]/).pop()?.split(/[?#]/)[0] || `image-${index + 1}`;
+    return [{
+      id: `history:${index}:${source}`,
+      input: part,
+      kind: "image",
+      name,
+      ...(part.input.kind === "url" ? { previewUrl: part.input.url } : {}),
+      size: 0,
+      sizeLabel: "From history"
+    }];
+  });
+  setAttachments(attachments);
 }
 
 function acceptedInteractionResponse(value: unknown): boolean {
