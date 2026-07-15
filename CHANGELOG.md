@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-15
+
+- Reworked Workbench sessions, workspace picking, and Git branch switching;
+  archived ACP imports now remain transcript-first and activate on send.
+- Simplified Composer and Files surfaces with a centered first draft, compact
+  workspace/Permission controls, and adjacent preview, edit, and file-tree
+  actions.
+- Made project/user Agent discovery, Exa web search, Browser, and interactive
+  HTML preview available by default, while speeding session opening and Agent
+  target refreshes.
+- Added compatibility and native projection for pinned Codex plugins, plus
+  isolated Codex Apps delegation with typed elicitation and Thread cleanup.
+- Fixed Side Chat bindings and Windows Git Bash Desktop startup.
+
 ## 2026-07-14
 
 - Added conversation-only message editing and Native Thread forking across
