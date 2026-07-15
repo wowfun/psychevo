@@ -211,7 +211,6 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
   const voiceAutoSpeakKeyRef = useRef<string | null>(null);
   const pendingTargetSelectionRef = useRef<string | null>(null);
-  const skipNextRuntimeContextReadRef = useRef(false);
   const runtimeTargetTransitionRef = useRef(false);
 
   function setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) {
@@ -252,13 +251,13 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     : [];
   const runtimeModeControl = runtimeControls.find((control) => control.surfaceRole === "mode") ?? null;
   const runtimeModeOption = useMemo(() => runtimeControlAsConfigOption(runtimeModeControl), [runtimeModeControl]);
+  const runtimeContextScope = activeScope
+    ?? init?.scope
+    ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
+  const runtimeContextDraftTargetKey = currentThreadId || runtimeBinding ? "" : selectedTargetId;
 
   useEffect(() => {
     if (runtimeTargetTransitionRef.current) {
-      return;
-    }
-    if (skipNextRuntimeContextReadRef.current) {
-      skipNextRuntimeContextReadRef.current = false;
       return;
     }
     if (!client) {
@@ -266,27 +265,16 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       threadController.setContext(null);
       return;
     }
-    const scope = activeScope
-      ?? init?.scope
-      ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
     let cancelled = false;
-    const pendingTarget = runtimeContext?.compatibleTargets.find((target) => (
-      target.targetId === pendingTargetSelectionRef.current
-    )) ?? null;
-    const requestedTarget = pendingTarget
-      ? {
-          agentRef: pendingTarget.agentRef ?? null,
-          runtimeProfileRef: pendingTarget.runtimeProfileRef
-        }
-      : currentThreadId || runtimeBinding
-        ? null
-        : threadController.contextReadTarget(selectedTargetId);
+    const requestedTarget = currentThreadId || runtimeBinding
+      ? null
+      : threadController.contextReadTarget(pendingTargetSelectionRef.current ?? selectedTargetId);
     setRuntimeOptionsLoading(true);
     setRuntimeOptionsError(null);
     void client.request("thread/context/read", {
       threadId: currentThreadId ?? null,
       target: requestedTarget,
-      scope
+      scope: runtimeContextScope
     }).then((value) => {
       if (cancelled) return;
       const context = parseThreadContext(value);
@@ -322,7 +310,16 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     return () => {
       cancelled = true;
     };
-  }, [activeScope, backends, client, currentThreadId, fallbackCwd, init?.scope, runtimeBinding?.runtimeRef, runtimeContextRefreshRevision, selectedTargetId, settings?.cwd]);
+  }, [
+    client,
+    currentThreadId,
+    runtimeContextDraftTargetKey,
+    runtimeContextRefreshRevision,
+    runtimeContextScope.cwd,
+    runtimeContextScope.source.kind,
+    runtimeContextScope.source.lifetime,
+    runtimeContextScope.source.rawId
+  ]);
 
   const controls = settings?.controls ?? null;
   const contextSendable = runtimeContextTargetId === selectedTargetId
@@ -365,9 +362,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const {
     adoptSnapshotScope,
     pushDebugEvent,
+    refreshAgentCatalog,
     refreshAgentSurface,
+    refreshCommands,
     refreshHistory,
     refreshRevertedThreadSnapshot,
+    refreshSettings,
     refreshSnapshot,
     refreshTrace,
     refreshWorkspaceSurface,
@@ -403,6 +403,14 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setWorkspaceDiff,
     setWorkspaceFiles
   });
+
+  async function refreshAgentSurfaceAndRuntimeContext(
+    nextClient: GatewayClient | null = client,
+    scope: GatewayRequestScope | undefined = activeScope ?? init?.scope ?? undefined
+  ) {
+    await refreshAgentSurface(nextClient, scope);
+    setRuntimeContextRefreshRevision((current) => current + 1);
+  }
 
   const {
     applyGatewayEvent,
@@ -521,6 +529,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     pinnedSessionIds,
     rightTabs,
     rightWidthPx,
+    runtimeTargetTransitionRef,
     scopeRef,
     selectedThreadIdRef,
     settingsSection,
@@ -535,9 +544,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     beginExplicitViewSwitch,
     clearCommandTransientUi,
     pushDebugEvent,
-    refreshAgentSurface,
+    refreshAgentCatalog,
+    refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
+    refreshCommands,
     refreshHistory,
     refreshRuntimeContext: () => setRuntimeContextRefreshRevision((current) => current + 1),
+    refreshSettings,
     refreshSnapshot,
     refreshTrace,
     refreshWorkspaceSurface,
@@ -661,9 +673,9 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
 
   const {
     acceptWorkspaceChange,
+    checkoutWorkspaceGitBranch,
     copyText,
     createWorkspace,
-    deleteArchivedSession,
     deleteBackend,
     deleteChannel,
     doctorChannel,
@@ -676,7 +688,8 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     openDiffPreview,
     openFilePreview,
     rejectWorkspaceChange,
-    restoreArchivedSession,
+    readWorkspaceFolders,
+    readWorkspaceGitBranches,
     saveBackendDraft,
     saveFileFromEditor,
     pollWechatQrSetup,
@@ -696,6 +709,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     fallbackCwd,
     host,
     initScope: init?.scope ?? null,
+    isThreadArchived: (threadId: string) => archivedSessions.some((session) => session.id === threadId),
     pendingDetachedShellRef,
     runtimeControls,
     runtimeControlDrafts,
@@ -710,7 +724,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     clearCommandTransientUi,
     openReviewTab,
     openRightWorkspaceTab,
-    refreshAgentSurface,
+    refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
     refreshHistory,
     refreshRuntimeContext: () => setRuntimeContextRefreshRevision((current) => current + 1),
     refreshSnapshot,
@@ -751,40 +765,51 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     }
     pendingTargetSelectionRef.current = targetId;
     runtimeTargetTransitionRef.current = true;
+    setSelectedTargetId(targetId);
+    setRuntimeControlDrafts({});
     setRuntimeOptionsLoading(true);
     setRuntimeOptionsError(null);
+    if (runtimeBinding) {
+      setRuntimeContext((current) => current ? { ...current, binding: null, selectionState: "draft" } : current);
+      setRuntimeContextTargetId("");
+      threadController.setContext(null);
+    }
+    let scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
+    let startedNewThread = false;
     try {
-      let scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
       if (runtimeBinding) {
-        const nextSnapshot = await startNewThread();
+        const nextSnapshot = await startNewThread(undefined, {
+          preserveRuntimeSelection: true,
+          refreshHistory: false
+        });
         scope = nextSnapshot?.scope ?? scope;
-        setRuntimeContext((current) => current ? { ...current, binding: null, selectionState: "draft" } : current);
-        setRuntimeContextTargetId("");
-        threadController.setContext(null);
+        startedNewThread = true;
       }
-      setRuntimeControlDrafts({});
       if (!client) {
-        setSelectedTargetId(targetId);
         return;
       }
       const result = await client.request("thread/draft/prepare", { scope, targetId });
       const context = parseThreadContext(result.context);
-      skipNextRuntimeContextReadRef.current = true;
       setRuntimeContext(context);
       threadController.setContext(context);
       setRuntimeContextTargetId(context.targetId);
-      setSelectedTargetId(targetId);
       pendingTargetSelectionRef.current = null;
     } catch (cause) {
-      skipNextRuntimeContextReadRef.current = true;
-      setSelectedTargetId(targetId);
-      setRuntimeContext(null);
       setRuntimeContextTargetId("");
       threadController.setContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       runtimeTargetTransitionRef.current = false;
       setRuntimeOptionsLoading(false);
+      if (startedNewThread && client) {
+        void refreshHistory(client);
+        void refreshSettings(client, scope.cwd, null);
+        void refreshWorkspaceSurface(client, scope, null);
+        void Promise.all([
+          refreshAgentCatalog(client, scope),
+          refreshCommands(client, scope, null)
+        ]);
+      }
     }
   }
 
@@ -836,6 +861,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     const input = inputOverride ?? (trimmed ? [{ type: "text" as const, text: trimmed }] : []);
     if (!client || input.length === 0) {
       return;
+    }
+    if (archivedSessions.some((session) => session.id === threadId)) {
+      await client.request("thread/restore", { threadId });
+      await Promise.all([refreshHistory(client), refreshHistory(client, true)]);
     }
     const selectedAtStart = snapshot.thread?.id === threadId;
     const targetSnapshot = selectedAtStart
@@ -1089,14 +1118,15 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch, capabilitiesTab,
     beginRightResize, changeRuntimeControl, changeRunnableTarget, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
     channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId, patchComposerDraft,
-    debugEnabled, debugEvents, deleteArchivedSession, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
+    debugEnabled, debugEvents, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
     executeCommand, handleAttachment, handleAttachmentFiles, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
     historyLoading, loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openCapabilitiesTab, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
     openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifyActions, pendingPermissionActions, pinnedSessionIds, pinnedSessions, pollWechatQrSetup,
-    refreshAgentSurface, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
-    restoreArchivedSession, revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runAction,
+    refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
+    readWorkspaceFolders, readWorkspaceGitBranches, checkoutWorkspaceGitBranch,
+    revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runAction,
     deleteAutomation, draftAutomation, pauseAutomation, refreshAutomations, resumeAutomation, runAutomation, saveAutomation,
     runCommandAlternateAction, running, runtimeContext, runtimeControls, runtimeControlDrafts, runtimeOptionsError, runtimeOptionsLoading, runtimeProfiles,
     saveBackendDraft, saveFileFromEditor,

@@ -230,8 +230,7 @@
   font-size: var(--pevo-font-size-small);
 }
 
-.settingsContentInner > .agentSurfacePanel,
-.settingsContentInner > .archivedSessionsPanel {
+.settingsContentInner > .agentSurfacePanel {
   align-self: start;
   align-content: start;
   min-height: 0;
@@ -240,76 +239,6 @@
   background: transparent;
   border: 0;
   border-radius: 0;
-}
-
-.archivedSessionsPanel {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.archivedSessionsPanel > p {
-  margin: 0;
-  color: var(--pevo-muted);
-  font-size: var(--pevo-font-size-small);
-}
-
-.archivedSessionList {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.archivedSessionRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 7px 8px;
-  background: var(--pevo-panel-muted);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.archivedSessionRow > div:first-child {
-  min-width: 0;
-}
-
-.archivedSessionRow strong,
-.archivedSessionRow span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.archivedSessionRow strong {
-  color: var(--pevo-ink);
-  font-size: var(--pevo-font-size-session);
-  font-weight: 650;
-}
-
-.archivedSessionRow span {
-  color: var(--pevo-muted);
-  font-size: var(--pevo-font-size-xsmall);
-}
-
-.archivedSessionActions {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.archivedSessionActions button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  color: var(--pevo-muted);
-  background: transparent;
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
 }
 
 .webSearchSettings select,

@@ -116,8 +116,16 @@ test.describe("pevo Web Workbench", () => {
       await openPanel(page, isMobile, "Transcript");
 
       const composer = page.getByPlaceholder("Ask Psychevo...");
+      await page.getByRole("button", { name: "Agent target", exact: true }).click();
+      const targetChoices = page.getByRole("dialog", { name: "Agent target" })
+        .getByRole("radiogroup", { name: "Agent target" });
+      const selectedTarget = targetChoices.getByRole("radio", { checked: true });
+      await expect(selectedTarget).toBeEnabled();
+      await selectedTarget.click();
       await composer.fill("Create a parent session for side chat validation.");
-      await page.getByRole("button", { name: "Send message" }).click();
+      const parentSubmit = page.getByRole("button", { name: "Send message" });
+      await expect(parentSubmit).toBeEnabled();
+      await parentSubmit.click();
       await expect(page.locator(".pevo-message.is-user")).toContainText("Create a parent session");
 
       await openPanel(page, isMobile, "Status");

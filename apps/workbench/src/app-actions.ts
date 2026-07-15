@@ -26,7 +26,9 @@ import {
   type ThreadSnapshot,
   type WorkspaceChangesResult,
   type WorkspaceDiffResult,
-  type WorkspaceFileWriteResult
+  type WorkspaceFolderListResult,
+  type WorkspaceFileWriteResult,
+  type WorkspaceGitBranchesResult
 } from "@psychevo/protocol";
 import type { PsychevoHost } from "@psychevo/host";
 import { attachmentFromFile } from "./attachments";
@@ -65,9 +67,14 @@ import {
   fileBasename,
   isUnsupportedPreviewFile
 } from "./right-workspace";
-import { runtimeControlSelections } from "./runtime-context";
+import { parseThreadContext, runtimeControlSelections } from "./runtime-context";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
+
+type StartNewThreadOptions = {
+  preserveRuntimeSelection?: boolean;
+  refreshHistory?: boolean;
+};
 
 type RefreshSnapshot = (
   nextClient?: GatewayClient | null,
@@ -93,6 +100,7 @@ type AppActionsParams = {
   detachedShellTokenRef: MutableRefObject<number>;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
+  isThreadArchived(threadId: string): boolean;
   fallbackCwd: string;
   turnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
@@ -163,18 +171,34 @@ export function createAppActions(params: AppActionsParams) {
     params.setTraceState({ error: null, loading: false, result: null, threadId: null });
   }
 
-  async function startNewThread(cwd?: string) {
+  async function startNewThread(cwd?: string, options: StartNewThreadOptions = {}) {
     if (!params.client) {
       return;
     }
     const epoch = params.beginExplicitViewSwitch();
-    resetRuntimeSelection();
+    if (!options.preserveRuntimeSelection) {
+      resetRuntimeSelection();
+    }
     clearSessionObservability();
     params.updateMainView("transcript");
     params.setMobilePanel("transcript");
     const nextScope = cwd
       ? scopeForCwd(cwd)
       : scope();
+    if (options.preserveRuntimeSelection) {
+      const optimisticDraft = normalizeSnapshot({
+        source: params.snapshot.source,
+        scope: nextScope,
+        thread: null,
+        history: params.snapshot.history,
+        entries: [],
+        activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+        pendingActions: []
+      });
+      params.selectedThreadIdRef.current = null;
+      params.setSnapshot(optimisticDraft);
+      params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
+    }
     const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: nextScope }));
     const normalized = normalizeSnapshot(nextSnapshot);
     if (params.viewEpochRef.current === epoch) {
@@ -183,15 +207,20 @@ export function createAppActions(params: AppActionsParams) {
       params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
       await params.adoptSnapshotScope(params.client, nextSnapshot);
     }
-    await params.refreshHistory(params.client);
+    if (options.refreshHistory !== false) {
+      await params.refreshHistory(params.client);
+    }
     return normalized;
   }
 
-  async function createWorkspace(name: string) {
+  async function createWorkspace(name: string, parent: string | null = null) {
     if (!params.client) {
       return;
     }
-    const created = WorkspaceCreateResultSchema.parse(await params.client.request("workspace/create", { name }));
+    const created = WorkspaceCreateResultSchema.parse(await params.client.request("workspace/create", {
+      name,
+      parent
+    }));
     const epoch = params.beginExplicitViewSwitch();
     resetRuntimeSelection();
     clearSessionObservability();
@@ -208,6 +237,59 @@ export function createAppActions(params: AppActionsParams) {
     params.setMobilePanel("transcript");
   }
 
+  async function readWorkspaceFolders(path: string | null = null): Promise<WorkspaceFolderListResult> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    return params.client.request("workspace/folders", { scope: scope(), path });
+  }
+
+  async function readWorkspaceGitBranches(): Promise<WorkspaceGitBranchesResult> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    return params.client.request("workspace/git/branches", { scope: scope() });
+  }
+
+  async function checkoutWorkspaceGitBranch(
+    branch: string,
+    create: boolean
+  ): Promise<WorkspaceGitBranchesResult> {
+    if (!params.client) {
+      throw new Error("Gateway client is unavailable.");
+    }
+    const nextScope = scope();
+    const result = await params.client.request("workspace/git/checkout", {
+      scope: nextScope,
+      branch,
+      create
+    });
+    params.setSettings((current) => current
+      ? {
+          ...current,
+          project: current.project
+            ? { ...current.project, branch: result.current }
+            : current.project
+        }
+      : current);
+    try {
+      const nextSettings = SettingsReadResultSchema.parse(await params.client.request("settings/read", {
+        cwd: nextScope.cwd,
+        threadId: params.currentThreadId
+      }));
+      params.setSettings(nextSettings);
+      await params.refreshWorkspaceSurface(
+        params.client,
+        nextScope,
+        params.currentThreadId,
+        params.viewEpochRef.current
+      );
+    } catch (error) {
+      params.setError(error instanceof Error ? error.message : String(error));
+    }
+    return result;
+  }
+
   async function submitTurn(
     text: string,
     mentions: GatewayMention[],
@@ -219,12 +301,30 @@ export function createAppActions(params: AppActionsParams) {
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...params.attachments.map((attachment) => attachment.input)
     ];
+    if (nextInput.length === 0) return;
     const optimisticText = displayText?.trim()
       || text.trim()
       || params.attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
     const turnOverrides = runtimeControlSelections(params.runtimeControls, params.runtimeControlDrafts);
+    const selectedThreadId = params.snapshot.thread?.id ?? null;
+    let turnTargetId = params.selectedTargetId;
+    if (selectedThreadId && params.isThreadArchived(selectedThreadId)) {
+      await params.client.request("thread/restore", { threadId: selectedThreadId });
+      await Promise.all([
+        params.refreshHistory(params.client),
+        params.refreshHistory(params.client, true)
+      ]);
+      const restoredContext = parseThreadContext(await params.client.request("thread/context/read", {
+        threadId: selectedThreadId,
+        target: null,
+        scope: scope()
+      }));
+      params.threadController.setContext(restoredContext);
+      turnTargetId = restoredContext.targetId;
+      params.refreshRuntimeContext();
+    }
     const turnControls = params.threadController.turnControls(
-      params.selectedTargetId,
+      turnTargetId,
       turnOverrides
     );
     const admission = params.threadController.admitTurn({ controls: turnControls, input: nextInput, mentions });
@@ -634,29 +734,11 @@ export function createAppActions(params: AppActionsParams) {
     return result;
   }
 
-  async function restoreArchivedSession(threadId: string) {
-    if (!params.client) {
-      return;
-    }
-    await params.client.request("thread/restore", { threadId });
-    await params.refreshHistory(params.client);
-    await params.refreshHistory(params.client, true);
-  }
-
-  async function deleteArchivedSession(threadId: string) {
-    if (!params.client) {
-      return;
-    }
-    await params.client.request("thread/delete", { threadId });
-    await params.refreshHistory(params.client);
-    await params.refreshHistory(params.client, true);
-  }
-
   return {
     acceptWorkspaceChange,
     copyText,
+    checkoutWorkspaceGitBranch,
     createWorkspace,
-    deleteArchivedSession,
     deleteBackend,
     deleteChannel,
     doctorChannel,
@@ -668,7 +750,8 @@ export function createAppActions(params: AppActionsParams) {
     openDiffPreview,
     openFilePreview,
     rejectWorkspaceChange,
-    restoreArchivedSession,
+    readWorkspaceFolders,
+    readWorkspaceGitBranches,
     saveBackendDraft,
     saveFileFromEditor,
     pollWechatQrSetup,

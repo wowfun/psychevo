@@ -205,6 +205,25 @@ runtime controls. Failure keeps the requested Agent identity visible, blocks
 submit, and shows the bounded Gateway error. Reconnect may reuse a cached
 prepared projection, but ordinary context refresh remains side-effect free.
 
+Opening a Session treats the `thread/resume` or `thread/read` snapshot as the
+authoritative first-render Transcript. Workbench must not synchronously repeat
+`thread/history/read` before committing that snapshot; paginated history reads
+remain available to explicit search and lazy-history consumers. Runtime context
+reads are keyed by the selected Thread, effective scope, prospective unbound
+target, and an explicit capability revision. A bound Session performs one
+context read on activation, and applying that response must not schedule the
+same read again. Auxiliary Settings, Workspace, Observability, Agent catalog,
+and command refreshes are deduplicated by their owning scope and do not block
+the selected Transcript or Composer controls.
+
+Changing immutable Agent provenance on a bound Session starts a new Thread and
+immediately prepares the requested draft target. The critical path is
+`thread/start` followed by `thread/draft/prepare`; Settings, Workspace,
+Observability, history, catalog, and command refreshes run after or alongside
+that path without being awaited between those two requests. The requested
+Agent identity appears in its loading state as soon as the user selects it and
+remains visible if preparation fails.
+
 The capsule is the only new runtime visual signature. It uses existing
 Workbench type, spacing, and semantic status colours rather than runtime brand
 colours. Runtime controls keep effective value/source, local draft override,
@@ -212,10 +231,30 @@ mutability, apply scope, stability, and Channel safety distinct. Shared
 Attention carries runtime/profile and parent/child origin and states the exact
 authorization lifetime.
 
-Composer places the Permission mode control immediately to the right of the `+`
-attachment control, followed by Agent and Mode on the left; the grouped
-Model/Reasoning selector plus Context remain on the right. Permission mode is
-not duplicated inside the Agent target popover. These footer selection triggers are borderless,
+An unbound draft Session presents Composer as the center-stage action instead
+of pinning it to the bottom of an otherwise empty Transcript. After the first
+prompt is accepted and the Thread becomes bound, the same Composer moves to its
+ordinary bottom dock with a short positional transition. The transition uses
+the existing Composer surface, does not remount or clear its draft state, and
+is omitted when reduced motion is requested.
+
+Composer keeps Agent and Mode beside the `+` attachment control; the grouped
+Model/Reasoning selector plus Context remain on the right. Permission mode moves
+to the quieter environment line immediately before Workspace. It is not
+duplicated inside the Agent target popover. On an unbound draft, Workspace opens
+a switcher of known workspaces and ends with `Open workspace...`; choosing a
+workspace starts a detached draft in that cwd, while opening a new workspace
+opens a folder-selection panel at the active cwd. The panel supports traversing
+folders across the filesystem visible to the Gateway process, including parent
+folders up to the filesystem root, and does not fall back to free-form path
+entry. Once a Thread is bound, Workspace keeps its
+existing Files-opening behavior and cannot retarget the Thread.
+
+The Git branch control opens a local-branch switcher for the active workspace
+and ends with `New branch...`. Branch checkout and creation use structured
+Gateway workspace operations, refresh the displayed project state on success,
+and surface bounded Git failures without manufacturing a successful selection.
+Mutation is unavailable while a turn is running. These footer selection triggers are borderless,
 chevron-free, and intrinsically sized to the current value with bounded narrow
 viewport truncation; action controls such as add, dictation, and Send retain
 their existing icon-button treatment. Mode focus removes the rectangular
@@ -262,16 +301,24 @@ resolution, revisions, turn serialization, and runtime-name decisions do not
 live in `App.tsx` or presentation Modules. Native and ACP use the same semantic
 control placement and disabled/unavailable treatment.
 
-The Sessions header contains one `Import Agent session` action. Opening that
-surface is the user intent that permits Agent session discovery; merely opening
-Sessions or archived history is not. The import surface groups candidates by
-ACP Profile, keeps successful groups usable when another Profile fails, offers
-refresh, and asks for an Agent target only when a Profile has multiple
-compatible targets. Empty and error states state the next action plainly.
-The import dialog keeps its header and footer visible inside the viewport; long
-Profile and Session results scroll only within its body on desktop and mobile.
-After a successful import, Workbench opens the published Thread whose Transcript
-already contains the Agent history committed by Gateway.
+The Sessions header contains one `Imported and archived sessions` view toggle.
+The toggle is the user intent that permits Agent session discovery; ordinary
+active-history rendering does not scan ACP Agents. Switching views immediately
+keeps the sidebar usable while archived Psychevo Threads and enabled ACP Agent
+session catalogs load independently. The alternate list is ordered as one
+`Archived` group followed by one group per ACP Runtime Profile. One failing or
+slow Profile does not hide archived Threads or successful Profile groups, and
+empty/error rows state the next action plainly.
+
+Selecting an archived Thread reads and renders its Transcript without restoring
+it. Selecting an ACP candidate atomically imports its durable `session/load`
+replay as an archived Thread and then renders the same Transcript surface. An
+`Activate` item in either row's secondary menu restores or imports the Thread
+into the ordinary active list. Sending the first new message from an archived
+Transcript performs that same activation before `turn/start`, so a read-only
+visit never silently changes history membership. When a Profile has multiple
+compatible targets, the group exposes only the necessary target selector and
+defaults to the first ready target rather than the first syntactic target.
 
 Session menus render Gateway lifecycle descriptors. Fork is visible only for a
 negotiated fork-capable Agent. Delete remains visible but disabled with its

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startPevoWeb } from "./harness";
@@ -22,130 +22,112 @@ cost = { input = 0, output = 0, cache_read = 0, cache_write = 0, request = 0 }
 `;
 
 test.describe("Workbench composer visual contract", () => {
-  test("locks workspace HTML until an explicit interactive run", async ({ page, isMobile }, testInfo) => {
-    const server = await startPevoWeb({ live: false });
-    const externalRequests: string[] = [];
-    await page.route("https://preview-probe.invalid/**", async (route) => {
-      externalRequests.push(route.request().url());
-      await route.abort("blockedbyclient");
-    });
+  test("runs workspace HTML interactively without a trust prompt", async ({ page, isMobile }, testInfo) => {
     mkdirSync(screenshotDir, { recursive: true });
+    const cwd = mkdtempSync(path.join(screenshotDir, "html-preview-cwd-"));
+    writeFileSync(
+      path.join(cwd, "dynamic-preview.html"),
+      [
+        "<!doctype html>",
+        "<html><body>",
+        "<div id=\"app\">pending</div>",
+        "<button id=\"interaction-probe\" type=\"button\">Clicks: <span>0</span></button>",
+        "<script>",
+        "const rows = ['需求分析', 'UI/UX 设计', '部署上线'];",
+        "document.getElementById('app').innerHTML = rows.map((row) => `<p class=\"gantt-row\">${row}</p>`).join('');",
+        "let clicks = 0; document.getElementById('interaction-probe').addEventListener('click', () => { clicks += 1; document.querySelector('#interaction-probe span').textContent = String(clicks); });",
+        "</script>",
+        "</body></html>"
+      ].join("")
+    );
+    const server = await startPevoWeb({ cwd, live: false });
     try {
-      writeFileSync(
-        path.join(server.cwd, "hostile-preview.html"),
-        [
-          "<!doctype html>",
-          "<html><head><meta http-equiv=\"refresh\" content=\"0;url=https://preview-probe.invalid/meta-refresh\"></head><body>",
-          "<div id=\"app\">locked</div>",
-          "<img alt=\"remote probe\" src=\"https://preview-probe.invalid/parser-image.png\">",
-          "<script src=\"https://preview-probe.invalid/parser-script.js\"></script>",
-          "<form id=\"probe-form\" action=\"https://preview-probe.invalid/form\" method=\"post\"><input name=\"probe\" value=\"1\"></form>",
-          "<a id=\"probe-navigation\" href=\"https://preview-probe.invalid/navigation\" target=\"_blank\">navigate</a>",
-          "<script>",
-          "document.getElementById('app').textContent = 'script ran';",
-          "void fetch('https://preview-probe.invalid/fetch').catch(() => undefined);",
-          "const dynamicImage = new Image(); dynamicImage.src = 'https://preview-probe.invalid/dynamic-image.png';",
-          "try { document.getElementById('probe-form').requestSubmit(); } catch {}",
-          "try { document.getElementById('probe-navigation').click(); } catch {}",
-          "try { window.open('https://preview-probe.invalid/popup', '_blank'); } catch {}",
-          "location.href = 'https://preview-probe.invalid/self-navigation';",
-          "</script>",
-          "</body></html>"
-        ].join("")
-      );
-      writeFileSync(
-        path.join(server.cwd, "dynamic-preview.html"),
-        [
-          "<!doctype html>",
-          "<html><body>",
-          "<div id=\"app\">pending</div>",
-          "<button id=\"interaction-probe\" type=\"button\">Clicks: <span>0</span></button>",
-          "<script>",
-          "const rows = ['需求分析', 'UI/UX 设计', '部署上线'];",
-          "document.getElementById('app').innerHTML = rows.map((row) => `<p class=\"gantt-row\">${row}</p>`).join('');",
-          "let clicks = 0; document.getElementById('interaction-probe').addEventListener('click', () => { clicks += 1; document.querySelector('#interaction-probe span').textContent = String(clicks); });",
-          "</script>",
-          "</body></html>"
-        ].join("")
-      );
-
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       await openStatusPanel(page, isMobile);
-      await page.getByRole("region", { name: "Workspace status" }).getByRole("button", { name: "Files", exact: true }).click();
+      const status = page.getByRole("region", { name: "Workspace status" });
+      await status.getByRole("button", { name: "Refresh workspace" }).click();
+      await status.getByRole("button", { name: "Files", exact: true }).click();
       const files = page.getByRole("region", { name: "Workspace files" });
       await expect(files).toBeVisible();
-      await files.getByRole("treeitem", { name: /hostile-preview\.html/ }).click();
-      const hostileFrame = files.locator(".htmlStaticPreview iframe");
-      await expect(hostileFrame).not.toHaveAttribute("sandbox", /allow-scripts/);
-      await expect(hostileFrame).toHaveAttribute("inert", "");
-      await expect(hostileFrame).toHaveAttribute("tabindex", "-1");
-      await expect(hostileFrame).toHaveCSS("pointer-events", "none");
-      const lockedRunButton = files.getByRole("button", { name: "Run interactive preview" });
-      await lockedRunButton.focus();
-      await page.keyboard.press("Tab");
-      await expect(files.getByLabel("Filter workspace files")).toBeFocused();
-      await expect(hostileFrame).not.toBeFocused();
-      const hostilePreview = files.frameLocator(".htmlStaticPreview iframe");
-      await expect(hostilePreview.locator("#app")).toHaveText("locked");
-      const lockedLinkBox = await hostilePreview.locator("#probe-navigation").boundingBox();
-      expect(lockedLinkBox).not.toBeNull();
-      await page.mouse.click(
-        lockedLinkBox!.x + lockedLinkBox!.width / 2,
-        lockedLinkBox!.y + lockedLinkBox!.height / 2
-      );
-      await page.waitForTimeout(150);
-      expect(externalRequests).toEqual([]);
-
       await files.getByRole("treeitem", { name: /dynamic-preview\.html/ }).click();
-      await expect(files.getByText("HTML preview")).toBeVisible();
       const inlineFrame = files.locator(".htmlStaticPreview iframe");
-      await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-scripts/);
+      await expect(inlineFrame).toHaveAttribute("sandbox", "allow-scripts");
       await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-forms/);
       await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-popups/);
       await expect(inlineFrame).not.toHaveAttribute("sandbox", /allow-same-origin/);
-      await expect(page.locator(".htmlStaticPreview iframe")).toHaveCount(1);
-      await expect(files.getByText("Locked · run enables scripts + network")).toBeVisible();
-      const inlinePreview = files.frameLocator(".htmlStaticPreview iframe");
-      await expect(inlinePreview.locator("#app")).toHaveText("pending");
-      await expect(inlinePreview.locator("#app .gantt-row")).toHaveCount(0);
-      await files.getByRole("button", { name: "Run interactive preview" }).click();
-      await expect(inlineFrame).toHaveAttribute("sandbox", /allow-scripts/);
       await expect(inlineFrame).not.toHaveAttribute("inert", "");
+      await expect(inlineFrame).toHaveAttribute("tabindex", "0");
       await expect(inlineFrame).toHaveCSS("pointer-events", "auto");
-      await expect(files.getByText("Trusted · scripts + network on")).toBeVisible();
+      await expect(page.locator(".htmlStaticPreview iframe")).toHaveCount(1);
+      await expect(files.getByRole("button", { name: "Run interactive preview" })).toHaveCount(0);
+      await expect(files.getByRole("button", { name: "Stop interactive preview" })).toHaveCount(0);
+      const inlinePreview = files.frameLocator(".htmlStaticPreview iframe");
       await expect(inlinePreview.locator("#app .gantt-row")).toHaveCount(3);
       await expect(inlinePreview.locator("#app")).toContainText("部署上线");
       await inlinePreview.locator("#interaction-probe").click();
       await expect(inlinePreview.locator("#interaction-probe span")).toHaveText("1");
-      expect(externalRequests).toEqual([]);
 
-      await files.getByLabel("Open HTML preview for dynamic-preview.html").click();
+      const openPreviewAction = files.getByLabel("Open HTML preview for dynamic-preview.html");
+      const editAction = files.getByLabel("Edit dynamic-preview.html");
+      const hideFileTree = files.getByRole("button", { name: "Hide file tree" });
+      const [openPreviewBox, editBox, treeToggleBox, previewWithTreeBox] = await Promise.all([
+        openPreviewAction.boundingBox(),
+        editAction.boundingBox(),
+        hideFileTree.boundingBox(),
+        files.locator(".htmlStaticPreview").boundingBox()
+      ]);
+      if (!openPreviewBox || !editBox || !treeToggleBox || !previewWithTreeBox) {
+        throw new Error("missing Files action geometry");
+      }
+      expect(openPreviewBox.x).toBeLessThan(editBox.x);
+      expect(Math.abs(editBox.x - openPreviewBox.x - openPreviewBox.width - 5)).toBeLessThanOrEqual(1);
+      expect(Math.abs(openPreviewBox.y - editBox.y)).toBeLessThanOrEqual(1);
+      expect(treeToggleBox.y).toBeLessThan(editBox.y);
+      expect(Math.abs(treeToggleBox.x + treeToggleBox.width - editBox.x - editBox.width)).toBeLessThanOrEqual(6);
+      await page.screenshot({
+        path: path.join(screenshotDir, `html-files-controls-${testInfo.project.name}.png`)
+      });
+
+      await hideFileTree.click();
+      await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toHaveCount(0);
+      await expect(files).not.toHaveClass(/has-fileTree/);
+      const previewWithoutTreeBox = await files.locator(".htmlStaticPreview").boundingBox();
+      if (!previewWithoutTreeBox) {
+        throw new Error("missing expanded Files preview geometry");
+      }
+      expect(Math.abs(previewWithoutTreeBox.y - previewWithTreeBox.y)).toBeLessThanOrEqual(1);
+      if (isMobile) {
+        expect(previewWithoutTreeBox.height).toBeGreaterThan(previewWithTreeBox.height * 1.3);
+      } else {
+        expect(previewWithoutTreeBox.width).toBeGreaterThan(previewWithTreeBox.width * 1.3);
+      }
+      await page.screenshot({
+        path: path.join(screenshotDir, `html-files-tree-hidden-${testInfo.project.name}.png`)
+      });
+      await files.getByRole("button", { name: "Show file tree" }).click();
+      await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toBeVisible();
+
+      await openPreviewAction.click();
       const preview = page.getByRole("region", { name: "Preview" });
       await expect(preview.getByRole("heading", { name: "dynamic-preview.html" })).toBeVisible();
-      await expect(preview.getByText("HTML preview")).toBeVisible();
       const previewIframe = preview.locator(".htmlStaticPreview iframe");
       const previewFrame = preview.frameLocator(".htmlStaticPreview iframe");
       await expect(page.locator(".htmlStaticPreview iframe")).toHaveCount(1);
       await expect(inlineFrame).toHaveCount(0);
-      await expect(previewIframe).not.toHaveAttribute("sandbox", /allow-scripts/);
-      await expect(preview.getByText("Locked · run enables scripts + network")).toBeVisible();
-      await expectHtmlPreviewChromeOutsideDocument(preview);
-      await expect(previewFrame.locator("#app")).toHaveText("pending");
-      await expect(previewFrame.locator("#app .gantt-row")).toHaveCount(0);
-      await preview.getByRole("button", { name: "Run interactive preview" }).click();
-      await expect(previewIframe).toHaveAttribute("sandbox", /allow-scripts/);
-      await expectHtmlPreviewChromeOutsideDocument(preview);
+      await expect(previewIframe).toHaveAttribute("sandbox", "allow-scripts");
+      await expect(preview.getByRole("button", { name: "Run interactive preview" })).toHaveCount(0);
+      await expect(preview.getByRole("button", { name: "Stop interactive preview" })).toHaveCount(0);
       await expect(previewFrame.locator("#app .gantt-row")).toHaveCount(3);
       await expect(previewFrame.locator("#app")).toContainText("UI/UX 设计");
       await previewFrame.locator("#interaction-probe").click();
       await expect(previewFrame.locator("#interaction-probe span")).toHaveText("1");
-      expect(externalRequests).toEqual([]);
       await page.screenshot({
         path: path.join(screenshotDir, `html-preview-scripts-${testInfo.project.name}.png`)
       });
     } finally {
       await server.stop();
+      rmSync(cwd, { force: true, recursive: true });
     }
   });
 
@@ -230,11 +212,37 @@ test.describe("Workbench composer visual contract", () => {
       await expect(page.getByRole("combobox", { name: "Psychevo mode" })).toHaveCount(0);
       await expect(page.getByRole("tablist", { name: "Turn mode" })).toHaveCount(0);
       await assertComposerGeometry(page, isMobile);
+      await assertDraftComposerCentered(page);
       const defaultFooterBox = await page.locator(".pevo-composerFooter").boundingBox();
       expect(defaultFooterBox).not.toBeNull();
       await page.screenshot({
         path: path.join(screenshotDir, `composer-empty-${testInfo.project.name}.png`)
       });
+
+      const workspaceControl = page.getByRole("button", { name: "Workspace", exact: true });
+      await workspaceControl.click();
+      const workspaceMenu = page.getByRole("menu", { name: "Workspace" });
+      await expect(workspaceMenu.getByRole("menuitem", { name: "Open workspace..." })).toBeVisible();
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-workspace-menu-${testInfo.project.name}.png`)
+      });
+      await workspaceMenu.getByRole("menuitem", { name: "Open workspace..." }).click();
+      const folderPicker = page.getByRole("dialog", { name: "Choose workspace folder" });
+      await expect(folderPicker.getByRole("button", { name: "Open folder" })).toBeEnabled();
+      await expect(folderPicker.getByRole("textbox")).toHaveCount(0);
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-folder-picker-${testInfo.project.name}.png`)
+      });
+      await folderPicker.getByRole("button", { name: "Close folder picker" }).click();
+
+      const branchControl = page.getByRole("button", { name: "Git branch", exact: true });
+      await branchControl.click();
+      const branchMenu = page.getByRole("menu", { name: "Git branch" });
+      await expect(branchMenu.getByRole("menuitem", { name: "New branch..." })).toBeVisible();
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-branch-menu-${testInfo.project.name}.png`)
+      });
+      await page.keyboard.press("Escape");
 
       if (!isMobile) {
         await page.getByRole("button", { name: "Context usage" }).click();
@@ -369,7 +377,7 @@ test.describe("Workbench composer visual contract", () => {
 
       if (!isMobile) {
         await expect.poll(() => threadItems.evaluate((element) => element.classList.contains("is-scrolling"))).toBe(false);
-        await threadItems.hover();
+        await threadItems.hover({ position: { x: 1, y: 1 } });
         const hoverColor = await scrollbarColor(threadItems);
         expect(hoverColor).not.toBe(restingColor);
       }
@@ -537,16 +545,6 @@ function workbenchRpcResultsForMethod(
   });
 }
 
-async function expectHtmlPreviewChromeOutsideDocument(preview: Locator) {
-  const [noticeBox, iframeBox] = await Promise.all([
-    preview.locator(".htmlPreviewNotice").boundingBox(),
-    preview.locator(".htmlStaticPreview iframe").boundingBox()
-  ]);
-  expect(noticeBox).not.toBeNull();
-  expect(iframeBox).not.toBeNull();
-  expect(noticeBox!.y + noticeBox!.height).toBeLessThanOrEqual(iframeBox!.y + 1);
-}
-
 async function expectSelectTextFits(select: Locator) {
   const result = await select.evaluate((element) => {
     const control = element as HTMLSelectElement;
@@ -653,16 +651,20 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
   const dictation = page.getByRole("button", { name: /dictation/ });
   const agent = page.getByRole("button", { name: "Agent target", exact: true });
   const permission = page.getByRole("combobox", { name: "Permission mode" });
+  const workspace = page.getByRole("button", { name: "Workspace", exact: true });
+  const branch = page.getByRole("button", { name: "Git branch" });
   const mode = page.getByRole("combobox", { name: "Mode", exact: true });
   const model = page.getByRole("button", { name: "Model", exact: true });
   const context = page.getByRole("button", { name: "Context usage" });
-  const [addBox, inputBox, footerBox, actionBox, dictationBox, permissionBox, agentBox, modeBox, modelBox, contextBox] = await Promise.all([
+  const [addBox, inputBox, footerBox, actionBox, dictationBox, permissionBox, workspaceBox, branchBox, agentBox, modeBox, modelBox, contextBox] = await Promise.all([
     add.boundingBox(),
     input.boundingBox(),
     footer.boundingBox(),
     action.boundingBox(),
     dictation.boundingBox(),
     permission.boundingBox(),
+    workspace.boundingBox(),
+    branch.boundingBox(),
     agent.boundingBox(),
     mode.boundingBox(),
     model.boundingBox(),
@@ -675,6 +677,8 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
   expect(actionBox).not.toBeNull();
   expect(dictationBox).not.toBeNull();
   expect(permissionBox).not.toBeNull();
+  expect(workspaceBox).not.toBeNull();
+  expect(branchBox).not.toBeNull();
   expect(agentBox).not.toBeNull();
   expect(modeBox).not.toBeNull();
   expect(modelBox).not.toBeNull();
@@ -693,42 +697,62 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
   if (isMobile) {
     const viewport = await page.viewportSize();
     expect(viewport).not.toBeNull();
-    const visibleBoxes = [addBox!, permissionBox!, agentBox!, modeBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
+    const visibleBoxes = [addBox!, permissionBox!, workspaceBox!, branchBox!, agentBox!, modeBox!, modelBox!, contextBox!, dictationBox!, actionBox!];
     for (const box of visibleBoxes) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
     }
     expect(Math.abs(addCenterY - agentCenterY)).toBeLessThanOrEqual(5);
-    expect(Math.abs(addCenterY - (permissionBox!.y + permissionBox!.height / 2))).toBeLessThanOrEqual(5);
     expect(Math.abs(agentCenterY - modeCenterY)).toBeLessThanOrEqual(5);
+    expect(Math.abs(
+      (permissionBox!.y + permissionBox!.height / 2)
+      - (workspaceBox!.y + workspaceBox!.height / 2)
+    )).toBeLessThanOrEqual(5);
     expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(5);
     expect(contextBox!.y).toBeGreaterThanOrEqual(modelBox!.y - 1);
     await expectNoBoxOverlap({ action: actionBox!, context: contextBox!, dictation: dictationBox!, model: modelBox! });
     expect(await footer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
     expect(addBox!.x).toBeLessThan(agentBox!.x);
-    expect(addBox!.x).toBeLessThan(permissionBox!.x);
-    expect(permissionBox!.x).toBeLessThan(agentBox!.x);
+    expect(permissionBox!.x).toBeLessThan(workspaceBox!.x);
+    expect(workspaceBox!.x).toBeLessThan(branchBox!.x);
     expect(dictationBox!.x).toBeLessThan(actionBox!.x);
     return;
   }
   expect(Math.abs(actionCenterY - dictationCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - agentCenterY)).toBeLessThanOrEqual(4);
-  expect(Math.abs(actionCenterY - (permissionBox!.y + permissionBox!.height / 2))).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modeCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - modelCenterY)).toBeLessThanOrEqual(4);
   expect(Math.abs(actionCenterY - contextCenterY)).toBeLessThanOrEqual(4);
 
   expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
   expect(addBox!.x).toBeLessThan(agentBox!.x);
-  expect(addBox!.x).toBeLessThan(permissionBox!.x);
-  expect(permissionBox!.x).toBeLessThan(agentBox!.x);
+  expect(Math.abs(
+    (permissionBox!.y + permissionBox!.height / 2)
+    - (workspaceBox!.y + workspaceBox!.height / 2)
+  )).toBeLessThanOrEqual(4);
+  expect(permissionBox!.x).toBeLessThan(workspaceBox!.x);
+  expect(workspaceBox!.x).toBeLessThan(branchBox!.x);
   expect(modeBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeLessThan(dictationBox!.x);
   expect(contextBox!.x).toBeGreaterThan(modelBox!.x);
   expect(contextBox!.x).toBeLessThan(dictationBox!.x);
   expect(dictationBox!.x).toBeLessThan(actionBox!.x);
+}
+
+async function assertDraftComposerCentered(page: Page) {
+  const conversation = page.locator(".conversationColumn.is-draftSession");
+  await expect(conversation).toHaveCount(1);
+  const [workspaceBox, dockBox] = await Promise.all([
+    conversation.locator(".centerWorkspace").boundingBox(),
+    conversation.locator(".composerDock").boundingBox()
+  ]);
+  expect(workspaceBox).not.toBeNull();
+  expect(dockBox).not.toBeNull();
+  const workspaceCenter = workspaceBox!.y + workspaceBox!.height / 2;
+  const dockCenter = dockBox!.y + dockBox!.height / 2;
+  expect(Math.abs(workspaceCenter - dockCenter)).toBeLessThanOrEqual(2);
 }
 
 async function expectNoBoxOverlap(boxes: Record<string, { x: number; y: number; width: number; height: number }>) {

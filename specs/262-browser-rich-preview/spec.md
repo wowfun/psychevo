@@ -73,37 +73,14 @@ viewer without leaving the transcript or preview surface.
 
 Local HTML preview is read-only and constrained to content that Gateway has
 already authorized as a workspace file or artifact. Workbench must not use raw
-`file://` URLs for local preview. Workspace authorization grants read access; it
-does not make the document trusted code.
-
-The default preview is a locked, scriptless offline sandbox. Inline styles and
-data/blob-backed local assets may render, but scripts do not run. Workbench
-injects a restrictive Content Security Policy that denies scripts and automatic
-network side effects from connections, parser-loaded subresources, forms, and
-nested browsing by default, including `default-src`, `connect-src`,
-`form-action`, frames, objects, workers, and remote media. The iframe does not
-grant script, same-origin, form, popup, top-navigation, or download sandbox
-capabilities. This locked mode is the state entered when a file is selected or
-opened in Preview.
-
-Locked mode is non-interactive as well as scriptless. Workbench makes the iframe
-inert, removes it from keyboard focus, and blocks pointer delivery at the outer
-iframe boundary so links or other disguised click targets cannot navigate or
-issue requests before trust is granted. This intentionally disables scrolling
-inside the locked document; the user must enter the explicit trusted run to
-interact with or scroll the document itself.
-
-`Run interactive preview` is a visible, explicit user action that starts a
-trusted run for the currently displayed document. Only that mode grants
-`allow-scripts`; network activity from the document is then inside the explicit
-trust boundary. Form, popup, same-origin, top-navigation, and download sandbox
-capabilities remain withheld. The trusted run also restores iframe pointer and
-keyboard interaction. Trust is scoped to the exact path and content in that
-preview surface and is revoked immediately when either changes. Returning to
-previously viewed content must not silently resurrect an earlier trusted run.
-The locked/trusted status and action row is Workbench chrome outside the iframe
-content area. It must reserve its own layout space and may wrap at narrow
-widths, but must never overlay or obscure the preview document.
+`file://` URLs for local preview. Files and Preview run authorized HTML
+immediately in an interactive opaque-origin iframe with `allow-scripts`.
+Scripts, network requests, pointer input, keyboard input, and document scrolling
+are available without a trust prompt or locked mode. The injected Content
+Security Policy still denies base rewriting, forms, nested frames, and objects;
+the iframe still withholds form, popup, same-origin, top-navigation, and
+download sandbox capabilities. Selecting a different document remounts the
+execution surface, and changing its content reloads `srcDoc`.
 
 Files and Preview are two views over one HTML execution surface. At most one
 iframe for a selected HTML document may be mounted at a time. Activating Preview
@@ -111,11 +88,20 @@ must suspend the Files iframe, and returning to Files must suspend the Preview
 iframe, without unmounting unrelated inactive tabs such as Terminal or Side
 chat.
 
+The Files pane header exposes a persistent toggle for its right-hand file tree.
+Hiding the tree expands the selected-file preview to the full pane while keeping
+the header toggle available to restore it. In the selected-file action row,
+`Open HTML preview` sits immediately to the left of `Edit`; panel-level tree
+visibility remains visually separate from those file-level actions.
+
 The Browser pane has compact toolbar controls for navigation, reload, address,
-annotation, and external open. Web and managed-Web hosts may show a preview-only
-iframe fallback for ordinary `http://` and `https://` pages, but Browser
-automation is Desktop-only. Non-Desktop Browser control attempts return a clear
-`Desktop required` failure instead of silently opening an external browser.
+annotation, and external open. Web and managed-Web hosts show ordinary
+`http://` and `https://` pages in an unsandboxed preview-only iframe so page
+scripts, forms, popups, and same-origin behavior follow normal browser rules.
+Browser automation remains Desktop-only. Non-Desktop Browser control attempts
+return a clear `Desktop required` failure instead of silently opening an
+external browser. A remote site's own embedding headers may still prevent it
+from loading in the iframe.
 
 Browser tab identity, navigation state, and visibility are thread-scoped. Each
 thread may reuse exactly one Browser tab, different threads never share a tab or
@@ -199,12 +185,10 @@ Default validation uses deterministic local harnesses and fake providers.
   URL, image, directory, missing-file, and outside-workspace cases.
 - Workbench tests cover per-thread Browser tab creation/reuse and A-B-A state
   restoration, Web preview-only automation messaging, public and loopback
-  host/port normalization, explicit scheme rejection, locked scriptless HTML
-  CSP and sandbox behavior, explicit trusted runs, trust reset on path/content
-  changes, locked link-click suppression with zero requests, restored trusted
-  pointer interaction, single active HTML execution, non-overlapping HTML
-  preview chrome at desktop and mobile widths, and right workspace navigation
-  without text overlap.
+  host/port normalization, explicit scheme rejection, unsandboxed Browser
+  fallback, immediate HTML script and pointer interaction, document/content
+  reload, the retained HTML sandbox/CSP restrictions, single active HTML
+  execution, and right workspace navigation without text overlap.
 - Gateway/runtime tests cover the built-in Browser plugin list row, default
   enabled policy, explicit disable policy, and secret-free projection.
 - Desktop tests cover Browser host command routing once the native host lands.

@@ -152,7 +152,7 @@ export type RightWorkspaceTab = {
 
 export type MainView = "transcript" | "search" | "settings" | "automations" | "capabilities";
 export type CapabilityTab = "agents" | "skills" | "plugins" | "mcp" | "tools";
-export type SettingsSection = "appearance" | "models" | "web-search" | "slash" | "usage" | "debug" | "channels" | "archived";
+export type SettingsSection = "appearance" | "models" | "web-search" | "slash" | "usage" | "debug" | "channels";
 export type WorkbenchUsageStats = UsageReadResult;
 export type WorkbenchAutomation = AutomationTaskView;
 export type Appearance = "dark" | "light" | "warm";

@@ -60,6 +60,12 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
+.composerRequestLink {
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  width: fit-content;
+}
+
 .composerRequest input {
   flex: 1 1 180px;
   min-height: 32px;
@@ -143,6 +149,14 @@
   gap: 2px;
 }
 
+.composerClarifyOptionImage {
+  border-radius: 8px;
+  display: block;
+  max-height: 128px;
+  max-width: min(256px, 100%);
+  object-fit: contain;
+}
+
 .composerClarifyOption small {
   color: var(--pevo-muted);
   line-height: 1.25;
@@ -157,6 +171,215 @@
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
   font-size: var(--pevo-font-size-small);
   white-space: nowrap;
+}
+
+.composerEnvironmentControl {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.composerEnvironmentControl.is-workspace {
+  flex: 1 1 auto;
+}
+
+.composerEnvironmentMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 48;
+  display: grid;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(360px, calc(100vh - 96px));
+  gap: 2px;
+  overflow-y: auto;
+  padding: 6px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  box-shadow: var(--pevo-shadow-popover);
+  white-space: normal;
+}
+
+.composerEnvironmentControl.is-branch .composerEnvironmentMenu {
+  right: 0;
+  left: auto;
+  width: min(280px, calc(100vw - 24px));
+}
+
+.composerEnvironmentMenu > button {
+  display: flex;
+  width: 100%;
+  max-width: none;
+  min-height: 30px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composerEnvironmentMenu > button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerEnvironmentMenu > button > svg:last-child {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.composerEnvironmentMenu > button:hover:not(:disabled),
+.composerEnvironmentMenu > button:focus-visible {
+  background: var(--pevo-panel-muted);
+}
+
+.composerEnvironmentMenu > button:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.composerEnvironmentMenuDivider {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--pevo-border);
+}
+
+.composerEnvironmentMenuState {
+  padding: 6px 8px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.composerEnvironmentMenuState.is-error,
+.composerDialogError,
+.composerFolderList .is-error {
+  color: var(--pevo-danger);
+}
+
+.composerFolderDialog,
+.composerBranchDialog {
+  gap: 14px;
+  padding: 16px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: var(--pevo-shadow-popover);
+}
+
+.composerFolderDialog {
+  grid-template-rows: auto auto minmax(180px, 46vh) auto;
+  width: min(560px, calc(100vw - 32px));
+}
+
+.composerFolderLocation {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  color: var(--pevo-muted);
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-size: var(--pevo-font-size-small);
+}
+
+.composerFolderLocation > button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerFolderLocation > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerFolderList {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.composerFolderList > button {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  text-align: left;
+}
+
+.composerFolderList > button:hover:not(:disabled),
+.composerFolderList > button:focus-visible,
+.composerFolderLocation > button:hover:not(:disabled),
+.composerFolderLocation > button:focus-visible {
+  background: var(--pevo-panel-muted);
+}
+
+.composerFolderList > p {
+  margin: 12px;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-small);
+}
+
+.workspacePickerCreate {
+  min-width: 0;
+  padding: 10px;
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+}
+
+.workspacePickerCreate label > span {
+  overflow: hidden;
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerFolderDialog > footer button {
+  gap: 6px;
+}
+
+.composerBranchDialog > label {
+  padding: 0;
+}
+
+.composerFolderDialog > footer button[type="submit"],
+.composerBranchDialog > footer button[type="submit"] {
+  color: var(--pevo-bg);
+  background: var(--pevo-ink);
+  border-color: var(--pevo-ink);
 }
 
 .composerSubmitControls {
@@ -623,6 +846,10 @@
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
+}
+
+.composerEnvironmentControl.is-workspace .pathStatusButton {
+  width: 100%;
 }
 
 .branchStatusButton {

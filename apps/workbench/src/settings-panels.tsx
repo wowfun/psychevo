@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import {
   Activity,
-  Archive,
   ArrowLeft,
   BrainCircuit,
   Bug,
@@ -14,7 +13,7 @@ import {
   Sun
 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
-import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, RuntimeProfileView, SessionSummary } from "@psychevo/protocol";
+import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, RuntimeProfileView } from "@psychevo/protocol";
 import { Switch } from "@psychevo/components";
 import type {
   Appearance,
@@ -29,7 +28,7 @@ import { ChannelsSettingsPanel } from "./settings-panels/channels";
 import { ModelsSettingsPanel } from "./settings-panels/models";
 import { SlashCommandsSettingsPanel } from "./settings-panels/slash";
 import { WebSearchSettingsPanel } from "./settings-panels/web-search";
-import { ArchivedSessionsPanel, UsageSettingsPanel } from "./settings-panels/usage";
+import { UsageSettingsPanel } from "./settings-panels/usage";
 import type { ChannelSettingsControls, ChannelUpdateDraft } from "./settings-panels/types";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
@@ -39,12 +38,10 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
   { id: "slash", label: "Slash Commands", description: "Aliases and TUI shortcuts" },
   { id: "usage", label: "Usage", description: "Tokens and cost" },
   { id: "debug", label: "Debug", description: "Developer diagnostics" },
-  { id: "channels", label: "Channels", description: "Messaging connections" },
-  { id: "archived", label: "Archived sessions", description: "Restore or delete" }
+  { id: "channels", label: "Channels", description: "Messaging connections" }
 ];
 export function SettingsPage({
   appearance,
-  archivedSessions,
   channelDoctor,
   channels,
   client,
@@ -57,7 +54,6 @@ export function SettingsPage({
   usageStatsLoading,
   onAppearanceChange,
   onDebugChange,
-  onDeleteArchivedSession,
   onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
@@ -66,7 +62,6 @@ export function SettingsPage({
   onModelAssignmentSaved,
   onModelCatalogLoaded,
   onPollWechatQrSetup,
-  onRestoreArchivedSession,
   onSectionChange,
   onSlashSettingsSaved,
   onRefreshUsageStats,
@@ -78,7 +73,6 @@ export function SettingsPage({
   cwd
 }: {
   appearance: Appearance;
-  archivedSessions: SessionSummary[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
   client: GatewayClient | null;
@@ -91,7 +85,6 @@ export function SettingsPage({
   usageStatsLoading: boolean;
   onAppearanceChange(value: Appearance): void;
   onDebugChange(value: boolean): void;
-  onDeleteArchivedSession(threadId: string): void;
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
@@ -100,7 +93,6 @@ export function SettingsPage({
   onModelAssignmentSaved(): Promise<void>;
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
-  onRestoreArchivedSession(threadId: string): void;
   onSectionChange(value: SettingsSection): void;
   onSlashSettingsSaved(): Promise<void>;
   onRefreshUsageStats(): void;
@@ -114,15 +106,12 @@ export function SettingsPage({
   const [query, setQuery] = useState("");
   const active = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0]!;
   const normalizedQuery = query.trim().toLowerCase();
-  const primarySections = SETTINGS_SECTIONS.filter((item) => item.id !== "archived");
-  const archivedSection = SETTINGS_SECTIONS.find((item) => item.id === "archived")!;
   const sectionMatches = (item: (typeof SETTINGS_SECTIONS)[number]) => (
     !normalizedQuery
     || item.label.toLowerCase().includes(normalizedQuery)
     || item.description.toLowerCase().includes(normalizedQuery)
   );
-  const visiblePrimarySections = primarySections.filter(sectionMatches);
-  const showArchivedSection = sectionMatches(archivedSection);
+  const visibleSections = SETTINGS_SECTIONS.filter(sectionMatches);
   return (
     <section className="centerPage settingsPage" aria-label="Settings">
       <div className="settingsShell">
@@ -144,7 +133,7 @@ export function SettingsPage({
             </label>
           </div>
           <div className="settingsNavGroups">
-            {visiblePrimarySections.map((item) => (
+            {visibleSections.map((item) => (
               <button
                 aria-current={item.id === section ? "page" : undefined}
                 className={item.id === section ? "is-selected" : ""}
@@ -156,21 +145,8 @@ export function SettingsPage({
                 <span>{item.label}</span>
               </button>
             ))}
-            {visiblePrimarySections.length === 0 && !showArchivedSection && (
+            {visibleSections.length === 0 && (
               <p className="settingsNavEmpty">No settings found</p>
-            )}
-          </div>
-          <div className="settingsNavFooter">
-            {showArchivedSection && (
-              <button
-                aria-current={section === archivedSection.id ? "page" : undefined}
-                className={section === archivedSection.id ? "is-selected" : ""}
-                onClick={() => onSectionChange(archivedSection.id)}
-                type="button"
-              >
-                {settingsSectionIcon(archivedSection.id, 15)}
-                <span>{archivedSection.label}</span>
-              </button>
             )}
           </div>
         </aside>
@@ -184,7 +160,6 @@ export function SettingsPage({
             </header>
             <SettingsSectionPanel
               appearance={appearance}
-              archivedSessions={archivedSessions}
               channelDoctor={channelDoctor}
               channels={channels}
               client={client}
@@ -197,7 +172,6 @@ export function SettingsPage({
               usageStatsLoading={usageStatsLoading}
               onAppearanceChange={onAppearanceChange}
               onDebugChange={onDebugChange}
-              onDeleteArchivedSession={onDeleteArchivedSession}
               onDeleteChannel={onDeleteChannel}
               onDoctorChannel={onDoctorChannel}
               onDoctorChannels={onDoctorChannels}
@@ -205,7 +179,6 @@ export function SettingsPage({
               onModelAssignmentSaved={onModelAssignmentSaved}
               onModelCatalogLoaded={onModelCatalogLoaded}
               onPollWechatQrSetup={onPollWechatQrSetup}
-              onRestoreArchivedSession={onRestoreArchivedSession}
               onSlashSettingsSaved={onSlashSettingsSaved}
               onRefreshUsageStats={onRefreshUsageStats}
               onSetChannelEnabled={onSetChannelEnabled}
@@ -224,7 +197,6 @@ export function SettingsPage({
 
 function SettingsSectionPanel({
   appearance,
-  archivedSessions,
   channelDoctor,
   channels,
   client,
@@ -237,7 +209,6 @@ function SettingsSectionPanel({
   usageStatsLoading,
   onAppearanceChange,
   onDebugChange,
-  onDeleteArchivedSession,
   onDeleteChannel,
   onDoctorChannel,
   onDoctorChannels,
@@ -246,7 +217,6 @@ function SettingsSectionPanel({
   onModelCatalogLoaded,
   onPollWechatQrSetup,
   onRefreshUsageStats,
-  onRestoreArchivedSession,
   onSetChannelEnabled,
   onSlashSettingsSaved,
   onStartWechatQrSetup,
@@ -256,7 +226,6 @@ function SettingsSectionPanel({
   cwd
 }: {
   appearance: Appearance;
-  archivedSessions: SessionSummary[];
   channelDoctor: Record<string, WorkbenchChannelDoctor>;
   channels: WorkbenchChannel[];
   client: GatewayClient | null;
@@ -269,7 +238,6 @@ function SettingsSectionPanel({
   usageStatsLoading: boolean;
   onAppearanceChange(value: Appearance): void;
   onDebugChange(value: boolean): void;
-  onDeleteArchivedSession(threadId: string): void;
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
   onDoctorChannels(): void;
@@ -278,7 +246,6 @@ function SettingsSectionPanel({
   onModelCatalogLoaded(options: ModelOptionView[]): void;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
   onRefreshUsageStats(): void;
-  onRestoreArchivedSession(threadId: string): void;
   onSetChannelEnabled(channel: WorkbenchChannel, enabled: boolean): void;
   onSlashSettingsSaved(): Promise<void>;
   onStartWechatQrSetup(): Promise<ChannelWechatQrStartResult>;
@@ -336,15 +303,6 @@ function SettingsSectionPanel({
       );
     case "web-search":
       return <WebSearchSettingsPanel client={client} cwd={cwd} disabled={disabled} />;
-    case "archived":
-      return (
-        <ArchivedSessionsPanel
-          disabled={disabled}
-          sessions={archivedSessions}
-          onDelete={onDeleteArchivedSession}
-          onRestore={onRestoreArchivedSession}
-        />
-      );
     case "debug":
       return (
         <div className="settingsRows">
@@ -415,8 +373,6 @@ function settingsSectionIcon(section: SettingsSection, size: number): ReactNode 
       return <Keyboard size={size} />;
     case "usage":
       return <Activity size={size} />;
-    case "archived":
-      return <Archive size={size} />;
     case "debug":
       return <Bug size={size} />;
     case "channels":

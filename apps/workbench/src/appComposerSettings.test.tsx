@@ -39,7 +39,7 @@ describe("Workbench settings and backend controls", () => {
     expect(settingsRegion).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Appearance" }).getAttribute("aria-current")).toBe("page");
     expect(within(settingsRegion).getByRole("heading", { name: "Appearance" })).toBeTruthy();
-    expect(within(settingsRegion).getByRole("button", { name: "Archived sessions" })).toBeTruthy();
+    expect(within(settingsRegion).queryByRole("button", { name: "Archived sessions" })).toBeNull();
     expect(within(settingsRegion).getByRole("button", { name: "Usage" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Models" })).toBeTruthy();
     expect(within(settingsRegion).getByRole("button", { name: "Slash Commands" })).toBeTruthy();
@@ -876,24 +876,41 @@ describe("Workbench settings and backend controls", () => {
     expect(within(channelsPanel).queryByText("WeChat reconnect required")).toBeNull();
   });
 
-  it("shows archived sessions from Settings without turning the sidebar into an archive filter", async () => {
+  it("shows archived sessions from the Sessions header without routing through Settings", async () => {
     gatewayMock.sessionSummaries = [sessionSummary("active-thread", "Active session")];
     gatewayMock.archivedSessionSummaries = [sessionSummary("archived-thread", "Archived session")];
 
     render(<App />);
 
     expect(await screen.findByText("Active session")).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
-    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
-    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Archived sessions" }));
-
-    const archivedPanel = await within(settingsRegion).findByRole("region", { name: "Archived sessions" });
-    expect(await within(archivedPanel).findByText("Archived session")).toBeTruthy();
-    expect(within(settingsRegion).queryByText("Active session")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Imported and archived sessions" }));
+    expect(await screen.findByText("Archived session")).toBeTruthy();
+    expect(screen.queryByText("Active session")).toBeNull();
     expect(gatewayMock.requestLog).toContainEqual({
       method: "thread/list",
       params: expect.objectContaining({ archived: true })
     });
+    expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/import/list",
+      params: expect.objectContaining({ cursors: {} })
+    });
+  });
+
+  it("activates an archived session before sending its first new message", async () => {
+    gatewayMock.archivedSessionSummaries = [sessionSummary("archived-thread", "Archived continuation")];
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Imported and archived sessions" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Archived continuation/ }));
+    const composer = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(composer, { target: { value: "Continue this session" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(true));
+    const methods = gatewayMock.requestLog.map((entry) => entry.method);
+    expect(methods.indexOf("thread/restore")).toBeGreaterThan(-1);
+    expect(methods.indexOf("thread/restore")).toBeLessThan(methods.indexOf("turn/start"));
   });
 
   it("renders model and reasoning from the canonical Thread control descriptors", async () => {

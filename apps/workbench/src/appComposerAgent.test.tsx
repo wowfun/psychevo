@@ -213,6 +213,7 @@ describe("Workbench layout and workspace panels", () => {
     const { container } = render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    expect(container.querySelector(".conversationColumn")?.classList.contains("is-draftSession")).toBe(true);
     expect((container.querySelector(".workbench") as HTMLElement | null)?.style.getPropertyValue("--right-column-width")).toBe("520px");
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -222,6 +223,185 @@ describe("Workbench layout and workspace panels", () => {
     });
     expect(container.querySelectorAll(".pevo-sessionRow.is-draft")).toHaveLength(0);
     expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
+    const status = screen.getByLabelText("Composer environment");
+    expect(within(status).getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
+    expect(within(status).getByRole("button", { name: "Workspace" })).toBeTruthy();
+    expect(within(status).getByRole("combobox", { name: "Permission mode" }).compareDocumentPosition(
+      within(status).getByRole("button", { name: "Workspace" })
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector(".composerRuntimeControls")?.querySelector('[aria-label="Permission mode"]')).toBeNull();
+  });
+
+  it("moves the same Composer from center stage to the bottom after the first accepted prompt", async () => {
+    const { container } = render(<App />);
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    const conversation = container.querySelector(".conversationColumn") as HTMLElement;
+    const dock = container.querySelector(".composerDock") as HTMLElement & {
+      animate: ReturnType<typeof vi.fn>;
+      getAnimations: ReturnType<typeof vi.fn>;
+    };
+    const animate = vi.fn();
+    Object.defineProperties(dock, {
+      animate: { configurable: true, value: animate },
+      getAnimations: { configurable: true, value: vi.fn(() => []) },
+      getBoundingClientRect: {
+        configurable: true,
+        value: vi.fn(() => ({
+          bottom: conversation.classList.contains("is-draftSession") ? 280 : 680,
+          height: 80,
+          left: 100,
+          right: 700,
+          top: conversation.classList.contains("is-draftSession") ? 200 : 600,
+          width: 600,
+          x: 100,
+          y: conversation.classList.contains("is-draftSession") ? 200 : 600,
+          toJSON: () => ({})
+        }))
+      }
+    });
+
+    fireEvent.change(textarea, { target: { value: "Start the thread" } });
+    const send = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
+    await waitFor(() => expect(send.disabled).toBe(false));
+    fireEvent.click(send);
+
+    await waitFor(() => expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(true));
+    await waitFor(() => expect(conversation.classList.contains("is-draftSession")).toBe(false));
+    expect(container.querySelector(".composerDock")).toBe(dock);
+    expect(animate).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ transform: expect.stringContaining("translate") }),
+        { transform: "translate(0, 0)" }
+      ]),
+      expect.objectContaining({ duration: 360 })
+    );
+  });
+
+  it("switches draft workspaces and exposes the open workspace action last", async () => {
+    gatewayMock.browserWorkspaces = [
+      {
+        cwd: "/tmp/project",
+        project: { cwd: "/tmp/project", label: "project", displayPath: "/tmp/project" },
+        sessions: [],
+        hiddenCount: 0,
+        nextCursor: null
+      },
+      {
+        cwd: "/tmp/other-project",
+        project: { cwd: "/tmp/other-project", label: "other-project", displayPath: "/tmp/other-project" },
+        sessions: [],
+        hiddenCount: 0,
+        nextCursor: null
+      }
+    ];
+    render(<App />);
+
+    const workspace = await screen.findByRole("button", { name: "Workspace" });
+    fireEvent.click(workspace);
+    const menu = await screen.findByRole("menu", { name: "Workspace" });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items.at(-1)?.textContent).toContain("Open workspace...");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "/tmp/other-project" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/start",
+        params: expect.objectContaining({ scope: expect.objectContaining({ cwd: "/tmp/other-project" }) })
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open workspace..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Choose workspace folder" });
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    fireEvent.click(await within(dialog).findByRole("button", { name: "manual-project" }));
+    expect(await within(dialog).findByText("/tmp/manual-project")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/start",
+        params: expect.objectContaining({ scope: expect.objectContaining({ cwd: "/tmp/manual-project" }) })
+      });
+    });
+  });
+
+  it("opens or creates a workspace from the Sessions header folder panel", async () => {
+    gatewayMock.workspaceFolderList = (params) => {
+      const current = (params as { path?: string | null }).path ?? "/tmp/project";
+      return {
+        root: "/",
+        current,
+        parent: current === "/" ? null : "/tmp",
+        folders: current === "/tmp/project"
+          ? [{ name: "existing-workspace", path: "/tmp/project/existing-workspace" }]
+          : []
+      };
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
+    const dialog = await screen.findByRole("dialog", { name: "Open workspace" });
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    fireEvent.click(await within(dialog).findByRole("button", { name: "existing-workspace" }));
+    expect(await within(dialog).findByText("/tmp/project/existing-workspace")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/start",
+      params: expect.objectContaining({ scope: expect.objectContaining({ cwd: "/tmp/project/existing-workspace" }) })
+    }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
+    const createDialog = await screen.findByRole("dialog", { name: "Open workspace" });
+    fireEvent.click(await within(createDialog).findByRole("button", { name: "New workspace..." }));
+    fireEvent.change(within(createDialog).getByRole("textbox"), { target: { value: "fresh-workspace" } });
+    fireEvent.click(within(createDialog).getByRole("button", { name: "Create workspace" }));
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "workspace/create",
+      params: { name: "fresh-workspace", parent: "/tmp/project" }
+    }));
+  });
+
+  it("switches and creates Git branches from the Composer environment menu", async () => {
+    render(<App />);
+
+    const branch = await screen.findByRole("button", { name: "Git branch" });
+    fireEvent.click(branch);
+    const menu = await screen.findByRole("menu", { name: "Git branch" });
+    expect(within(menu).getAllByRole("menuitem").at(-1)?.textContent).toContain("New branch...");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "feature/composer" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/git/checkout",
+        params: expect.objectContaining({ branch: "feature/composer", create: false })
+      });
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Git branch" }).textContent).toContain("feature/composer"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Git branch" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New branch..." }));
+    const dialog = await screen.findByRole("dialog", { name: "New branch" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Branch name" }), {
+      target: { value: "feature/new-composer" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create branch" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/git/checkout",
+        params: expect.objectContaining({ branch: "feature/new-composer", create: true })
+      });
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Git branch" }).textContent).toContain("feature/new-composer"));
+  });
+
+  it("keeps the bound Workspace control scoped to Files instead of retargeting the Thread", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Bound workspace")];
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Bound workspace"));
+    const workspace = await screen.findByRole("button", { name: "Workspace" });
+    fireEvent.click(workspace);
+
+    expect(await screen.findByRole("region", { name: "Workspace files" })).toBeTruthy();
+    expect(screen.queryByRole("menu", { name: "Workspace" })).toBeNull();
   });
 
   it("opens right workspace tabs from Home and the add menu", async () => {
@@ -279,6 +459,7 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.submit(openUrl.closest("form") as HTMLFormElement);
     const iframe = await within(browser).findByTitle("example.com") as HTMLIFrameElement;
     expect(iframe.getAttribute("src")).toBe("https://example.com:8080/");
+    expect(iframe.hasAttribute("sandbox")).toBe(false);
     expect(within(browser).getByText("Preview only")).toBeTruthy();
 
     const address = within(browser).getByLabelText("Browser address") as HTMLInputElement;
@@ -577,9 +758,9 @@ describe("Workbench layout and workspace panels", () => {
     const files = await screen.findByRole("region", { name: "Workspace files" });
     const frame = files.querySelector('iframe[title="site/index.html"]');
     if (!(frame instanceof HTMLIFrameElement)) {
-      throw new Error("missing locked HTML artifact preview");
+      throw new Error("missing interactive HTML artifact preview");
     }
-    expect(frame.getAttribute("sandbox")).not.toContain("allow-scripts");
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("srcdoc")).toContain("Artifact preview");
 
     fireEvent.click(pathButton("C:\\repo\\site\\index.html"));
@@ -596,7 +777,7 @@ describe("Workbench layout and workspace panels", () => {
     });
   });
 
-  it("keeps HTML locked until explicitly run and revokes trust when the document changes", async () => {
+  it("runs HTML immediately and reloads the interactive surface when the document changes", async () => {
     gatewayMock.workspaceFilesResult = {
       root: gatewayMock.scope.cwd,
       entries: [
@@ -637,37 +818,43 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(within(files).getByRole("treeitem", { name: /index\.html/ }));
 
     expect(await within(files).findByText("/tmp/project/site/index.html")).toBeTruthy();
-    await within(files).findByText("HTML preview");
     const inlineFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement | null;
     if (!inlineFrame) {
       throw new Error("missing inline HTML preview iframe");
     }
-    expect(inlineFrame.getAttribute("sandbox")).not.toContain("allow-scripts");
+    expect(inlineFrame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(inlineFrame.getAttribute("sandbox")).not.toContain("allow-forms");
     expect(inlineFrame.getAttribute("sandbox")).not.toContain("allow-popups");
     expect(inlineFrame.getAttribute("sandbox")).not.toContain("allow-same-origin");
-    expect(inlineFrame.getAttribute("tabindex")).toBe("-1");
-    expect(inlineFrame.getAttribute("aria-hidden")).toBe("true");
-    expect(inlineFrame.hasAttribute("inert")).toBe(true);
-    expect(inlineFrame.closest(".htmlStaticPreview")?.classList.contains("is-locked")).toBe(true);
+    expect(inlineFrame.getAttribute("tabindex")).toBe("0");
+    expect(inlineFrame.hasAttribute("aria-hidden")).toBe(false);
+    expect(inlineFrame.hasAttribute("inert")).toBe(false);
     const inlineDocument = inlineFrame.getAttribute("srcdoc") ?? "";
-    expect(inlineDocument).toContain("default-src 'none'");
-    expect(inlineDocument).toContain("connect-src 'none'");
+    expect(inlineDocument).toContain("base-uri 'none'");
     expect(inlineDocument).toContain("form-action 'none'");
-    expect(inlineDocument).toContain("script-src 'none'");
-    expect(inlineDocument).toContain("style-src 'unsafe-inline'");
+    expect(inlineDocument).toContain("frame-src 'none'");
+    expect(inlineDocument).toContain("object-src 'none'");
+    expect(inlineDocument).not.toContain("script-src 'none'");
+    expect(inlineDocument).not.toContain("connect-src 'none'");
     expect(inlineDocument).toContain("textContent = \"rendered\"");
     expect(container.querySelectorAll(".htmlStaticPreview iframe")).toHaveLength(1);
-    expect(within(files).getByText("Locked · run enables scripts + network")).toBeTruthy();
-    fireEvent.click(within(files).getByRole("button", { name: "Run interactive preview" }));
-    let activeFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement;
-    expect(activeFrame.getAttribute("sandbox")).toContain("allow-scripts");
-    expect(activeFrame.getAttribute("tabindex")).toBe("0");
-    expect(activeFrame.hasAttribute("aria-hidden")).toBe(false);
-    expect(activeFrame.hasAttribute("inert")).toBe(false);
-    expect(activeFrame.closest(".htmlStaticPreview")?.classList.contains("is-interactive")).toBe(true);
-    expect(within(files).getByText("Trusted · scripts + network on")).toBeTruthy();
-    expect(within(files).getByRole("button", { name: "Stop interactive preview" })).toBeTruthy();
+    expect(within(files).queryByRole("button", { name: "Run interactive preview" })).toBeNull();
+    expect(within(files).queryByRole("button", { name: "Stop interactive preview" })).toBeNull();
+
+    const openPreviewAction = within(files).getByLabelText("Open HTML preview for site/index.html");
+    const editAction = within(files).getByLabelText("Edit site/index.html");
+    expect(openPreviewAction.parentElement).toBe(editAction.parentElement);
+    expect(openPreviewAction.parentElement?.classList.contains("filePreviewActions")).toBe(true);
+    expect(openPreviewAction.nextElementSibling).toBe(editAction);
+
+    const hideFileTree = within(files).getByRole("button", { name: "Hide file tree" });
+    expect(hideFileTree.closest("header")).toBe(files.querySelector(":scope > header"));
+    fireEvent.click(hideFileTree);
+    expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
+    expect(files.classList.contains("has-fileTree")).toBe(false);
+    fireEvent.click(within(files).getByRole("button", { name: "Show file tree" }));
+    expect(within(files).getByRole("complementary", { name: "Workspace file tree" })).toBeTruthy();
+    expect(files.classList.contains("has-fileTree")).toBe(true);
 
     fireEvent.click(within(files).getByLabelText("Edit site/index.html"));
     fireEvent.change(within(files).getByLabelText("Edit site/index.html"), { target: { value: changedHtmlSource } });
@@ -686,37 +873,31 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(within(files).getByLabelText("Save file"));
     await waitFor(() => expect(within(files).queryByText("unsaved")).toBeNull());
     await waitFor(() => expect(files.querySelector(".htmlStaticPreview iframe")).toBeTruthy());
-    activeFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement;
-    expect(activeFrame.getAttribute("sandbox")).not.toContain("allow-scripts");
-    expect(within(files).getByRole("button", { name: "Run interactive preview" })).toBeTruthy();
-
-    fireEvent.click(within(files).getByRole("button", { name: "Run interactive preview" }));
-    expect((files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement).getAttribute("sandbox")).toContain("allow-scripts");
+    let activeFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement;
+    expect(activeFrame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(activeFrame.getAttribute("srcdoc")).toContain("textContent = \"changed\"");
     fireEvent.click(within(files).getByRole("treeitem", { name: /other\.html/ }));
     await waitFor(() => expect((files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement | null)?.title).toBe("site/other.html"));
     activeFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement;
-    expect(activeFrame.getAttribute("sandbox")).not.toContain("allow-scripts");
+    expect(activeFrame.getAttribute("sandbox")).toBe("allow-scripts");
     fireEvent.click(within(files).getByRole("treeitem", { name: /index\.html/ }));
     await waitFor(() => expect((files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement | null)?.title).toBe("site/index.html"));
     activeFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement;
-    expect(activeFrame.getAttribute("sandbox")).not.toContain("allow-scripts");
+    expect(activeFrame.getAttribute("sandbox")).toBe("allow-scripts");
 
     fireEvent.click(within(files).getByLabelText("Open HTML preview for site/index.html"));
     const preview = await screen.findByRole("region", { name: "Preview" });
     expect(within(preview).getByRole("heading", { name: "index.html" })).toBeTruthy();
-    expect(within(preview).getByText("HTML preview")).toBeTruthy();
-    let previewFrame = within(preview).getByTitle("index.html") as HTMLIFrameElement;
-    expect(previewFrame.getAttribute("sandbox")).not.toContain("allow-scripts");
+    const previewFrame = within(preview).getByTitle("index.html") as HTMLIFrameElement;
+    expect(previewFrame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(previewFrame.getAttribute("sandbox")).not.toContain("allow-forms");
     expect(previewFrame.getAttribute("sandbox")).not.toContain("allow-popups");
     expect(previewFrame.getAttribute("sandbox")).not.toContain("allow-same-origin");
     expect(previewFrame.getAttribute("srcdoc")).toContain("textContent = \"changed\"");
     expect(container.querySelectorAll(".htmlStaticPreview iframe")).toHaveLength(1);
     expect(files.querySelector(".htmlStaticPreview iframe")).toBeNull();
-    fireEvent.click(within(preview).getByRole("button", { name: "Run interactive preview" }));
-    previewFrame = within(preview).getByTitle("index.html") as HTMLIFrameElement;
-    expect(previewFrame.getAttribute("sandbox")).toContain("allow-scripts");
-    expect(container.querySelectorAll(".htmlStaticPreview iframe")).toHaveLength(1);
+    expect(within(preview).queryByRole("button", { name: "Run interactive preview" })).toBeNull();
+    expect(within(preview).queryByRole("button", { name: "Stop interactive preview" })).toBeNull();
   });
 
   it("saves text edits manually without entering the Review queue", async () => {

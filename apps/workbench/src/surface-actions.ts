@@ -35,7 +35,6 @@ import {
   normalizeSessionSummary,
   normalizeSnapshot
 } from "./session-utils";
-import { hydrateThreadSnapshotHistory } from "./thread-application";
 import type {
   DebugEvent,
   TraceState,
@@ -78,6 +77,13 @@ type SurfaceActionsParams = {
   setWorkspaceFiles: Dispatch<SetStateAction<WorkspaceFilesResult | null>>;
 };
 
+function sameScopeIdentity(left: GatewayRequestScope | null, right: GatewayRequestScope): boolean {
+  return left?.cwd === right.cwd
+    && left.source.kind === right.source.kind
+    && (left.source.rawId ?? null) === (right.source.rawId ?? null)
+    && left.source.lifetime === right.source.lifetime;
+}
+
 export function createSurfaceActions(params: SurfaceActionsParams) {
   function defaultScope(): GatewayRequestScope {
     return params.activeScope
@@ -97,8 +103,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     if (threadId && readOnly) {
-      const bootstrap = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
-      const nextSnapshot = await hydrateThreadSnapshotHistory(nextClient, bootstrap);
+      const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
       if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
         return;
       }
@@ -124,8 +129,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     }
     const nextScope = scope ?? defaultScope();
     const requestParams = threadId ? { threadId, scope: nextScope } : { scope: nextScope };
-    const bootstrap = parseThreadSnapshot(await nextClient.request("thread/resume", requestParams));
-    const nextSnapshot = await hydrateThreadSnapshotHistory(nextClient, bootstrap);
+    const nextSnapshot = parseThreadSnapshot(await nextClient.request("thread/resume", requestParams));
     params.setSnapshot((current) => {
       if (expectedEpoch != null && expectedEpoch !== params.viewEpochRef.current) {
         return current;
@@ -157,8 +161,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !threadId) {
       return;
     }
-    const bootstrap = parseThreadSnapshot(await nextClient.request("thread/read", { threadId }));
-    const nextSnapshot = normalizeSnapshot(await hydrateThreadSnapshotHistory(nextClient, bootstrap));
+    const nextSnapshot = normalizeSnapshot(parseThreadSnapshot(await nextClient.request("thread/read", { threadId })));
     params.setSnapshot((current) => (
       (current.thread?.id ?? null) === threadId ? (() => {
         params.selectedThreadIdRef.current = nextSnapshot.thread?.id ?? null;
@@ -168,26 +171,24 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
   }
 
   async function adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot) {
+    void nextClient;
     const scope = nextSnapshot.scope;
     if (!scope?.cwd) {
       return;
     }
-    const previous = params.scopeRef.current;
     params.scopeRef.current = scope;
-    params.setActiveScope(scope);
-    const threadId = nextSnapshot.thread?.id ?? null;
-    if ((previous?.cwd ?? "") === scope.cwd) {
-      const nextSettings = SettingsReadResultSchema.parse(await nextClient.request("settings/read", { threadId, cwd: scope.cwd }));
-      params.setSettings(nextSettings);
-      applyInitialControls(nextSettings);
-      await refreshObservability(nextClient, scope, threadId);
+    params.setActiveScope((current) => sameScopeIdentity(current, scope) ? current : scope);
+  }
+
+  async function refreshSettings(
+    nextClient = params.client,
+    cwd = params.activeScope?.cwd ?? params.initScope?.cwd ?? params.fallbackCwd,
+    threadId: string | null = params.currentThreadId ?? null
+  ) {
+    if (!nextClient || !cwd) {
       return;
     }
-    const [settingsValue] = await Promise.all([
-      nextClient.request("settings/read", { threadId, cwd: scope.cwd }),
-      refreshAgentSurface(nextClient, scope),
-      refreshWorkspaceSurface(nextClient, scope, threadId)
-    ]);
+    const settingsValue = await nextClient.request("settings/read", { threadId, cwd });
     const nextSettings = SettingsReadResultSchema.parse(settingsValue);
     params.setSettings(nextSettings);
     applyInitialControls(nextSettings);
@@ -232,18 +233,35 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     ].filter((id): id is string => Boolean(id))));
   }
 
-  async function refreshAgentSurface(nextClient = params.client, scope = params.activeScope ?? params.initScope ?? undefined) {
+  async function refreshAgentCatalog(nextClient = params.client, scope = params.activeScope ?? params.initScope ?? undefined) {
     if (!nextClient || !scope) {
       return;
     }
-    const [agentList, backendList, commandList] = await Promise.all([
+    const [agentList, backendList] = await Promise.all([
       nextClient.request("agent/list", { scope }),
-      nextClient.request("backend/list", { scope }),
-      nextClient.request("command/list", { scope, threadId: params.snapshot.thread?.id ?? null })
+      nextClient.request("backend/list", { scope })
     ]);
     params.setAgents(parseAgentList(agentList));
     params.setBackends(parseBackendList(backendList));
+  }
+
+  async function refreshCommands(
+    nextClient = params.client,
+    scope = params.activeScope ?? params.initScope ?? undefined,
+    threadId: string | null = params.currentThreadId ?? null
+  ) {
+    if (!nextClient || !scope) {
+      return;
+    }
+    const commandList = await nextClient.request("command/list", { scope, threadId });
     params.setCommands(parseCommandList(commandList));
+  }
+
+  async function refreshAgentSurface(nextClient = params.client, scope = params.activeScope ?? params.initScope ?? undefined) {
+    await Promise.all([
+      refreshAgentCatalog(nextClient, scope),
+      refreshCommands(nextClient, scope, params.currentThreadId ?? null)
+    ]);
   }
 
   async function refreshWorkspaceSurface(
@@ -390,11 +408,14 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     applyInitialControls,
     applyObservability,
     pushDebugEvent,
+    refreshAgentCatalog,
     refreshAgentSurface,
+    refreshCommands,
     refreshHistory,
     refreshObservability,
     refreshRevertedThreadSnapshot,
     refreshSnapshot,
+    refreshSettings,
     refreshTrace,
     refreshWorkspaceSurface,
     runAction

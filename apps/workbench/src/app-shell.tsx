@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { CalendarClock, FolderPlus, Pin, Settings, Wrench, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { CalendarClock, Pin, Settings, Wrench, X } from "lucide-react";
 import type {
   GatewayClient,
 } from "@psychevo/client";
@@ -16,7 +16,6 @@ import type {
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
-import { ActionButton, CreatePanel, FormField } from "@psychevo/components";
 import { AutomationsPage } from "./automations-panel";
 import { CapabilitiesPage } from "./capabilities-page";
 import { SearchPage } from "./search";
@@ -70,69 +69,6 @@ export function LeftUtilityRail({
   );
 }
 
-export function WorkspaceCreateDialog({
-  disabled,
-  onCancel,
-  onCreate
-}: {
-  disabled: boolean;
-  onCancel(): void;
-  onCreate(name: string): void;
-}) {
-  const [name, setName] = useState("");
-  const trimmed = name.trim();
-
-  return (
-    <div
-      className="modalBackdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onCancel();
-        }
-      }}
-      role="presentation"
-    >
-      <form
-        aria-label="New workspace"
-        className="workspaceDialog"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (trimmed && !disabled) {
-            onCreate(trimmed);
-          }
-        }}
-      >
-        <CreatePanel
-          icon={<FolderPlus size={18} />}
-          layout="dialog"
-          onClose={onCancel}
-          title="New Workspace"
-          footer={
-            <>
-              <ActionButton disabled={disabled} onClick={onCancel} variant="ghost">
-                Cancel
-              </ActionButton>
-              <ActionButton disabled={disabled || !trimmed} type="submit" variant="primary">
-                Create
-              </ActionButton>
-            </>
-          }
-        >
-          <FormField label="Name">
-          <input
-            autoFocus
-            disabled={disabled}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="general notes"
-            value={name}
-          />
-          </FormField>
-        </CreatePanel>
-      </form>
-    </div>
-  );
-}
-
 export function PinnedPanel({
   currentThreadId,
   disabled,
@@ -178,7 +114,6 @@ export function MainSurface({
   automations,
   automationsError,
   automationsLoading,
-  archivedSessions,
   backendDraft,
   backendDoctor,
   backends,
@@ -201,7 +136,6 @@ export function MainSurface({
   onCancelBackendEdit,
   onChangeBackendDraft,
   onDebugChange,
-  onDeleteArchivedSession,
   onDeleteBackend,
   onDeleteChannel,
   onDoctorChannel,
@@ -218,7 +152,6 @@ export function MainSurface({
   onPauseAutomation,
   onLoadChannelSources,
   onPollWechatQrSetup,
-  onRestoreArchivedSession,
   onRefreshUsageStats,
   onRefreshAutomations,
   onResumeAutomation,
@@ -246,7 +179,6 @@ export function MainSurface({
   automations: WorkbenchAutomation[];
   automationsError: string | null;
   automationsLoading: boolean;
-  archivedSessions: SessionSummary[];
   backendDraft: BackendDraft | null;
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
@@ -269,7 +201,6 @@ export function MainSurface({
   onCancelBackendEdit(): void;
   onChangeBackendDraft(draft: BackendDraft): void;
   onDebugChange(value: boolean): void;
-  onDeleteArchivedSession(threadId: string): void;
   onDeleteBackend(backend: WorkbenchBackend): void;
   onDeleteChannel(channel: WorkbenchChannel): Promise<void>;
   onDoctorChannel(channel: WorkbenchChannel): void;
@@ -286,7 +217,6 @@ export function MainSurface({
   onPauseAutomation(id: string): Promise<void>;
   onLoadChannelSources(channel: WorkbenchChannel): Promise<WorkbenchChannelSource[]>;
   onPollWechatQrSetup(sessionId: string): Promise<ChannelWechatQrPollResult>;
-  onRestoreArchivedSession(threadId: string): void;
   onRefreshUsageStats(): void;
   onRefreshAutomations(): Promise<void>;
   onResumeAutomation(id: string): Promise<void>;
@@ -317,7 +247,6 @@ export function MainSurface({
     return (
       <SettingsPage
         appearance={appearance}
-        archivedSessions={archivedSessions}
         channelDoctor={channelDoctor}
         channels={channels}
         client={client}
@@ -330,7 +259,6 @@ export function MainSurface({
         usageStatsLoading={usageStatsLoading}
         onAppearanceChange={onAppearanceChange}
         onDebugChange={onDebugChange}
-        onDeleteArchivedSession={onDeleteArchivedSession}
         onDeleteChannel={onDeleteChannel}
         onDoctorChannel={onDoctorChannel}
         onDoctorChannels={onDoctorChannels}
@@ -340,7 +268,6 @@ export function MainSurface({
         onLoadChannelSources={onLoadChannelSources}
         onPollWechatQrSetup={onPollWechatQrSetup}
         onRefreshUsageStats={onRefreshUsageStats}
-        onRestoreArchivedSession={onRestoreArchivedSession}
         onSectionChange={onSettingsSectionChange}
         onSetChannelEnabled={onSetChannelEnabled}
         onSlashSettingsSaved={onSlashSettingsSaved}

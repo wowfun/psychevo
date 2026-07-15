@@ -17,8 +17,12 @@
 }
 
 @container (max-width: 460px) {
+  .filesPanel.has-fileTree > header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .reviewPanel.has-fileTree .reviewSplit,
-  .filesSplit {
+  .filesPanel.has-fileTree .filesSplit {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(190px, 0.75fr);
   }
@@ -196,11 +200,6 @@
 
   .composerStatusLine {
     gap: 6px;
-    overflow: hidden;
-  }
-
-  .branchStatusButton {
-    display: none;
   }
 
   .statusSelect[data-status="permission-mode"] select {
@@ -231,8 +230,9 @@
   }
 
   .agentDefinitionPopover {
-    right: 0;
-    left: auto;
+    right: auto;
+    left: 0;
+    width: min(260px, calc(100vw - 72px));
   }
 
   .composerSubmitControls {

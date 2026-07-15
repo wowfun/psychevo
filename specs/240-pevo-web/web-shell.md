@@ -24,12 +24,16 @@ process. Launching another profile requires a separate `pevo -p <name> web` or
 equivalent process.
 
 Workspace-management RPCs are UI conveniences, not a second execution scope.
-`workspace/create` accepts a display name, creates a direct child directory
-under the configured workspace root, returns the canonical cwd and matching
-`GatewayRequestScope`, and updates the browser session to that scope. It must
-reject empty names, path separators, `.`/`..`, and names that resolve outside
-the workspace root. The created cwd then behaves exactly like any other
-cwd for sessions, files, diff, skills, agents, and `.psychevo` overlays.
+`workspace/create` accepts a display name and an optional canonical parent. An
+explicit parent may be any directory visible to the Gateway process, matching
+the unrestricted server-side folder picker; when omitted, the configured
+workspace root remains the default parent. Folder enumeration applies no
+workspace-file-tree exclusions: readable hidden, dependency, build, and temp
+directories remain selectable. The RPC creates one direct child,
+returns the canonical cwd and matching `GatewayRequestScope`, and updates the
+browser session to that scope. It must reject empty names, path separators, and
+`.`/`..`. The created cwd then behaves exactly like any other cwd for sessions,
+files, diff, skills, agents, and `.psychevo` overlays.
 
 The Web Shell uses the same Gateway agent and command APIs as TUI. Its Agents
 panel lists local, generated peer, Markdown-shadowed peer, invalid, and
@@ -403,14 +407,21 @@ cwd, without first requiring the user to resume an older session.
 The left Sessions browser owns the session-history controls. It has one
 compact header with the history icon to the left of `Sessions`; it does not
 render a separate `History` title or an `active across projects` subtitle. The
-header includes one expand/collapse-all toggle for project groups; when any
-project is collapsed it expands all groups, otherwise it collapses all groups.
+header includes `Open workspace`, an active/imported-and-archived view toggle,
+and one expand/collapse-all toggle for the visible groups. `Open workspace`
+opens the server-side folder panel for selecting an existing directory or
+creating a one-segment child workspace in the currently viewed directory. The
+folder panel may traverse every directory visible to the Gateway process up to
+the filesystem root. When any visible group is collapsed, expand-all expands
+all groups; otherwise collapse-all collapses them.
 Each project group can be collapsed independently, shows only the project label
 in its header, and has a right-aligned `+` action for starting a new session in
 that project. Group headers do not show session counts. Session rows put the
 display title and timestamp on the same line with the timestamp right-aligned;
-the row does not show project name or entry count under the title. The archive
-history toggle belongs in Settings rather than the Sessions header. The
+the row does not show project name or entry count under the title. The
+imported-and-archived view renders one `Archived` group first, then one
+asynchronously discovered group per ACP Runtime Profile. Discovery starts only
+after the user opens that view and never blocks the active Sessions UI. The
 Sessions scroller reserves a stable scrollbar gutter so project header actions
 do not shift horizontally as overflow appears or disappears. The Sessions
 browser must not expose horizontal scrolling or swipe panning. Long session

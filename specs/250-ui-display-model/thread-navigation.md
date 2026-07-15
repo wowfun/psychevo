@@ -69,6 +69,12 @@ side-local control changes do not mutate the parent controls. Workspace changes
 requested inside the side chat are real workspace changes; closing or
 deleting the side thread does not revert them.
 
+Creation snapshots the parent's resolved immutable Agent/runtime binding onto
+the side thread. The snapshot carries the parent's effective control values as
+side-local preferences, starts with no native runtime session identity, and
+does not claim that the new runtime has observed those values. An unbound
+parent must not produce an accepted but permanently unsendable side thread.
+
 Surfaces may open side chats as an entered view, a split/tab, or another
 native child-thread container. The side transcript and composer submit to the
 side thread. Turns submitted to a side-conversation thread are thread-scoped and
@@ -80,6 +86,12 @@ only the temporary side thread transcript and messages, clears any retained
 live-event backlog for that side thread, and returns/focuses the parent. If side
 work is running, interrupting the side work takes precedence over deleting the
 side thread.
+
+After creation, the side composer derives turn availability from the side
+thread's own `Thread Context`, including its immutable binding, sendability,
+input capabilities, and revisions. A parent composer may share connection
+availability with its side view, but its draft Agent target, loading state, or
+submission error must not enable, disable, or relabel side-thread submission.
 
 When `/btw` includes an inline prompt, the surface must open the side thread
 view and submit the prompt to the side thread, not the parent. The first side

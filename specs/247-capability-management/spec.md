@@ -244,11 +244,22 @@ direct uninstall request for `builtin:browser`. Disabled Browser policy is
 reported consistently as `Disabled` by plugin list, read, and doctor; enabled
 policy is reported as `Installed`.
 
-Plugin row and detail states use the fixed status vocabulary `Available`,
-`Installed`, `Disabled`, `Needs trust`, `Needs setup`, `Failed`, and
-`Unsupported target`. Status text must describe the next useful action rather
-than internal implementation state. Trust actions require explicit user intent
-and record trust only for the current package fingerprint.
+The Plugins tab aggregates Psychevo and Codex authorities without merging rows
+by display name. Every row carries an authority-qualified selector. Codex rows
+retain `<plugin>@<marketplace>` identity and delegate install/uninstall to
+Codex; they never create a mirror package in the Psychevo store.
+
+Plugin detail groups `Skills`, `MCP`, `Hooks`, `Apps`, `Interface`, and optional
+Psychevo overlay contributions. Each group shows the pinned compatibility
+profile, highest compatibility level, execution owner, readiness, reason, and
+only the next valid action. Package-level success is shown only when every
+declared executable component is ready or delegated.
+
+Plugin row and detail states use `Ready`, `Disabled`, `Needs trust`, `Needs
+authentication`, `Needs setup`, `Runtime unavailable`, `Delegated to Codex`,
+`Unsupported by profile`, and `Failed`. Codex installation responses surface
+`appsNeedingAuth` immediately with one Connect action. Trust actions require
+explicit user intent and record trust only for the current package fingerprint.
 
 ## MCP
 

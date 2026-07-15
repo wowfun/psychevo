@@ -26,8 +26,7 @@ describe("runtime composer controls", () => {
       />
     );
 
-    const permission = screen.getByRole("combobox", { name: "Permission mode" }) as HTMLSelectElement;
-    expect(permission.options[permission.selectedIndex]?.textContent).toBe("Default Permission");
+    expect(screen.queryByRole("combobox", { name: "Permission mode" })).toBeNull();
     expect(screen.getByRole("combobox", { name: "Mode" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Agent target" }));
 

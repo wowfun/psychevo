@@ -195,9 +195,21 @@ afterEach(() => {
   gatewayMock.completionResult = { items: [], replacement: null };
   gatewayMock.threadActionRun = null;
   gatewayMock.threadHistoryDraftRead = null;
+  gatewayMock.threadImportList = null;
+  gatewayMock.threadImport = null;
+  gatewayMock.threadRestore = null;
+  gatewayMock.threadHistoryRead = null;
   gatewayMock.threadBrowser = null;
   gatewayMock.threadStart = null;
   gatewayMock.turnStart = null;
+  gatewayMock.settingsRead = null;
+  gatewayMock.workspaceGitCheckout = null;
+  gatewayMock.workspaceFolderList = null;
+  gatewayMock.workspaceCreate = null;
+  gatewayMock.workspaceGitBranchesResult = {
+    current: "main",
+    branches: ["feature/composer", "main"]
+  };
   gatewayMock.snapshot.historyEditing = null;
   gatewayMock.commandList = [];
   gatewayMock.slashSettings = {
@@ -211,6 +223,7 @@ afterEach(() => {
   };
   gatewayMock.endpoint = { wsUrl: "ws://127.0.0.1/test", baseUrl: "http://127.0.0.1/test" };
   gatewayMock.model = "xiaomi/xiaomi-token-high";
+  gatewayMock.projectBranch = "main";
   gatewayMock.acpChannelModelSafe = true;
   gatewayMock.modelVariant = "none";
   gatewayMock.modelOverride = null;

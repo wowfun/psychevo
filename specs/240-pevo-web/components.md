@@ -105,6 +105,14 @@ icon, and sizes to the current display value with a bounded max width.
 Workspaces that do not report a git branch omit the branch pill instead of
 rendering a `no-branch` placeholder.
 
+The Sessions surface uses one header and one scroll container in both active
+and imported-and-archived modes. Source groups reuse the project-group density,
+collapse affordance, title truncation, and secondary-menu placement. Archived
+Thread rows and unimported ACP candidate rows remain visually distinguishable
+through their group headings rather than per-row badges. Asynchronous Agent
+discovery uses quiet loading/error rows inside the affected source area and
+does not replace the whole Sessions surface with a blocking dialog or spinner.
+
 Composer request panels are live interaction controls. Permission buttons must
 either resolve the request or surface a transient composer error when the
 Gateway returns `accepted: false`; a failed response must not leave the UI in a
@@ -156,11 +164,14 @@ effective value is non-interactive, and an absent descriptor produces no
 Reasoning group or invented default. The model label and context-usage popover
 must not clip their selected value, summary, or visible usage details at desktop
 or narrow Workbench widths.
-Permission mode is a visible descriptor-driven selection immediately after the
-`+` control and before the Agent control. It uses the current effective value,
-remains interactive when the descriptor is selectable, and is not repeated in
-the Agent target popover. If Gateway cannot provide an effective value, the
-control shows an explicit unavailable or selection-required state.
+Permission mode is a visible descriptor-driven selection in the environment
+line immediately before Workspace. Agent and Mode remain beside the `+`
+control. Permission uses the current effective value, remains interactive when
+the descriptor is selectable, and is not repeated in the Agent target popover.
+If Gateway cannot provide an effective value, the control shows an explicit
+unavailable or selection-required state. In a detached draft, Workspace opens
+a switcher plus a final `Open workspace...` folder-browser action; Git branch
+opens a local branch switcher plus a final `New branch...` action.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
 estimated cost. The composer context popover remains compact and must not show
@@ -182,7 +193,14 @@ model-visible context. Observability refreshes are scoped to the selected view
 epoch/session: a delayed response for a previously selected session must be
 discarded after the user creates or selects a different session or detached
 draft.
-Path and branch remain in the quieter status line. The default send control is
+In a detached draft, Workspace opens a known-workspace switcher whose final
+action opens a folder browser. The browser starts at the active cwd, can
+traverse the filesystem visible to Gateway, and selects a folder without a
+free-form path field. In a bound Thread, Workspace continues to open Files.
+Git branch opens a local-branch switcher with `New branch...` as its final
+action; checkout and creation use structured Gateway operations and are
+disabled while a turn is running. Path and branch remain in the quieter status
+line. The default send control is
 a compact circular arrow-up button; during an
 active turn, the same slot becomes an interrupt control with a Codex-like filled
 square stop glyph inside the same circular button. The prompt textarea grows with
@@ -193,8 +211,10 @@ Workbench presents Agent Definition and Runtime Profile through one compact
 target control. Its rows come from Gateway-compatible `RunnableTarget` choices;
 the browser does not pair them or infer persona compatibility. The popover
 keeps identity and execution provenance visually distinct without nested native
-select menus. After binding it becomes an immutable provenance capsule, and its
-change action starts a new thread.
+select menus. The popover remains wholly inside the viewport at narrow widths,
+including when the compact target trigger sits in the composer's left control
+group. After binding it becomes an immutable provenance capsule, and its change
+action starts a new thread.
 
 The target control keys rows by opaque `targetId` and renders only the
 Gateway-projected `agentLabel`, `profileLabel`, readiness, and unavailable

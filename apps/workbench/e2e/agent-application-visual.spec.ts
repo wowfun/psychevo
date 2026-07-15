@@ -562,33 +562,33 @@ test.describe("Native and ACP Agent application visual contract", () => {
       await page.setViewportSize({ width: isMobile ? 412 : 900, height: 560 });
       await page.goto(server.url);
       if (isMobile) await page.getByRole("button", { name: "History", exact: true }).click();
-      await page.getByRole("button", { name: "Import Agent session" }).click();
-      const importDialog = page.getByRole("dialog", { name: "Import Agent session" });
-      await expect(importDialog).toContainText("Codex external session");
-      await expect(importDialog).toContainText("OpenCode external session");
-      const dialogBody = importDialog.locator(".pevo-createPanelBody");
-      const dialogFooter = importDialog.locator(".pevo-createPanelFooter");
-      await expect(dialogFooter).toBeVisible();
-      const geometry = await dialogBody.evaluate((element) => ({
+      await page.getByRole("button", { name: "Imported and archived sessions" }).click();
+      const archivePanel = page.getByRole("region", { name: "Sessions", exact: true });
+      await expect(archivePanel).toContainText("Codex external session");
+      await expect(archivePanel).toContainText("OpenCode external session");
+      await expect(archivePanel.getByText("Archived", { exact: true })).toBeVisible();
+      const sourceList = archivePanel.locator(".pevo-sessionList");
+      const geometry = await sourceList.evaluate((element) => ({
         clientHeight: element.clientHeight,
         scrollHeight: element.scrollHeight
       }));
       expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
-      await dialogBody.evaluate((element) => {
+      await sourceList.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
       });
-      expect(await dialogBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-      const dialogBox = await importDialog.boundingBox();
-      expect(dialogBox).not.toBeNull();
-      expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(560);
+      expect(await sourceList.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await sourceList.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      await expect(archivePanel.getByRole("button", { name: "Active sessions" })).toBeVisible();
       expect(JSON.stringify(await gatewayRequest(page, "thread/import/list", {
         scope: { cwd: server.cwd, source: { kind: "web", rawId: "visual-import-proof" } },
         cursors: {}
       }))).not.toContain("opencode-external");
-      await capture(page, testInfo, "agent-session-import");
+      await capture(page, testInfo, "agent-session-archive-sources");
 
-      await importDialog.getByRole("button", { name: /OpenCode external session/ }).click();
-      await expect(importDialog).toBeHidden();
+      const openCodeCandidate = archivePanel.locator(".pevo-sessionRow", { hasText: "OpenCode external session" });
+      await openCodeCandidate.locator(".pevo-sessionMain").click();
       const importedTranscript = page.getByRole("region", { name: "Transcript" });
       await expect(importedTranscript).toContainText("Imported replay user question");
       await expect(importedTranscript).toContainText("Imported replay assistant answer");
@@ -600,15 +600,6 @@ test.describe("Native and ACP Agent application visual contract", () => {
         await capture(page, testInfo, "agent-session-imported-transcript");
         await page.getByRole("button", { name: "History", exact: true }).click();
       }
-      await page.getByRole("button", { name: "Import Agent session" }).click();
-      const secondImportDialog = page.getByRole("dialog", { name: "Import Agent session" });
-      await secondImportDialog.getByRole("button", { name: /Codex external session/ }).click();
-      await expect(secondImportDialog).toBeHidden();
-      if (isMobile) {
-        await page.waitForTimeout(400);
-        await page.getByRole("button", { name: "History", exact: true }).click();
-        await expect(page.locator(".historyColumn.is-mobileSelected")).toBeVisible();
-      }
       const openCodeRow = page.locator(".pevo-sessionRow").filter({ hasText: "OpenCode external session" });
       await expect(openCodeRow).toBeVisible();
       const openCodeActions = openCodeRow.locator('summary[aria-label="Session actions"]');
@@ -618,23 +609,35 @@ test.describe("Native and ACP Agent application visual contract", () => {
         await openCodeRow.hover();
         await openCodeActions.click();
       }
-      await expect(openCodeRow.getByRole("menuitem", { name: "Fork" })).toBeVisible();
-      const openCodeDelete = openCodeRow.getByRole("menuitem", { name: "Delete" });
+      await expect(openCodeRow.getByRole("menuitem", { name: "Activate" })).toBeVisible();
+      const archivedOpenCodeDelete = openCodeRow.getByRole("menuitem", { name: "Delete" });
+      await expect(archivedOpenCodeDelete).toBeDisabled();
+      await capture(page, testInfo, "agent-session-archived-actions");
+      await openCodeRow.getByRole("menuitem", { name: "Activate" }).click();
+      if (isMobile) {
+        await expect(page.locator(".historyColumn.is-mobileSelected")).toBeHidden();
+        await page.getByRole("button", { name: "History", exact: true }).click();
+      }
+      await expect(page.getByRole("button", { name: "Imported and archived sessions" })).toBeVisible();
+
+      const activeOpenCodeRow = page.locator(".pevo-sessionRow").filter({ hasText: "OpenCode external session" });
+      await expect(activeOpenCodeRow).toBeVisible();
+      const activeOpenCodeActions = activeOpenCodeRow.locator('summary[aria-label="Session actions"]');
+      if (isMobile) await activeOpenCodeActions.evaluate((element) => (element as HTMLElement).click());
+      else {
+        await activeOpenCodeRow.hover();
+        await activeOpenCodeActions.click();
+      }
+      await expect(activeOpenCodeRow.getByRole("menuitem", { name: "Fork" })).toBeVisible();
+      const openCodeDelete = activeOpenCodeRow.getByRole("menuitem", { name: "Delete" });
       await expect(openCodeDelete).toBeDisabled();
       await expect(openCodeDelete).toHaveAttribute("title", /did not advertise persistent session deletion/i);
       await capture(page, testInfo, "agent-session-lifecycle-actions");
-      const openCodeSession = openCodeRow.getByRole("button", { name: /OpenCode external session/ });
-      if (isMobile) {
-        await openCodeActions.evaluate((element) => {
-          (element as HTMLDetailsElement).open = false;
-        });
-        await openCodeSession.evaluate((element) => (element as HTMLElement).click());
-      } else {
-        await page.keyboard.press("Escape");
-        await openCodeSession.click();
-      }
-      await expect(openCodeRow).toHaveClass(/is-active/);
 
+      await page.getByRole("button", { name: "Imported and archived sessions" }).click();
+      const codexCandidate = page.locator(".pevo-sessionRow", { hasText: "Codex external session" });
+      await expect(codexCandidate).toBeVisible();
+      await codexCandidate.locator(".pevo-sessionMain").click();
       if (isMobile) {
         await page.waitForTimeout(400);
         await page.getByRole("button", { name: "History", exact: true }).click();
@@ -649,6 +652,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
         await codexRow.hover();
         await codexActions.click();
       }
+      await expect(codexRow.getByRole("menuitem", { name: "Activate" })).toBeVisible();
       const codexDelete = codexRow.getByRole("menuitem", { name: "Delete" });
       if (isMobile) {
         await codexDelete.evaluate((element) => (element as HTMLElement).click());

@@ -1,24 +1,8 @@
-import { useEffect, useState } from "react";
-import { FileText, ShieldCheck } from "lucide-react";
+import { FileText } from "lucide-react";
 import { MarkdownText } from "@psychevo/components";
 import type { RightWorkspacePreview } from "../types";
 
-const LOCKED_HTML_PREVIEW_CSP = [
-  "default-src 'none'",
-  "base-uri 'none'",
-  "connect-src 'none'",
-  "form-action 'none'",
-  "frame-src 'none'",
-  "object-src 'none'",
-  "script-src 'none'",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
-  "font-src data:",
-  "media-src data: blob:",
-  "worker-src 'none'",
-  "navigate-to 'none'"
-].join("; ");
-const INTERACTIVE_HTML_PREVIEW_CSP = [
+const HTML_PREVIEW_CSP = [
   "base-uri 'none'",
   "form-action 'none'",
   "frame-src 'none'",
@@ -75,41 +59,14 @@ export function HtmlStaticPreview({
   documentId: string;
   title: string;
 }) {
-  const [trust, setTrust] = useState({ content, documentId, trusted: false });
-  const interactive = trust.trusted && trust.content === content && trust.documentId === documentId;
-
-  useEffect(() => {
-    setTrust((current) => (
-      current.content === content && current.documentId === documentId
-        ? current
-        : { content, documentId, trusted: false }
-    ));
-  }, [content, documentId]);
-
   return (
-    <div className={`htmlStaticPreview ${interactive ? "is-interactive" : "is-locked"}`}>
-      <div className="htmlPreviewNotice">
-        <ShieldCheck size={14} aria-hidden />
-        <span>HTML preview</span>
-        <small>
-          {interactive ? "Trusted · scripts + network on" : "Locked · run enables scripts + network"}
-        </small>
-        <button
-          onClick={() => setTrust({ content, documentId, trusted: !interactive })}
-          title={interactive ? "Stop scripts" : "Trust and run this HTML with scripts and network access"}
-          type="button"
-        >
-          {interactive ? "Stop interactive preview" : "Run interactive preview"}
-        </button>
-      </div>
+    <div className="htmlStaticPreview">
       {active && (
         <iframe
-          aria-hidden={interactive ? undefined : true}
-          inert={!interactive}
-          key={interactive ? "interactive" : "locked"}
-          sandbox={interactive ? "allow-scripts" : ""}
-          srcDoc={htmlPreviewDocument(content, interactive)}
-          tabIndex={interactive ? 0 : -1}
+          key={documentId}
+          sandbox="allow-scripts"
+          srcDoc={htmlPreviewDocument(content)}
+          tabIndex={0}
           title={title || "HTML preview"}
         />
       )}
@@ -117,9 +74,8 @@ export function HtmlStaticPreview({
   );
 }
 
-function htmlPreviewDocument(content: string, interactive: boolean): string {
-  const csp = interactive ? INTERACTIVE_HTML_PREVIEW_CSP : LOCKED_HTML_PREVIEW_CSP;
-  const policy = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+function htmlPreviewDocument(content: string): string {
+  const policy = `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}">`;
   const doctype = content.match(/^\s*<!doctype\s+html[^>]*>/i);
   if (!doctype) {
     return `${policy}${content}`;

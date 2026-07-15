@@ -201,14 +201,13 @@ Settings is active, it replaces the Workbench session shell: the session list,
 composer, mobile Workbench panel tabs, and right inspector are hidden. The
 internal Settings navigation lists app-level settings directly in the left
 column: `Appearance`, `Models`, `Slash Commands`, `Usage`, `Debug`, and
-`Channels`, with bottom-aligned `Archived sessions`. The right side renders
+`Channels`. The right side renders
 only the selected item. `Appearance` owns the dark/light/warm Workbench
-preference, `Debug` owns the local developer-diagnostics switch, `Channels`
-owns messaging connection setup, and `Archived sessions` directly displays
-archived sessions with restore/delete actions. Agent definitions, teams, and
-ACP backend management live in `Capabilities > Agents`, not Settings. Outside
-Settings, the Workbench left sidebar always shows active sessions; archived
-sessions are not a sidebar filter state.
+preference, `Debug` owns the local developer-diagnostics switch, and `Channels`
+owns messaging connection setup. Agent definitions, teams, and ACP backend
+management live in `Capabilities > Agents`, not Settings. Outside Settings, the
+Workbench Sessions header toggles between active history and a grouped
+imported-and-archived source view.
 Session-scoped controls such as Agent,
 Model, Variant, and Permission mode do not appear in Settings; the
 current-session agent can only be chosen through the composer agent selector.

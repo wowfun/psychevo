@@ -2,7 +2,40 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.filesPanel > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.filesPanel.has-fileTree > header {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+}
+
+.filesPanel > header > .filesPanelTitle,
+.filesPanel > header > .rightPanelActions {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.filesPanelTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 40px;
+}
+
+.filesPanel > header > .rightPanelActions {
+  justify-self: end;
+  margin-left: 0;
+}
+
 .filesSplit {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.filesPanel.has-fileTree .filesSplit {
   grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
 }
 
@@ -43,12 +76,19 @@
   white-space: nowrap;
 }
 
+.filePreviewActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+
 .filePreviewPath button {
   display: grid;
   flex: 0 0 auto;
   width: 26px;
   height: 24px;
-  margin-left: auto;
   place-items: center;
   color: var(--pevo-muted);
   background: transparent;

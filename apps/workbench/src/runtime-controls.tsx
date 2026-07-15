@@ -39,16 +39,9 @@ export function ComposerRuntimeControls({
   onTargetChange(targetId: string): void;
   onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
-  const permissionControls = controls.filter((control) => control.id === "permissionMode");
   const modeControls = controls.filter((control) => control.surfaceRole === "mode");
   return (
     <div className="composerRuntimeControls" aria-label="Runtime controls">
-      <RuntimeControlFields
-        controls={permissionControls}
-        disabled={disabled || contextLoading}
-        values={controlValues}
-        onChange={onControlChange}
-      />
       <AgentRuntimeSelector
         binding={binding}
         controls={controls}

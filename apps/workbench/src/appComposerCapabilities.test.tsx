@@ -637,6 +637,38 @@ describe("Workbench capabilities management", () => {
     confirm.mockRestore();
   });
 
+  it("keeps Codex authority distinct and shows component-level compatibility evidence", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+
+    const review = await within(region).findByRole("button", { name: "Plugin review" });
+    expect(within(review).getByText("Codex")).toBeTruthy();
+    const toggle = within(region).getByRole("switch", { name: "Enable review" }) as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    fireEvent.click(review);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/read",
+        params: expect.objectContaining({ selector: "codex:review@openai" })
+      });
+    });
+    const evidence = await within(region).findByRole("region", { name: "Plugin component compatibility" });
+    expect(within(evidence).getByText("Apps")).toBeTruthy();
+    expect(within(evidence).getByText(/Delegate.*Codex Broker.*Needs Setup/)).toBeTruthy();
+
+    fireEvent.click(within(region).getByRole("button", { name: "Install" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/install",
+        params: expect.objectContaining({ source: "codex:review@openai" })
+      });
+    });
+  });
+
   it("keeps coding-core tools read-only while web remains mode-configurable", async () => {
     render(<App />);
 

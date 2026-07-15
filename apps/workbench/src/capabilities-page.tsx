@@ -266,6 +266,7 @@ export function CapabilitiesPage({
   });
   const [toolPolicyDraft, setToolPolicyDraft] = useState({ enabledTools: "", disabledTools: "" });
   const [oauthSession, setOauthSession] = useState<string | null>(null);
+  const [pluginDetail, setPluginDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
 
   const requestScope = scope ?? (cwd ? { cwd, source: { kind: "web", rawId: null, lifetime: "persistent", rawIdentity: null, visibleName: null } } as GatewayRequestScope : null);
 
@@ -328,6 +329,23 @@ export function CapabilitiesPage({
 
   const selectedId = selected[activeTab] ?? rows[0]?.id ?? null;
   const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
+
+  useEffect(() => {
+    if (!client || !requestScope || activeTab !== "plugins" || !selectedRow) {
+      setPluginDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setPluginDetail({ id: selectedRow.id, loading: true, value: null, error: null });
+    void client.request("plugin/read", { selector: pluginSelector(selectedRow), scope: requestScope }).then((value) => {
+      if (!cancelled) setPluginDetail({ id: selectedRow.id, loading: false, value: objectValue(value), error: null });
+    }).catch((err) => {
+      if (!cancelled) setPluginDetail({ id: selectedRow.id, loading: false, value: null, error: errorMessage(err) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, client, refreshToken, requestScope?.cwd, selectedRow?.id]);
 
   async function mutate(action: () => Promise<unknown>, options: MutationOptions = {}): Promise<boolean> {
     if (!client || !requestScope) return false;
@@ -545,6 +563,12 @@ export function CapabilitiesPage({
                     mutate={mutate}
                     onOAuthSession={setOauthSession}
                   />
+                  {activeTab === "plugins" && (
+                    <PluginComponentStatuses
+                      detail={pluginDetail?.id === selectedRow.id ? pluginDetail : null}
+                      row={selectedRow}
+                    />
+                  )}
                   <KeyValueView value={selectedRow.raw} />
                 </>
               ) : (
@@ -2221,6 +2245,8 @@ function CapabilityActions({
     const scopeName = pluginMutationScope(row);
     const packageMutable = pluginPackageMutable(row);
     const removable = pluginRemovable(row);
+    const codexAuthority = pluginAuthorityKind(row) === "codex";
+    const installed = boolField(row.raw, "installed");
     return (
       <div className="capabilityActionGrid">
         <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/doctor", { selector, scope }))} type="button">
@@ -2234,6 +2260,11 @@ function CapabilityActions({
         {packageMutable && removable && (
           <button disabled={busy} onClick={() => confirmAction(`Uninstall plugin ${row.name}?`) && void mutate(() => client.request("plugin/uninstall", { selector, scopeName, scope }))} type="button">
             <Trash2 size={14} /> Uninstall
+          </button>
+        )}
+        {codexAuthority && !installed && (
+          <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/install", { source: selector, scope }))} type="button">
+            <Plus size={14} /> Install
           </button>
         )}
       </div>
@@ -3052,6 +3083,7 @@ function rowsForTab(tab: CapabilityTab, data: JsonObject | null): CapabilityRow[
       enabled: boolField(plugin, "enabled"),
       status: stringField(plugin, "status") || stringField(plugin, "readiness") || "Installed",
       badges: [
+        pluginAuthorityLabel(plugin),
         targetLabel(parseAgentTarget(stringField(plugin, "scope_name"))),
         stringField(plugin, "manifest_kind"),
         stringField(plugin, "source_kind")
@@ -3101,6 +3133,51 @@ function toolsetModeMutable(row: CapabilityRow): boolean {
 
 function pluginSelector(row: CapabilityRow): string {
   return stringField(row.raw, "selector") || row.id;
+}
+
+function pluginAuthorityKind(row: CapabilityRow): string {
+  return stringField(objectField(row.raw, "authority"), "kind") || "psychevo";
+}
+
+function pluginAuthorityLabel(plugin: JsonObject): string {
+  const kind = stringField(objectField(plugin, "authority"), "kind");
+  if (kind === "codex") return "Codex";
+  if (kind === "psychevo") return "Psychevo";
+  return "";
+}
+
+function PluginComponentStatuses({
+  detail,
+  row
+}: {
+  detail: { loading: boolean; value: JsonObject | null; error: string | null } | null;
+  row: CapabilityRow;
+}) {
+  if (detail?.loading) return <div className="capabilityEmpty">Loading component evidence</div>;
+  if (detail?.error) return <div className="capabilityBanner is-error">{detail.error}</div>;
+  const record = detail?.value ? objectField(detail.value, "plugin") : row.raw;
+  const statuses = arrayObjects(record.component_statuses ?? record.componentStatuses);
+  if (statuses.length === 0) {
+    return <div className="capabilityEmpty">No declared plugin components</div>;
+  }
+  return (
+    <section className="skillDiagnostics" aria-label="Plugin component compatibility">
+      {statuses.map((status) => {
+        const component = stringField(status, "component");
+        const level = stringField(status, "highestLevel") || stringField(status, "highest_level");
+        const owner = stringField(status, "executionOwner") || stringField(status, "execution_owner");
+        const readiness = stringField(status, "readiness");
+        const reason = stringField(status, "reason");
+        return (
+          <div className="skillIssue" key={`${component}:${owner}`}>
+            <strong>{readinessStageLabel(component)}</strong>
+            <span>{[readinessStageLabel(level), readinessStageLabel(owner), readinessStageLabel(readiness)].filter(Boolean).join(" · ")}</span>
+            {reason && <small>{reason}</small>}
+          </div>
+        );
+      })}
+    </section>
+  );
 }
 
 function pluginMutationScope(row: CapabilityRow): "profile" | "project" {

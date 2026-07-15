@@ -9,6 +9,51 @@ import { App } from "./App";
 afterEach(() => vi.restoreAllMocks());
 
 describe("Workbench public Thread Application interactions", () => {
+  it("renders the resumed snapshot without waiting for paginated history", async () => {
+    const history = deferred<Record<string, unknown>>();
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Snapshot session")];
+    (gatewayMock.snapshot as { entries: Array<Record<string, unknown>> }).entries = [
+      transcriptEntry("Snapshot first paint.", "completed", "thread-1", 1)
+    ];
+    gatewayMock.threadHistoryRead = () => history.promise;
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Snapshot session"));
+
+    expect(await screen.findByText("Snapshot first paint.")).toBeTruthy();
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/resume")).toHaveLength(1);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/history/read")).toHaveLength(0);
+  });
+
+  it("deduplicates auxiliary refreshes when a session activates", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Auxiliary session")];
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Agent target" });
+    gatewayMock.requestLog.length = 0;
+    fireEvent.click(await screen.findByText("Auxiliary session"));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "observability/read")).toBe(true);
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "command/list")).toBe(true);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    for (const method of [
+      "settings/read",
+      "workspace/files",
+      "workspace/diff",
+      "workspace/changes",
+      "observability/read",
+      "command/list"
+    ]) {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === method), method).toHaveLength(1);
+    }
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "agent/list")).toHaveLength(0);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "backend/list")).toHaveLength(0);
+  });
+
   it("responds to permission through the sealed Thread interaction union", async () => {
     gatewayMock.snapshot.pendingActions = [{
       actionId: "permission-1",
@@ -36,10 +81,6 @@ describe("Workbench public Thread Application interactions", () => {
       });
     });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "permission/respond")).toBe(false);
-    expect(gatewayMock.requestLog).toContainEqual({
-      method: "thread/history/read",
-      params: { scope: gatewayMock.scope, threadId: "thread-1", cursor: null, limit: 200 }
-    });
     expect(await screen.findByText("Permission response accepted.")).toBeTruthy();
   });
 
@@ -82,6 +123,97 @@ describe("Workbench public Thread Application interactions", () => {
     });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "clarify/respond")).toBe(false);
     expect(await screen.findByText("Clarify response accepted.")).toBeTruthy();
+  });
+
+  it("renders a safe Codex App URL elicitation and returns its typed acceptance", async () => {
+    gatewayMock.snapshot.pendingActions = [{
+      actionId: "codex-elicitation:1",
+      kind: "clarify",
+      title: "Codex App request",
+      summary: "Finish sign-in",
+      payload: {
+        owner: "codex_capability_broker",
+        raw: {
+          url: "https://example.com/complete",
+          questions: [{
+            question: "Finish sign-in",
+            options: [{ label: "Open", description: "https://example.com/complete" }],
+            multiple: false,
+            custom: false,
+            secret: false,
+            required: true
+          }]
+        }
+      },
+      threadId: "thread-1",
+      turnId: "turn-1"
+    }];
+
+    render(<App />);
+    await resumeSession();
+    const link = await screen.findByRole("link", { name: "Open Codex App link" });
+    expect(link.getAttribute("href")).toBe("https://example.com/complete");
+    expect(link.getAttribute("target")).toBe("_blank");
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/interaction/respond",
+        params: {
+          scope: gatewayMock.scope,
+          threadId: "thread-1",
+          interactionId: "codex-elicitation:1",
+          response: { kind: "clarify", answers: [["Open"]] }
+        }
+      });
+    });
+  });
+
+  it("renders the pinned Codex openai image-picker elicitation", async () => {
+    gatewayMock.snapshot.pendingActions = [{
+      actionId: "codex-elicitation:image",
+      kind: "clarify",
+      title: "Codex App request",
+      summary: "Choose a report",
+      payload: {
+        owner: "codex_capability_broker",
+        raw: {
+          questions: [{
+            question: "Choose a report",
+            options: [{
+              label: "monthly-review",
+              description: "Monthly review",
+              image: "data:image/png;base64,AA=="
+            }],
+            multiple: false,
+            custom: false,
+            secret: false,
+            required: true
+          }]
+        }
+      },
+      threadId: "thread-1",
+      turnId: "turn-1"
+    }];
+
+    const { container } = render(<App />);
+    await resumeSession();
+    expect(await screen.findByText("Monthly review")).toBeTruthy();
+    const image = container.querySelector(".composerClarifyOptionImage") as HTMLImageElement | null;
+    expect(image?.getAttribute("src")).toBe("data:image/png;base64,AA==");
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/interaction/respond",
+        params: {
+          scope: gatewayMock.scope,
+          threadId: "thread-1",
+          interactionId: "codex-elicitation:image",
+          response: { kind: "clarify", answers: [["monthly-review"]] }
+        }
+      });
+    });
   });
 
   it("interrupts only through an enabled Thread action descriptor", async () => {

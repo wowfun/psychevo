@@ -13,10 +13,15 @@ test.describe("Workbench New/Create visual contract", () => {
       if (isMobile) {
         await openPanel(page, isMobile, "History");
       }
-      await page.getByRole("button", { name: "New Workspace" }).click();
-      const workspaceDialog = page.getByRole("dialog", { name: "New Workspace" });
+      await page.getByRole("button", { name: "Open workspace" }).click();
+      const workspaceDialog = page.getByRole("dialog", { name: "Open workspace" });
       await expectPanelInViewport(page, workspaceDialog, "workspace dialog");
+      await expect(workspaceDialog.getByRole("button", { name: "src", exact: true })).toBeVisible();
       await captureWorkbench(page, testInfo, `new-create-workspace-${isMobile ? "mobile" : "desktop"}`);
+      await workspaceDialog.getByRole("button", { name: "New workspace..." }).click();
+      await expect(workspaceDialog.getByRole("textbox")).toBeVisible();
+      await expectPanelInViewport(page, workspaceDialog, "workspace create dialog");
+      await workspaceDialog.getByRole("button", { name: "Back" }).click();
       await workspaceDialog.getByRole("button", { name: "Cancel" }).click();
 
       await openTopLevelView(page, isMobile, "Automations");

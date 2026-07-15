@@ -279,7 +279,8 @@
   gap: 6px;
 }
 
-.reviewFilesToggle.is-pressed {
+.reviewFilesToggle.is-pressed,
+.filesTreeToggle.is-pressed {
   color: var(--pevo-ink);
   background: color-mix(in oklch, var(--pevo-panel-muted), transparent 28%);
   border-color: color-mix(in oklch, var(--pevo-border-strong), transparent 18%);

@@ -173,6 +173,51 @@ describe("Workbench command routing", () => {
     });
   });
 
+  it("uses the side thread context when the parent Agent target is not sendable", async () => {
+    gatewayMock.runtimeContextRead = (params: unknown) => {
+      const threadId = (params as { threadId?: string | null }).threadId ?? null;
+      return sideChatThreadContext(threadId === "side-thread");
+    };
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: {
+        type: "sideConversationStart",
+        threadId: "side-thread",
+        parentThreadId: "thread-1",
+        title: "Side chat"
+      }
+    });
+
+    render(<App />);
+    await resumeSession();
+
+    const mainComposer = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(mainComposer, { target: { value: "/btw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    const rightWorkspace = await screen.findByRole("region", { name: "Right workspace" });
+    const sideChat = within(rightWorkspace).getByRole("region", { name: "Side chat" });
+    const sideComposer = await within(sideChat).findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(sideComposer, { target: { value: "side follow-up" } });
+    const sideSubmit = within(sideChat).getByRole("button", { name: "Send message" });
+    expect((sideSubmit as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(sideSubmit);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "turn/start",
+        params: expect.objectContaining({
+          input: [{ type: "text", text: "side follow-up" }],
+          threadId: "side-thread"
+        })
+      });
+    });
+  });
+
   it("opens agent transcript rows in a child session tab from the explicit Open action", async () => {
     const agentEntry: TranscriptEntry = {
       id: "entry-agent",
@@ -1158,6 +1203,57 @@ describe("Workbench command routing", () => {
     expect(await screen.findByText("Export download opened.")).toBeTruthy();
   });
 });
+
+function sideChatThreadContext(sideThread: boolean) {
+  const target = {
+    targetId: "target:default:native",
+    agentRef: null,
+    runtimeProfileRef: "native",
+    agentLabel: "Psychevo",
+    profileLabel: "Native",
+    label: "Psychevo · Native",
+    ready: true,
+    unavailableReason: null
+  };
+  return {
+    targetId: target.targetId,
+    runtimeProfileRef: "native",
+    selectionState: sideThread ? "bound" : "default",
+    profiles: [],
+    binding: sideThread
+      ? {
+          threadId: "side-thread",
+          agentRef: null,
+          agentFingerprint: "agent-fingerprint",
+          runtimeRef: "native",
+          backendKind: "native",
+          nativeKind: "native",
+          sessionHandle: "side-thread",
+          cwd: "/tmp/project",
+          profileFingerprint: "profile-fingerprint",
+          ownership: "readWrite",
+          bindingRevision: 1
+        }
+      : null,
+    controls: [],
+    stability: "stable",
+    capabilities: [{ id: "turn.start", enabled: true, stability: "stable", unavailableReason: null }],
+    compatibleTargets: [target],
+    inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+    actions: [],
+    sendability: sideThread
+      ? { allowed: true, reason: null, recoveryAction: null }
+      : {
+          allowed: false,
+          reason: "Select an Agent target before starting a turn.",
+          recoveryAction: null
+        },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+    pendingInteractions: [],
+    contextRevision: sideThread ? "side-context-1" : "parent-context-1",
+    controlRevision: sideThread ? "side-controls-1" : "parent-controls-1"
+  };
+}
 
 function spawnedChildEntry(): TranscriptEntry {
   return {

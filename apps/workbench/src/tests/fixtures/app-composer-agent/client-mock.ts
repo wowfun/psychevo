@@ -624,6 +624,9 @@ vi.mock("@psychevo/client", async () => {
         };
       }
       if (method === "thread/history/read") {
+        if (gatewayMock.threadHistoryRead) {
+          return gatewayMock.threadHistoryRead(params);
+        }
         const record = params as { threadId: string; cursor?: string | null; limit?: number | null };
         const entries = gatewayMock.snapshot.entries as Array<{ id: string }>;
         const start = record.cursor
@@ -644,6 +647,28 @@ vi.mock("@psychevo/client", async () => {
           return gatewayMock.threadHistoryDraftRead(params);
         }
         throw new Error("thread/history/draft/read mock is not configured");
+      }
+      if (method === "thread/import/list") {
+        return gatewayMock.threadImportList ? gatewayMock.threadImportList(params) : { profiles: [] };
+      }
+      if (method === "thread/import") {
+        if (gatewayMock.threadImport) return gatewayMock.threadImport(params);
+        return {
+          snapshot: {
+            ...gatewayMock.snapshot,
+            thread: {
+              id: "thread-imported",
+              backend: { kind: "acp", runtimeRef: "mock-acp", sessionHandle: "thread-imported" },
+              sourceKey: "source-thread-imported"
+            }
+          }
+        };
+      }
+      if (method === "thread/restore") {
+        if (gatewayMock.threadRestore) return gatewayMock.threadRestore(params);
+        const record = params as { threadId: string };
+        gatewayMock.archivedSessionSummaries = gatewayMock.archivedSessionSummaries.filter((session) => session.id !== record.threadId);
+        return { session: { id: record.threadId, archivedAtMs: null } };
       }
       if (method === "thread/list") {
         const record = params as { archived?: boolean } | undefined;
@@ -681,6 +706,9 @@ vi.mock("@psychevo/client", async () => {
         };
       }
       if (method === "settings/read") {
+        if (gatewayMock.settingsRead) {
+          return gatewayMock.settingsRead(params);
+        }
         return gatewayMock.settingsResult(null);
       }
       if (method === "settings/update") {
@@ -1978,10 +2006,66 @@ vi.mock("@psychevo/client", async () => {
               package_fingerprint: "dual-project",
               trust: { required: false, status: "not_required", fingerprint: "dual-project" },
               diagnostics: []
+            },
+            {
+              name: "review",
+              selector: "codex:review@openai",
+              canonical_id: "review@openai",
+              authority: { kind: "codex", plugin: "review", marketplace: "openai" },
+              scope_name: "codex_home",
+              enablement_scope_name: "codex_home",
+              removable: false,
+              package_mutable: true,
+              enablement_mutable: false,
+              installed: false,
+              description: "Review changes with Codex Apps",
+              source_id: "codex:openai",
+              source: "openai",
+              source_kind: "codex_marketplace",
+              scope: "codex_home",
+              manifest_kind: "codex",
+              compatibility_profile: "codex-plugin/8604689e",
+              component_statuses: [],
+              enabled: false,
+              status: "Available",
+              readiness: "Available",
+              diagnostics: []
             }
           ],
-          count: 4
+          count: 5
         };
+      }
+      if (method === "plugin/read") {
+        const record = params as { selector?: string } | undefined;
+        if (record?.selector === "codex:review@openai") {
+          return {
+            plugin: {
+              name: "review",
+              selector: record.selector,
+              authority: { kind: "codex", plugin: "review", marketplace: "openai" },
+              compatibility_profile: "codex-plugin/8604689e",
+              component_statuses: [
+                {
+                  component: "skills",
+                  compatibilityProfile: "codex-plugin/8604689e",
+                  highestLevel: "execute",
+                  executionOwner: "psychevo_native",
+                  readiness: "disabled",
+                  reason: "Install through Codex to project portable skill content."
+                },
+                {
+                  component: "apps",
+                  compatibilityProfile: "codex-plugin/8604689e",
+                  highestLevel: "delegate",
+                  executionOwner: "codex_broker",
+                  readiness: "needs_setup",
+                  reason: "Apps remain Codex-owned."
+                }
+              ]
+            }
+          };
+        }
+        return { plugin: {} };
       }
       if (method === "plugin/import/inspect") {
         return {
@@ -2250,6 +2334,48 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "workspace/files") {
         return gatewayMock.workspaceFilesResult;
+      }
+      if (method === "workspace/git/branches") {
+        return gatewayMock.workspaceGitBranchesResult;
+      }
+      if (method === "workspace/git/checkout") {
+        if (gatewayMock.workspaceGitCheckout) {
+          return gatewayMock.workspaceGitCheckout(params);
+        }
+        const record = params as { branch?: string };
+        gatewayMock.projectBranch = record.branch ?? gatewayMock.projectBranch;
+        gatewayMock.workspaceGitBranchesResult = {
+          current: gatewayMock.projectBranch,
+          branches: Array.from(new Set([
+            ...((gatewayMock.workspaceGitBranchesResult.branches as string[] | undefined) ?? []),
+            ...(gatewayMock.projectBranch ? [gatewayMock.projectBranch] : [])
+          ])).sort()
+        };
+        return gatewayMock.workspaceGitBranchesResult;
+      }
+      if (method === "workspace/folders") {
+        if (gatewayMock.workspaceFolderList) {
+          return gatewayMock.workspaceFolderList(params);
+        }
+        const record = params as { path?: string | null };
+        const current = record.path ?? "/tmp";
+        return {
+          root: "/tmp",
+          current,
+          parent: current === "/tmp" ? null : "/tmp",
+          folders: current === "/tmp" ? [
+            { name: "manual-project", path: "/tmp/manual-project" },
+            { name: "other-project", path: "/tmp/other-project" },
+            { name: "project", path: "/tmp/project" }
+          ] : []
+        };
+      }
+      if (method === "workspace/create") {
+        if (gatewayMock.workspaceCreate) return gatewayMock.workspaceCreate(params);
+        const record = params as { name: string; parent?: string | null };
+        const parent = record.parent ?? "/tmp";
+        const cwd = `${parent.replace(/[\\/]$/, "")}/${record.name}`;
+        return { cwd, scope: { ...gatewayMock.scope, cwd } };
       }
       if (method === "workspace/diff") {
         const record = params as { path?: string | null } | undefined;

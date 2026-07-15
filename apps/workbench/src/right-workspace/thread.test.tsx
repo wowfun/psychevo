@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayClient } from "@psychevo/client";
-import type { GatewayEvent, ThreadSnapshot, TranscriptEntry } from "@psychevo/protocol";
+import type { GatewayEvent, ThreadContextReadResult, ThreadSnapshot, TranscriptEntry } from "@psychevo/protocol";
 import { eventWithEntry, snapshot } from "../liveTranscript.test-support";
 import { setupComponentFallbackTests, transcriptBlock } from "../componentFallbacks.test-support";
 import {
@@ -155,6 +155,72 @@ describe("ThreadPanel live event feed", () => {
       target: null,
       scope: childSnapshot().scope
     });
+  });
+
+  it("enables Side Chat submission after its own Thread Context loads", async () => {
+    const pending = deferred<ThreadSnapshot>();
+    const client = threadClientWithContext(threadContext("readWrite", "full"), pending.promise);
+    render(
+      <ThreadPanel
+        client={client}
+        disabled={false}
+        gatewayEventFeed={EMPTY_GATEWAY_EVENT_FEED}
+        kind="sideConversation"
+        parentThreadId="parent-thread"
+        scope={null}
+        threadId="child-thread"
+        title="Side chat"
+      />
+    );
+
+    const panel = screen.getByRole("region", { name: "Side chat" });
+    const composer = within(panel).getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(composer, { target: { value: "side follow-up" } });
+    const submit = within(panel).getByRole("button", { name: "Send message" });
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(true));
+
+    await act(async () => {
+      pending.resolve(childHistorySnapshot());
+      await pending.promise;
+    });
+
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(submit);
+    await waitFor(() => expect(client.request).toHaveBeenCalledWith(
+      "turn/start",
+      expect.objectContaining({
+        input: [{ type: "text", text: "side follow-up" }],
+        threadId: "child-thread"
+      })
+    ));
+  });
+
+  it("shows the Side Chat Thread Context reason when that thread is not sendable", async () => {
+    const unavailableReason = "This Side Chat target is unavailable.";
+    const client = threadClientWithContext({
+      ...threadContext("readWrite", "full"),
+      sendability: { allowed: false, reason: unavailableReason, recoveryAction: null }
+    });
+    render(
+      <ThreadPanel
+        client={client}
+        disabled={false}
+        gatewayEventFeed={EMPTY_GATEWAY_EVENT_FEED}
+        kind="sideConversation"
+        parentThreadId="parent-thread"
+        scope={null}
+        threadId="child-thread"
+        title="Unavailable Side chat"
+      />
+    );
+
+    const panel = screen.getByRole("region", { name: "Unavailable Side chat" });
+    const composer = await within(panel).findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(composer, { target: { value: "blocked follow-up" } });
+    const submit = within(panel).getByRole("button", { name: "Send message" });
+    await waitFor(() => expect(submit.getAttribute("title")).toBe(unavailableReason));
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    expect(client.request).not.toHaveBeenCalledWith("turn/start", expect.anything());
   });
 
   it("queues OpenCode managed-member input when turn.steer is not advertised", async () => {
@@ -743,6 +809,28 @@ function threadClientWithOwnership(
   } as unknown as GatewayClient & { request: ReturnType<typeof vi.fn> };
 }
 
+function threadClientWithContext(
+  context: ReturnType<typeof threadContext>,
+  result: Promise<ThreadSnapshot> = Promise.resolve(childHistorySnapshot())
+): GatewayClient & { request: ReturnType<typeof vi.fn> } {
+  return {
+    request: vi.fn(async (method: string) => {
+      if (method === "thread/read") return result;
+      if (method === "thread/history/read") return historyReadResult(await result);
+      if (method === "thread/context/read") return context;
+      if (method === "turn/start") {
+        return {
+          accepted: true,
+          threadId: "child-thread",
+          turnId: "queued-turn",
+          thread: childSnapshot().thread
+        };
+      }
+      throw new Error(`unexpected request: ${method}`);
+    })
+  } as unknown as GatewayClient & { request: ReturnType<typeof vi.fn> };
+}
+
 function historyReadResult(value: ThreadSnapshot) {
   return {
     threadId: "child-thread",
@@ -755,7 +843,7 @@ function historyReadResult(value: ThreadSnapshot) {
 function threadContext(
   ownership: "readOnly" | "readWrite",
   fidelity: "full" | "summary" | "partial" | "unavailable"
-) {
+): ThreadContextReadResult {
   return {
     targetId: "target:opencode-bound",
     runtimeProfileRef: "opencode",

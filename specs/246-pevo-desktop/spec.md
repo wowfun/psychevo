@@ -159,6 +159,21 @@ and runs the existing Tauri development entrypoint for `@psychevo/desktop`.
 This command is not a Desktop packaging, installer, update, or background
 lifecycle surface.
 
+The launcher resolves `pnpm` through the shared host executable boundary before
+starting the development entrypoint. On Windows it searches `PATH`/`Path`,
+honors `PATHEXT`, and launches `.cmd` or `.bat` shims through the native command
+processor instead of treating an extensionless shell command as a directly
+executable program.
+
+The repository `packageManager` version remains a recommendation rather than a
+Desktop launch gate. Unless the caller explicitly configures the corresponding
+variables, the launcher disables Corepack project-version enforcement, download
+prompts, and strict version matching for this pnpm child and uses
+`pnpm_config_pm_on_fail=warn`. These defaults are subprocess-scoped: the
+launcher does not modify user Corepack, pnpm, registry, proxy, or CA
+configuration, and pnpm launch or compatibility failures remain visible on the
+inherited stderr stream.
+
 `pevo desktop [--dir <DIR>]` preserves the active Psychevo profile for the
 Desktop child process through `PSYCHEVO_HOME`, `PSYCHEVO_PROFILE`, and
 `PSYCHEVO_PROFILE_HOME`. The Desktop workspace cwd is the caller's cwd by

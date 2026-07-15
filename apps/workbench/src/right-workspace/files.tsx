@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, ChevronRight, Edit3, ExternalLink, FileText, FolderTree, Save, Search, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  Edit3,
+  ExternalLink,
+  FileText,
+  FolderTree,
+  PanelRightClose,
+  PanelRightOpen,
+  Save,
+  Search,
+  X
+} from "lucide-react";
 import { MarkdownText } from "@psychevo/components";
 import type { WorkspaceFileEntry, WorkspaceFileReadResult, WorkspaceFileWriteResult } from "@psychevo/protocol";
 import { highlightToHtml, languageForPath } from "../highlight";
@@ -47,6 +59,7 @@ export function FilesPanel({
   const [draft, setDraft] = useState("");
   const [baseRevision, setBaseRevision] = useState<string | null>(null);
   const [wrap, setWrap] = useState(true);
+  const [fileTreeOpen, setFileTreeOpen] = useState(true);
   const [findText, setFindText] = useState("");
   const [goLine, setGoLine] = useState("");
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
@@ -171,11 +184,23 @@ export function FilesPanel({
   }
 
   return (
-    <section className="filesPanel" aria-label="Workspace files">
+    <section className={`filesPanel ${fileTreeOpen ? "has-fileTree" : ""}`} aria-label="Workspace files">
       <header>
-        <FolderTree size={17} />
-        <div>
+        <div className="filesPanelTitle">
+          <FolderTree size={17} />
           <h2>Files</h2>
+        </div>
+        <div className="rightPanelActions">
+          <button
+            aria-label={fileTreeOpen ? "Hide file tree" : "Show file tree"}
+            aria-pressed={fileTreeOpen}
+            className={`filesTreeToggle ${fileTreeOpen ? "is-pressed" : ""}`}
+            onClick={() => setFileTreeOpen((value) => !value)}
+            title={fileTreeOpen ? "Hide file tree" : "Show file tree"}
+            type="button"
+          >
+            {fileTreeOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+          </button>
         </div>
       </header>
       <div className="filesSplit">
@@ -185,7 +210,7 @@ export function FilesPanel({
             {preview?.truncated && <b>truncated</b>}
             {dirty && <b>unsaved</b>}
             {previewContent !== null && !editing && (
-              <>
+              <div className="filePreviewActions">
                 {isHtmlFile(previewPath) && (
                   <button
                     aria-label={`Open HTML preview for ${previewPath}`}
@@ -210,7 +235,7 @@ export function FilesPanel({
                 >
                   <Edit3 size={13} />
                 </button>
-              </>
+              </div>
             )}
           </div>
           {previewContent !== null ? (
@@ -333,17 +358,19 @@ export function FilesPanel({
             <p>{previewMessage ?? "Select a text file to preview."}</p>
           )}
         </div>
-        <aside className="filesTreePane" aria-label="Workspace file tree">
-          <WorkspaceFileTree
-            emptyLabel="No workspace files."
-            filterLabel="Filter workspace files"
-            filterPlaceholder="Filter files..."
-            items={treeItems}
-            selectedPath={selectedPath}
-            onOpen={openTreePath}
-          />
-          {truncated && <footer>File tree truncated.</footer>}
-        </aside>
+        {fileTreeOpen && (
+          <aside className="filesTreePane" aria-label="Workspace file tree">
+            <WorkspaceFileTree
+              emptyLabel="No workspace files."
+              filterLabel="Filter workspace files"
+              filterPlaceholder="Filter files..."
+              items={treeItems}
+              selectedPath={selectedPath}
+              onOpen={openTreePath}
+            />
+            {truncated && <footer>File tree truncated.</footer>}
+          </aside>
+        )}
       </div>
     </section>
   );

@@ -164,7 +164,7 @@ describe("component fallback rendering", () => {
     await waitFor(() => expect(menu?.open).toBe(false));
   });
 
-  it("renders workspace creation as a sessions header action", () => {
+  it("renders workspace opening as a sessions header action", () => {
     const html = renderToStaticMarkup(
       <HistoryPanel
         archived={false}
@@ -181,8 +181,8 @@ describe("component fallback rendering", () => {
       />
     );
 
-    expect(html).toContain("title=\"New Workspace\"");
-    expect(html.indexOf("title=\"New Workspace\"")).toBeLessThan(html.indexOf("title=\"Collapse all workspaces\""));
+    expect(html).toContain("title=\"Open workspace\"");
+    expect(html.indexOf("title=\"Open workspace\"")).toBeLessThan(html.indexOf("title=\"Collapse all workspaces\""));
   });
 
   it("does not mark the first history row active without a current thread", () => {

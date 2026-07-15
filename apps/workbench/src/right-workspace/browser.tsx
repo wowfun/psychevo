@@ -114,7 +114,6 @@ export function BrowserPanel({
         ) : (
           <iframe
             key={`${currentUrl}:${reloadKey}`}
-            sandbox="allow-forms allow-popups allow-same-origin"
             src={currentUrl}
             title={pageTitle}
           />

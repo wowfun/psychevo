@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Check, GitBranch, Pin, ShieldCheck, ShieldPlus, X } from "lucide-react";
+import { Check, ShieldCheck, ShieldPlus, X } from "lucide-react";
 import type {
   ContextReadResult,
-  InitializeResult,
   PendingActionView,
   PermissionDecision,
   SessionUsageSummaryView,
@@ -87,6 +86,7 @@ function ClarifyComposerRequest({
     () => parseClarifyQuestions(clarifyRawPayload(request)),
     [request.actionId]
   );
+  const url = useMemo(() => clarifyUrl(request), [request.actionId]);
   const [answers, setAnswers] = useState<ClarifyAnswerState[]>(() => initialClarifyAnswers(questions));
   const [fallbackAnswer, setFallbackAnswer] = useState("");
 
@@ -102,7 +102,8 @@ function ClarifyComposerRequest({
     ? fallbackAnswer.trim().length > 0
     : resolvedAnswers.every((answer, index) => {
         const state = answers[index] ?? defaultClarifyAnswer(questions[index]!);
-        return answer.length > 0 && (!state.customSelected || state.custom.trim().length > 0);
+        return !questions[index]!.required
+          || (answer.length > 0 && (!state.customSelected || state.custom.trim().length > 0));
       });
 
   function submitClarify() {
@@ -124,6 +125,11 @@ function ClarifyComposerRequest({
         {request.turnId ? <span>{request.turnId}</span> : null}
       </div>
       <AttentionProvenance request={request} />
+      {url ? (
+        <a className="composerRequestLink" href={url} rel="noopener noreferrer" target="_blank">
+          Open Codex App link
+        </a>
+      ) : null}
       {questions.length === 0 ? (
         <input
           value={fallbackAnswer}
@@ -167,6 +173,9 @@ function ClarifyComposerRequest({
                         }}
                       />
                       <span>
+                        {option.image ? (
+                          <img alt="" className="composerClarifyOptionImage" src={option.image} />
+                        ) : null}
                         <strong>{option.label}</strong>
                         {option.description ? <small>{option.description}</small> : null}
                       </span>
@@ -202,6 +211,7 @@ function ClarifyComposerRequest({
 type ClarifyOption = {
   label: string;
   description: string;
+  image?: string;
 };
 
 type ClarifyQuestion = {
@@ -211,6 +221,7 @@ type ClarifyQuestion = {
   multiple: boolean;
   custom: boolean;
   secret: boolean;
+  required: boolean;
 };
 
 type ClarifyAnswerState = {
@@ -237,9 +248,11 @@ function parseClarifyQuestions(raw: unknown): ClarifyQuestion[] {
           if (!label) {
             return [];
           }
+          const image = safeImageUrl(optionRecord.image);
           return [{
             label,
-            description: typeof optionRecord.description === "string" ? optionRecord.description.trim() : ""
+            description: typeof optionRecord.description === "string" ? optionRecord.description.trim() : "",
+            ...(image ? { image } : {})
           }];
         })
       : [];
@@ -252,7 +265,8 @@ function parseClarifyQuestions(raw: unknown): ClarifyQuestion[] {
       options,
       multiple: question.multiple === true,
       custom: typeof question.custom === "boolean" ? question.custom : true,
-      secret: question.secret === true
+      secret: question.secret === true,
+      required: question.required !== false
     }];
   });
 }
@@ -319,6 +333,22 @@ function replaceClarifyAnswer(
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function safeImageUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const candidate = value.trim();
+  if (/^data:image\/(?:png|jpeg|webp|gif|svg\+xml);base64,/i.test(candidate)) {
+    return candidate;
+  }
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function actionPayload(action: PendingActionView): Record<string, unknown> {
@@ -430,6 +460,20 @@ function permissionTimeoutSecs(permission: PendingActionView): number {
 function clarifyRawPayload(action: PendingActionView): unknown {
   const payload = actionPayload(action);
   return payload.raw ?? action.payload;
+}
+
+function clarifyUrl(action: PendingActionView): string {
+  const raw = asRecord(clarifyRawPayload(action));
+  const value = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!value) {
+    return "";
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 export function ComposerSubmitControls({
@@ -605,46 +649,6 @@ function compactTokenCount(value: number): string {
     maximumFractionDigits: 1
   }).format(value);
   return compact.toLowerCase();
-}
-
-export function ComposerStatusLine({
-  branch,
-  path,
-  runtimeSafetyLabel,
-  profile,
-  onBranchClick,
-  onPathClick
-}: {
-  branch: string | null;
-  path: string;
-  runtimeSafetyLabel?: string | null;
-  profile: InitializeResult["profile"] | null;
-  onBranchClick(): void;
-  onPathClick(): void;
-}) {
-  const profileLabel = profile && !profile.default ? profile.name : null;
-  return (
-    <div className="composerStatusLine" aria-label="Composer status">
-      {runtimeSafetyLabel ? (
-        <span className="profileStatusPill" aria-label="Runtime Profile safety policy" title={runtimeSafetyLabel}>
-          <span>{runtimeSafetyLabel}</span>
-        </span>
-      ) : null}
-      {profileLabel ? (
-        <span className="profileStatusPill" title={profile?.home || profileLabel}>
-          <Pin size={12} />
-          <span>{profileLabel}</span>
-        </span>
-      ) : null}
-      <button className="pathStatusButton" onClick={onPathClick} title={path} type="button">{path || "workspace"}</button>
-      {branch?.trim() ? (
-        <button className="branchStatusButton" onClick={onBranchClick} type="button">
-          <GitBranch size={13} />
-          <span>{branch}</span>
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 export function StatusSelect({

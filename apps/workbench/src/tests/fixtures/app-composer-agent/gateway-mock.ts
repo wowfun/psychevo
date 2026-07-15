@@ -66,8 +66,13 @@ const gatewayMock = vi.hoisted(() => {
     turnStart: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadStart: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadBrowser: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadHistoryRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadActionRun: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadHistoryDraftRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadImportList: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadImport: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadRestore: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    settingsRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
     slashSettings: {
       scope: "global",
       cwd: scope.cwd,
@@ -90,6 +95,13 @@ const gatewayMock = vi.hoisted(() => {
     openDownloadLog: [] as string[],
     optimisticLog: [] as string[],
     projectBranch: "main" as string | null,
+    workspaceGitBranchesResult: {
+      current: "main",
+      branches: ["feature/composer", "main"]
+    } as Record<string, unknown>,
+    workspaceGitCheckout: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    workspaceFolderList: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    workspaceCreate: null as null | ((params: unknown) => unknown | Promise<unknown>),
     requestLog: [] as Array<{ method: string; params: unknown }>,
     xtermTerminalOptions: [] as Array<Record<string, unknown>>,
     subscribers: [] as Array<(notification: { method: string; params?: unknown }) => void>,

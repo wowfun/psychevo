@@ -443,9 +443,11 @@ fn providers_for_checks(
 fn check_requires_provider(check: &LiveCheck) -> bool {
     match check.action {
         LiveCheckAction::DesktopNativeSmoke { provider_required } => provider_required,
+        LiveCheckAction::CargoIgnoredTest {
+            provider_required, ..
+        } => provider_required,
         LiveCheckAction::ProviderSmoke
         | LiveCheckAction::PevoDoctorLive
-        | LiveCheckAction::CargoIgnoredTest { .. }
         | LiveCheckAction::Playwright { .. } => true,
         LiveCheckAction::DeterministicPlaywright { .. } => false,
     }
@@ -477,7 +479,7 @@ fn run_check(
         LiveCheckAction::PevoDoctorLive => {
             run_pevo_doctor_live_check(root, check_dir, providers, env_mode, log)
         }
-        LiveCheckAction::CargoIgnoredTest { package, test } => {
+        LiveCheckAction::CargoIgnoredTest { package, test, .. } => {
             run_cargo_ignored_live_check(root, check_dir, providers, env_mode, package, test, log)
         }
         LiveCheckAction::DeterministicPlaywright { spec, grep } => {

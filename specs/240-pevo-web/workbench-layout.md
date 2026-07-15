@@ -8,15 +8,15 @@ the same Web/Desktop tree.
 The desktop layout is a three-surface workbench:
 
 - left: collapse control, `New Session`, `Search`, `Automations`, global
-  `Pinned`, project-grouped Sessions with expand/collapse and per-project new
-  session actions, and a bottom utility rail for Settings. Settings is the
+  `Pinned`, project-grouped active Sessions with expand/collapse and per-project
+  new session actions, an alternate imported-and-archived source view, and a
+  bottom utility rail for Settings. Settings is the
   persistent app-level configuration center whose left navigation lists
   `Appearance`, `Models`, `Slash Commands`, `Usage`, `Debug`, and `Channels`
-  directly, with bottom-aligned `Archived sessions` for archived-session
-  management. Agent definitions, teams, and ACP backend configuration live in
+  directly. Agent definitions, teams, and ACP backend configuration live in
   `Capabilities > Agents`; Settings does not include an Agents entry. The ordinary
-  Workbench left sidebar always lists active sessions and does not become an
-  archived-session filter.
+  Workbench left sidebar defaults to active sessions; its explicit header toggle
+  reveals archived Threads and asynchronously discovered ACP Agent sessions.
   Composer-triggered `/commands` remains a closeable overlay over the transcript.
   GUI `/agents` is not exposed by Web/Desktop command discovery or panel routing.
 - center: transcript/workbench and bottom-fixed composer
@@ -51,9 +51,10 @@ those types. Browser is exposed as a right-workspace peer when the Browser
 plugin is enabled, with one independently identified and stateful Browser pane
 per thread. Switching threads hides the previous thread's Browser tab without
 sharing its URL, and returning restores that thread's navigation state. Web/PWA
-Browser behavior is preview-only: it may render a safe iframe/static preview
-for `http://` and `https://`, but browser-control RPCs and annotation overlay
-injection return `Desktop required` until a Desktop Browser host is available.
+Browser behavior is preview-only: it renders ordinary `http://` and `https://`
+pages in an unsandboxed iframe, while browser-control RPCs and annotation
+overlay injection return `Desktop required` until a Desktop Browser host is
+available. Remote embedding headers may still prevent a page from loading.
 Host/port shorthand defaults public hosts to HTTPS and localhost or loopback
 addresses to HTTP; unsupported explicit schemes are rejected.
 
@@ -110,9 +111,12 @@ A Review tab has a top-right Files toggle; when pressed, the tab splits into
 left diff preview and right changed-files tree. Selecting a changed file scopes
 the active Review tab to that file when Gateway can provide a file-specific
 diff. The `/diff` host action opens or updates a Review tab. Files tabs split
-into left preview and right tree. That left-preview/right-tree split is the
-desktop information architecture for both Review and Files, with stacking only
-for narrow responsive layouts. Review and Files use the same locally filterable
+into left preview and right tree. A Files-header toggle hides or restores the
+tree, expanding the preview to the full pane while hidden. Selected-file actions
+keep `Open HTML preview` immediately to the left of `Edit`, below that panel-level
+toggle. The left-preview/right-tree split is the desktop information architecture
+for both Review and Files, with stacking only for narrow responsive layouts.
+Review and Files use the same locally filterable
 tree component with folder expand/collapse and selected row state. Preview and
 tree regions are immersive right-workspace panes with subtle split dividers
 instead of framed card backgrounds. Markdown previews reuse the shared
@@ -121,20 +125,15 @@ blocks, GitHub-like document-start YAML frontmatter tables, complete fenced
 Mermaid rendering, and a quiet copy action that writes the raw Markdown file
 source through the host clipboard. Incomplete fenced Mermaid blocks remain code
 while streaming. Local HTML previews must be read-only and must not use raw
-`file://`; for Gateway-authorized workspace content, Files and Preview default
-to a locked, scriptless, opaque-origin iframe. Workbench injects CSP that blocks
-scripts and automatic network side effects from connections, remote
-subresources, forms, and nested browsing, and the iframe grants no script,
-same-origin, form, or popup
-capabilities. `Run interactive preview` is the only path to a trusted run with
-scripts enabled. That trust applies only to the exact path and content and is
-revoked immediately on either change; selecting or opening a file never grants
-it. Locked iframes are inert, excluded from keyboard focus, and receive no
-pointer events, so disguised links cannot navigate before trust is granted;
-this also disables internal document scrolling until the trusted run restores
-iframe interaction. Files and Preview share a single active HTML execution
-instance: changing between those views suspends the inactive iframe while
-preserving unrelated tab state. Code previews
+`file://`; Gateway-authorized workspace content runs immediately in an
+interactive opaque-origin iframe with scripts, network access, pointer input,
+keyboard input, and scrolling enabled. Workbench retains the CSP and iframe
+restrictions that deny base rewriting, forms, nested frames, objects, popups,
+same-origin, top navigation, and downloads. There is no locked/trusted state or
+confirmation control. Changing the selected document remounts the iframe and
+changing its content reloads `srcDoc`. Files and Preview share a single active
+HTML execution instance: changing between those views suspends the inactive
+iframe while preserving unrelated tab state. Code previews
 use a Workbench-local `highlight.js` core
 integration with app-token colors. The Files header does not repeat the project
 path; the selected file absolute path is shown above the preview. Diff previews
@@ -216,13 +215,10 @@ show a separate top Settings header or top-right close button; its return
 control sits at the top of the Settings left navigation, followed by a settings
 search field, and the current project/cwd path is not repeated there. The
 internal left navigation lists `Appearance`, `Models`, `Slash Commands`,
-`Usage`, `Debug`, and `Channels` directly, with `Archived sessions` pinned to
-the bottom.
-`Appearance` includes a local appearance control with `dark`, `light`, and
-`warm` choices, `Archived sessions` directly lists archived sessions for
-restore/delete workflows, and `Debug` owns the local Debug switch. The ordinary
-Workbench left sidebar remains an active-session list and must not switch to
-archived sessions. The default is the dark ledger appearance. The setting is a
+`Usage`, `Debug`, and `Channels` directly. `Appearance` includes a local
+appearance control with `dark`, `light`, and `warm` choices, and `Debug` owns
+the local Debug switch. Archived-session browsing and activation belong only to
+the Sessions header toggle. The default is the dark ledger appearance. The setting is a
 Workbench host preference and does not require Gateway to persist
 provider/runtime configuration. `light` is the neutral paper-warm daytime shell
 with a near-white canvas, warmer paper sidebar, soft warm-gray dividers, and
@@ -267,12 +263,14 @@ variants insert newline, IME composition is respected, and running-turn prompt
 submission steers by default. Queueing remains available as an explicit composer
 mode and via `/queue`.
 The composer panel uses a Copilot-style restrained input surface: the textarea
-and send control are inside the input frame, the attachment button, Permission
-mode, and current Agent selector sit in the lower-left action slot, and model
-controls are moved out of the text frame into the status line. Permission mode
-is immediately to the right of the attachment button and is not repeated in
-the Agent popover. The status line mirrors the TUI footer shape with clickable
-chat mode, model, variant, context usage ring, project path, and Git branch.
+and send control are inside the input frame, while the attachment button and
+current Agent selector sit in the lower-left action slot. Permission mode lives
+in the quieter environment line immediately before Workspace and is not
+repeated in the Agent popover. The status line mirrors the TUI footer shape
+with clickable chat mode, model, variant, context usage ring, project path, and
+Git branch. A detached draft centers the Composer in the empty conversation
+surface; binding the first accepted prompt moves the same Composer to its
+ordinary bottom dock with a reduced-motion-aware positional transition.
 Context usage is graphical by
 default; detailed text appears on hover or in the same graphical popover used
 by the right `Status` context panel. Tokenizer and context-scope details are

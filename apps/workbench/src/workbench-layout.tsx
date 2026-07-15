@@ -1,11 +1,13 @@
-import { useState, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
 import { ActionButton, Composer, HistoryPanel, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
 import type { ThreadEditableInputPart } from "@psychevo/protocol";
-import { WorkspaceCreateDialog, LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
+import { LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
-import { ComposerRequests, ComposerStatusLine, ComposerSubmitControls } from "./composer-controls";
+import { ComposerRequests, ComposerSubmitControls } from "./composer-controls";
+import { ComposerEnvironment } from "./composer-environment";
+import { WorkspacePickerDialog } from "./workspace-picker-dialog";
 import { ComposerRuntimeControls } from "./runtime-controls";
 import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-controls";
 import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
@@ -17,7 +19,8 @@ import {
   snapshotThreadApplicationTarget
 } from "./thread-application";
 import type { PendingAttachment, RightWorkspaceTab } from "./types";
-import { AgentSessionImportDialog, DeleteSessionDialog } from "./agent-session-import-dialog";
+import { DeleteSessionDialog } from "./delete-session-dialog";
+import { SessionArchivePanel } from "./session-archive-panel";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
 
@@ -51,12 +54,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
     contextUsage,
     controls,
     copyText,
+    checkoutWorkspaceGitBranch,
     createWorkspace,
     currentThreadId,
     debugEnabled,
     debugEvents,
     deleteAutomation,
-    deleteArchivedSession,
     deleteBackend,
     deleteChannel,
     disabled,
@@ -104,8 +107,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
     refreshSnapshot,
     refreshUsageStats,
     refreshWorkspaceSurface,
+    readWorkspaceFolders,
+    readWorkspaceGitBranches,
     rejectWorkspaceChange,
-    restoreArchivedSession,
     resumeAutomation,
     rightCollapsed,
     rightTabs,
@@ -236,10 +240,13 @@ export function WorkbenchLayout(props: Record<string, any>) {
         session.id === snapshot.thread?.forkedFromThreadId
       )) ?? null
     : null;
-  const [agentSessionImportOpen, setAgentSessionImportOpen] = useState(false);
+  const [sessionArchiveView, setSessionArchiveView] = useState(false);
   const [pendingDeleteSession, setPendingDeleteSession] = useState<any | null>(null);
   const [deleteSessionPending, setDeleteSessionPending] = useState(false);
   const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
+  const draftSession = showSessionChrome && !currentThreadId;
+  const composerDockRef = useRef<HTMLDivElement | null>(null);
+  useComposerDockTransition(composerDockRef, draftSession);
 
   return (
     <main className="appShell" data-main-view={mainView}>
@@ -250,28 +257,20 @@ export function WorkbenchLayout(props: Record<string, any>) {
         </div>
       )}
       {workspaceDialogOpen && (
-        <WorkspaceCreateDialog
+        <WorkspacePickerDialog
+          ariaLabel="Open workspace"
           disabled={disabled}
           onCancel={() => props.setWorkspaceDialogOpen(false)}
-          onCreate={(name) => void runAction(async () => {
-            await createWorkspace(name);
+          onCreate={async (parent, name) => {
+            await createWorkspace(name, parent);
             props.setWorkspaceDialogOpen(false);
-          })}
-        />
-      )}
-      {agentSessionImportOpen && (
-        <AgentSessionImportDialog
-          client={client}
-          disabled={disabled}
-          onClose={() => setAgentSessionImportOpen(false)}
-          onImported={(threadId) => void runAction(async () => {
-            const epoch = beginExplicitViewSwitch();
-            await refreshSnapshot(client, threadId, undefined, false, epoch);
-            await refreshHistory();
-            updateMainView("transcript");
-            setMobilePanel("transcript");
-          })}
-          scope={importScope}
+          }}
+          onOpen={async (cwd) => {
+            await startNewThread(cwd);
+            props.setWorkspaceDialogOpen(false);
+          }}
+          onReadFolders={readWorkspaceFolders}
+          title="Open workspace"
         />
       )}
       {pendingDeleteSession && (
@@ -355,6 +354,50 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   })}
                   onUnpin={togglePinnedSession}
                 />
+                {sessionArchiveView ? (
+                  <SessionArchivePanel
+                    archivedSessions={archivedSessions}
+                    client={client}
+                    currentThreadId={currentThreadId}
+                    disabled={disabled}
+                    scope={importScope}
+                    onActivateArchived={async (threadId) => {
+                      if (!client) return;
+                      await client.request("thread/restore", { threadId });
+                      await Promise.all([refreshHistory(client), refreshHistory(client, true)]);
+                      const epoch = beginExplicitViewSwitch();
+                      await refreshSnapshot(client, threadId, undefined, false, epoch);
+                      updateMainView("transcript");
+                      setMobilePanel("transcript");
+                    }}
+                    onDeleteArchived={(session) => setPendingDeleteSession(session)}
+                    onImportSession={async (profile, candidateId, targetId, activate) => {
+                      if (!client) return;
+                      const imported = await client.request("thread/import", {
+                        archived: !activate,
+                        candidateId,
+                        scope: importScope,
+                        targetId
+                      });
+                      const threadId = imported.snapshot.thread?.id;
+                      if (!threadId) throw new Error(`Imported ${profile.profileLabel} session did not publish a Thread.`);
+                      await Promise.all([refreshHistory(client), refreshHistory(client, true)]);
+                      const epoch = beginExplicitViewSwitch();
+                      await refreshSnapshot(client, threadId, undefined, !activate, epoch, true);
+                      updateMainView("transcript");
+                      setMobilePanel("transcript");
+                    }}
+                    onOpenArchived={async (threadId) => {
+                      const epoch = beginExplicitViewSwitch();
+                      await refreshSnapshot(client, threadId, undefined, true, epoch, true);
+                      updateMainView("transcript");
+                      setMobilePanel("transcript");
+                    }}
+                    onOpenWorkspace={() => props.setWorkspaceDialogOpen(true)}
+                    onRefreshArchived={() => refreshHistory(client, true)}
+                    onShowActive={() => setSessionArchiveView(false)}
+                  />
+                ) : (
                 <HistoryPanel
                   archived={false}
                   currentThreadId={currentThreadId}
@@ -397,7 +440,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     updateMainView("transcript");
                     setMobilePanel("transcript");
                   })}
-                  onImportSessions={() => setAgentSessionImportOpen(true)}
+                  onImportSessions={() => setSessionArchiveView(true)}
                   onNew={() => void runAction(async () => {
                     await startNewThread();
                   })}
@@ -433,6 +476,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     }
                   }}
                 />
+                )}
               </>
             )}
             <LeftUtilityRail
@@ -449,7 +493,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
           </div>
         </aside>
 
-        <section className={`conversationColumn ${mobilePanel === "transcript" ? "is-mobileSelected" : ""}`}>
+        <section className={`conversationColumn ${mobilePanel === "transcript" ? "is-mobileSelected" : ""} ${draftSession ? "is-draftSession" : ""}`}>
           <div className="conversationChrome">
             {snapshot.thread?.forkedFromThreadId && (
               <button
@@ -484,7 +528,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
               automations={automations}
               automationsError={automationsError}
               automationsLoading={automationsLoading}
-              archivedSessions={archivedSessions}
               backendDraft={backendDraft}
               backendDoctor={backendDoctor}
               backends={backends}
@@ -512,8 +555,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onAgentSurfaceChanged={() => refreshAgentSurface()}
               onDeleteAutomation={(id) => deleteAutomation(id)}
               onDraftAutomation={(params) => draftAutomation(params)}
-              onDeleteArchivedSession={(threadId) => void runAction(async () => deleteArchivedSession(threadId))}
-              onRestoreArchivedSession={(threadId) => void runAction(async () => restoreArchivedSession(threadId))}
               onDebugChange={setDebugEnabled}
               onCancelBackendEdit={() => setBackendDraft(null)}
               onChangeBackendDraft={setBackendDraft}
@@ -624,7 +665,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               />
             )}
           </div>
-          {showSessionChrome && <div className="composerDock">
+          {showSessionChrome && <div className="composerDock" ref={composerDockRef}>
             {snapshot.historyEditing?.kind === "conversationEdit" && (
               <div className="historyEditingStrip" role="status">
                 <span>{snapshot.historyEditing.hiddenEntryCount} hidden {snapshot.historyEditing.hiddenEntryCount === 1 ? "entry" : "entries"}</span>
@@ -823,17 +864,24 @@ export function WorkbenchLayout(props: Record<string, any>) {
               })}
               onSubmit={(text, mentions, orderedInput) => void runAction(async () => submitTurn(text, mentions, undefined, orderedInput))}
             />
-            <ComposerStatusLine
+            <ComposerEnvironment
               branch={settings?.project?.branch ?? null}
-              path={settings?.project?.displayPath ?? settings?.cwd ?? ""}
+              branchDisabled={running}
+              controlValues={runtimeControlDrafts}
+              controls={activeRuntimeControls}
+              cwd={settings?.cwd ?? activeWorkbenchCwd}
+              disabled={disabled}
+              draft={draftSession}
+              path={settings?.project?.displayPath ?? settings?.cwd ?? activeWorkbenchCwd}
               runtimeSafetyLabel={runtimeSafetyLabel}
               profile={init?.profile ?? null}
-              onBranchClick={() => {
-                void runAction(async () => openDiffPreview(null));
-              }}
-              onPathClick={() => {
-                openRightWorkspaceTab("files");
-              }}
+              workspaceCwds={sessionBrowserWorkspaces.map((workspace: any) => workspace.cwd)}
+              onBranchChange={(nextBranch, create) => checkoutWorkspaceGitBranch(nextBranch, create)}
+              onOpenFiles={() => openRightWorkspaceTab("files")}
+              onReadBranches={() => readWorkspaceGitBranches()}
+              onReadFolders={(folderPath) => readWorkspaceFolders(folderPath)}
+              onRuntimeControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
+              onWorkspaceChange={(cwd) => startNewThread(cwd)}
             />
           </div>}
         </section>
@@ -865,8 +913,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
               scope={activeScope ?? init?.scope ?? null}
               sessionId={snapshot.thread?.id ?? null}
               status={props.status}
-              promptSubmitBlockReason={turnBlockReason}
-              promptSubmitDisabled={!turnSendable}
               usage={sessionUsage}
               tabs={rightTabs}
               terminalEvents={terminalEvents}
@@ -922,6 +968,43 @@ export function WorkbenchLayout(props: Record<string, any>) {
       </div>
     </main>
   );
+}
+
+function useComposerDockTransition(
+  ref: RefObject<HTMLDivElement | null>,
+  draftSession: boolean
+) {
+  const previousRectRef = useRef<DOMRect | null>(null);
+  const previousDraftRef = useRef(draftSession);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const nextRect = element.getBoundingClientRect();
+    const previousRect = previousRectRef.current;
+    const stateChanged = previousDraftRef.current !== draftSession;
+    const reducedMotion = typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (previousRect && stateChanged && !reducedMotion && typeof element.animate === "function") {
+      const x = previousRect.left - nextRect.left;
+      const y = previousRect.top - nextRect.top;
+      if (Math.abs(x) > 0.5 || Math.abs(y) > 0.5) {
+        element.getAnimations?.().forEach((animation) => animation.cancel());
+        element.animate(
+          [
+            { transform: `translate(${x}px, ${y}px)` },
+            { transform: "translate(0, 0)" }
+          ],
+          {
+            duration: 360,
+            easing: "cubic-bezier(0.16, 1, 0.3, 1)"
+          }
+        );
+      }
+    }
+    previousRectRef.current = nextRect;
+    previousDraftRef.current = draftSession;
+  }, [draftSession, ref]);
 }
 
 function editableDraftText(parts: ThreadEditableInputPart[]): string {

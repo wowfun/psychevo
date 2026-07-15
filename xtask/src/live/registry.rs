@@ -23,6 +23,7 @@ pub(crate) enum LiveCheckAction {
     CargoIgnoredTest {
         package: &'static str,
         test: &'static str,
+        provider_required: bool,
     },
     DeterministicPlaywright {
         spec: &'static str,
@@ -89,6 +90,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-runtime",
             test: "live_xiaomi_token_plan_read_tool",
+            provider_required: true,
         },
     },
     LiveCheck {
@@ -98,6 +100,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-runtime",
             test: "live_xiaomi_token_plan_model_fetch",
+            provider_required: true,
         },
     },
     LiveCheck {
@@ -107,6 +110,17 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-gateway",
             test: "live_xiaomi_token_plan_automation_manual_run_completes",
+            provider_required: true,
+        },
+    },
+    LiveCheck {
+        id: "codex-plugin-broker-live",
+        description: "Read the current Codex plugin catalog through the capability broker",
+        suites: &["plugin"],
+        action: LiveCheckAction::CargoIgnoredTest {
+            package: "psychevo-gateway",
+            test: "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_current_catalog",
+            provider_required: false,
         },
     },
     LiveCheck {
@@ -382,6 +396,10 @@ pub(crate) const LIVE_SUITES: &[LiveSuite] = &[
         description: "Gateway and Workbench automation live checks",
     },
     LiveSuite {
+        id: "plugin",
+        description: "Codex plugin and capability-broker live checks",
+    },
+    LiveSuite {
         id: "agents",
         description: "Deterministic Native and ACP Agent GUI, Channel, history, and delivery checks",
     },
@@ -493,7 +511,7 @@ pub(crate) fn command_for_plan(check: &LiveCheck) -> Vec<String> {
         LiveCheckAction::PevoDoctorLive => {
             vec!["xtask-internal".to_string(), "pevo-doctor-live".to_string()]
         }
-        LiveCheckAction::CargoIgnoredTest { package, test } => vec![
+        LiveCheckAction::CargoIgnoredTest { package, test, .. } => vec![
             "cargo".to_string(),
             "test".to_string(),
             "-p".to_string(),
@@ -576,6 +594,28 @@ mod tests {
                 "desktop-floating-provider-live"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_suite_selects_the_read_only_codex_broker_probe() {
+        let checks = select_checks(&LiveSelection {
+            checks: Vec::new(),
+            suites: vec!["plugin".to_string()],
+            all: false,
+            providers: Vec::new(),
+        })
+        .expect("checks");
+        assert_eq!(
+            checks.iter().map(|check| check.id).collect::<Vec<_>>(),
+            vec!["codex-plugin-broker-live"]
+        );
+        assert!(matches!(
+            checks[0].action,
+            LiveCheckAction::CargoIgnoredTest {
+                provider_required: false,
+                ..
+            }
+        ));
     }
 
     #[test]

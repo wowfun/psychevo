@@ -36,8 +36,6 @@ type ThreadPanelProps = {
   historyFidelity?: ThreadHistoryFidelityView | null;
   parentThreadId?: string | null;
   pendingPrompt?: string | null;
-  promptSubmitBlockReason?: string | undefined;
-  promptSubmitDisabled?: boolean | undefined;
   scope: GatewayRequestScope | null;
   threadId: string | null;
   title: string;
@@ -55,8 +53,6 @@ export function ThreadPanel({
   historyFidelity: registeredHistoryFidelity = null,
   parentThreadId,
   pendingPrompt,
-  promptSubmitBlockReason,
-  promptSubmitDisabled = false,
   scope,
   threadId,
   title,
@@ -77,6 +73,7 @@ export function ThreadPanel({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [threadContext, setThreadContext] = useState<ReturnType<typeof parseThreadContext> | null>(null);
   const [observedHistoryFidelity, setObservedHistoryFidelity] = useState<ThreadHistoryFidelityView | null>(
     registeredHistoryFidelity
   );
@@ -97,6 +94,16 @@ export function ThreadPanel({
   const running = activity.running;
   const writable = kind === "sideConversation" || access === "readWrite";
   const readOnly = kind === "agentSession" && access === "readOnly";
+  const promptSubmitDisabled = loading
+    || !visibleSnapshot
+    || !threadContext
+    || !threadContext.sendability.allowed;
+  const promptSubmitBlockReason = loading
+    ? "Loading Thread Context."
+    : !visibleSnapshot
+      ? "Loading thread."
+      : threadContext?.sendability.reason
+        ?? (!threadContext ? "Thread Context is required before starting a turn." : undefined);
   const icon = kind === "agentSession" ? <Bot size={16} /> : <MessageSquare size={16} />;
   const threadLabel = useMemo(() => threadId ?? "unavailable", [threadId]);
 
@@ -108,6 +115,7 @@ export function ThreadPanel({
     if (!client || !threadId) {
       controller.reset(null);
       controller.setContext(null);
+      setThreadContext(null);
       setObservedHistoryFidelity(registeredHistoryFidelity);
       setThreadActions([]);
       setSteerAvailable(false);
@@ -116,6 +124,8 @@ export function ThreadPanel({
     }
     setLoading(true);
     setError(null);
+    controller.setContext(null);
+    setThreadContext(null);
     setAccess(kind === "sideConversation" ? "readWrite" : "checking");
     setThreadActions([]);
     setSteerAvailable(false);
@@ -159,6 +169,7 @@ export function ThreadPanel({
         .filter((record) => record.seq > barrierSeq);
       controller.reset(next);
       controller.setContext(nextContext);
+      setThreadContext(nextContext);
       refreshAfterTerminal = applyGatewayFeed(controller, pending);
       nextHistoryFidelity = controller.snapshot()?.history.fidelity ?? nextHistoryFidelity;
       lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? barrierSeq;
@@ -207,7 +218,14 @@ export function ThreadPanel({
 
   useEffect(() => {
     const prompt = pendingPrompt?.trim();
-    if (!prompt || !threadId || !snapshot || consumedPendingPromptRef.current === prompt) {
+    if (
+      !prompt
+      || !threadId
+      || !snapshot
+      || loading
+      || !threadContext
+      || consumedPendingPromptRef.current === prompt
+    ) {
       return;
     }
     consumedPendingPromptRef.current = prompt;
@@ -216,19 +234,11 @@ export function ThreadPanel({
       setError("This runtime child is read-only.");
       return;
     }
-    if (promptSubmitDisabled) {
-      setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
-      return;
-    }
     void submit(prompt, []);
-  }, [onPendingPromptConsumed, pendingPrompt, promptSubmitBlockReason, promptSubmitDisabled, snapshot?.thread?.id, threadId, writable]);
+  }, [loading, onPendingPromptConsumed, pendingPrompt, snapshot?.thread?.id, threadContext, threadId, writable]);
 
   async function submit(text: string, mentions: GatewayMention[]) {
     if (!writable || !threadId || !text.trim()) {
-      return;
-    }
-    if (promptSubmitDisabled) {
-      setError(promptSubmitBlockReason ?? "Select a provider/model before starting a conversation.");
       return;
     }
     if (!client || !snapshot) {

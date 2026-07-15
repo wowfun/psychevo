@@ -85,7 +85,7 @@ describe("HistoryPanel", () => {
     expect(screen.getByText("No sessions")).toBeTruthy();
   });
 
-  it("opens Agent import and renders lifecycle actions from product descriptors", () => {
+  it("opens imported-and-archived history and renders lifecycle actions from product descriptors", () => {
     const onImportSessions = vi.fn();
     const onFork = vi.fn();
     const onDelete = vi.fn();
@@ -104,7 +104,7 @@ describe("HistoryPanel", () => {
       })]
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Import Agent session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Imported and archived sessions" }));
     expect(onImportSessions).toHaveBeenCalledTimes(1);
     fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
     fireEvent.click(screen.getByRole("menuitem", { name: "Fork" }));
@@ -113,6 +113,15 @@ describe("HistoryPanel", () => {
     expect((deleteButton as HTMLButtonElement).disabled).toBe(true);
     expect(deleteButton.getAttribute("title")).toBe("OpenCode cannot delete sessions.");
     expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("labels the workspace action as opening rather than creating", () => {
+    const onCreateWorkspace = vi.fn();
+    renderHistory({ onCreateWorkspace });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+    expect(onCreateWorkspace).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "New Workspace" })).toBeNull();
   });
 
   it("uses the native title tooltip for truncated session titles", () => {

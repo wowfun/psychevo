@@ -95,6 +95,7 @@ type AppEffectsParams = {
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
   rightTabs: RightWorkspaceTab[];
   rightWidthPx: number;
+  runtimeTargetTransitionRef: MutableRefObject<boolean>;
   settingsSection: string;
   fallbackCwd: string;
   showSessionChrome: boolean;
@@ -110,9 +111,12 @@ type AppEffectsParams = {
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
   pushDebugEvent(method: string, payload: unknown): void;
+  refreshAgentCatalog(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
   refreshAgentSurface(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
+  refreshCommands(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope, threadId?: string | null): Promise<void>;
   refreshHistory(runtimeClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
   refreshRuntimeContext(): void;
+  refreshSettings(runtimeClient?: GatewayClient | null, cwd?: string, threadId?: string | null): Promise<void>;
   refreshSnapshot: RefreshSnapshot;
   refreshTrace(runtimeClient?: GatewayClient | null, threadId?: string | null): Promise<void>;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
@@ -496,21 +500,36 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     };
   }, []);
 
+  const activeScopeSourceKey = params.activeScope
+    ? [
+        params.activeScope.source.kind,
+        params.activeScope.source.rawId ?? "",
+        params.activeScope.source.lifetime
+      ].join(":")
+    : "";
+
   useEffect(() => {
-    if (params.client && params.activeScope) {
+    if (params.client && params.activeScope && !params.runtimeTargetTransitionRef.current) {
+      void params.refreshSettings(params.client, params.activeScope.cwd, params.currentThreadId ?? null);
       void params.refreshWorkspaceSurface(params.client, params.activeScope, params.currentThreadId ?? null);
     }
-  }, [params.client, params.activeScope, params.currentThreadId]);
+  }, [params.client, params.activeScope?.cwd, params.currentThreadId]);
 
   useEffect(() => {
-    if (params.client && params.mainView === "settings" && params.settingsSection === "archived") {
-      void params.refreshHistory(params.client, true);
+    if (params.client && params.activeScope && !params.runtimeTargetTransitionRef.current) {
+      void params.refreshAgentCatalog(params.client, params.activeScope);
     }
-  }, [params.client, params.mainView, params.settingsSection]);
+  }, [params.client, params.activeScope?.cwd]);
 
   useEffect(() => {
-    if (params.client && params.activeScope) {
-      void params.refreshAgentSurface(params.client, params.activeScope);
+    if (params.client && params.activeScope && !params.runtimeTargetTransitionRef.current) {
+      void params.refreshCommands(params.client, params.activeScope, params.currentThreadId ?? null);
     }
-  }, [params.client, params.activeScope, params.currentThreadId, params.snapshot.activity.running]);
+  }, [
+    params.client,
+    params.activeScope?.cwd,
+    activeScopeSourceKey,
+    params.currentThreadId,
+    params.snapshot.activity.running
+  ]);
 }

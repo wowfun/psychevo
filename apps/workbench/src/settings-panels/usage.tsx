@@ -1,5 +1,4 @@
-import { BarChart3, RotateCcw, Trash2 } from "lucide-react";
-import type { SessionSummary } from "@psychevo/protocol";
+import { BarChart3, RotateCcw } from "lucide-react";
 import type { WorkbenchUsageStats } from "../types";
 
 export function UsageSettingsPanel({
@@ -203,51 +202,4 @@ function formatShortDateTime(value: number): string {
     minute: "2-digit",
     month: "short"
   });
-}
-
-function shortSessionId(id: string): string {
-  return id.length <= 12 ? id : `${id.slice(0, 8)}...`;
-}
-
-export function ArchivedSessionsPanel({
-  disabled,
-  sessions,
-  onDelete,
-  onRestore
-}: {
-  disabled: boolean;
-  sessions: SessionSummary[];
-  onDelete(threadId: string): void;
-  onRestore(threadId: string): void;
-}) {
-  return (
-    <section className="archivedSessionsPanel" aria-label="Archived sessions">
-      {sessions.length === 0 ? (
-        <p>No archived sessions.</p>
-      ) : (
-        <div className="archivedSessionList">
-          {sessions.map((session) => {
-            const title = session.displayTitle?.trim() || session.title?.trim() || shortSessionId(session.id);
-            const workspace = session.project?.label || session.project?.displayPath || session.cwd || "workspace";
-            return (
-              <div className="archivedSessionRow" key={session.id}>
-                <div>
-                  <strong>{title}</strong>
-                  <span>{workspace}</span>
-                </div>
-                <div className="archivedSessionActions">
-                  <button aria-label={`Restore ${title}`} disabled={disabled} onClick={() => onRestore(session.id)} title="Restore" type="button">
-                    <RotateCcw size={13} />
-                  </button>
-                  <button aria-label={`Delete ${title}`} disabled={disabled} onClick={() => onDelete(session.id)} title="Delete" type="button">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
 }

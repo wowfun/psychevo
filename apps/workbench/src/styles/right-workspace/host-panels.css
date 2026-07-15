@@ -72,7 +72,6 @@
 
 .centerPage > header,
 .previewPane > header,
-.filesPanel > header,
 .debugPanel > header {
   display: flex;
   align-items: center;

@@ -4,7 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
-  FolderPlus,
+  FolderOpen,
   History,
   Inbox,
   GitFork,
@@ -138,30 +138,30 @@ export function HistoryPanel(props: HistoryPanelProps) {
         <div className="pevo-iconRow">
           {props.onCreateWorkspace && (
             <ActionButton
-              ariaLabel="New Workspace"
+              ariaLabel="Open workspace"
               disabled={props.disabled}
-              icon={<FolderPlus size={17} />}
+              icon={<FolderOpen size={17} />}
               iconOnly
               onClick={props.onCreateWorkspace}
               size="compact"
-              tooltip="New Workspace"
+              tooltip="Open workspace"
               variant="ghost"
             >
-              New Workspace
+              Open workspace
             </ActionButton>
           )}
           {props.onImportSessions && !props.archived && (
             <ActionButton
-              ariaLabel="Import Agent session"
+              ariaLabel="Imported and archived sessions"
               disabled={props.disabled}
               icon={<Inbox size={17} />}
               iconOnly
               onClick={props.onImportSessions}
               size="compact"
-              tooltip="Import Agent session"
+              tooltip="Imported and archived sessions"
               variant="ghost"
             >
-              Import Agent session
+              Imported and archived sessions
             </ActionButton>
           )}
           <IconButton title={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"} onClick={toggleAllProjects} disabled={groupedSessions.length === 0}>

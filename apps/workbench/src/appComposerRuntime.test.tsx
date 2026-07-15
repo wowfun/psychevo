@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it } from "vitest";
 import {
   agentRecord,
+  deferred,
   gatewayMock,
   openAgentRuntimePopover,
   sessionSummary
@@ -404,6 +405,10 @@ describe("Workbench first-class Agent runtime controls", () => {
       const params = entry.params as { threadId?: string | null; target?: unknown };
       return params.threadId === "thread-1" && params.target !== null;
     })).toBe(false);
+    expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/context/read"
+      && (entry.params as { threadId?: string | null }).threadId === "thread-1"
+    ))).toHaveLength(1);
     expect(screen.queryByText("Default Agent is not compatible with this Runtime Profile.")).toBeNull();
   });
 
@@ -424,13 +429,15 @@ describe("Workbench first-class Agent runtime controls", () => {
         visibleName: "project"
       }
     } as const;
+    const delayedSettings = deferred<Record<string, unknown>>();
+    let delayAuxiliaryRefresh = false;
     let starts = 0;
     gatewayMock.threadStart = () => {
       starts += 1;
       return {
         ...gatewayMock.snapshot,
         scope: starts === 1 ? gatewayMock.scope : preparedScope,
-        thread: null,
+        thread: starts === 1 ? gatewayMock.snapshot.thread : null,
         entries: [],
         activity: { ...gatewayMock.snapshot.activity }
       };
@@ -454,6 +461,9 @@ describe("Workbench first-class Agent runtime controls", () => {
         selectionState: "bound"
       });
     };
+    gatewayMock.settingsRead = () => delayAuxiliaryRefresh
+      ? delayedSettings.promise
+      : gatewayMock.settingsResult(null);
     render(<App />);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Agent target" }).textContent).toContain("Codex");
@@ -462,21 +472,46 @@ describe("Workbench first-class Agent runtime controls", () => {
     const requestsBefore = gatewayMock.requestLog.length;
 
     const popover = await openAgentRuntimePopover();
+    delayAuxiliaryRefresh = true;
     fireEvent.click(within(popover).getByRole("radio", { name: "Start a new thread with OpenCode · OpenCode (ACP)" }));
 
+    expect(screen.getByRole("button", { name: "Agent target" }).textContent).toContain("OpenCode");
+    expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/start")).toHaveLength(startsBefore + 1);
-      expect(screen.getByRole("button", { name: "Agent target" }).textContent).toContain("OpenCode");
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/draft/prepare",
+        params: {
+          scope: preparedScope,
+          targetId: "target:opencode:opencode"
+        }
+      });
     });
+    const switchMethods = gatewayMock.requestLog.slice(requestsBefore).map((entry) => entry.method);
+    const threadStartIndex = switchMethods.indexOf("thread/start");
+    const draftPrepareIndex = switchMethods.indexOf("thread/draft/prepare", threadStartIndex + 1);
+    expect(switchMethods.slice(threadStartIndex, draftPrepareIndex + 1)).toEqual([
+      "thread/start",
+      "thread/draft/prepare"
+    ]);
+    await waitFor(() => {
+      const settingsIndex = gatewayMock.requestLog
+        .slice(requestsBefore)
+        .findIndex((entry) => entry.method === "settings/read");
+      expect(settingsIndex).toBeGreaterThan(draftPrepareIndex);
+    });
+    delayedSettings.resolve(gatewayMock.settingsResult(null));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/start")).toHaveLength(startsBefore + 1);
-    expect(gatewayMock.requestLog).toContainEqual({
-      method: "thread/draft/prepare",
-      params: {
-        scope: preparedScope,
-        targetId: "target:opencode:opencode"
-      }
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.slice(requestsBefore).some((entry) => entry.method === "command/list"))
+        .toBe(true);
     });
+    const refreshedCommandScope = gatewayMock.requestLog
+      .slice(requestsBefore)
+      .filter((entry) => entry.method === "command/list")
+      .at(-1)?.params;
+    expect(refreshedCommandScope).toEqual({ scope: preparedScope, threadId: null });
     const targetReads = gatewayMock.requestLog
       .slice(requestsBefore)
       .filter((entry) => entry.method === "thread/context/read")
@@ -531,6 +566,40 @@ describe("Workbench first-class Agent runtime controls", () => {
         entry.method === "thread/context/read"
         && (entry.params as { threadId?: string | null }).threadId === "thread-1"
       )).length).toBeGreaterThan(readsBeforeCompletion);
+    });
+  });
+
+  it("refreshes authoritative Thread context after shell catalog changes", async () => {
+    useFirstClassContexts();
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Bound ACP thread")];
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("Bound ACP thread"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/context/read",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+    });
+    const readsBeforeShell = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/context/read"
+      && (entry.params as { threadId?: string | null }).threadId === "thread-1"
+    )).length;
+
+    act(() => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "shell/result",
+          params: { thread: { id: "thread-1" } }
+        });
+      }
+    });
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => (
+        entry.method === "thread/context/read"
+        && (entry.params as { threadId?: string | null }).threadId === "thread-1"
+      )).length).toBeGreaterThan(readsBeforeShell);
     });
   });
 });

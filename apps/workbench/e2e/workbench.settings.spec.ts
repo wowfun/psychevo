@@ -37,7 +37,7 @@ test.describe("pevo Web Workbench", () => {
       await expect(settings.getByRole("button", { name: "Debug" })).toBeVisible();
       await expect(settings.getByRole("button", { name: "Agents" })).toHaveCount(0);
       await expect(settings.getByRole("button", { name: "Models" })).toBeVisible();
-      await expect(settings.getByRole("button", { name: "Archived sessions" })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Archived sessions" })).toHaveCount(0);
       await expect(settings.getByRole("button", { name: "General", exact: true })).toHaveCount(0);
       await expect(settings.getByRole("button", { name: "Session", exact: true })).toHaveCount(0);
       await expect(settings.getByRole("button", { name: "Session history", exact: true })).toHaveCount(0);
@@ -144,11 +144,6 @@ test.describe("pevo Web Workbench", () => {
       await firstEditButton.click();
       await expect(providerEditor).toHaveCount(0);
       await expect(firstEditButton).toHaveAttribute("aria-expanded", "false");
-
-      await settings.getByRole("button", { name: "Archived sessions" }).click();
-      await expect(settings.getByRole("region", { name: "Archived sessions" })).toBeVisible();
-      await assertNoHorizontalOverflow(page, settings);
-      await captureWorkbench(page, testInfo, `settings-archived-${isMobile ? "mobile" : "desktop"}`);
 
       await settings.getByRole("button", { name: "Back to app" }).click();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
