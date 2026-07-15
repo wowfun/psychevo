@@ -1821,14 +1821,21 @@ fn write_command_shim(path: &Path) {
 async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
     let (_temp, state) = web_state();
     let project_agents = state.inner.cwd.join(".psychevo/agents");
+    let compatible_agents = state.inner.cwd.join(".agents/agents");
     let profile_agents = state.inner.home.join("agents");
     std::fs::create_dir_all(&project_agents).expect("project agents");
+    std::fs::create_dir_all(&compatible_agents).expect("compatible agents");
     std::fs::create_dir_all(&profile_agents).expect("profile agents");
     std::fs::write(
         project_agents.join("review.md"),
         "---\ndescription: Project review\nenabled: false\nmodel: keep-model\n---\nProject body.\n",
     )
     .expect("project agent");
+    std::fs::write(
+        compatible_agents.join("compat.md"),
+        "---\ndescription: Compatible agent\n---\nCompatibility body.\n",
+    )
+    .expect("compatible agent");
     std::fs::write(
         profile_agents.join("review.md"),
         "---\ndescription: Profile review\n---\nProfile body.\n",
@@ -1869,6 +1876,16 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
         .expect("disabled project review");
     assert_eq!(disabled["target"], "project");
     assert_eq!(disabled["mutable"], true);
+    let compatible = list["agents"]
+        .as_array()
+        .expect("agents")
+        .iter()
+        .find(|agent| agent["name"] == "compat")
+        .expect("compatible agent");
+    assert_eq!(compatible["source"], "agents_project");
+    assert_eq!(compatible["sourceLabel"], "Project");
+    assert_eq!(compatible["target"], Value::Null);
+    assert_eq!(compatible["mutable"], false);
 
     let read_project = handle_rpc(
         state.clone(),

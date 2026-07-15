@@ -8,19 +8,22 @@ use super::types::{
     LoadedPluginManifest, PluginDiagnostic, PluginInterfaceMetadata, PluginManifestKind,
     PluginWorkerSpec,
 };
+use super::{
+    CODEX_PLUGIN_COMPATIBILITY_PROFILE, PluginCompatibilityLevel, PluginComponentKind,
+    PluginComponentStatus, PluginExecutionOwner, PluginReadiness,
+};
 use crate::config::CustomToolsetConfig;
 use crate::error::{Error, Result};
 use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput};
 
-const NATIVE_MANIFEST: &str = ".psychevo-plugin/plugin.json";
 const CODEX_MANIFEST: &str = ".codex-plugin/plugin.json";
 const CLAUDE_MANIFEST: &str = ".claude-plugin/plugin.json";
+const PSYCHEVO_OVERLAY: &str = "psychevo.plugin.json";
 const HERMES_MANIFESTS: [&str; 3] = ["plugin.yaml", "plugin.yml", ".hermes-plugin/plugin.yaml"];
 
 pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<LoadedPluginManifest> {
     let root = root.to_path_buf();
     let candidates = [
-        (NATIVE_MANIFEST, PluginManifestKind::Psychevo),
         (CODEX_MANIFEST, PluginManifestKind::Codex),
         (CLAUDE_MANIFEST, PluginManifestKind::Claude),
     ];
@@ -78,41 +81,29 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         )
     }));
 
-    let name = string_field(object, "name")
-        .or_else(|| string_field(object, "id"))
-        .unwrap_or_else(|| "dev-plugin".to_string());
+    let name = string_field(object, "name").unwrap_or_else(|| {
+        root.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("plugin")
+            .to_string()
+    });
     let version = string_field(object, "version");
     let description = string_field(object, "description");
-    if kind == PluginManifestKind::Psychevo {
-        if string_field(object, "name").is_none() {
+    let keywords = object
+        .get("keywords")
+        .map(|value| string_array_value(value, "keywords"))
+        .transpose()
+        .unwrap_or_else(|err| {
             diagnostics.push(PluginDiagnostic::invalid(
-                "native plugin manifest requires name",
+                format!("manifest {err}"),
                 Some(manifest_path.clone()),
             ));
-        }
-        if version.is_none() {
-            diagnostics.push(PluginDiagnostic::invalid(
-                "native plugin manifest requires version",
-                Some(manifest_path.clone()),
-            ));
-        }
-        if description.is_none() {
-            diagnostics.push(PluginDiagnostic::invalid(
-                "native plugin manifest requires description",
-                Some(manifest_path.clone()),
-            ));
-        }
-    } else if !allow_compat_dev && (version.is_none() || name.trim().is_empty()) {
-        diagnostics.push(PluginDiagnostic::invalid(
-            "compatibility manifest install requires resolvable name and version",
-            Some(manifest_path.clone()),
-        ));
-    } else {
+            None
+        })
+        .unwrap_or_default();
+    if allow_compat_dev && version.is_none() {
         diagnostics.push(PluginDiagnostic::warning(
-            format!(
-                "{} compatibility manifest loaded with Psychevo field-subset semantics",
-                kind.as_str()
-            ),
+            "local development package has no version; active version is `local`",
             Some(manifest_path.clone()),
         ));
     }
@@ -120,54 +111,64 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
     let mut supported_fields = BTreeSet::new();
     let mut ignored_fields = BTreeSet::new();
     for key in object.keys() {
-        if supported_manifest_field(key) {
+        if supported_manifest_field(key) || metadata_manifest_field(key) {
             supported_fields.insert(key.clone());
-        } else if !matches!(
-            key.as_str(),
-            "name" | "id" | "version" | "description" | "keywords" | "author"
-        ) {
+        } else {
             ignored_fields.insert(key.clone());
             diagnostics.push(PluginDiagnostic::warning(
-                format!("manifest field `{key}` is ignored"),
+                format!(
+                    "manifest field `{key}` is outside compatibility profile {CODEX_PLUGIN_COMPATIBILITY_PROFILE}; known components remain inspectable"
+                ),
                 Some(manifest_path.clone()),
             ));
         }
     }
 
+    let overlay_path = root.join(PSYCHEVO_OVERLAY);
+    let raw_overlay = load_overlay(&overlay_path, &mut diagnostics)?;
+    let overlay = overlay_for_projection(raw_overlay.as_ref(), &overlay_path, &mut diagnostics);
+
     let mut manifest_resources = BTreeSet::new();
     let mut psychevo_extensions = BTreeSet::new();
-    let skill_roots = path_list_field(
-        object.get("skills"),
-        &root,
-        "skills",
-        &manifest_path,
-        &mut diagnostics,
-    )?;
-    if !skill_roots.is_empty() {
+    let skill_roots = if object.contains_key("skills") {
+        path_list_field(
+            object.get("skills"),
+            &root,
+            "skills",
+            &manifest_path,
+            &mut diagnostics,
+        )?
+    } else if root.join("skills").is_dir() {
+        vec![root.join("skills")]
+    } else {
+        Vec::new()
+    };
+    if object.contains_key("skills") || !skill_roots.is_empty() {
         manifest_resources.insert("skills".to_string());
     }
     if object.contains_key("mcpServers") {
         manifest_resources.insert("mcpServers".to_string());
     }
-    if object.contains_key("apps") {
+    let app_resource =
+        parse_manifest_app_resource(object.get("apps"), &root, &manifest_path, &mut diagnostics);
+    if object.contains_key("apps") || app_resource.is_some() {
         manifest_resources.insert("apps".to_string());
     }
     if object.contains_key("interface") {
         manifest_resources.insert("interface".to_string());
     }
-    let psychevo = object.get("psychevo").and_then(Value::as_object);
     let agent_roots = path_list_field(
-        psychevo.and_then(|psychevo| psychevo.get("agents")),
+        overlay.and_then(|overlay| overlay.get("agents")),
         &root,
-        "psychevo.agents",
-        &manifest_path,
+        "agents",
+        &overlay_path,
         &mut diagnostics,
     )?;
     if !agent_roots.is_empty() {
         psychevo_extensions.insert("agents".to_string());
     }
     let hooks = parse_manifest_hooks(object.get("hooks"), &root, &manifest_path, &mut diagnostics)?;
-    if hooks.is_some() {
+    if object.contains_key("hooks") || hooks.is_some() || root.join("hooks/hooks.json").is_file() {
         manifest_resources.insert("hooks".to_string());
     }
     let mcp_servers = parse_manifest_mcp_servers(
@@ -183,19 +184,17 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         manifest_resources.insert("mcpServers".to_string());
     }
     let toolsets = parse_manifest_toolsets(
-        psychevo.and_then(|psychevo| psychevo.get("toolsets")),
-        &manifest_path,
+        overlay.and_then(|overlay| overlay.get("toolsets")),
+        &overlay_path,
         &mut diagnostics,
     );
-    for field in ["commands", "providers", "toolsets"] {
-        if psychevo.is_some_and(|psychevo| psychevo.contains_key(field)) {
-            psychevo_extensions.insert(field.to_string());
-        }
+    if overlay.is_some_and(|overlay| overlay.contains_key("toolsets")) {
+        psychevo_extensions.insert("toolsets".to_string());
     }
     let worker = parse_worker(
-        psychevo.and_then(|psychevo| psychevo.get("runtime")),
+        overlay.and_then(|overlay| overlay.get("runtime")),
         &root,
-        &manifest_path,
+        &overlay_path,
         &mut diagnostics,
     )?;
     if worker.is_some() {
@@ -207,6 +206,15 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         &manifest_path,
         &mut diagnostics,
     );
+    let component_statuses = component_statuses(
+        &manifest_resources,
+        &psychevo_extensions,
+        !skill_roots.is_empty(),
+        !mcp_servers.is_empty(),
+        hooks.is_some(),
+        interface.is_some(),
+        app_resource.is_some(),
+    );
 
     Ok(LoadedPluginManifest {
         root,
@@ -215,12 +223,18 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
         name,
         version,
         description,
+        keywords,
+        compatibility_profile: CODEX_PLUGIN_COMPATIBILITY_PROFILE.to_string(),
+        raw_manifest: raw,
+        raw_overlay,
+        component_statuses,
         diagnostics,
         ignored_manifest_paths,
         skill_roots,
         agent_roots,
         hooks,
         mcp_servers,
+        app_resource,
         worker,
         toolsets,
         interface,
@@ -234,7 +248,205 @@ pub fn load_plugin_manifest(root: &Path, allow_compat_dev: bool) -> Result<Loade
 fn supported_manifest_field(key: &str) -> bool {
     matches!(
         key,
-        "skills" | "mcpServers" | "hooks" | "apps" | "psychevo" | "interface"
+        "skills" | "mcpServers" | "hooks" | "apps" | "interface"
+    )
+}
+
+fn load_overlay(
+    overlay_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Result<Option<Value>> {
+    if !overlay_path.is_file() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(overlay_path)?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| Error::Config(format!("{}: {err}", overlay_path.display())))?;
+    if !value.is_object() {
+        return Err(Error::Config(format!(
+            "{} must contain a JSON object",
+            overlay_path.display()
+        )));
+    }
+    diagnostics.push(PluginDiagnostic::warning(
+        "Psychevo companion overlay is outside the Codex compatibility profile",
+        Some(overlay_path.to_path_buf()),
+    ));
+    Ok(Some(value))
+}
+
+fn overlay_for_projection<'a>(
+    raw_overlay: Option<&'a Value>,
+    overlay_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<&'a Map<String, Value>> {
+    let object = raw_overlay?.as_object()?;
+    let mut valid = true;
+    for key in object.keys() {
+        if !matches!(key.as_str(), "runtime" | "agents" | "toolsets") {
+            valid = false;
+            let reason = if matches!(
+                key.as_str(),
+                "skills" | "mcpServers" | "hooks" | "apps" | "interface"
+            ) {
+                "duplicates a shared Codex component"
+            } else {
+                "is not supported by the Psychevo companion overlay"
+            };
+            diagnostics.push(PluginDiagnostic::invalid(
+                format!("overlay field `{key}` {reason}; no overlay fields were projected"),
+                Some(overlay_path.to_path_buf()),
+            ));
+        }
+    }
+    valid.then_some(object)
+}
+
+fn component_statuses(
+    manifest_resources: &BTreeSet<String>,
+    psychevo_extensions: &BTreeSet<String>,
+    skills_valid: bool,
+    mcp_valid: bool,
+    hooks_valid: bool,
+    interface_valid: bool,
+    apps_valid: bool,
+) -> Vec<PluginComponentStatus> {
+    let mut statuses = Vec::new();
+    if manifest_resources.contains("skills") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Skills,
+            if skills_valid {
+                PluginCompatibilityLevel::Execute
+            } else {
+                PluginCompatibilityLevel::Inspect
+            },
+            PluginExecutionOwner::PsychevoNative,
+            if skills_valid {
+                PluginReadiness::Ready
+            } else {
+                PluginReadiness::Failed
+            },
+            if skills_valid {
+                "projected through Psychevo skill discovery"
+            } else {
+                "skill declaration has no valid package-relative root"
+            },
+        ));
+    }
+    if manifest_resources.contains("mcpServers") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::McpServers,
+            if mcp_valid {
+                PluginCompatibilityLevel::Execute
+            } else {
+                PluginCompatibilityLevel::Inspect
+            },
+            PluginExecutionOwner::PsychevoNative,
+            if mcp_valid {
+                PluginReadiness::Ready
+            } else {
+                PluginReadiness::Failed
+            },
+            if mcp_valid {
+                "projected through Psychevo MCP policy and tool surfaces"
+            } else {
+                "no valid MCP server descriptor was found"
+            },
+        ));
+    }
+    if manifest_resources.contains("hooks") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Hooks,
+            if hooks_valid {
+                PluginCompatibilityLevel::Execute
+            } else {
+                PluginCompatibilityLevel::Inspect
+            },
+            PluginExecutionOwner::PsychevoNative,
+            if hooks_valid {
+                PluginReadiness::NeedsTrust
+            } else {
+                PluginReadiness::Failed
+            },
+            if hooks_valid {
+                "hook declarations require normalized-hash trust before execution"
+            } else {
+                "hook declaration could not be normalized"
+            },
+        ));
+    }
+    if manifest_resources.contains("apps") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Apps,
+            if apps_valid {
+                PluginCompatibilityLevel::Delegate
+            } else {
+                PluginCompatibilityLevel::Inspect
+            },
+            PluginExecutionOwner::CodexBroker,
+            if apps_valid {
+                PluginReadiness::NeedsSetup
+            } else {
+                PluginReadiness::Failed
+            },
+            if apps_valid {
+                "requires a compatible Codex app-server and Codex-owned installation"
+            } else {
+                "app declaration has no valid package-relative resource"
+            },
+        ));
+    }
+    if manifest_resources.contains("interface") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Interface,
+            if interface_valid {
+                PluginCompatibilityLevel::Inspect
+            } else {
+                PluginCompatibilityLevel::Parse
+            },
+            PluginExecutionOwner::MetadataOnly,
+            if interface_valid {
+                PluginReadiness::Ready
+            } else {
+                PluginReadiness::Failed
+            },
+            "display metadata does not grant runtime authority",
+        ));
+    }
+    if psychevo_extensions.contains("runtime") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Runtime,
+            PluginCompatibilityLevel::Execute,
+            PluginExecutionOwner::PsychevoWorker,
+            PluginReadiness::Ready,
+            "Psychevo companion worker executes out of process",
+        ));
+    }
+    if psychevo_extensions.contains("agents") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Agents,
+            PluginCompatibilityLevel::Project,
+            PluginExecutionOwner::PsychevoNative,
+            PluginReadiness::Ready,
+            "projected into Psychevo agent discovery",
+        ));
+    }
+    if psychevo_extensions.contains("toolsets") {
+        statuses.push(PluginComponentStatus::new(
+            PluginComponentKind::Toolsets,
+            PluginCompatibilityLevel::Project,
+            PluginExecutionOwner::PsychevoNative,
+            PluginReadiness::Ready,
+            "candidate toolsets still pass owning tool-surface acceptance",
+        ));
+    }
+    statuses
+}
+
+fn metadata_manifest_field(key: &str) -> bool {
+    matches!(
+        key,
+        "name" | "version" | "description" | "keywords" | "author"
     )
 }
 
@@ -295,7 +507,7 @@ fn parse_manifest_hooks(
     if let Some(value) = value {
         match value {
             Value::Object(_) => merge_hook_declarations(&mut hooks, value.clone()),
-            Value::String(_) | Value::Array(_) => {
+            Value::String(_) => {
                 for path in path_list_field(Some(value), root, "hooks", manifest_path, diagnostics)?
                 {
                     match load_hook_file(&path) {
@@ -307,8 +519,25 @@ fn parse_manifest_hooks(
                     }
                 }
             }
+            Value::Array(items) if items.iter().all(Value::is_string) => {
+                for path in path_list_field(Some(value), root, "hooks", manifest_path, diagnostics)?
+                {
+                    match load_hook_file(&path) {
+                        Ok(value) => merge_hook_declarations(&mut hooks, value),
+                        Err(err) => diagnostics.push(PluginDiagnostic::invalid(
+                            format!("manifest hooks file `{}` is invalid: {err}", path.display()),
+                            Some(manifest_path.to_path_buf()),
+                        )),
+                    }
+                }
+            }
+            Value::Array(items) if items.iter().all(Value::is_object) => {
+                for item in items {
+                    merge_hook_declarations(&mut hooks, item.clone());
+                }
+            }
             _ => diagnostics.push(PluginDiagnostic::warning(
-                "manifest hooks must be an object, string path, or string path array",
+                "manifest hooks must be an object, object array, string path, or string path array",
                 Some(manifest_path.to_path_buf()),
             )),
         }
@@ -332,6 +561,37 @@ fn parse_manifest_hooks(
         Ok(Some(hooks))
     } else {
         Ok(None)
+    }
+}
+
+fn parse_manifest_app_resource(
+    value: Option<&Value>,
+    root: &Path,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Option<PathBuf> {
+    match value {
+        Some(Value::String(path)) => match resolve_manifest_path(root, path) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                diagnostics.push(PluginDiagnostic::invalid(
+                    format!("manifest apps path `{path}` is invalid: {err}"),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                None
+            }
+        },
+        Some(_) => {
+            diagnostics.push(PluginDiagnostic::invalid(
+                "manifest apps must be a string path",
+                Some(manifest_path.to_path_buf()),
+            ));
+            None
+        }
+        None => root
+            .join(".app.json")
+            .is_file()
+            .then(|| root.join(".app.json")),
     }
 }
 
@@ -385,6 +645,7 @@ fn parse_manifest_interface(
             manifest_path,
             diagnostics,
         ),
+        default_prompt: interface_default_prompts(object, manifest_path, diagnostics),
         capabilities: interface_string_array(
             object,
             "capabilities",
@@ -500,6 +761,76 @@ fn interface_string_array(
             Vec::new()
         }
     }
+}
+
+fn interface_default_prompts(
+    object: &Map<String, Value>,
+    manifest_path: &Path,
+    diagnostics: &mut Vec<PluginDiagnostic>,
+) -> Vec<String> {
+    const MAX_PROMPTS: usize = 3;
+    const MAX_CHARS: usize = 128;
+    let Some(value) = object.get("defaultPrompt") else {
+        return Vec::new();
+    };
+    let values = match value {
+        Value::String(value) => vec![value.as_str()],
+        Value::Array(values) => {
+            if values.len() > MAX_PROMPTS {
+                diagnostics.push(PluginDiagnostic::warning(
+                    format!(
+                        "manifest interface.defaultPrompt supports at most {MAX_PROMPTS} prompts; extras are ignored"
+                    ),
+                    Some(manifest_path.to_path_buf()),
+                ));
+            }
+            values
+                .iter()
+                .take(MAX_PROMPTS)
+                .filter_map(|value| {
+                    if let Some(value) = value.as_str() {
+                        Some(value)
+                    } else {
+                        diagnostics.push(PluginDiagnostic::warning(
+                            "manifest interface.defaultPrompt entries must be strings",
+                            Some(manifest_path.to_path_buf()),
+                        ));
+                        None
+                    }
+                })
+                .collect()
+        }
+        _ => {
+            diagnostics.push(PluginDiagnostic::warning(
+                "manifest interface.defaultPrompt must be a string or string array",
+                Some(manifest_path.to_path_buf()),
+            ));
+            return Vec::new();
+        }
+    };
+    values
+        .into_iter()
+        .filter_map(|value| {
+            let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            if normalized.is_empty() {
+                diagnostics.push(PluginDiagnostic::warning(
+                    "manifest interface.defaultPrompt must not be empty",
+                    Some(manifest_path.to_path_buf()),
+                ));
+                return None;
+            }
+            if normalized.chars().count() > MAX_CHARS {
+                diagnostics.push(PluginDiagnostic::warning(
+                    format!(
+                        "manifest interface.defaultPrompt must be at most {MAX_CHARS} characters"
+                    ),
+                    Some(manifest_path.to_path_buf()),
+                ));
+                return None;
+            }
+            Some(normalized)
+        })
+        .collect()
 }
 
 fn interface_path(

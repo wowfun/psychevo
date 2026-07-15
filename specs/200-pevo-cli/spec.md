@@ -217,11 +217,16 @@ JSON response always reports the actual bound URL in `baseUrl`. An explicit
 shell. It discovers a Psychevo source checkout containing `apps/desktop/` and
 runs the existing `@psychevo/desktop` Tauri development entrypoint. It accepts
 `--dir <DIR>` to choose the Desktop fallback workspace cwd; otherwise it uses
-the caller's cwd. The command preserves active profile selection for the
-Desktop child process and passes the current `pevo` executable path as
-`PSYCHEVO_PEVO_BIN` so Desktop managed Gateway startup uses the same CLI build
-that launched the native shell. It is not a Desktop packaging, installer,
-update, or background lifecycle command.
+the caller's cwd. The launcher resolves pnpm through the shared host executable
+boundary, including Windows `PATH`/`PATHEXT` command shims, and defaults the
+pnpm child to the installed usable package-manager version instead of requiring
+Corepack to download the repository's recommended exact version. These
+Corepack defaults are subprocess-scoped and preserve explicit caller settings.
+The command preserves active profile selection for the Desktop child process
+and passes the current `pevo` executable path as `PSYCHEVO_PEVO_BIN` so Desktop
+managed Gateway startup uses the same CLI build that launched the native shell.
+It is not a Desktop packaging, installer, update, or background lifecycle
+command.
 
 `pevo serve` starts the strict headless local Gateway API server. It binds
 loopback by default, requires an explicit token from `PSYCHEVO_SERVE_TOKEN` or

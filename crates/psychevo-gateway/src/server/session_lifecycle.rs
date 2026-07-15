@@ -42,7 +42,7 @@ async fn discover_profile_sessions(
     let runtime_profile_ref = profile.config.id.clone();
     let profile_label = profile.view.label.clone();
     let targets = profile.targets.clone();
-    let result = async {
+    let result = Box::pin(async {
         if !profile.view.enabled || !profile.targets.iter().any(|target| target.ready) {
             return Err(agent_session_error(
                 "target_unavailable",
@@ -75,7 +75,7 @@ async fn discover_profile_sessions(
             .gateway
             .discover_agent_sessions(profile.config.clone(), peer, scope.cwd.clone(), cursor)
             .await
-    }
+    })
     .await;
 
     match result {
@@ -207,6 +207,7 @@ pub(super) async fn import_agent_session(
     scope: &ResolvedScope,
     params: wire::ThreadImportParams,
 ) -> psychevo_runtime::Result<wire::ThreadImportResult> {
+    let import_archived = params.archived;
     let candidate = take_import_candidate(state, &params.candidate_id)?;
     if candidate.cwd != scope.cwd {
         return Err(agent_session_error(
@@ -238,11 +239,11 @@ pub(super) async fn import_agent_session(
             &candidate.native_session_id,
         )?
     {
-        state
-            .inner
-            .state
-            .store()
-            .restore_session(&existing.thread_id)?;
+        if import_archived {
+            archive_thread(state, &existing.thread_id).await?;
+        } else {
+            restore_thread(state, &existing.thread_id).await?;
+        }
         bind_source_to_thread(state, scope, &existing.thread_id)?;
         return Ok(wire::ThreadImportResult {
             snapshot: Box::new(typed_thread_snapshot(
@@ -273,9 +274,21 @@ pub(super) async fn import_agent_session(
         Some(json!({IMPORT_STATE_METADATA_KEY: "pending"})),
     )?;
     let imported_native_session_id = candidate.native_session_id.clone();
-    let result = import_agent_session_into_thread(
-        state, scope, &target, profile, peer, candidate, &thread_id,
-    )
+    let result = async {
+        let imported = import_agent_session_into_thread(
+            state, scope, &target, profile, peer, candidate, &thread_id,
+        )
+        .await?;
+        if !import_archived {
+            return Ok(imported);
+        }
+        archive_thread(state, &thread_id).await?;
+        Ok(wire::ThreadImportResult {
+            snapshot: Box::new(typed_thread_snapshot(
+                thread_snapshot_live(state, scope, Some(&thread_id)).await?,
+            )?),
+        })
+    }
     .await;
     if result.is_err() {
         let _ = state
@@ -645,6 +658,11 @@ pub(super) async fn archive_thread(
         }
     }
     state.inner.state.store().archive_session(thread_id)?;
+    state
+        .inner
+        .codex_capability_broker
+        .archive_ephemeral_thread(thread_id)
+        .await;
     session_summary_by_id(state, thread_id)
 }
 
@@ -713,10 +731,22 @@ pub(super) async fn delete_thread(
         .store()
         .gateway_runtime_binding(thread_id)?
     else {
-        return state.inner.state.delete_session(thread_id);
+        state.inner.state.delete_session(thread_id)?;
+        state
+            .inner
+            .codex_capability_broker
+            .archive_ephemeral_thread(thread_id)
+            .await;
+        return Ok(());
     };
     if binding.backend_kind.as_deref() != Some("acp") {
-        return state.inner.state.delete_session(thread_id);
+        state.inner.state.delete_session(thread_id)?;
+        state
+            .inner
+            .codex_capability_broker
+            .archive_ephemeral_thread(thread_id)
+            .await;
+        return Ok(());
     }
     let scope = resolved_scope_for_thread(state, thread_id)?;
     let bound = runtime_profiles::resolve_bound_thread_agent_target(state, &binding)?;
@@ -773,7 +803,13 @@ pub(super) async fn delete_thread(
         DELETE_INTENT_METADATA_KEY,
         Some(json!({"state": "remoteAcknowledged", "updatedAtMs": gateway_now_ms()})),
     )?;
-    state.inner.state.delete_session(thread_id)
+    state.inner.state.delete_session(thread_id)?;
+    state
+        .inner
+        .codex_capability_broker
+        .archive_ephemeral_thread(thread_id)
+        .await;
+    Ok(())
 }
 
 fn require_acp_binding(

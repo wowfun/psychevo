@@ -431,7 +431,10 @@ mod tests {
 
     #[test]
     fn parses_defaults_and_full_search_config() {
-        assert_eq!(parse_web_config(&json!({})).unwrap(), WebConfig::default());
+        let defaults = parse_web_config(&json!({})).unwrap();
+        assert_eq!(defaults, WebConfig::default());
+        assert_eq!(defaults.search.execution, WebSearchExecution::Local);
+        assert_eq!(defaults.search.backend, WebSearchBackend::Exa);
         let web = parse_web_config(&json!({"search": {
             "execution": "local", "backend": "exa", "external_access": "cached",
             "context_size": "high", "return_token_budget": "unlimited",
@@ -463,7 +466,11 @@ mod tests {
 
     #[test]
     fn resolves_hosted_only_with_capability_and_static_permission() {
-        let config = WebSearchConfig::default();
+        let config = WebSearchConfig {
+            execution: WebSearchExecution::Auto,
+            backend: WebSearchBackend::Auto,
+            ..WebSearchConfig::default()
+        };
         let capabilities = ModelCapabilities {
             web_search: Some(true),
             ..Default::default()

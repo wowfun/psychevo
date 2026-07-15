@@ -519,17 +519,16 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let cwd = tmp.path().join("work");
     let plugin_source_root = tmp.path().join("plugin-source");
     fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
-    fs::create_dir_all(plugin_source_root.join(".psychevo-plugin")).expect("plugin manifest dir");
+    fs::create_dir_all(plugin_source_root.join(".codex-plugin")).expect("plugin manifest dir");
     fs::create_dir_all(&home).expect("home");
     fs::write(home.join("config.toml"), "\n").expect("home config");
     fs::write(cwd.join(".psychevo/config.toml"), "\n").expect("project config");
     fs::write(
-        plugin_source_root.join(".psychevo-plugin/plugin.json"),
+        plugin_source_root.join(".codex-plugin/plugin.json"),
         r#"{
           "name": "child-hook-plugin",
           "version": "1.0.0",
           "description": "Child hook plugin",
-          "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}},
           "hooks": {
             "PostToolUse": [{
               "matcher": "Bash",
@@ -539,6 +538,11 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
         }"#,
     )
     .expect("plugin manifest");
+    fs::write(
+        plugin_source_root.join("psychevo.plugin.json"),
+        r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#,
+    )
+    .expect("plugin runtime overlay");
     fs::write(
         plugin_source_root.join("worker.py"),
         r#"#!/usr/bin/env python3

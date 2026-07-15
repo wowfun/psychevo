@@ -3,7 +3,7 @@ use super::{
     definition_policy::{
         HookedTool, SpawnAgentTool, agent_allows_tool, agent_catalog_for_policy,
         agent_policy_allows_agent_catalog, agent_policy_allows_skill_catalog,
-        ancestor_claude_agent_dirs, built_in_agents, existing_agent_path, home_path,
+        ancestor_compatible_agent_dirs, built_in_agents, existing_agent_path, home_path,
         parse_agent_file,
     },
     lifecycle::{

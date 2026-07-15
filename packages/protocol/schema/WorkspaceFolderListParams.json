@@ -1,5 +1,4 @@
 {
-  "$id": "ClientRequest/thread-import.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -63,46 +62,23 @@
         "persistent"
       ],
       "type": "string"
-    },
-    "ThreadImportParams": {
-      "properties": {
-        "archived": {
-          "default": false,
-          "type": "boolean"
-        },
-        "candidateId": {
-          "type": "string"
-        },
-        "scope": {
-          "$ref": "#/definitions/GatewayRequestScope"
-        },
-        "targetId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "candidateId",
-        "scope",
-        "targetId"
-      ],
-      "type": "object"
     }
   },
   "properties": {
-    "method": {
-      "enum": [
-        "thread/import"
-      ],
-      "type": "string"
+    "path": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     },
-    "params": {
-      "$ref": "#/definitions/ThreadImportParams"
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
     }
   },
   "required": [
-    "method",
-    "params"
+    "scope"
   ],
-  "title": "ClientRequest thread/import",
+  "title": "WorkspaceFolderListParams",
   "type": "object"
 }

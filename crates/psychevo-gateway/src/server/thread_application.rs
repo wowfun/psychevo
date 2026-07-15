@@ -108,6 +108,54 @@ pub(super) async fn run_routed_turn(
     gateway_request.event_sink = request.event_sink;
     gateway_request.lineage = request.lineage;
     gateway_request.turn_id = request.turn_id;
+    if let Some(thread_id) = gateway_request.thread_id.clone() {
+        match state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(
+                state.clone(),
+                &scope.cwd,
+                &thread_id,
+                gateway_request.turn_id.clone(),
+                gateway_request.event_sink.clone(),
+            )
+            .await
+        {
+            Ok(contributions) => {
+                gateway_request
+                    .policy
+                    .selected_capability_roots
+                    .extend(contributions.capability_roots);
+                gateway_request.extend_runtime_tools(contributions.runtime_tools);
+                if let Some(event_sink) = gateway_request.event_sink.as_ref() {
+                    for message in contributions.warnings {
+                        event_sink(GatewayEvent::Warning {
+                            kind: "codex_plugin_projection".to_string(),
+                            message,
+                            source_path: None,
+                            suggestion: Some(
+                                "Inspect the Codex plugin in Capabilities for component readiness."
+                                    .to_string(),
+                            ),
+                        });
+                    }
+                }
+            }
+            Err(err) => {
+                if let Some(event_sink) = gateway_request.event_sink.as_ref() {
+                    event_sink(GatewayEvent::Warning {
+                        kind: "codex_capability_broker".to_string(),
+                        message: err.to_string(),
+                        source_path: None,
+                        suggestion: Some(
+                            "Check the current CODEX_HOME and Codex app-server availability."
+                                .to_string(),
+                        ),
+                    });
+                }
+            }
+        }
+    }
     state.inner.gateway.run_turn(gateway_request).await
 }
 
@@ -697,6 +745,16 @@ pub(super) fn respond_to_routed_interaction_for_selector(
     expected_kind: GatewayActionKind,
     response: wire::ThreadInteractionResponse,
 ) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
+    if expected_kind == GatewayActionKind::Clarify
+        && let Some(result) = super::codex_capability_broker::respond_to_elicitation(
+            state,
+            interaction_id,
+            response.clone(),
+        )?
+    {
+        state.remove_pending_permission(interaction_id);
+        return Ok(result);
+    }
     let (accepted, outcome) = match (expected_kind, response) {
         (
             GatewayActionKind::Permission,

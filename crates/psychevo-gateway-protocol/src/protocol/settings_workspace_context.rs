@@ -42,18 +42,27 @@ pub struct WebSearchSettingsView {
     pub external_access: String,
     pub context_size: String,
     pub return_token_budget: String,
-    #[serde(default)] pub content_types: Vec<String>,
-    #[serde(default)] pub allowed_domains: Vec<String>,
-    #[serde(default)] pub blocked_domains: Vec<String>,
+    #[serde(default)]
+    pub content_types: Vec<String>,
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    #[serde(default)]
+    pub blocked_domains: Vec<String>,
     pub background_storage_acknowledged: bool,
-    #[ts(type = "Record<string, unknown>")] pub location: BTreeMap<String, Value>,
-    #[ts(type = "Record<string, unknown>")] pub image: BTreeMap<String, Value>,
-    #[ts(type = "Record<string, string>")] pub credentials: BTreeMap<String, String>,
+    #[ts(type = "Record<string, unknown>")]
+    pub location: BTreeMap<String, Value>,
+    #[ts(type = "Record<string, unknown>")]
+    pub image: BTreeMap<String, Value>,
+    #[ts(type = "Record<string, string>")]
+    pub credentials: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct WebSearchSettingsReadParams { #[serde(default)] pub cwd: Option<String> }
+pub struct WebSearchSettingsReadParams {
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -336,6 +345,8 @@ pub struct ModelAssignmentSetResult {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCreateParams {
     pub name: String,
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -343,6 +354,54 @@ pub struct WorkspaceCreateParams {
 pub struct WorkspaceCreateResult {
     pub cwd: String,
     pub scope: GatewayRequestScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFolderEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFolderListParams {
+    pub scope: GatewayRequestScope,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFolderListResult {
+    pub root: String,
+    pub current: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+    pub folders: Vec<WorkspaceFolderEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitBranchesParams {
+    pub scope: GatewayRequestScope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitCheckoutParams {
+    pub scope: GatewayRequestScope,
+    pub branch: String,
+    #[serde(default)]
+    pub create: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitBranchesResult {
+    #[serde(default)]
+    pub current: Option<String>,
+    pub branches: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

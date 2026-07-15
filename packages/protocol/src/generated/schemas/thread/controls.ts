@@ -1725,6 +1725,10 @@ export const threadControlSchemas = {
     }
   },
   "properties": {
+    "archived": {
+      "default": false,
+      "type": "boolean"
+    },
     "candidateId": {
       "type": "string"
     },

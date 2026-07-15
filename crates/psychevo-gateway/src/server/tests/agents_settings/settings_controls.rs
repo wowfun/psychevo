@@ -174,6 +174,8 @@ async fn settings_read_projects_web_search_with_protocol_field_names() {
     .expect("settings read");
 
     let search = &result["webSearch"];
+    assert_eq!(search["execution"], "local");
+    assert_eq!(search["backend"], "exa");
     assert_eq!(search["externalAccess"], "live");
     assert_eq!(search["contextSize"], "medium");
     assert_eq!(search["returnTokenBudget"], "default");

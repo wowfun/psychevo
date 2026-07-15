@@ -351,6 +351,16 @@ Callers therefore compare revisions only as opaque freshness tokens and refresh
 the complete context after the turn; they do not require the receipt revision
 to remain equal after runtime observation.
 
+Creating a Side Chat snapshots the parent Thread's resolved live control
+descriptors at the same command boundary that creates the child binding. Every
+non-null effective control becomes an initial sticky preference on the child,
+including values projected only from a resident or persisted ACP Session
+snapshot. Copying only the parent's persisted preference and observation maps
+is insufficient because those maps need not contain the Agent's current model,
+mode, or other live effective values. The child starts a fresh runtime-native
+session and does not copy the parent's runtime-observation or native-session
+identity.
+
 When the unbound source owns a matching prepared ACP session,
 `thread/control/set` applies the value to that resident session before
 returning. The first accepted turn atomically claims the prepared session,
@@ -484,6 +494,11 @@ captured backend/profile fingerprint, canonical workspace, and auth scope. A
 generation owns one process/connection and may multiplex sessions only when the
 Agent contract supports it. Each public thread still owns an independent
 session actor and native session id.
+
+Supervisor lookup and actor bootstrap MUST run safely on the default Tokio and
+Rust test worker stacks. Lifecycle correctness MUST NOT depend on enlarging
+`RUST_MIN_STACK`; large lifecycle dispatch futures are heap-isolated before
+they reach synchronous registry lookup and reuse paths.
 
 Generations use leases and reference counts. Startup failure cleans up the
 partial generation. Idle eviction may reclaim a zero-reference process but must
@@ -760,6 +775,12 @@ Direct Codex app-server and OpenCode HTTP/SSE Adapters are removed. The
 kinds, direct Gateway branches, direct protocol operations, and direct UI/test
 fixtures must not remain as dormant fallback paths.
 
+This hard cut does not prohibit an internal Codex capability broker used only
+for Codex-owned plugin catalog and Apps behavior. The broker does not submit
+model turns, expose a Runtime Profile, own Agent history, or interpret a Codex
+thread as a Psychevo Agent session. Its hidden ephemeral thread exists only
+when an app-backed MCP call requires Codex thread identity.
+
 Configuration containing `runtime = "codex"` or `runtime = "opencode"` fails
 with `adapter_removed` and points to the corresponding ACP profile. This is a
 pre-release incompatible cutover: persisted direct bindings, sessions, and
@@ -801,6 +822,13 @@ state while a detached or throwaway controller owns its submitted turn. Headless
 commands may target a non-visible Thread, but they do not create a second
 optimistic owner for an already rendered Thread surface.
 
+For selected-Thread activation, the entries carried by an authoritative
+`thread/resume` or `thread/read` snapshot are sufficient history hydration for
+the first render. Workbench binds that snapshot directly to the stable
+controller and must not synchronously issue `thread/history/read` before
+rendering it. Explicit search and lazy-history surfaces may still page through
+`thread/history/read` independently.
+
 Every writable Thread surface performs an authoritative same-Thread refresh
 after applying a terminal event. This refresh replaces retained live entries
 and activity with the declared history projection even when the terminal wire
@@ -819,6 +847,28 @@ pending or already-settled acceptance correlation, so a delayed response cannot
 resurrect a terminal turn. Detached shell notifications, terminal I/O, history
 refresh, and other non-turn surfaces keep their existing owners and must not be
 misclassified as Thread turn lifecycle events.
+
+Workbench keys runtime-context reads by client, effective Thread scope, selected
+Thread, prospective unbound target, and an explicit capability revision. A
+bound Thread activation performs exactly one read for that key; applying the
+returned binding or selected target is output, not a reason to repeat the read.
+Settings and Workspace state refresh once per selected Thread scope, Agent and
+backend catalogs refresh once per working directory or explicit mutation, and
+commands refresh for their source, Thread, and running state. These auxiliary
+reads must not be duplicated by both scope adoption and React effects.
+After changing a bound Thread's Agent target, the resulting unbound draft
+refreshes commands explicitly with `threadId: null`; a callback captured from
+the prior bound render must not retain session-only commands such as `/btw`.
+When a completed shell command refreshes the Agent/backend catalog, Workbench
+also invalidates the selected Thread Context so `compatibleTargets` reflects
+new or changed backend and Agent definitions.
+
+When immutable Agent provenance changes, Workbench exposes the requested target
+immediately in a disabled loading state. For a bound Thread, it then sends
+`thread/start` and `thread/draft/prepare` in sequence before awaiting Settings,
+Workspace, Observability, history, catalog, or command refreshes. Preparation
+failure preserves the requested identity and blocks submission with the
+authoritative error.
 
 Workbench renders all negotiated and certified descriptors. The Agent/Profile
 selector becomes immutable provenance after binding; changing either starts a

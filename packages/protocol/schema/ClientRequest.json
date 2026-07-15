@@ -380,6 +380,15 @@
       "$ref": "ClientRequest/workspace-files.json"
     },
     {
+      "$ref": "ClientRequest/workspace-folders.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-git-branches.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-git-checkout.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-file-read.json"
     },
     {

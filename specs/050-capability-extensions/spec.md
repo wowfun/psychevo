@@ -67,6 +67,20 @@ manifest is the source boundary. A malformed recognized manifest must fail
 closed for that source instead of falling back to treating the package directory
 as an unrelated skill root or generic directory source.
 
+Selected capability roots carry an authority-qualified selector, not an
+assumption that every source is a host-local path. A capability source provider
+resolves the selector into authority-bound resource locators. Local and Codex
+providers enforce containment and resource access inside their own authority;
+consumers must not manufacture a local path for a remote or service-owned root.
+Thread state persists stable selectors and the compatibility profile, never
+resolved secrets, process handles, or temporary resource locators.
+
+An in-place Codex catalog projection serializes `authority.kind = codex` plus
+the plugin and marketplace identity even when the accepted locator is a local
+materialized directory. Local roots omit the default local authority field.
+The locator may be read for one frozen thread snapshot but is never copied into
+or mutated through the Psychevo plugin store.
+
 ## Registry Relationship
 
 The runtime extension registry is the primary runtime interface for extension

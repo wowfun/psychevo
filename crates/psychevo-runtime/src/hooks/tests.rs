@@ -672,7 +672,7 @@ for line in sys.stdin:
         plugin_source: "local".to_string(),
         plugin_root: temp.path().to_path_buf(),
         plugin_data: temp.path().join("data"),
-        manifest_path: temp.path().join(".psychevo-plugin/plugin.json"),
+        manifest_path: temp.path().join(".codex-plugin/plugin.json"),
         manifest_resources: vec!["hooks".to_string()],
         psychevo_extensions: vec!["runtime".to_string()],
         command: PathBuf::from("python3"),

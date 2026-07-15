@@ -9,6 +9,8 @@ use crate::contribution_projection::ContributionProjection;
 use crate::hooks::HookSourceDescriptor;
 use crate::types::{McpServerInput, RuntimeTool};
 
+use super::compatibility::PluginComponentStatus;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginScope {
@@ -162,12 +164,18 @@ pub struct LoadedPluginManifest {
     pub name: String,
     pub version: Option<String>,
     pub description: Option<String>,
+    pub keywords: Vec<String>,
+    pub compatibility_profile: String,
+    pub raw_manifest: Value,
+    pub raw_overlay: Option<Value>,
+    pub component_statuses: Vec<PluginComponentStatus>,
     pub diagnostics: Vec<PluginDiagnostic>,
     pub ignored_manifest_paths: Vec<PathBuf>,
     pub skill_roots: Vec<PathBuf>,
     pub agent_roots: Vec<PathBuf>,
     pub hooks: Option<Value>,
     pub mcp_servers: Vec<McpServerInput>,
+    pub app_resource: Option<PathBuf>,
     pub worker: Option<PluginWorkerSpec>,
     pub(crate) toolsets: BTreeMap<String, CustomToolsetConfig>,
     pub interface: Option<PluginInterfaceMetadata>,
@@ -190,6 +198,8 @@ pub struct PluginInterfaceMetadata {
     pub developer_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_prompt: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,6 +242,10 @@ pub struct PluginInstallRecord {
     pub data_root: PathBuf,
     pub manifest_path: PathBuf,
     pub manifest_kind: PluginManifestKind,
+    #[serde(default)]
+    pub compatibility_profile: String,
+    #[serde(default)]
+    pub component_statuses: Vec<PluginComponentStatus>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub package_fingerprint: String,
     #[serde(default)]
@@ -294,6 +308,8 @@ pub struct PluginInspection {
     pub source_id: String,
     pub framework: PluginManifestKind,
     pub canonical_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility_profile: Option<String>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -307,6 +323,8 @@ pub struct PluginInspection {
     pub status: String,
     pub target_lanes: Vec<String>,
     pub projected_contributions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub component_statuses: Vec<PluginComponentStatus>,
     pub unsupported_lanes: Vec<String>,
     pub diagnostics: Vec<PluginDiagnostic>,
     pub stages: Vec<PluginStageDiagnostic>,

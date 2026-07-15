@@ -359,6 +359,9 @@ struct WebStateInner {
     realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
     agent_session_imports: Mutex<AgentSessionImportRegistry>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
+    codex_capability_broker: codex_capability_broker::CodexCapabilityBroker,
+    codex_elicitations:
+        Mutex<HashMap<String, codex_capability_broker::PendingCodexElicitation>>,
 }
 
 const AGENT_SESSION_IMPORT_TTL_MS: i64 = 10 * 60 * 1_000;
@@ -492,6 +495,8 @@ impl WebState {
         let state = config.gateway.state().clone();
         let source = cwd_source(&config.cwd);
         let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
+        let codex_capability_broker =
+            codex_capability_broker::CodexCapabilityBroker::new(&config.inherited_env);
         let web_state = Self {
             inner: Arc::new(WebStateInner {
                 gateway: config.gateway,
@@ -516,6 +521,8 @@ impl WebState {
                 realtime_sessions: Mutex::new(HashMap::new()),
                 agent_session_imports: Mutex::new(AgentSessionImportRegistry::default()),
                 channel_runtime,
+                codex_capability_broker,
+                codex_elicitations: Mutex::new(HashMap::new()),
             }),
         };
         channel_runtime::reconcile(web_state.clone());

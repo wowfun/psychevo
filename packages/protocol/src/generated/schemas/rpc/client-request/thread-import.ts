@@ -68,6 +68,10 @@ export const clientRequestThreadImportSchema = {
     },
     "ThreadImportParams": {
       "properties": {
+        "archived": {
+          "default": false,
+          "type": "boolean"
+        },
         "candidateId": {
           "type": "string"
         },

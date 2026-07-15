@@ -15,6 +15,168 @@ fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
 }
 
 #[tokio::test]
+async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boundary() {
+    let (temp, state) = web_state();
+    let root = temp.path().join("workspaces");
+    let alpha = root.join("alpha");
+    let nested = alpha.join("nested");
+    std::fs::create_dir_all(&nested).expect("workspace folders");
+    std::fs::create_dir_all(root.join(".local")).expect("normally hidden folder");
+    std::fs::write(alpha.join("README.md"), "ignored\n").expect("file");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let root_result = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("folders-1")),
+            method: "workspace/folders".to_string(),
+            params: Some(json!({ "scope": scope.clone(), "path": root })),
+        },
+    )
+    .await
+    .expect("workspace/folders root");
+    assert_eq!(
+        root_result["current"].as_str(),
+        Some(root.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        root_result["parent"].as_str(),
+        Some(temp.path().to_string_lossy().as_ref())
+    );
+    let root_folders = root_result["folders"].as_array().expect("folder array");
+    assert!(root_folders.iter().any(|folder| folder["name"] == ".local"));
+    assert!(root_folders.iter().any(|folder| folder["name"] == "alpha"));
+
+    let nested_result = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("folders-2")),
+            method: "workspace/folders".to_string(),
+            params: Some(json!({ "scope": scope.clone(), "path": alpha })),
+        },
+    )
+    .await
+    .expect("workspace/folders nested");
+    assert_eq!(
+        nested_result["parent"].as_str(),
+        Some(root.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        nested_result["folders"][0]["path"].as_str(),
+        Some(nested.to_string_lossy().as_ref())
+    );
+
+    let outside_result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("folders-3")),
+            method: "workspace/folders".to_string(),
+            params: Some(json!({ "scope": scope, "path": temp.path() })),
+        },
+    )
+    .await
+    .expect("workspace/folders outside the configured workspace root");
+    assert_eq!(
+        outside_result["current"].as_str(),
+        Some(temp.path().to_string_lossy().as_ref())
+    );
+}
+
+#[tokio::test]
+async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
+    let (_temp, state) = web_state();
+    git(&state.inner.cwd, ["init", "-b", "main"]);
+    git(
+        &state.inner.cwd,
+        ["config", "user.email", "test@example.com"],
+    );
+    git(&state.inner.cwd, ["config", "user.name", "Test User"]);
+    std::fs::write(state.inner.cwd.join("README.md"), "workspace\n").expect("readme");
+    git(&state.inner.cwd, ["add", "."]);
+    git(&state.inner.cwd, ["commit", "-m", "initial"]);
+    git(&state.inner.cwd, ["branch", "feature/existing"]);
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let listed = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("1")),
+            method: "workspace/git/branches".to_string(),
+            params: Some(json!({ "scope": scope.clone() })),
+        },
+    )
+    .await
+    .expect("workspace/git/branches");
+    assert_eq!(listed["current"].as_str(), Some("main"));
+    assert_eq!(
+        listed["branches"].as_array().expect("branches"),
+        &vec![json!("feature/existing"), json!("main")]
+    );
+
+    let switched = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("2")),
+            method: "workspace/git/checkout".to_string(),
+            params: Some(json!({
+                "scope": scope.clone(),
+                "branch": "feature/existing",
+                "create": false
+            })),
+        },
+    )
+    .await
+    .expect("workspace/git/checkout existing");
+    assert_eq!(switched["current"].as_str(), Some("feature/existing"));
+
+    let created = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("3")),
+            method: "workspace/git/checkout".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "branch": "feature/new",
+                "create": true
+            })),
+        },
+    )
+    .await
+    .expect("workspace/git/checkout create");
+    assert_eq!(created["current"].as_str(), Some("feature/new"));
+    assert!(
+        created["branches"]
+            .as_array()
+            .expect("branches")
+            .contains(&json!("feature/new"))
+    );
+}
+
+#[tokio::test]
 async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
     let (_temp, state) = web_state();
     let src = state.inner.cwd.join("src");
@@ -633,8 +795,7 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
         .store()
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
         .expect("session");
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
-        .expect("scope");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let profile = generated_runtime_profiles()
         .into_iter()
         .find(|profile| profile.id == "native")
@@ -696,7 +857,10 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
     assert_eq!(result["result"]["accepted"], true);
     assert_eq!(result["result"]["compacted"], false);
     assert_eq!(result["result"]["reason"], "manual");
-    assert_eq!(result["result"]["message"], "not enough messages to compact");
+    assert_eq!(
+        result["result"]["message"],
+        "not enough messages to compact"
+    );
     assert!(result["result"]["checkpoint"].is_null());
 
     let mut activity_running_states = Vec::new();
@@ -776,7 +940,10 @@ async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_bi
     assert_eq!(result["result"]["accepted"], true);
     assert_eq!(result["result"]["compacted"], false);
     assert_eq!(result["result"]["reason"], "manual");
-    assert_eq!(result["result"]["message"], "not enough messages to compact");
+    assert_eq!(
+        result["result"]["message"],
+        "not enough messages to compact"
+    );
 }
 
 #[tokio::test]
@@ -967,6 +1134,31 @@ async fn command_execute_btw_creates_side_chat_session() {
         "'/btw' is unavailable until the current conversation has started. Send a message first, then try /btw again."
     );
 
+    let unbound = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("unbound")),
+            method: "command/execute".to_string(),
+            params: Some(json!({
+                "scope": scope,
+                "command": "/btw explain this",
+                "threadId": parent_session.clone()
+            })),
+        },
+    )
+    .await
+    .expect("command/execute unbound btw");
+    assert_eq!(unbound["accepted"], false, "{unbound:#}");
+    assert_eq!(
+        unbound["message"],
+        "Select an Agent target before starting a side chat."
+    );
+
+    let parent_binding = bind_native_runtime_to_thread(&state, &parent_session);
+
     let result = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
@@ -1025,6 +1217,105 @@ async fn command_execute_btw_creates_side_chat_session() {
         side_metadata["side_conversation"]["ephemeral"].as_bool(),
         Some(true)
     );
+    let side_binding = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(side_thread_id)
+        .expect("side binding")
+        .expect("resolved side binding");
+    assert_eq!(side_binding.status, GatewayRuntimeBindingStatus::Resolved);
+    assert_eq!(side_binding.agent_ref, parent_binding.agent_ref);
+    assert_eq!(side_binding.runtime_ref, parent_binding.runtime_ref);
+    assert_eq!(
+        side_binding.profile_fingerprint,
+        parent_binding.profile_fingerprint
+    );
+    assert_eq!(side_binding.native_session_id, None);
+    assert_eq!(side_binding.parent_thread_id, None);
+}
+
+#[tokio::test]
+async fn command_execute_btw_snapshots_live_effective_acp_controls() {
+    let (_temp, state) = web_state();
+    let resolved_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let parent_session = state
+        .inner
+        .state
+        .store()
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "stale-summary-model",
+            "fake-provider",
+            None,
+        )
+        .expect("parent session");
+    bind_persisted_acp_runtime_to_thread(&state, &parent_session);
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let parent_context = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("parent-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "scope": resolved_scope.to_wire_scope(),
+                "threadId": parent_session,
+                "target": null
+            })),
+        },
+    )
+    .await
+    .expect("parent Thread Context");
+    let effective_controls = parent_context["controls"]
+        .as_array()
+        .expect("parent controls")
+        .iter()
+        .filter_map(|control| {
+            Some((
+                control["id"].as_str()?.to_string(),
+                control["effectiveValue"].clone(),
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(effective_controls["model"], json!("live-acp-model"));
+    assert_eq!(effective_controls["mode"], json!("plan"));
+
+    let result = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("btw")),
+            method: "command/execute".to_string(),
+            params: Some(json!({
+                "scope": resolved_scope.to_wire_scope(),
+                "command": "/btw",
+                "threadId": parent_session
+            })),
+        },
+    )
+    .await
+    .expect("command/execute btw");
+    let side_thread_id = result["action"]["threadId"]
+        .as_str()
+        .expect("side thread id");
+    let side_binding = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(side_thread_id)
+        .expect("side binding")
+        .expect("resolved side binding");
+
+    assert_eq!(side_binding.thread_preferences, effective_controls);
+    assert!(side_binding.runtime_observed.is_empty());
+    assert_eq!(side_binding.native_session_id, None);
 }
 
 #[tokio::test]
@@ -1045,7 +1336,26 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         .store()
         .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
         .expect("parent message");
-    bind_source_to_thread(&state, &resolved_scope, &parent_session).expect("bind parent");
+    bind_source_to_thread(&state, &resolved_scope, &parent_session).expect("bind parent source");
+    let parent_binding = bind_native_runtime_to_thread(&state, &parent_session);
+    let mut parent_preferences = BTreeMap::new();
+    parent_preferences.insert("mode".to_string(), json!("plan"));
+    let mut parent_observed = BTreeMap::new();
+    parent_observed.insert("model".to_string(), json!("fake-model"));
+    state
+        .inner
+        .state
+        .store()
+        .compare_and_set_gateway_runtime_control_state(
+            &parent_session,
+            parent_binding.binding_revision,
+            parent_binding.control_revision,
+            GatewayRuntimeControlStatePatch {
+                thread_preferences: Some(&parent_preferences),
+                runtime_observed: Some(&parent_observed),
+            },
+        )
+        .expect("parent control state");
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -1080,12 +1390,30 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             params: Some(json!({
                 "scope": resolved_scope.to_wire_scope(),
                 "threadId": side_thread_id,
-                "target": {"agentRef": null, "runtimeProfileRef": "native"}
+                "target": null
             })),
         },
     )
     .await
     .expect("side Thread Context");
+    assert_eq!(context["selectionState"], "bound", "{context:#}");
+    assert_eq!(context["runtimeProfileRef"], "native", "{context:#}");
+    assert_eq!(context["binding"]["threadId"], side_thread_id);
+    assert_eq!(context["sendability"]["allowed"], true, "{context:#}");
+    let side_binding = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(&side_thread_id)
+        .expect("side binding")
+        .expect("resolved side binding");
+    assert_eq!(side_binding.thread_preferences["mode"], json!("plan"));
+    assert_eq!(
+        side_binding.thread_preferences["model"],
+        json!("fake-model")
+    );
+    assert!(side_binding.runtime_observed.is_empty());
+    assert_eq!(side_binding.native_session_id, None);
 
     let accepted = handle_rpc(
         state.clone(),
@@ -1098,7 +1426,6 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             params: Some(json!({
                 "scope": resolved_scope.to_wire_scope(),
                 "threadId": side_thread_id.clone(),
-                "target": {"agentRef": null, "runtimeProfileRef": "native"},
                 "input": [{"type": "text", "text": "explain this"}],
                 "mentions": [],
                 "turnOverrides": {"model": "fake-model"},
@@ -1155,6 +1482,200 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             .expect("side summary")
             .is_none()
     );
+}
+
+fn bind_native_runtime_to_thread(state: &WebState, thread_id: &str) -> GatewayRuntimeBindingRecord {
+    let profile = generated_runtime_profiles()
+        .into_iter()
+        .find(|profile| profile.id == "native")
+        .expect("Native profile");
+    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
+    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
+    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
+    let agent_fingerprint = crate::gateway_agent_definition_fingerprint("null");
+    let cwd = state.inner.cwd.display().to_string();
+    state
+        .inner
+        .state
+        .store()
+        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+            thread_id,
+            agent_ref: None,
+            agent_fingerprint: &agent_fingerprint,
+            agent_definition_json: "null",
+            runtime_ref: "native",
+            backend_kind: "native",
+            native_kind: "native",
+            native_session_id: Some(thread_id),
+            cwd: &cwd,
+            profile_fingerprint: &profile_fingerprint,
+            profile_revision: &profile_revision,
+            profile_config_json: &profile_json,
+            adapter_kind: "native",
+            adapter_revision: "test",
+            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+            parent_thread_id: None,
+        })
+        .expect("native runtime binding")
+}
+
+fn bind_persisted_acp_runtime_to_thread(
+    state: &WebState,
+    thread_id: &str,
+) -> GatewayRuntimeBindingRecord {
+    std::fs::create_dir_all(&state.inner.home).expect("profile home");
+    let executable = std::env::current_exe().expect("test executable");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        format!(
+            r#"[agents.backends.ephemeral]
+kind = "acp"
+label = "Ephemeral"
+command = {}
+entrypoints = ["peer"]
+
+[runtime_profiles.ephemeral]
+runtime = "acp"
+enabled = true
+label = "Ephemeral ACP"
+backend_ref = "ephemeral"
+default_model = "profile-default-model"
+default_mode = "default"
+"#,
+            serde_json::to_string(&executable.to_string_lossy()).expect("test executable path")
+        ),
+    )
+    .expect("ACP profile config");
+    let profile = RuntimeProfileConfig {
+        id: "ephemeral".to_string(),
+        runtime: RuntimeProfileKind::Acp,
+        enabled: true,
+        label: "Ephemeral ACP".to_string(),
+        backend_ref: Some("ephemeral".to_string()),
+        default_model: Some("profile-default-model".to_string()),
+        default_mode: Some("default".to_string()),
+        default_agent: None,
+        approval_mode: None,
+        sandbox: None,
+        workspace_roots: Vec::new(),
+        options: Value::Null,
+    };
+    let profile_json = serde_json::to_string(&profile).expect("profile snapshot");
+    let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
+    let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
+    let agent_json = r#"{"name":"ephemeral","instructions":"captured"}"#;
+    let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
+    let cwd = state.inner.cwd.display().to_string();
+    let binding = state
+        .inner
+        .state
+        .store()
+        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+            thread_id,
+            agent_ref: Some("ephemeral"),
+            agent_fingerprint: &agent_fingerprint,
+            agent_definition_json: agent_json,
+            runtime_ref: "ephemeral",
+            backend_kind: "acp",
+            native_kind: "acp",
+            native_session_id: Some("ephemeral-native-1"),
+            cwd: &cwd,
+            profile_fingerprint: &profile_fingerprint,
+            profile_revision: &profile_revision,
+            profile_config_json: &profile_json,
+            adapter_kind: "acp",
+            adapter_revision: "test",
+            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+            parent_thread_id: None,
+        })
+        .expect("ACP runtime binding");
+    let persisted_projection = crate::acp_peer::AcpSessionSnapshot {
+        native_session_id: "ephemeral-native-1".to_string(),
+        agent: Some(crate::acp_peer::AcpAgentIdentitySnapshot {
+            name: "ephemeral-test".to_string(),
+            title: Some("Ephemeral".to_string()),
+            version: "1.0.0".to_string(),
+        }),
+        capabilities: crate::acp_peer::AcpNegotiatedCapabilitiesSnapshot {
+            prompt_input: crate::acp_peer::AcpPromptInputCapabilitiesSnapshot {
+                text: true,
+                image: false,
+                audio: false,
+                resource: false,
+                resource_link: false,
+                embedded_context: true,
+            },
+            session: crate::acp_peer::AcpSessionLifecycleCapabilitiesSnapshot {
+                load: true,
+                list: false,
+                delete: false,
+                fork: false,
+                resume: true,
+                close: false,
+                additional_directories: false,
+            },
+            auth_logout: false,
+            auth_methods: Vec::new(),
+            providers: false,
+            mcp_http: false,
+            mcp_sse: false,
+            mcp_acp: false,
+        },
+        options: vec![wire::RuntimeConfigOptionView {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            description: None,
+            category: Some("model".to_string()),
+            option_type: "select".to_string(),
+            current_value: Some("live-acp-model".to_string()),
+            values: vec![wire::RuntimeConfigOptionValueView {
+                value: "live-acp-model".to_string(),
+                name: "Live ACP Model".to_string(),
+                description: None,
+                group: None,
+            }],
+        }],
+        available_commands: Vec::new(),
+        available_modes: vec![crate::acp_peer::AcpSessionModeSnapshot {
+            id: "plan".to_string(),
+            name: "Plan".to_string(),
+            description: None,
+        }],
+        current_mode_id: Some("plan".to_string()),
+        legacy_models: None,
+        history: crate::acp_peer::AcpHistorySnapshot {
+            owner: crate::acp_peer::AcpHistoryOwnerSnapshot::Agent,
+            resumable: true,
+            load_supported: true,
+            resume_supported: true,
+            loaded_from_agent: true,
+            replay_complete: true,
+            replay_update_count: 0,
+            live_update_count: 0,
+        },
+        session_info: crate::acp_peer::AcpSessionInfoSnapshot::default(),
+        generation: 1,
+        session_epoch: 1,
+        control_revision: "live-controls".to_string(),
+        projection_revision: "live-projection".to_string(),
+    };
+    state
+        .inner
+        .state
+        .store()
+        .set_session_metadata_field(
+            thread_id,
+            ACP_PEER_METADATA_KEY,
+            Some(json!({
+                "agentName": "ephemeral",
+                "backendId": "ephemeral",
+                "backendKind": "acp",
+                "nativeSessionId": "ephemeral-native-1",
+                "sessionProjection": persisted_projection,
+            })),
+        )
+        .expect("persist ACP projection");
+    binding
 }
 
 #[tokio::test]

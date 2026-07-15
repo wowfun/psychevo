@@ -12,8 +12,8 @@ The merged runtime configuration is:
 
 ```toml
 [web.search]
-execution = "auto"              # auto | local | hosted
-backend = "auto"                # auto | searxng | brave | exa | parallel
+execution = "local"             # auto | local | hosted
+backend = "exa"                 # auto | searxng | brave | exa | parallel
 external_access = "live"        # live | cached
 context_size = "medium"         # low | medium | high
 return_token_budget = "default" # default | unlimited
@@ -33,7 +33,7 @@ max_results = 3
 caption = true
 ```
 
-Defaults are `auto`, `auto`, `live`, `medium`, `default`, and text-only.
+Defaults are `local`, `exa`, `live`, `medium`, `default`, and text-only.
 Unknown keys and invalid enum values reject configuration. `limit` is not a
 persistent setting: local calls accept 1 through 20 and default to 8.
 
@@ -64,11 +64,12 @@ Otherwise `auto` selects local. Unknown model capability selects local. An
 explicit hosted request that fails one of these preconditions rejects before
 provider invocation with a precise configuration error.
 
-Local `backend = "auto"` selects the first configured backend in this order:
-Exa, Parallel, SearXNG, Brave. Exa and Parallel are configured when their key is
-present or their public no-key MCP route is available. SearXNG requires
-`SEARXNG_URL`; Brave requires `BRAVE_SEARCH_API_KEY`. An explicit unavailable
-backend fails with its missing environment variable or unavailable route.
+An explicit local `backend = "auto"` selects the first configured backend in
+this order: Exa, Parallel, SearXNG, Brave. Exa and Parallel are configured when
+their key is present or their public no-key MCP route is available. SearXNG
+requires `SEARXNG_URL`; Brave requires `BRAVE_SEARCH_API_KEY`. An explicit
+unavailable backend fails with its missing environment variable or unavailable
+route.
 
 Tool-surface evidence records the selected lane, resolved backend, provider
 capability input, permission decision basis, and omitted or unavailable reason.

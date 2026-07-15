@@ -741,11 +741,18 @@ pub(crate) fn existing_agent_path(
     Ok((path.is_file()).then_some(path))
 }
 
-pub(crate) fn ancestor_claude_agent_dirs(cwd: &Path) -> Vec<PathBuf> {
+pub(crate) fn ancestor_compatible_agent_dirs(cwd: &Path) -> Vec<(PathBuf, AgentSource)> {
     let mut result = Vec::new();
     let mut current = cwd.to_path_buf();
     loop {
-        result.push(current.join(".claude").join("agents"));
+        result.push((
+            current.join(".agents").join("agents"),
+            AgentSource::AgentsProject,
+        ));
+        result.push((
+            current.join(".claude").join("agents"),
+            AgentSource::ClaudeProject,
+        ));
         if current.join(".git").exists() {
             break;
         }

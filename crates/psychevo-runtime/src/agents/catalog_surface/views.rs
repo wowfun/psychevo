@@ -8,8 +8,10 @@ pub const MAX_AGENT_SPAWN_DEPTH_CAP: u8 = 3;
 pub enum AgentSource {
     Explicit,
     Project,
+    AgentsProject,
     ClaudeProject,
     Global,
+    AgentsGlobal,
     ClaudeGlobal,
     Generated,
     BuiltIn,
@@ -20,8 +22,10 @@ impl AgentSource {
         match self {
             Self::Explicit => "explicit",
             Self::Project => "project",
+            Self::AgentsProject => "agents_project",
             Self::ClaudeProject => "claude_project",
             Self::Global => "global",
+            Self::AgentsGlobal => "agents_global",
             Self::ClaudeGlobal => "claude_global",
             Self::Generated => "generated",
             Self::BuiltIn => "built_in",
@@ -30,8 +34,12 @@ impl AgentSource {
 
     pub fn display_label(self) -> &'static str {
         match self {
-            Self::Project | Self::ClaudeProject => "Project",
-            Self::Explicit | Self::Global | Self::ClaudeGlobal | Self::Generated => "User",
+            Self::Project | Self::AgentsProject | Self::ClaudeProject => "Project",
+            Self::Explicit
+            | Self::Global
+            | Self::AgentsGlobal
+            | Self::ClaudeGlobal
+            | Self::Generated => "User",
             Self::BuiltIn => "System",
         }
     }
@@ -39,8 +47,10 @@ impl AgentSource {
 
 pub fn agent_source_display_label(value: Option<&str>) -> Option<&'static str> {
     match value.map(str::trim).filter(|value| !value.is_empty())? {
-        "project" | "claude_project" | "Project" => Some("Project"),
-        "explicit" | "global" | "claude_global" | "generated" | "User" => Some("User"),
+        "project" | "agents_project" | "claude_project" | "Project" => Some("Project"),
+        "explicit" | "global" | "agents_global" | "claude_global" | "generated" | "User" => {
+            Some("User")
+        }
         "built_in" | "builtin" | "system" | "core" | "System" => Some("System"),
         _ => None,
     }

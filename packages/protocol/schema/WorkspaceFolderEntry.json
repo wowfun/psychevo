@@ -4,17 +4,14 @@
     "name": {
       "type": "string"
     },
-    "parent": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
+    "path": {
+      "type": "string"
     }
   },
   "required": [
-    "name"
+    "name",
+    "path"
   ],
-  "title": "WorkspaceCreateParams",
+  "title": "WorkspaceFolderEntry",
   "type": "object"
 }

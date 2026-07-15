@@ -282,8 +282,8 @@ pub struct WebSearchConfig {
 impl Default for WebSearchConfig {
     fn default() -> Self {
         Self {
-            execution: WebSearchExecution::Auto,
-            backend: WebSearchBackend::Auto,
+            execution: WebSearchExecution::Local,
+            backend: WebSearchBackend::Exa,
             external_access: WebSearchExternalAccess::Live,
             context_size: WebSearchContextSize::Medium,
             return_token_budget: WebSearchTokenBudget::Default,

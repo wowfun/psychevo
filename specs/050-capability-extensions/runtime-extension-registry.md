@@ -56,38 +56,42 @@ letting skills, hooks, MCP, agents, and tool surface own their final semantics.
 
 ## ExtensionData
 
-`ExtensionData` is the scoped store for extension-private state.
+`ExtensionData` is the scoped store for extension-private state. The current
+registry owns session and thread stores because installed built-in contributors
+use those lifetimes. Turn storage is added only with a real turn-scoped owner
+and call site.
 
-Psychevo may keep separate stores for session, thread, and turn scopes when an
-effect needs durable or scoped extension state. Contributors receive only the
-store scopes and typed host inputs they are allowed to use. Contributors do not
-receive mutable access to core runtime state, provider credentials, permission
-policy, sandbox policy, transcript storage, or future registry snapshots.
+Contributors receive only the store scopes and typed host inputs they are
+allowed to use. Contributors do not receive mutable access to core runtime
+state, provider credentials, permission policy, sandbox policy, transcript
+storage, or future registry snapshots.
 
 ## Contributor Slots
 
-The intended contributor slots are:
+The registry exposes only contributor slots with a current host call site and
+at least one real owner:
 
-- `McpServerContributor`: resolves runtime MCP servers and preserves source
-  provenance before MCP tools enter the tool surface.
-- `ContextContributor`: contributes prompt fragments or world-state fragments
-  through context assembly.
-- `ThreadLifecycleContributor`: observes or seeds thread-level lifecycle state.
-- `TurnLifecycleContributor`: observes or seeds turn-level lifecycle state.
-- `TurnInputContributor`: contributes turn-local user-context fragments.
-- `ConfigContributor`: observes committed effective configuration changes.
-- `TokenUsageContributor`: observes model token-usage checkpoints.
-- `ToolContributor`: exposes native tools owned by an extension feature.
-- `ToolLifecycleContributor`: observes accepted tool execution without owning
-  tool payload policy.
-- `ApprovalReviewContributor`: can claim a rendered approval-review prompt and
-  return a review decision.
-- `TurnItemContributor`: post-processes parsed turn items through an ordered
-  host-owned slot.
+- `McpServerContributor`: resolves source-qualified MCP server candidates for
+  one frozen thread selection before MCP startup.
+- `ToolContributor`: exposes native tool bindings owned by a built-in feature
+  or accepted plugin worker.
 
-Psychevo may add contributor slots only when a new effect cannot be expressed
-through these slots without making an existing slot ambiguous. New slots must
-remain host-owned, typed, scoped, and evidence-friendly.
+Delegated capability sessions are currently owned directly by the Gateway
+broker. A `ThreadLifecycleContributor` is not exposed until that broker and a
+second real owner share a typed lifecycle call site; an identity-only slot
+would provide no usable extensibility.
+
+Contributor inputs and outputs are typed behavior, not marker identities. The
+host invokes contributors in registration order. When an owning module permits
+replacement, a later contribution for the same owned identity wins and the
+replacement remains visible in source-qualified diagnostics.
+
+Psychevo must not publish empty marker traits for hypothetical context, turn,
+config, token, tool-lifecycle, approval, or item effects. A new slot is added
+only when an existing feature owns the effect, the host has a concrete call
+site, and its behavior can be tested through the registry interface. This is a
+pre-release replacement of the earlier shallow marker surface, not a stable
+third-party Rust interface.
 
 ## Composition
 
@@ -95,10 +99,6 @@ Runtime features compose from contributors rather than from source forms.
 
 Examples:
 
-- Skills may install context contributors, turn-input contributors, tool
-  contributors, and lifecycle contributors.
-- Memory may install context contributors, tool contributors, lifecycle
-  contributors, and token-usage contributors.
 - MCP inputs primarily install `McpServerContributor` entries; resulting MCP
   tools still pass through the tool surface.
 - An exported Psychevo MCP server is an interface adapter; it uses runtime

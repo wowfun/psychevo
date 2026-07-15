@@ -21,6 +21,8 @@ use crate::types::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectedCapabilityRoot {
     pub id: String,
+    #[serde(default, skip_serializing_if = "CapabilityRootAuthority::is_local")]
+    pub authority: CapabilityRootAuthority,
     pub location: CapabilityRootLocation,
 }
 
@@ -28,8 +30,42 @@ impl SelectedCapabilityRoot {
     pub fn local(id: impl Into<String>, path: impl Into<std::path::PathBuf>) -> Self {
         Self {
             id: id.into(),
+            authority: CapabilityRootAuthority::Local,
             location: CapabilityRootLocation::Local { path: path.into() },
         }
+    }
+
+    pub fn codex_local(
+        id: impl Into<String>,
+        plugin: impl Into<String>,
+        marketplace: impl Into<String>,
+        path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            authority: CapabilityRootAuthority::Codex {
+                plugin: plugin.into(),
+                marketplace: marketplace.into(),
+            },
+            location: CapabilityRootLocation::Local { path: path.into() },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CapabilityRootAuthority {
+    #[default]
+    Local,
+    Codex {
+        plugin: String,
+        marketplace: String,
+    },
+}
+
+impl CapabilityRootAuthority {
+    fn is_local(&self) -> bool {
+        matches!(self, Self::Local)
     }
 }
 
@@ -112,60 +148,23 @@ pub trait McpServerContributor: Send + Sync {
     fn servers(&self) -> Vec<McpServerInput>;
 }
 
-pub trait ContextContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait ThreadLifecycleContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait TurnLifecycleContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait TurnInputContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait ConfigContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait TokenUsageContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
 pub trait ToolContributor: Send + Sync {
     fn id(&self) -> &str;
     fn tools(&self) -> Vec<RuntimeTool>;
 }
 
-pub trait ToolLifecycleContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait ApprovalReviewContributor: Send + Sync {
-    fn id(&self) -> &str;
-}
-
-pub trait TurnItemContributor: Send + Sync {
-    fn id(&self) -> &str;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionRegistryDiagnostic {
+    pub kind: String,
+    pub contributor_id: String,
+    pub message: String,
 }
 
 #[derive(Default)]
 pub struct ExtensionRegistryBuilder {
     mcp_server_contributors: Vec<Arc<dyn McpServerContributor>>,
-    context_contributors: Vec<Arc<dyn ContextContributor>>,
-    thread_lifecycle_contributors: Vec<Arc<dyn ThreadLifecycleContributor>>,
-    turn_lifecycle_contributors: Vec<Arc<dyn TurnLifecycleContributor>>,
-    turn_input_contributors: Vec<Arc<dyn TurnInputContributor>>,
-    config_contributors: Vec<Arc<dyn ConfigContributor>>,
-    token_usage_contributors: Vec<Arc<dyn TokenUsageContributor>>,
     tool_contributors: Vec<Arc<dyn ToolContributor>>,
-    tool_lifecycle_contributors: Vec<Arc<dyn ToolLifecycleContributor>>,
-    approval_review_contributors: Vec<Arc<dyn ApprovalReviewContributor>>,
-    turn_item_contributors: Vec<Arc<dyn TurnItemContributor>>,
+    diagnostics: Vec<ExtensionRegistryDiagnostic>,
 }
 
 impl ExtensionRegistryBuilder {
@@ -174,65 +173,28 @@ impl ExtensionRegistryBuilder {
     }
 
     pub fn mcp_server_contributor(&mut self, contributor: Arc<dyn McpServerContributor>) {
-        self.mcp_server_contributors.push(contributor);
-    }
-
-    pub fn context_contributor(&mut self, contributor: Arc<dyn ContextContributor>) {
-        self.context_contributors.push(contributor);
-    }
-
-    pub fn thread_lifecycle_contributor(
-        &mut self,
-        contributor: Arc<dyn ThreadLifecycleContributor>,
-    ) {
-        self.thread_lifecycle_contributors.push(contributor);
-    }
-
-    pub fn turn_lifecycle_contributor(&mut self, contributor: Arc<dyn TurnLifecycleContributor>) {
-        self.turn_lifecycle_contributors.push(contributor);
-    }
-
-    pub fn turn_input_contributor(&mut self, contributor: Arc<dyn TurnInputContributor>) {
-        self.turn_input_contributors.push(contributor);
-    }
-
-    pub fn config_contributor(&mut self, contributor: Arc<dyn ConfigContributor>) {
-        self.config_contributors.push(contributor);
-    }
-
-    pub fn token_usage_contributor(&mut self, contributor: Arc<dyn TokenUsageContributor>) {
-        self.token_usage_contributors.push(contributor);
+        replace_contributor(
+            &mut self.mcp_server_contributors,
+            contributor,
+            &mut self.diagnostics,
+            "mcp_server",
+        );
     }
 
     pub fn tool_contributor(&mut self, contributor: Arc<dyn ToolContributor>) {
-        self.tool_contributors.push(contributor);
-    }
-
-    pub fn tool_lifecycle_contributor(&mut self, contributor: Arc<dyn ToolLifecycleContributor>) {
-        self.tool_lifecycle_contributors.push(contributor);
-    }
-
-    pub fn approval_review_contributor(&mut self, contributor: Arc<dyn ApprovalReviewContributor>) {
-        self.approval_review_contributors.push(contributor);
-    }
-
-    pub fn turn_item_contributor(&mut self, contributor: Arc<dyn TurnItemContributor>) {
-        self.turn_item_contributors.push(contributor);
+        replace_contributor(
+            &mut self.tool_contributors,
+            contributor,
+            &mut self.diagnostics,
+            "tool",
+        );
     }
 
     pub fn build(self) -> ExtensionRegistry {
         ExtensionRegistry {
             mcp_server_contributors: self.mcp_server_contributors,
-            context_contributors: self.context_contributors,
-            thread_lifecycle_contributors: self.thread_lifecycle_contributors,
-            turn_lifecycle_contributors: self.turn_lifecycle_contributors,
-            turn_input_contributors: self.turn_input_contributors,
-            config_contributors: self.config_contributors,
-            token_usage_contributors: self.token_usage_contributors,
             tool_contributors: self.tool_contributors,
-            tool_lifecycle_contributors: self.tool_lifecycle_contributors,
-            approval_review_contributors: self.approval_review_contributors,
-            turn_item_contributors: self.turn_item_contributors,
+            diagnostics: self.diagnostics,
         }
     }
 }
@@ -240,16 +202,8 @@ impl ExtensionRegistryBuilder {
 #[derive(Clone, Default)]
 pub struct ExtensionRegistry {
     mcp_server_contributors: Vec<Arc<dyn McpServerContributor>>,
-    context_contributors: Vec<Arc<dyn ContextContributor>>,
-    thread_lifecycle_contributors: Vec<Arc<dyn ThreadLifecycleContributor>>,
-    turn_lifecycle_contributors: Vec<Arc<dyn TurnLifecycleContributor>>,
-    turn_input_contributors: Vec<Arc<dyn TurnInputContributor>>,
-    config_contributors: Vec<Arc<dyn ConfigContributor>>,
-    token_usage_contributors: Vec<Arc<dyn TokenUsageContributor>>,
     tool_contributors: Vec<Arc<dyn ToolContributor>>,
-    tool_lifecycle_contributors: Vec<Arc<dyn ToolLifecycleContributor>>,
-    approval_review_contributors: Vec<Arc<dyn ApprovalReviewContributor>>,
-    turn_item_contributors: Vec<Arc<dyn TurnItemContributor>>,
+    diagnostics: Vec<ExtensionRegistryDiagnostic>,
 }
 
 impl ExtensionRegistry {
@@ -257,44 +211,12 @@ impl ExtensionRegistry {
         &self.mcp_server_contributors
     }
 
-    pub fn context_contributors(&self) -> &[Arc<dyn ContextContributor>] {
-        &self.context_contributors
-    }
-
-    pub fn thread_lifecycle_contributors(&self) -> &[Arc<dyn ThreadLifecycleContributor>] {
-        &self.thread_lifecycle_contributors
-    }
-
-    pub fn turn_lifecycle_contributors(&self) -> &[Arc<dyn TurnLifecycleContributor>] {
-        &self.turn_lifecycle_contributors
-    }
-
-    pub fn turn_input_contributors(&self) -> &[Arc<dyn TurnInputContributor>] {
-        &self.turn_input_contributors
-    }
-
-    pub fn config_contributors(&self) -> &[Arc<dyn ConfigContributor>] {
-        &self.config_contributors
-    }
-
-    pub fn token_usage_contributors(&self) -> &[Arc<dyn TokenUsageContributor>] {
-        &self.token_usage_contributors
-    }
-
     pub fn tool_contributors(&self) -> &[Arc<dyn ToolContributor>] {
         &self.tool_contributors
     }
 
-    pub fn tool_lifecycle_contributors(&self) -> &[Arc<dyn ToolLifecycleContributor>] {
-        &self.tool_lifecycle_contributors
-    }
-
-    pub fn approval_review_contributors(&self) -> &[Arc<dyn ApprovalReviewContributor>] {
-        &self.approval_review_contributors
-    }
-
-    pub fn turn_item_contributors(&self) -> &[Arc<dyn TurnItemContributor>] {
-        &self.turn_item_contributors
+    pub fn diagnostics(&self) -> &[ExtensionRegistryDiagnostic] {
+        &self.diagnostics
     }
 
     pub(crate) fn mcp_servers(&self) -> Vec<McpServerInput> {
@@ -309,6 +231,44 @@ impl ExtensionRegistry {
             .iter()
             .flat_map(|contributor| contributor.tools())
             .collect()
+    }
+}
+
+trait IdentifiedContributor {
+    fn contributor_id(&self) -> &str;
+}
+
+impl IdentifiedContributor for dyn McpServerContributor {
+    fn contributor_id(&self) -> &str {
+        self.id()
+    }
+}
+
+impl IdentifiedContributor for dyn ToolContributor {
+    fn contributor_id(&self) -> &str {
+        self.id()
+    }
+}
+
+fn replace_contributor<T: ?Sized + IdentifiedContributor>(
+    contributors: &mut Vec<Arc<T>>,
+    contributor: Arc<T>,
+    diagnostics: &mut Vec<ExtensionRegistryDiagnostic>,
+    kind: &str,
+) {
+    if let Some(index) = contributors
+        .iter()
+        .position(|existing| existing.contributor_id() == contributor.contributor_id())
+    {
+        let id = contributor.contributor_id().to_string();
+        contributors[index] = contributor;
+        diagnostics.push(ExtensionRegistryDiagnostic {
+            kind: "replacement".to_string(),
+            contributor_id: id.clone(),
+            message: format!("later {kind} contributor `{id}` replaced the earlier registration"),
+        });
+    } else {
+        contributors.push(contributor);
     }
 }
 
@@ -576,13 +536,9 @@ pub(crate) fn selected_root_contributions(
 }
 
 fn has_recognized_manifest(root: &Path) -> bool {
-    [
-        ".psychevo-plugin/plugin.json",
-        ".codex-plugin/plugin.json",
-        ".claude-plugin/plugin.json",
-    ]
-    .iter()
-    .any(|path| root.join(path).is_file())
+    [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"]
+        .iter()
+        .any(|path| root.join(path).is_file())
 }
 
 pub(crate) fn registry_from_static_inputs(
@@ -666,6 +622,26 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     struct Marker(&'static str);
 
+    struct TestMcpContributor {
+        id: &'static str,
+        server: &'static str,
+    }
+
+    impl McpServerContributor for TestMcpContributor {
+        fn id(&self) -> &str {
+            self.id
+        }
+
+        fn servers(&self) -> Vec<McpServerInput> {
+            vec![McpServerInput::new(
+                self.server,
+                crate::types::McpTransportInput::Unsupported {
+                    kind: "test".to_string(),
+                },
+            )]
+        }
+    }
+
     #[test]
     fn extension_data_stores_values_by_type() {
         let mut init = ExtensionDataInit::default();
@@ -680,21 +656,13 @@ mod tests {
     #[test]
     fn registry_preserves_contributor_order() {
         let mut builder = ExtensionRegistryBuilder::new();
-        builder.mcp_server_contributor(Arc::new(StaticMcpServerContributor {
-            mcp_servers: vec![McpServerInput::new(
-                "a",
-                crate::types::McpTransportInput::Unsupported {
-                    kind: "test".to_string(),
-                },
-            )],
+        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
+            id: "a",
+            server: "a",
         }));
-        builder.mcp_server_contributor(Arc::new(StaticMcpServerContributor {
-            mcp_servers: vec![McpServerInput::new(
-                "b",
-                crate::types::McpTransportInput::Unsupported {
-                    kind: "test".to_string(),
-                },
-            )],
+        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
+            id: "b",
+            server: "b",
         }));
 
         let names = builder
@@ -705,6 +673,33 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn registry_replaces_duplicate_contributor_id_in_place_with_diagnostic() {
+        let mut builder = ExtensionRegistryBuilder::new();
+        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
+            id: "package:review",
+            server: "old",
+        }));
+        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
+            id: "package:review",
+            server: "new",
+        }));
+
+        let registry = builder.build();
+
+        assert_eq!(registry.mcp_servers()[0].name, "new");
+        assert_eq!(registry.mcp_server_contributors().len(), 1);
+        assert_eq!(
+            registry.diagnostics(),
+            &[ExtensionRegistryDiagnostic {
+                kind: "replacement".to_string(),
+                contributor_id: "package:review".to_string(),
+                message: "later mcp_server contributor `package:review` replaced the earlier registration"
+                    .to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -767,7 +762,7 @@ mod tests {
     fn selected_root_manifest_contributes_declarative_resources_only() {
         let temp = tempfile::tempdir().expect("temp");
         let root = temp.path().join("plugin");
-        fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
+        fs::create_dir_all(root.join(".codex-plugin")).expect("manifest dir");
         fs::create_dir_all(root.join("skills/cleanup")).expect("skill dir");
         fs::create_dir_all(root.join("agents")).expect("agent dir");
         fs::write(
@@ -776,7 +771,7 @@ mod tests {
         )
         .expect("agent");
         fs::write(
-            root.join(".psychevo-plugin/plugin.json"),
+            root.join(".codex-plugin/plugin.json"),
             r#"{
               "name": "cleanup",
               "version": "1.0.0",
@@ -787,17 +782,21 @@ mod tests {
               },
               "hooks": {
                 "PostToolUse": [{"hooks": [{"type": "command", "command": "echo ok"}]}]
-              },
-              "psychevo": {
-                "agents": ["./agents"],
-                "toolsets": {
-                  "repo-tools": { "tools": ["mcp__repo__search"] }
-                },
-                "runtime": {"worker": {"command": "./worker.py"}}
               }
             }"#,
         )
         .expect("manifest");
+        fs::write(
+            root.join("psychevo.plugin.json"),
+            r#"{
+              "agents": ["./agents"],
+              "toolsets": {
+                "repo-tools": { "tools": ["mcp__repo__search"] }
+              },
+              "runtime": {"worker": {"command": "./worker.py"}}
+            }"#,
+        )
+        .expect("overlay");
 
         let contributions = selected_root_contributions(
             temp.path(),
@@ -830,10 +829,10 @@ mod tests {
         let home = temp.path().join("home");
         let root = temp.path().join("plugin");
         fs::create_dir_all(&home).expect("home");
-        fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
+        fs::create_dir_all(root.join(".codex-plugin")).expect("manifest dir");
         fs::create_dir_all(root.join("skills/cleanup")).expect("skill dir");
         fs::write(
-            root.join(".psychevo-plugin/plugin.json"),
+            root.join(".codex-plugin/plugin.json"),
             r#"{
               "name": "cleanup",
               "version": "1.0.0",
@@ -903,15 +902,15 @@ mod tests {
     fn selected_root_with_malformed_manifest_is_omitted() {
         let temp = tempfile::tempdir().expect("temp");
         let root = temp.path().join("plugin");
-        fs::create_dir_all(root.join(".psychevo-plugin")).expect("native manifest dir");
         fs::create_dir_all(root.join(".codex-plugin")).expect("codex manifest dir");
+        fs::create_dir_all(root.join(".claude-plugin")).expect("claude manifest dir");
         fs::create_dir_all(root.join("skills")).expect("skill dir");
-        fs::write(root.join(".psychevo-plugin/plugin.json"), "{").expect("native manifest");
+        fs::write(root.join(".codex-plugin/plugin.json"), "{").expect("codex manifest");
         fs::write(
-            root.join(".codex-plugin/plugin.json"),
+            root.join(".claude-plugin/plugin.json"),
             r#"{"name":"fallback","version":"1.0.0","description":"fallback","skills":["./skills"]}"#,
         )
-        .expect("codex manifest");
+        .expect("claude manifest");
 
         let contributions = selected_root_contributions(
             temp.path(),
@@ -925,7 +924,7 @@ mod tests {
         assert!(
             contributions.warnings[0]
                 .message
-                .contains(".psychevo-plugin/plugin.json")
+                .contains(".codex-plugin/plugin.json")
         );
     }
 }

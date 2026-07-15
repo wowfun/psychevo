@@ -533,6 +533,10 @@ fn record_value(
     let readiness = readiness_status(record, enabled, &trust);
     json!({
         "name": record.name,
+        "authority": {
+            "kind": "psychevo",
+            "selector": canonical_record_selector(record),
+        },
         "selector": canonical_record_selector(record),
         "scope_name": plugin_scope_name(record.scope),
         "enablement_scope_name": plugin_scope_name(policy_scope),
@@ -550,6 +554,8 @@ fn record_value(
         "data_root": record.data_root,
         "manifest_path": record.manifest_path,
         "manifest_kind": record.manifest_kind.as_str(),
+        "compatibility_profile": record.compatibility_profile,
+        "component_statuses": record.component_statuses,
         "package_fingerprint": current_fingerprint(record).unwrap_or_else(|| record.package_fingerprint.clone()),
         "adapter_mode": record.adapter_mode.as_str(),
         "manifest_resources": record.manifest_resources,
@@ -567,6 +573,9 @@ fn manifest_value(manifest: &LoadedPluginManifest) -> Value {
         "name": manifest.name,
         "version": manifest.version,
         "description": manifest.description,
+        "keywords": manifest.keywords,
+        "compatibility_profile": manifest.compatibility_profile,
+        "component_statuses": manifest.component_statuses,
         "path": manifest.manifest_path,
         "kind": manifest.kind.as_str(),
         "supported_fields": manifest.supported_fields.iter().cloned().collect::<Vec<_>>(),
@@ -577,6 +586,7 @@ fn manifest_value(manifest: &LoadedPluginManifest) -> Value {
         "skill_roots": manifest.skill_roots,
         "agent_roots": manifest.agent_roots,
         "hooks": manifest.hooks.is_some(),
+        "app_resource": manifest.app_resource,
         "worker": manifest.worker,
         "interface": manifest.interface,
         "diagnostics": manifest.diagnostics,

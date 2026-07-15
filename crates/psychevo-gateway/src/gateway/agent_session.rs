@@ -816,11 +816,11 @@ fn lower_native_runtime_options(options: &mut RunOptions) -> psychevo_runtime::R
 }
 
 impl AttachedAgent {
-    async fn transact(
+    fn transact(
         &self,
         command: AgentSessionCommand,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
-        match command {
+    ) -> BoxFuture<'_, psychevo_runtime::Result<AgentSessionResponse>> {
+        Box::pin(async move { match command {
             AgentSessionCommand::Inspect(session) => self.inspect(session).await,
             AgentSessionCommand::SetControl {
                 session,
@@ -840,7 +840,7 @@ impl AttachedAgent {
             } => self.fork_session(source, fork_local_session_id).await,
             AgentSessionCommand::CloseSession(session) => self.close_session(session).await,
             AgentSessionCommand::DeleteSession(session) => self.delete_session(session).await,
-        }
+        } })
     }
 
     fn unsupported_lifecycle(

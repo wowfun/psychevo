@@ -127,7 +127,8 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         json!({
             "scope": wire_scope.clone(),
             "candidateId": candidate_id,
-            "targetId": target_id
+            "targetId": target_id,
+            "archived": true
         }),
     )
     .await;
@@ -178,7 +179,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         &state,
         &tx,
         "thread/list",
-        json!({"cwd": state.inner.cwd}),
+        json!({"cwd": state.inner.cwd, "archived": true}),
     )
     .await;
     let imported_summary = sessions_after_import["sessions"]
@@ -187,6 +188,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         .iter()
         .find(|session| session["id"] == imported_thread_id)
         .expect("published imported Thread summary");
+    assert!(imported_summary["archivedAtMs"].is_number());
     assert_eq!(
         imported_summary["title"],
         "Listed fixture",
@@ -205,14 +207,6 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         Some("listed-native")
     );
 
-    let archived = rpc_test_request(
-        &state,
-        &tx,
-        "thread/archive",
-        json!({"threadId": imported_thread_id}),
-    )
-    .await;
-    assert!(archived["session"]["archivedAtMs"].is_number());
     let restored = rpc_test_request(
         &state,
         &tx,
@@ -221,6 +215,21 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
     )
     .await;
     assert!(restored["session"]["archivedAtMs"].is_null());
+    let archived = rpc_test_request(
+        &state,
+        &tx,
+        "thread/archive",
+        json!({"threadId": imported_thread_id}),
+    )
+    .await;
+    assert!(archived["session"]["archivedAtMs"].is_number());
+    rpc_test_request(
+        &state,
+        &tx,
+        "thread/restore",
+        json!({"threadId": imported_thread_id}),
+    )
+    .await;
 
     let forked = rpc_test_request(
         &state,

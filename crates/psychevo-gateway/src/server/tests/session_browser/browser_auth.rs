@@ -232,13 +232,57 @@ root = "~/workspaces"
     assert_eq!(created["cwd"], cwd_string);
     assert_eq!(created["scope"]["cwd"].as_str(), Some(cwd_string.as_str()));
 
+    let unrestricted_parent = temp.path().join("outside-configured-root");
+    std::fs::create_dir_all(&unrestricted_parent).expect("unrestricted parent");
+    let unrestricted_parent = unrestricted_parent
+        .canonicalize()
+        .expect("canonical unrestricted parent");
+    let outside_created = handle_rpc(
+        state.clone(),
+        auth.clone(),
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(2)),
+            method: "workspace/create".to_string(),
+            params: Some(json!({
+                "name": "Existing-parent-child",
+                "parent": unrestricted_parent
+            })),
+        },
+    )
+    .await
+    .expect("workspace/create beneath an explicit unrestricted parent");
+    let outside_cwd = unrestricted_parent
+        .join("Existing-parent-child")
+        .canonicalize()
+        .expect("created outside cwd");
+    assert_eq!(outside_created["cwd"].as_str(), Some(outside_cwd.to_string_lossy().as_ref()));
+
+    let missing_parent = temp.path().join("missing-parent");
+    let missing_error = handle_rpc(
+        state.clone(),
+        auth.clone(),
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(3)),
+            method: "workspace/create".to_string(),
+            params: Some(json!({ "name": "child", "parent": missing_parent })),
+        },
+    )
+    .await
+    .expect_err("an explicit parent must already exist");
+    assert!(!missing_error.to_string().is_empty());
+    assert!(!missing_parent.exists());
+
     let settings = handle_rpc(
         state,
         auth,
         tx,
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!(2)),
+            id: Some(json!(4)),
             method: "settings/read".to_string(),
             params: Some(json!({ "cwd": cwd_string.clone() })),
         },

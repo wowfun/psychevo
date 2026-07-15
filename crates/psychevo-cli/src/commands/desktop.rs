@@ -1,10 +1,14 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use anyhow::{Context, Result, anyhow, bail};
-use psychevo_runtime::canonicalize_cwd;
+use anyhow::{Context, Result, anyhow};
+use psychevo_runtime::{
+    ExecutableResolveOptions, HostPlatform, canonicalize_cwd, resolve_executable_path,
+    tokio_host_process_command,
+};
 
 use crate::args::DesktopArgs;
 use crate::commands::serve::source_checkout_roots;
@@ -14,26 +18,31 @@ use crate::profiles::{PROFILE_ENV, PROFILE_HOME_ENV};
 pub(crate) const DESKTOP_CWD_ENV: &str = "PSYCHEVO_DESKTOP_CWD";
 pub(crate) const PEVO_BIN_ENV: &str = "PSYCHEVO_PEVO_BIN";
 const LIBGL_ALWAYS_SOFTWARE_ENV: &str = "LIBGL_ALWAYS_SOFTWARE";
+const PNPM_RUNTIME_ENV_DEFAULTS: [(&str, &str); 4] = [
+    ("COREPACK_ENABLE_PROJECT_SPEC", "0"),
+    ("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"),
+    ("COREPACK_ENABLE_STRICT", "0"),
+    ("pnpm_config_pm_on_fail", "warn"),
+];
 
-pub(crate) fn run_desktop_command(args: DesktopArgs) -> Result<ExitCode> {
+pub(crate) async fn run_desktop_command(args: DesktopArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir().context("resolve current directory")?;
     let desktop_cwd = resolve_desktop_cwd(args.dir.as_deref(), &env_map, &cwd)?;
     let source_root = desktop_source_root(&cwd)?;
     let pevo_bin = env::current_exe().context("resolve current pevo executable")?;
-    ensure_pnpm_available(&env_map)?;
-
-    let mut command = Command::new("pnpm");
-    command
-        .args(["--filter", "@psychevo/desktop", "tauri:dev"])
-        .current_dir(&source_root)
-        .env(DESKTOP_CWD_ENV, &desktop_cwd);
-    apply_pevo_bin_env(&mut command, &pevo_bin);
-    apply_profile_env(&mut command, &env_map);
-    apply_desktop_runtime_env(&mut command, &env_map);
+    let mut command = desktop_command_for_platform(
+        &source_root,
+        &desktop_cwd,
+        &pevo_bin,
+        &env_map,
+        HostPlatform::current(),
+    )?;
+    apply_desktop_runtime_env(command.as_std_mut(), &env_map);
 
     let status = command
         .status()
+        .await
         .with_context(|| "run `pnpm --filter @psychevo/desktop tauri:dev`")?;
     Ok(exit_code_from_status(status))
 }
@@ -59,6 +68,44 @@ fn is_desktop_source_root(root: &Path) -> bool {
             .is_file()
 }
 
+fn desktop_command_for_platform(
+    source_root: &Path,
+    desktop_cwd: &Path,
+    pevo_bin: &Path,
+    env_map: &BTreeMap<String, String>,
+    platform: HostPlatform,
+) -> Result<tokio::process::Command> {
+    let pnpm = resolve_executable_path(
+        "pnpm",
+        source_root,
+        &ExecutableResolveOptions {
+            platform,
+            env: env_map,
+        },
+    )
+    .ok_or_else(|| anyhow!("pnpm not found; install pnpm before running `pevo desktop`"))?;
+    let args = ["--filter", "@psychevo/desktop", "tauri:dev"].map(OsString::from);
+    let mut command = tokio_host_process_command(&pnpm, &args, platform, env_map)?;
+    {
+        let command = command.as_std_mut();
+        command
+            .current_dir(source_root)
+            .env(DESKTOP_CWD_ENV, desktop_cwd);
+        apply_pevo_bin_env(command, pevo_bin);
+        apply_profile_env(command, env_map);
+        apply_pnpm_runtime_env(command, env_map);
+    }
+    Ok(command)
+}
+
+fn apply_pnpm_runtime_env(command: &mut Command, env_map: &BTreeMap<String, String>) {
+    for (name, value) in PNPM_RUNTIME_ENV_DEFAULTS {
+        if psychevo_runtime::env_value_case_insensitive(env_map, name).is_none() {
+            command.env(name, value);
+        }
+    }
+}
+
 fn resolve_desktop_cwd(
     dir: Option<&Path>,
     env_map: &BTreeMap<String, String>,
@@ -69,35 +116,6 @@ fn resolve_desktop_cwd(
         None => cwd.to_path_buf(),
     };
     Ok(canonicalize_cwd(&path)?)
-}
-
-fn ensure_pnpm_available(env_map: &BTreeMap<String, String>) -> Result<()> {
-    if command_exists_in_env("pnpm", env_map) {
-        return Ok(());
-    }
-    bail!("pnpm not found; install pnpm before running `pevo desktop`");
-}
-
-fn command_exists_in_env(name: &str, env_map: &BTreeMap<String, String>) -> bool {
-    let Some(path_env) = env_value("PATH", env_map) else {
-        return false;
-    };
-    env::split_paths(&path_env).any(|dir| command_candidate_exists(&dir, name, env_map))
-}
-
-fn command_candidate_exists(dir: &Path, name: &str, env_map: &BTreeMap<String, String>) -> bool {
-    if dir.join(name).is_file() {
-        return true;
-    }
-    if !cfg!(windows) {
-        return false;
-    }
-    let extensions = env_value("PATHEXT", env_map).unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
-    extensions
-        .split(';')
-        .map(str::trim)
-        .filter(|extension| !extension.is_empty())
-        .any(|extension| dir.join(format!("{name}{extension}")).is_file())
 }
 
 fn apply_profile_env(command: &mut Command, env_map: &BTreeMap<String, String>) {
@@ -236,16 +254,187 @@ mod tests {
     }
 
     #[test]
-    fn command_exists_in_env_checks_path() {
+    fn desktop_command_reports_missing_pnpm() {
         let temp = tempdir().expect("temp");
-        let bin = temp.path().join("bin");
-        fs::create_dir_all(&bin).expect("bin");
-        fs::write(bin.join("pnpm"), "").expect("pnpm");
-        let mut env_map = BTreeMap::new();
-        env_map.insert("PATH".to_string(), bin.display().to_string());
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        let env_map = BTreeMap::from([(
+            "PATH".to_string(),
+            temp.path().join("missing").display().to_string(),
+        )]);
 
-        assert!(command_exists_in_env("pnpm", &env_map));
-        assert!(!command_exists_in_env("missing", &env_map));
+        let error = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new("/tmp/pevo"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Posix,
+        )
+        .expect_err("missing pnpm");
+
+        assert_eq!(
+            error.to_string(),
+            "pnpm not found; install pnpm before running `pevo desktop`"
+        );
+    }
+
+    #[test]
+    fn desktop_command_launches_windows_pnpm_shim_from_source_root() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        let pnpm = bin.join("pnpm.cmd");
+        fs::write(&pnpm, "@echo off\n").expect("pnpm shim");
+        let env_map = BTreeMap::from([
+            ("PATH".to_string(), bin.display().to_string()),
+            ("PATHEXT".to_string(), ".CMD".to_string()),
+            (
+                "COMSPEC".to_string(),
+                r"C:\Windows\System32\cmd.exe".to_string(),
+            ),
+        ]);
+
+        let command = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new(r"C:\Tools\pevo.exe"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Windows,
+        )
+        .expect("desktop command");
+        let command = command.as_std();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            command.get_program(),
+            std::ffi::OsStr::new(r"C:\Windows\System32\cmd.exe")
+        );
+        assert_eq!(&args[..4], ["/D", "/S", "/V:OFF", "/C"]);
+        #[cfg(not(windows))]
+        {
+            assert!(args[4].contains(&pnpm.display().to_string()), "{args:?}");
+            assert!(args[4].contains("\"--filter\""), "{args:?}");
+            assert!(args[4].contains("\"@psychevo/desktop\""), "{args:?}");
+            assert!(args[4].contains("\"tauri:dev\""), "{args:?}");
+        }
+        assert_eq!(command.get_current_dir(), Some(source_root.as_path()));
+    }
+
+    #[test]
+    fn desktop_command_launches_posix_pnpm_directly() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        let pnpm = bin.join("pnpm");
+        fs::write(&pnpm, "#!/bin/sh\n").expect("pnpm");
+        let env_map = BTreeMap::from([("PATH".to_string(), bin.display().to_string())]);
+
+        let command = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new("/tmp/pevo"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Posix,
+        )
+        .expect("desktop command");
+        let command = command.as_std();
+
+        assert_eq!(command.get_program(), pnpm.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["--filter", "@psychevo/desktop", "tauri:dev"]
+                .map(std::ffi::OsStr::new)
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn desktop_command_defaults_corepack_to_installed_pnpm() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("pnpm"), "#!/bin/sh\n").expect("pnpm");
+        let env_map = BTreeMap::from([("PATH".to_string(), bin.display().to_string())]);
+
+        let command = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new("/tmp/pevo"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Posix,
+        )
+        .expect("desktop command");
+        let command = command.as_std();
+
+        for (name, expected) in [
+            ("COREPACK_ENABLE_PROJECT_SPEC", "0"),
+            ("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0"),
+            ("COREPACK_ENABLE_STRICT", "0"),
+            ("pnpm_config_pm_on_fail", "warn"),
+        ] {
+            assert_eq!(
+                command_env_value(command, name).as_deref(),
+                Some(expected),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_command_preserves_explicit_corepack_settings() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("pnpm"), "#!/bin/sh\n").expect("pnpm");
+        let env_map = BTreeMap::from([
+            ("PATH".to_string(), bin.display().to_string()),
+            ("COREPACK_ENABLE_PROJECT_SPEC".to_string(), "1".to_string()),
+            (
+                "COREPACK_ENABLE_DOWNLOAD_PROMPT".to_string(),
+                "1".to_string(),
+            ),
+            ("COREPACK_ENABLE_STRICT".to_string(), "1".to_string()),
+            ("pnpm_config_pm_on_fail".to_string(), "error".to_string()),
+        ]);
+
+        let command = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new("/tmp/pevo"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Posix,
+        )
+        .expect("desktop command");
+        let command = command.as_std();
+
+        for (name, _) in PNPM_RUNTIME_ENV_DEFAULTS {
+            assert_eq!(
+                command_env_value(command, name),
+                None,
+                "explicit {name} must remain inherited"
+            );
+        }
     }
 
     #[test]

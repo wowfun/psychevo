@@ -8,19 +8,23 @@ pub(crate) fn plugin_cmd(test_home: &Path, psychevo_home: &Path, cwd: &Path) -> 
 }
 
 pub(crate) fn write_cli_plugin(root: &Path) {
-    std::fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
+    std::fs::create_dir_all(root.join(".codex-plugin")).expect("manifest dir");
     std::fs::create_dir_all(root.join("skills/cleanup")).expect("skill dir");
     std::fs::write(
-        root.join(".psychevo-plugin/plugin.json"),
+        root.join(".codex-plugin/plugin.json"),
         r#"{
           "name": "disk-cleanup",
           "version": "1.0.0",
           "description": "Track and clean temporary files",
-          "skills": ["./skills"],
-          "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
+          "skills": ["./skills"]
         }"#,
     )
     .expect("manifest");
+    std::fs::write(
+        root.join("psychevo.plugin.json"),
+        r#"{"runtime":{"worker":{"command":"./worker.py"}}}"#,
+    )
+    .expect("overlay");
     std::fs::write(
         root.join("skills/cleanup/SKILL.md"),
         "---\nname: cleanup\ndescription: \"Clean temporary files\"\n---\n\nUse cleanup_status before cleanup.\n",
@@ -56,11 +60,11 @@ for line in sys.stdin:
 }
 
 fn write_display_plugin(root: &Path) {
-    std::fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
+    std::fs::create_dir_all(root.join(".codex-plugin")).expect("manifest dir");
     std::fs::create_dir_all(root.join("assets")).expect("assets");
     std::fs::write(root.join("assets/icon.png"), "icon").expect("icon");
     std::fs::write(
-        root.join(".psychevo-plugin/plugin.json"),
+        root.join(".codex-plugin/plugin.json"),
         r#"{
           "name": "display-plugin",
           "version": "1.0.0",

@@ -49,8 +49,7 @@ fn schema_group_module(name: &str) -> &'static str {
             | "TeamStatusResult"
             | "TeamRunView"
             | "MissionRunView"
-    )
-        || name.starts_with("AgentRun")
+    ) || name.starts_with("AgentRun")
         || name == "AgentStatusControlView"
     {
         return "gateway/agents/runs";
@@ -90,10 +89,7 @@ fn schema_group_module(name: &str) -> &'static str {
     ) {
         return "automations/views";
     }
-    if matches!(
-        name,
-        "AutomationListResult" | "AutomationDraftResult"
-    ) {
+    if matches!(name, "AutomationListResult" | "AutomationDraftResult") {
         return "automations/list-results";
     }
     if matches!(
@@ -212,25 +208,27 @@ fn schema_group_module(name: &str) -> &'static str {
     }
     if matches!(
         name,
-        "RunnableTargetInput"
-            | "TurnStartParams"
-            | "TurnStartResult"
+        "RunnableTargetInput" | "TurnStartParams" | "TurnStartResult"
     ) {
         return "turn/control";
     }
     if name.starts_with("Turn") {
         return "turn/result";
     }
-    if name.starts_with("Permission")
-        || name.starts_with("Clarify")
-        || name.starts_with("Pending")
+    if name.starts_with("Permission") || name.starts_with("Clarify") || name.starts_with("Pending")
     {
         return "interaction";
     }
-    if name.starts_with("Settings") || name.starts_with("Workbench") || name.starts_with("WebSearchSettings") {
+    if name.starts_with("Settings")
+        || name.starts_with("Workbench")
+        || name.starts_with("WebSearchSettings")
+    {
         return "settings";
     }
-    if matches!(name, "InitializeParams" | "InitializeResult" | "GatewayProfileView" | "ReadyzResult") {
+    if matches!(
+        name,
+        "InitializeParams" | "InitializeResult" | "GatewayProfileView" | "ReadyzResult"
+    ) {
         return "system/init";
     }
     if name.starts_with("Slash") {
@@ -261,6 +259,8 @@ fn schema_group_module(name: &str) -> &'static str {
         return "usage";
     }
     if name.starts_with("WorkspaceFile")
+        || name.starts_with("WorkspaceFolder")
+        || name.starts_with("WorkspaceGit")
         || matches!(
             name,
             "WorkspaceFilesParams"

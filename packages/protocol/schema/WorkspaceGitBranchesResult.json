@@ -1,10 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
-    "name": {
-      "type": "string"
+    "branches": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
-    "parent": {
+    "current": {
       "default": null,
       "type": [
         "string",
@@ -13,8 +16,8 @@
     }
   },
   "required": [
-    "name"
+    "branches"
   ],
-  "title": "WorkspaceCreateParams",
+  "title": "WorkspaceGitBranchesResult",
   "type": "object"
 }

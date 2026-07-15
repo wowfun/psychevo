@@ -195,8 +195,8 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
         AgentSource::Project,
     )?;
 
-    for dir in ancestor_claude_agent_dirs(&options.cwd) {
-        load_agent_dir(&mut catalog, &mut winners, &dir, AgentSource::ClaudeProject)?;
+    for (dir, source) in ancestor_compatible_agent_dirs(&options.cwd) {
+        load_agent_dir(&mut catalog, &mut winners, &dir, source)?;
     }
 
     load_agent_dir(
@@ -207,6 +207,12 @@ pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> 
     )?;
 
     if let Ok(home) = home_path(&options.env) {
+        load_agent_dir(
+            &mut catalog,
+            &mut winners,
+            &home.join(".agents").join("agents"),
+            AgentSource::AgentsGlobal,
+        )?;
         load_agent_dir(
             &mut catalog,
             &mut winners,

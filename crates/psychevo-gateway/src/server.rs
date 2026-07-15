@@ -100,6 +100,7 @@ mod agents;
 mod automations;
 mod channel_runtime;
 mod channels;
+mod codex_capability_broker;
 mod commands;
 mod completion;
 mod runtime_profiles;
@@ -180,6 +181,7 @@ use workspace::workspace_dir_name;
 use workspace::{
     WorkspaceReviewState, workspace_create_value, workspace_diff_result, workspace_diff_value,
     workspace_file_read_value, workspace_file_write_value, workspace_files_value,
+    workspace_folder_list_value, workspace_git_branches_value, workspace_git_checkout_value,
 };
 
 include!("server/binding.rs");

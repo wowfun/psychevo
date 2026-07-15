@@ -411,10 +411,16 @@ pub(crate) fn project_agent_wins_over_built_in() {
 
 #[test]
 pub(crate) fn agent_source_display_label_groups_raw_sources() {
-    for source in ["project", "claude_project"] {
+    for source in ["project", "agents_project", "claude_project"] {
         assert_eq!(agent_source_display_label(Some(source)), Some("Project"));
     }
-    for source in ["explicit", "global", "claude_global", "generated"] {
+    for source in [
+        "explicit",
+        "global",
+        "agents_global",
+        "claude_global",
+        "generated",
+    ] {
         assert_eq!(agent_source_display_label(Some(source)), Some("User"));
     }
     for source in ["built_in", "builtin", "system", "core"] {
@@ -423,6 +429,114 @@ pub(crate) fn agent_source_display_label_groups_raw_sources() {
     assert_eq!(agent_source_display_label(Some("custom_source")), None);
     assert_eq!(agent_source_display_label(Some("")), None);
     assert_eq!(agent_source_display_label(None), None);
+}
+
+#[test]
+pub(crate) fn agents_compatible_directories_follow_proximity_and_source_precedence() {
+    let tmp = TempDir::new().expect("tmp");
+    let profile_home = tmp.path().join("profile");
+    let user_home = tmp.path().join("user");
+    let repo = tmp.path().join("repo");
+    let cwd = repo.join("packages/app");
+    fs::create_dir_all(repo.join(".git")).expect("git root");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let write_agent = |dir: &Path, name: &str, description: &str| {
+        fs::create_dir_all(dir).expect("agent dir");
+        fs::write(
+            dir.join(format!("{name}.md")),
+            format!("---\ndescription: {description}\n---\n{description}.\n"),
+        )
+        .expect("agent");
+    };
+
+    write_agent(
+        &cwd.join(".psychevo/agents"),
+        "native-winner",
+        "Psychevo native",
+    );
+    write_agent(
+        &cwd.join(".agents/agents"),
+        "native-winner",
+        "Agents compatibility",
+    );
+    write_agent(
+        &cwd.join(".agents/agents"),
+        "nearest-winner",
+        "Nearest agents",
+    );
+    write_agent(
+        &cwd.join(".claude/agents"),
+        "nearest-winner",
+        "Nearest Claude",
+    );
+    write_agent(
+        &repo.join(".agents/agents"),
+        "nearest-winner",
+        "Root agents",
+    );
+    write_agent(
+        &repo.join(".agents/agents/nested"),
+        "root-only",
+        "Root recursive agents",
+    );
+    write_agent(
+        &profile_home.join("agents"),
+        "profile-winner",
+        "Profile native",
+    );
+    write_agent(
+        &user_home.join(".agents/agents"),
+        "profile-winner",
+        "User agents",
+    );
+    write_agent(
+        &user_home.join(".agents/agents"),
+        "user-winner",
+        "User agents",
+    );
+    write_agent(
+        &user_home.join(".claude/agents"),
+        "user-winner",
+        "User Claude",
+    );
+
+    let catalog = discover_agents(&AgentDiscoveryOptions {
+        home: profile_home,
+        cwd,
+        env: env(&user_home),
+        explicit_inputs: Vec::new(),
+        no_agents: false,
+    })
+    .expect("catalog");
+    let active = |name: &str| {
+        catalog
+            .agents
+            .iter()
+            .find(|agent| agent.name == name)
+            .unwrap_or_else(|| panic!("missing active agent {name}"))
+    };
+
+    assert_eq!(active("native-winner").source, AgentSource::Project);
+    assert_eq!(active("nearest-winner").source, AgentSource::AgentsProject);
+    assert_eq!(active("nearest-winner").description, "Nearest agents");
+    assert_eq!(active("root-only").source, AgentSource::AgentsProject);
+    assert_eq!(active("profile-winner").source, AgentSource::Global);
+    assert_eq!(active("user-winner").source, AgentSource::AgentsGlobal);
+    assert!(
+        catalog
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == "collision")
+    );
+    let value = list_agents_value(&catalog);
+    let user = value["agents"]
+        .as_array()
+        .expect("agents")
+        .iter()
+        .find(|agent| agent["name"] == "user-winner")
+        .expect("user source projection");
+    assert_eq!(user["source"], "agents_global");
+    assert_eq!(user["source_label"], "User");
 }
 
 #[test]

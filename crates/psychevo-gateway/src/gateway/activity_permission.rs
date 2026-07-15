@@ -345,6 +345,13 @@ impl ThreadTurnRequest {
         self.runtime_tools = tools;
     }
 
+    pub(crate) fn extend_runtime_tools(
+        &mut self,
+        tools: impl IntoIterator<Item = psychevo_runtime::RuntimeTool>,
+    ) {
+        self.runtime_tools.extend(tools);
+    }
+
     fn into_queue_request(self, state: StateRuntime) -> SendTurnRequest {
         let policy = self.policy;
         SendTurnRequest {

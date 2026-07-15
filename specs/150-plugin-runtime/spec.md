@@ -21,11 +21,11 @@ enablement, diagnostics, static declarations, and Psychevo worker execution.
   disable, inspect, trust, and catalog operations
 
 Out of scope:
-- hosted marketplaces, signatures, review workflows, ratings, accounts, or graphical stores
+- reimplementation of hosted marketplace accounts, reviews, ratings, or sharing
 - in-process plugin ABI or unbounded host facades
 - worker hot reload, long-lived health checks, streaming worker diagnostics, or whole-process sandboxing
 - provider credential storage inside plugin packages
-- Codex app runtime execution, Hermes Dashboard routes, or OpenCode TUI/UI slots
+- Hermes Dashboard routes or OpenCode TUI/UI slots
 
 ## Store
 
@@ -132,9 +132,39 @@ acceptance semantics. Typed interface metadata is supported for package display
 only. `plugin doctor` may report inert descriptors as recognized and
 unsupported without implying runtime support.
 
-Codex app descriptors are readiness facts. They may report `Needs setup` when
-the manifest declares an app/auth surface, but the runtime must not execute the
-app connector or call a remote auth flow in this slice.
+Portable Codex components are projected independently. For an installed,
+enabled Codex catalog package, the broker resolves the Codex-owned package root
+from `plugin/read` paths or plugin hook metadata without copying it into the
+Psychevo plugin store. That authority-qualified root feeds Psychevo-owned skill,
+ordinary MCP, and synchronous command-hook adapters under the pinned
+compatibility profile. If Codex retains an MCP declaration without exposing a
+materialized package root, only that effective named MCP server is delegated
+through the broker. Apps and app-backed MCP tools always use the broker. A
+component is projected through exactly one execution owner for a frozen thread
+selection.
+
+The broker is a managed `codex app-server --listen stdio://` child scoped to the
+current `CODEX_HOME`. It is an internal capability adapter, not an Agent Runtime
+Profile and not a dormant direct Codex Agent path. It owns Codex catalog
+mutation, Apps inventory, Apps authentication, server-initiated elicitation,
+and app-backed MCP tool calls. Each Psychevo thread that needs delegation uses
+one non-persistent Codex ephemeral thread and archives it during thread cleanup.
+The installed-package selectors, package-root locators, execution owners, and
+compatibility profile are frozen when that Psychevo thread first assembles
+Codex contributions. Later turns reuse the snapshot; archive/delete clears it,
+and a new thread observes later Codex catalog changes.
+
+The broker advertises the pinned app-server elicitation capabilities that the
+Workbench can faithfully answer: MCP standard forms (including titled single-
+and multi-select values), URL elicitations, and the pinned `openai/form`
+`openai/imagePicker` shape. Answers are returned as typed form content with
+Codex `_meta`; arbitrary future custom controls are not inferred from unknown
+schema fields.
+
+The broker retries only requests proven not delivered. Install, uninstall, and
+tool calls are not retried after delivery because they may have side effects.
+Missing or incompatible Codex processes make only Codex-owned components
+unavailable; native package components continue to work.
 
 Plugin hook sources are loaded only when the plugin package is enabled. Loading
 a plugin hook source does not trust or execute its handlers. Runtime passes
@@ -238,6 +268,13 @@ surfaces: `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
 honor resolved scope/profile rules, return typed interface metadata, and keep
 responses secret-free. GUI install overwrite, trust writes, and other
 force-worthy actions require an explicit request supplied by the caller.
+
+Requests and responses use authority-qualified records. Psychevo authority uses
+the existing profile/project canonical selector. Codex authority uses
+`<plugin>@<marketplace>`. Catalog lists may aggregate both authorities, but
+must not merge by display name. Each component record reports compatibility
+profile, highest level, execution owner, readiness, and a short actionable
+reason.
 
 ## Related Topics
 

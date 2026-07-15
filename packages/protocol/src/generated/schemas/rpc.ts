@@ -126,6 +126,9 @@ import { clientRequestThreadRealtimeAppendSpeechSchema } from './rpc/client-requ
 import { clientRequestThreadRealtimeStopSchema } from './rpc/client-request/thread-realtime-stop';
 import { clientRequestThreadRealtimeListVoicesSchema } from './rpc/client-request/thread-realtime-list-voices';
 import { clientRequestWorkspaceFilesSchema } from './rpc/client-request/workspace-files';
+import { clientRequestWorkspaceFoldersSchema } from './rpc/client-request/workspace-folders';
+import { clientRequestWorkspaceGitBranchesSchema } from './rpc/client-request/workspace-git-branches';
+import { clientRequestWorkspaceGitCheckoutSchema } from './rpc/client-request/workspace-git-checkout';
 import { clientRequestWorkspaceFileReadSchema } from './rpc/client-request/workspace-file-read';
 import { clientRequestWorkspaceFileWriteSchema } from './rpc/client-request/workspace-file-write';
 import { clientRequestWorkspaceDiffSchema } from './rpc/client-request/workspace-diff';
@@ -722,6 +725,15 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/workspace-files.json"
     },
     {
+      "$ref": "ClientRequest/workspace-folders.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-git-branches.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-git-checkout.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-file-read.json"
     },
     {
@@ -931,6 +943,9 @@ export const rpcSchemaRefs = [
   clientRequestThreadRealtimeStopSchema,
   clientRequestThreadRealtimeListVoicesSchema,
   clientRequestWorkspaceFilesSchema,
+  clientRequestWorkspaceFoldersSchema,
+  clientRequestWorkspaceGitBranchesSchema,
+  clientRequestWorkspaceGitCheckoutSchema,
   clientRequestWorkspaceFileReadSchema,
   clientRequestWorkspaceFileWriteSchema,
   clientRequestWorkspaceDiffSchema,

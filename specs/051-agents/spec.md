@@ -86,11 +86,22 @@ frontmatter fields may be preserved as diagnostics but must not prevent loading.
 Discovery is deterministic. Precedence is:
 
 1. explicit CLI or session-selected agent path
-2. recursively discovered project `.psychevo/agents/**/*.md`
-3. recursively discovered nearest-to-root ancestor compatible agent directories
-4. recursively discovered global `$PSYCHEVO_HOME/agents/**/*.md`
-5. recursively discovered global compatible agent directories
-6. built-in agents
+2. recursively discovered cwd `.psychevo/agents/**/*.md`
+3. recursively discovered compatible project directories, walking from cwd to
+   the nearest Git root and checking `.agents/agents/**/*.md` before
+   `.claude/agents/**/*.md` at each ancestor
+4. recursively discovered profile `$PSYCHEVO_HOME/agents/**/*.md`
+5. recursively discovered user `~/.agents/agents/**/*.md`
+6. recursively discovered user `~/.claude/agents/**/*.md`
+7. generated backend agents
+8. built-in agents
+
+If no Git root exists, compatible project discovery continues to the filesystem
+root. A nearer ancestor wins over a farther ancestor, and `.agents/agents`
+wins over `.claude/agents` at the same ancestor. Definitions discovered from
+`.agents/agents` report `agents_project` or `agents_global` source provenance;
+interactive clients group those sources under `Project` or `User`
+respectively.
 
 The first definition for a name wins. Later duplicates are omitted from the
 model-visible active catalog with a diagnostic, but interactive clients may
@@ -131,8 +142,10 @@ Project agents are stored as `<cwd>/.psychevo/agents/<name>.md`. Profile agents
 are stored as `<active-profile-config-dir>/agents/<name>.md`, where the active
 profile config directory follows the same `PSYCHEVO_CONFIG`-aware resolution
 used by profile-scoped Workbench settings. Management writes must not mutate
-Claude-compatible agent directories, built-in agents, generated backend agents,
-or plugin-provided agents.
+`.agents`-compatible or Claude-compatible agent directories, built-in agents,
+generated backend agents, or plugin-provided agents. Compatibility definitions
+have no mutable Project/Profile management target even when their source label
+is grouped under `Project` or `User`.
 
 Gateway exposes target-aware agent management RPCs:
 

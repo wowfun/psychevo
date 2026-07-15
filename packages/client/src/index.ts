@@ -200,6 +200,11 @@ import {
   type WorkspaceDiffResult,
   type WorkspaceCreateParams,
   type WorkspaceCreateResult,
+  type WorkspaceFolderListParams,
+  type WorkspaceFolderListResult,
+  type WorkspaceGitBranchesParams,
+  type WorkspaceGitBranchesResult,
+  type WorkspaceGitCheckoutParams,
   type WorkspaceFileReadParams,
   type WorkspaceFileReadResult,
   type WorkspaceFileWriteParams,
@@ -388,6 +393,9 @@ export interface GatewayRequestParams {
   "workspace/file/read": WorkspaceFileReadParams;
   "workspace/file/write": WorkspaceFileWriteParams;
   "workspace/files": WorkspaceFilesParams;
+  "workspace/folders": WorkspaceFolderListParams;
+  "workspace/git/branches": WorkspaceGitBranchesParams;
+  "workspace/git/checkout": WorkspaceGitCheckoutParams;
 }
 
 export interface GatewayRequestResults {
@@ -526,6 +534,9 @@ export interface GatewayRequestResults {
   "workspace/file/read": WorkspaceFileReadResult;
   "workspace/file/write": WorkspaceFileWriteResult;
   "workspace/files": WorkspaceFilesResult;
+  "workspace/folders": WorkspaceFolderListResult;
+  "workspace/git/branches": WorkspaceGitBranchesResult;
+  "workspace/git/checkout": WorkspaceGitBranchesResult;
 }
 
 export type GatewayMethod = keyof GatewayRequestParams;

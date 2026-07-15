@@ -597,6 +597,21 @@ async fn handle_rpc(
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
             workspace_files_value(&scope)
         }
+        "workspace/folders" => {
+            let params = request.required_params::<wire::WorkspaceFolderListParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            workspace_folder_list_value(&state, &scope, params.path.as_deref())
+        }
+        "workspace/git/branches" => {
+            let params = request.required_params::<wire::WorkspaceGitBranchesParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope)?;
+            workspace_git_branches_value(&scope)
+        }
+        "workspace/git/checkout" => {
+            let params = request.required_params::<wire::WorkspaceGitCheckoutParams>()?;
+            let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            workspace_git_checkout_value(&scope, params)
+        }
         "workspace/file/read" => {
             let params = request.required_params::<wire::WorkspaceFileReadParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
@@ -816,10 +831,9 @@ async fn handle_rpc(
             let backend = backends
                 .get(&params.id)
                 .ok_or_else(|| Error::Message(format!("unknown backend: {}", params.id)))?;
-            Ok(serde_json::to_value(managed_backend_doctor_value_with_auth(
-                &state, &scope, backend,
-            )
-            .await?)?)
+            Ok(serde_json::to_value(
+                managed_backend_doctor_value_with_auth(&state, &scope, backend).await?,
+            )?)
         }
         "backend/install" | "backend/repair" | "backend/upgrade" => {
             let params = request.required_params::<wire::BackendManageParams>()?;
@@ -840,18 +854,58 @@ async fn handle_rpc(
         "plugin/list" => {
             let params = request.params::<wire::PluginListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            let options = plugin_runtime_options(&state, scope.cwd);
-            plugin_list_value(&options)
+            let options = plugin_runtime_options(&state, scope.cwd.clone());
+            let native = plugin_list_value(&options)?;
+            let codex = state
+                .inner
+                .codex_capability_broker
+                .plugin_list(&scope.cwd)
+                .await;
+            Ok(codex_capability_broker::merge_plugin_list(native, codex))
         }
         "plugin/read" => {
             let params = request.required_params::<wire::PluginReadParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(identity) =
+                codex_capability_broker::CodexPluginIdentity::parse_selector(&params.selector)?
+            {
+                let detail = state
+                    .inner
+                    .codex_capability_broker
+                    .plugin_read(&scope.cwd, &identity)
+                    .await?;
+                return Ok(codex_capability_broker::codex_plugin_read_value(
+                    &identity, detail,
+                ));
+            }
             let options = plugin_runtime_options(&state, scope.cwd);
             plugin_view_value(&options, &params.selector)
         }
         "plugin/doctor" => {
             let params = request.params::<wire::PluginDoctorParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(selector) = params.selector.as_deref()
+                && let Some(identity) =
+                    codex_capability_broker::CodexPluginIdentity::parse_selector(selector)?
+            {
+                let detail = state
+                    .inner
+                    .codex_capability_broker
+                    .plugin_read(&scope.cwd, &identity)
+                    .await?;
+                let apps = state
+                    .inner
+                    .codex_capability_broker
+                    .request("app/list", json!({"threadId":null,"forceRefetch":false}))
+                    .await;
+                return Ok(json!({
+                    "plugins": [codex_capability_broker::codex_plugin_read_value(&identity, detail)],
+                    "apps": match apps {
+                        Ok(value) => value,
+                        Err(err) => json!({"readiness":"unavailable","reason":err.to_string()}),
+                    },
+                }));
+            }
             let options = plugin_runtime_options(&state, scope.cwd);
             plugin_doctor_value(&options, params.selector.as_deref())
         }
@@ -874,6 +928,24 @@ async fn handle_rpc(
         "plugin/install" => {
             let params = request.required_params::<wire::PluginInstallParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(identity) =
+                codex_capability_broker::CodexPluginIdentity::parse_selector(&params.source)?
+            {
+                let result = state
+                    .inner
+                    .codex_capability_broker
+                    .plugin_install(&scope.cwd, &identity)
+                    .await?;
+                return Ok(json!({
+                    "success": true,
+                    "authority": {
+                        "kind": "codex",
+                        "plugin": identity.plugin,
+                        "marketplace": identity.marketplace,
+                    },
+                    "result": result,
+                }));
+            }
             plugin_install_value(
                 &state.inner.home,
                 &scope.cwd,
@@ -892,6 +964,24 @@ async fn handle_rpc(
         "plugin/uninstall" => {
             let params = request.required_params::<wire::PluginUninstallParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if let Some(identity) =
+                codex_capability_broker::CodexPluginIdentity::parse_selector(&params.selector)?
+            {
+                let result = state
+                    .inner
+                    .codex_capability_broker
+                    .plugin_uninstall(&scope.cwd, &identity)
+                    .await?;
+                return Ok(json!({
+                    "success": true,
+                    "authority": {
+                        "kind": "codex",
+                        "plugin": identity.plugin,
+                        "marketplace": identity.marketplace,
+                    },
+                    "result": result,
+                }));
+            }
             plugin_uninstall_value(
                 &state.inner.home,
                 &scope.cwd,
@@ -1253,7 +1343,7 @@ async fn handle_rpc(
             if let Some(thread_id) = &params.thread_id {
                 authorize_thread(&state, &auth, thread_id)?;
             }
-            command_execute_value(&state, &scope, params)
+            command_execute_value(&state, &scope, params).await
         }
         "slash/settings/read" => {
             let params = request.params::<wire::SlashSettingsReadParams>()?;

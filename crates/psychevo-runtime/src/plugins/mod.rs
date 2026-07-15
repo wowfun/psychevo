@@ -1,4 +1,5 @@
 mod api;
+mod compatibility;
 mod contributions;
 mod inspect;
 mod install;
@@ -13,6 +14,10 @@ mod worker;
 pub use api::{
     plugin_doctor_value, plugin_list_value, plugin_set_enabled_value, plugin_set_trust_value,
     plugin_uninstall_value, plugin_view_value,
+};
+pub use compatibility::{
+    CODEX_PLUGIN_COMPATIBILITY_PROFILE, PluginAuthority, PluginCompatibilityLevel,
+    PluginComponentKind, PluginComponentStatus, PluginExecutionOwner, PluginReadiness,
 };
 pub(crate) use contributions::{
     load_enabled_plugin_contributions, load_enabled_plugin_hook_sources,

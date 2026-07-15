@@ -247,20 +247,149 @@ pub(super) fn workspace_files_value(scope: &ResolvedScope) -> psychevo_runtime::
     })?)
 }
 
+pub(super) fn workspace_folder_list_value(
+    _state: &WebState,
+    scope: &ResolvedScope,
+    requested_path: Option<&str>,
+) -> psychevo_runtime::Result<Value> {
+    let requested = requested_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| scope.cwd.clone());
+    let current = canonical_existing_directory(&requested)?;
+    let root = current
+        .ancestors()
+        .last()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| current.clone());
+    let mut folders = std::fs::read_dir(&current)?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                return None;
+            }
+            let path = canonicalize_cwd(&entry.path()).ok()?;
+            Some(wire::WorkspaceFolderEntry {
+                name,
+                path: path.display().to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    folders.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    let parent = (current != root)
+        .then(|| current.parent())
+        .flatten()
+        .map(|parent| parent.display().to_string());
+    Ok(serde_json::to_value(wire::WorkspaceFolderListResult {
+        root: root.display().to_string(),
+        current: current.display().to_string(),
+        parent,
+        folders,
+    })?)
+}
+
+pub(super) fn workspace_git_branches_value(
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<Value> {
+    Ok(serde_json::to_value(workspace_git_branches(scope)?)?)
+}
+
+pub(super) fn workspace_git_checkout_value(
+    scope: &ResolvedScope,
+    params: wire::WorkspaceGitCheckoutParams,
+) -> psychevo_runtime::Result<Value> {
+    let branch = params.branch.trim();
+    if branch.is_empty() {
+        return Err(Error::Message(
+            "Git branch name must not be empty".to_string(),
+        ));
+    }
+    let checked = run_git(&scope.cwd, &["check-ref-format", "--branch", branch])?;
+    if checked.trim() != branch {
+        return Err(Error::Message("Git branch name is not valid".to_string()));
+    }
+    let before = workspace_git_branches(scope)?;
+    let exists = before.branches.iter().any(|candidate| candidate == branch);
+    if params.create && exists {
+        return Err(Error::Message(format!(
+            "Git branch already exists: {branch}"
+        )));
+    }
+    if !params.create && !exists {
+        return Err(Error::Message(format!(
+            "Git branch does not exist: {branch}"
+        )));
+    }
+    if params.create {
+        run_git(&scope.cwd, &["switch", "-c", branch])?;
+    } else if before.current.as_deref() != Some(branch) {
+        run_git(&scope.cwd, &["switch", "--", branch])?;
+    }
+    Ok(serde_json::to_value(workspace_git_branches(scope)?)?)
+}
+
+fn workspace_git_branches(
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<wire::WorkspaceGitBranchesResult> {
+    let branches = run_git(
+        &scope.cwd,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    )?
+    .lines()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(ToOwned::to_owned)
+    .collect::<Vec<_>>();
+    let current_output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&scope.cwd)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()?;
+    let current = current_output.status.success().then(|| {
+        String::from_utf8_lossy(&current_output.stdout)
+            .trim()
+            .to_string()
+    });
+    Ok(wire::WorkspaceGitBranchesResult { current, branches })
+}
+
+fn run_git(cwd: &Path, args: &[&str]) -> psychevo_runtime::Result<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        let bounded = message.chars().take(480).collect::<String>();
+        return Err(Error::Message(if bounded.is_empty() {
+            "Git command failed".to_string()
+        } else {
+            bounded
+        }));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 pub(super) fn workspace_create_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::WorkspaceCreateParams,
 ) -> psychevo_runtime::Result<Value> {
     let dir_name = workspace_dir_name(&params.name)?;
-    let options = state.run_options(state.inner.cwd.clone(), None);
-    let root = canonicalize_cwd(&resolve_workspace_root(&options, &state.inner.cwd)?)?;
-    let cwd = canonicalize_cwd(&root.join(&dir_name))?;
-    if !cwd.starts_with(&root) {
-        return Err(Error::Message(
-            "workspace path is outside the configured workspace root".to_string(),
-        ));
-    }
+    let parent = if let Some(parent) = params.parent.as_deref() {
+        canonical_existing_directory(Path::new(parent))?
+    } else {
+        let options = state.run_options(state.inner.cwd.clone(), None);
+        canonicalize_cwd(&resolve_workspace_root(&options, &state.inner.cwd)?)?
+    };
+    let cwd = canonicalize_cwd(&parent.join(&dir_name))?;
     let scope = ResolvedScope {
         source: cwd_source(&cwd),
         cwd,
@@ -270,6 +399,17 @@ pub(super) fn workspace_create_value(
         cwd: scope.cwd.display().to_string(),
         scope: scope.to_wire_scope(),
     })?)
+}
+
+fn canonical_existing_directory(path: &Path) -> psychevo_runtime::Result<PathBuf> {
+    let canonical = normalized_native_path(&std::fs::canonicalize(path)?);
+    if !canonical.is_dir() {
+        return Err(Error::Message(format!(
+            "workspace parent is not a directory: {}",
+            canonical.display()
+        )));
+    }
+    Ok(canonical)
 }
 
 pub(super) fn workspace_dir_name(input: &str) -> psychevo_runtime::Result<String> {

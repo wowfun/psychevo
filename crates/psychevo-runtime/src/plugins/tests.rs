@@ -22,8 +22,23 @@ use crate::types::McpTransportInput;
 use super::*;
 
 fn write_plugin(root: &Path, manifest: &str) {
-    fs::create_dir_all(root.join(".psychevo-plugin")).expect("manifest dir");
-    fs::write(root.join(".psychevo-plugin/plugin.json"), manifest).expect("manifest");
+    let mut document: Value = serde_json::from_str(manifest).expect("manifest json");
+    let overlay = document
+        .as_object_mut()
+        .and_then(|object| object.remove("psychevo"));
+    fs::create_dir_all(root.join(".codex-plugin")).expect("manifest dir");
+    fs::write(
+        root.join(".codex-plugin/plugin.json"),
+        serde_json::to_vec_pretty(&document).expect("manifest encode"),
+    )
+    .expect("manifest");
+    if let Some(overlay) = overlay {
+        fs::write(
+            root.join("psychevo.plugin.json"),
+            serde_json::to_vec_pretty(&overlay).expect("overlay encode"),
+        )
+        .expect("overlay");
+    }
 }
 
 fn write_worker(root: &Path, script: &str) -> PathBuf {
@@ -36,7 +51,7 @@ fn write_worker(root: &Path, script: &str) -> PathBuf {
 }
 
 #[test]
-fn manifest_selects_native_before_compat_and_rejects_path_escape() {
+fn manifest_selects_codex_before_claude_and_rejects_path_escape() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join("plugin");
     write_plugin(
@@ -48,13 +63,13 @@ fn manifest_selects_native_before_compat_and_rejects_path_escape() {
               "skills": ["./skills", "../escape"]
             }"#,
     );
-    fs::create_dir_all(root.join(".codex-plugin")).expect("codex");
-    fs::write(root.join(".codex-plugin/plugin.json"), "{}").expect("codex manifest");
+    fs::create_dir_all(root.join(".claude-plugin")).expect("claude");
+    fs::write(root.join(".claude-plugin/plugin.json"), "{}").expect("claude manifest");
     fs::create_dir_all(root.join("skills")).expect("skills");
 
     let manifest = load_plugin_manifest(&root, true).expect("manifest");
 
-    assert_eq!(manifest.kind, PluginManifestKind::Psychevo);
+    assert_eq!(manifest.kind, PluginManifestKind::Codex);
     assert_eq!(manifest.skill_roots.len(), 1);
     assert_eq!(manifest.ignored_manifest_paths.len(), 1);
     assert!(manifest.diagnostics.iter().any(|diagnostic| {
@@ -67,18 +82,18 @@ fn manifest_selects_native_before_compat_and_rejects_path_escape() {
 fn malformed_preferred_manifest_does_not_fall_back_to_compat() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join("plugin");
-    fs::create_dir_all(root.join(".psychevo-plugin")).expect("native");
-    fs::write(root.join(".psychevo-plugin/plugin.json"), "{").expect("native manifest");
     fs::create_dir_all(root.join(".codex-plugin")).expect("codex");
+    fs::write(root.join(".codex-plugin/plugin.json"), "{").expect("codex manifest");
+    fs::create_dir_all(root.join(".claude-plugin")).expect("claude");
     fs::write(
-        root.join(".codex-plugin/plugin.json"),
-        r#"{"name":"codex-plugin","version":"1.0.0","description":"codex"}"#,
+        root.join(".claude-plugin/plugin.json"),
+        r#"{"name":"claude-plugin","version":"1.0.0","description":"claude"}"#,
     )
-    .expect("codex manifest");
+    .expect("claude manifest");
 
     let err = load_plugin_manifest(&root, true).expect_err("malformed preferred manifest");
 
-    assert!(err.to_string().contains(".psychevo-plugin/plugin.json"));
+    assert!(err.to_string().contains(".codex-plugin/plugin.json"));
 }
 
 #[test]
@@ -218,6 +233,115 @@ fn manifest_parses_codex_interface_metadata_with_path_safety() {
             && diagnostic
                 .message
                 .contains("interface.screenshots must contain string paths")
+    }));
+}
+
+#[test]
+fn codex_profile_conformance_preserves_defaults_raw_fields_and_prompt_rules() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("fallback-name");
+    fs::create_dir_all(root.join("skills/review")).expect("skills");
+    fs::create_dir_all(root.join("hooks")).expect("hooks");
+    fs::write(
+        root.join("hooks/hooks.json"),
+        r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"prompt","prompt":"context"}]}]}}"#,
+    )
+    .expect("hooks");
+    fs::write(root.join(".mcp.json"), r#"{"mcpServers":{}}"#).expect("mcp");
+    fs::write(root.join(".app.json"), r#"{"apps":[]}"#).expect("apps");
+    write_plugin(
+        &root,
+        r#"{
+          "keywords": ["review", "portable"],
+          "futureField": {"preserved": true},
+          "interface": {
+            "defaultPrompt": [
+              "  Summarize   this change  ",
+              "Find risks",
+              "Suggest tests",
+              "ignored fourth prompt"
+            ]
+          }
+        }"#,
+    );
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+
+    assert_eq!(manifest.name, "fallback-name");
+    assert_eq!(manifest.version, None);
+    assert_eq!(manifest.keywords, vec!["review", "portable"]);
+    assert_eq!(manifest.skill_roots, vec![root.join("skills")]);
+    assert!(manifest.hooks.is_some());
+    assert!(manifest.manifest_resources.contains("mcpServers"));
+    assert_eq!(manifest.app_resource, Some(root.join(".app.json")));
+    assert_eq!(
+        manifest
+            .interface
+            .as_ref()
+            .expect("interface")
+            .default_prompt,
+        vec!["Summarize this change", "Find risks", "Suggest tests"]
+    );
+    assert_eq!(manifest.raw_manifest["futureField"]["preserved"], true);
+    assert!(manifest.ignored_fields.contains("futureField"));
+    let apps = manifest
+        .component_statuses
+        .iter()
+        .find(|status| status.component == PluginComponentKind::Apps)
+        .expect("apps status");
+    assert_eq!(apps.highest_level, PluginCompatibilityLevel::Delegate);
+    assert_eq!(apps.execution_owner, PluginExecutionOwner::CodexBroker);
+}
+
+#[test]
+fn codex_profile_conformance_accepts_inline_hook_object_arrays() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(
+        &root,
+        r#"{
+          "name":"inline-hooks",
+          "hooks":[
+            {"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo pre"}]}]}},
+            {"hooks":{"SessionStart":[{"hooks":[{"type":"prompt","prompt":"context"}]}]}}
+          ]
+        }"#,
+    );
+
+    let manifest = load_plugin_manifest(&root, true).expect("manifest");
+    let hooks = manifest.hooks.expect("inline hooks");
+
+    assert_eq!(hooks["PreToolUse"].as_array().map(Vec::len), Some(1));
+    assert_eq!(hooks["SessionStart"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn companion_overlay_with_shared_component_fails_closed_as_one_unit() {
+    let temp = tempdir().expect("temp");
+    let root = temp.path().join("plugin");
+    write_plugin(&root, r#"{"name":"overlay"}"#);
+    fs::write(
+        root.join("psychevo.plugin.json"),
+        r#"{
+          "skills":["./other-skills"],
+          "runtime":{"worker":{"command":"./worker.py"}}
+        }"#,
+    )
+    .expect("overlay");
+
+    let manifest = load_plugin_manifest(&root, true).expect("base remains inspectable");
+
+    assert!(manifest.raw_overlay.is_some());
+    assert!(manifest.worker.is_none());
+    assert!(manifest.psychevo_extensions.is_empty());
+    assert!(manifest.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == "invalid"
+            && diagnostic
+                .message
+                .contains("duplicates a shared Codex component")
+            && diagnostic
+                .message
+                .contains("no overlay fields were projected")
     }));
 }
 
@@ -1127,8 +1251,7 @@ fn compatibility_manifest_install_allows_missing_description() {
     fs::write(
         source.join(".codex-plugin/plugin.json"),
         r#"{
-              "name": "compat-cleanup",
-              "version": "1.0.0"
+              "name": "compat-cleanup"
             }"#,
     )
     .expect("codex manifest");
@@ -1150,6 +1273,7 @@ fn compatibility_manifest_install_allows_missing_description() {
     .expect("compat install");
 
     assert_eq!(record.name, "compat-cleanup");
+    assert_eq!(record.version, "local");
     assert_eq!(record.description, "");
     assert_eq!(record.manifest_kind, PluginManifestKind::Codex);
 }
@@ -1510,7 +1634,7 @@ fn install_from_local_git_source_materializes_record() {
     assert!(
         record
             .package_root
-            .join(".psychevo-plugin/plugin.json")
+            .join(".codex-plugin/plugin.json")
             .exists()
     );
 }

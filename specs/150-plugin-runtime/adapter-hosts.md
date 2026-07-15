@@ -10,7 +10,7 @@ foreign plugin code into the main Rust process.
 
 ## Scope
 
-- package-shape detection for native Psychevo, Codex, Hermes, and OpenCode
+- package-shape detection for Codex, Claude, Hermes, and OpenCode
 - dry-run inspection for local, Git, npm, and catalog-row sources
 - manifest-only inspection before trust
 - out-of-process Hermes Python and OpenCode Node adapter hosts
@@ -25,9 +25,8 @@ Out of scope:
 
 ## Detection
 
-Inspection reports one detected framework:
+Inspection reports one detected base framework:
 
-- `psychevo` for `.psychevo-plugin/plugin.json`
 - `codex` for `.codex-plugin/plugin.json`
 - `claude` for `.claude-plugin/plugin.json`
 - `hermes` for `plugin.yaml`, `plugin.yml`, or `.hermes-plugin/plugin.yaml`
@@ -35,9 +34,12 @@ Inspection reports one detected framework:
   `./server` or `./tui`
 - `unknown` when no recognized package shape exists
 
-Native and Codex manifests use the normal manifest loader. Hermes and OpenCode
-packages are not accepted as in-process ABI packages. Their static metadata may
-be inspected and displayed even when adapter execution is disabled.
+Codex and Claude manifests use the normal manifest loader. A package may add a
+root `psychevo.plugin.json` overlay for Psychevo-owned runtime, Agent, and
+toolset declarations, but the overlay is never a third base-manifest shape.
+Hermes and OpenCode packages are not accepted as in-process ABI packages.
+Their static metadata may be inspected and displayed even when adapter
+execution is disabled.
 
 ## Adapter Modes
 

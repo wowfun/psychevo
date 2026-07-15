@@ -1529,6 +1529,8 @@ pub struct ThreadImportParams {
     pub candidate_id: String,
     #[serde(rename = "targetId")]
     pub target_id: String,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1936,6 +1938,12 @@ pub enum ClientRequest {
     ThreadRealtimeListVoices(ThreadRealtimeSessionParams),
     #[serde(rename = "workspace/files")]
     WorkspaceFiles(WorkspaceFilesParams),
+    #[serde(rename = "workspace/folders")]
+    WorkspaceFolderList(WorkspaceFolderListParams),
+    #[serde(rename = "workspace/git/branches")]
+    WorkspaceGitBranches(WorkspaceGitBranchesParams),
+    #[serde(rename = "workspace/git/checkout")]
+    WorkspaceGitCheckout(WorkspaceGitCheckoutParams),
     #[serde(rename = "workspace/file/read")]
     WorkspaceFileRead(WorkspaceFileReadParams),
     #[serde(rename = "workspace/file/write")]

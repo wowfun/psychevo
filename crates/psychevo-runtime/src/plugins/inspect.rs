@@ -168,6 +168,7 @@ pub(crate) fn inspect_materialized_source(
                 source_id: materialized.source_id.clone(),
                 framework: PluginManifestKind::Unknown,
                 canonical_id: source_slug(&materialized.source_id),
+                compatibility_profile: None,
                 name: "unknown-plugin".to_string(),
                 version: None,
                 description: None,
@@ -179,6 +180,7 @@ pub(crate) fn inspect_materialized_source(
                 status: "Failed".to_string(),
                 target_lanes: Vec::new(),
                 projected_contributions: Vec::new(),
+                component_statuses: Vec::new(),
                 unsupported_lanes: Vec::new(),
                 diagnostics: vec![PluginDiagnostic::invalid(
                     manifest_err.to_string(),
@@ -418,8 +420,15 @@ fn inspection_from_manifest(
     ));
     stages.push(PluginStageDiagnostic::new(
         "compatibility",
-        "ok",
-        "compatible manifest fields are mapped by Psychevo-owned loaders",
+        if manifest.ignored_fields.is_empty() {
+            "ok"
+        } else {
+            "newer_contract"
+        },
+        format!(
+            "evaluated component behavior against {}",
+            manifest.compatibility_profile
+        ),
         Some(manifest.manifest_path.clone()),
     ));
 
@@ -469,15 +478,7 @@ fn inspection_from_manifest(
             }
         }
     }
-    let mut unsupported = Vec::new();
-    if manifest.manifest_resources.contains("apps") {
-        unsupported.push("apps".to_string());
-    }
-    for extension in ["commands", "providers"] {
-        if manifest.psychevo_extensions.contains(extension) {
-            unsupported.push(extension.to_string());
-        }
-    }
+    let unsupported = Vec::new();
     stages.push(PluginStageDiagnostic::new(
         "target lanes",
         "ok",
@@ -505,7 +506,7 @@ fn inspection_from_manifest(
     ));
     let readiness = if invalid {
         "Failed"
-    } else if unsupported.iter().any(|lane| lane == "apps") {
+    } else if manifest.manifest_resources.contains("apps") {
         "Needs setup"
     } else {
         "Ready"
@@ -525,6 +526,7 @@ fn inspection_from_manifest(
         source_id: materialized.source_id.clone(),
         framework: manifest.kind,
         canonical_id: manifest.name.clone(),
+        compatibility_profile: Some(manifest.compatibility_profile),
         name: manifest.name,
         version: manifest.version,
         description: manifest.description,
@@ -540,6 +542,7 @@ fn inspection_from_manifest(
         },
         target_lanes: target_lanes.into_iter().collect(),
         projected_contributions: projected.into_iter().collect(),
+        component_statuses: manifest.component_statuses,
         unsupported_lanes: unsupported,
         diagnostics: manifest.diagnostics,
         stages,
@@ -606,6 +609,7 @@ fn inspect_hermes(
         source_id: materialized.source_id.clone(),
         framework: PluginManifestKind::Hermes,
         canonical_id: name.clone(),
+        compatibility_profile: None,
         name,
         version,
         description,
@@ -617,6 +621,7 @@ fn inspect_hermes(
         status: foreign_status(status, adapter_mode),
         target_lanes,
         projected_contributions: projected,
+        component_statuses: Vec::new(),
         unsupported_lanes: unsupported,
         diagnostics: vec![PluginDiagnostic::warning(
             "Hermes register(ctx) is not imported into the Rust process; adapter output is manifest-scoped",
@@ -716,6 +721,7 @@ fn inspect_opencode(
         source_id: materialized.source_id.clone(),
         framework: PluginManifestKind::OpenCode,
         canonical_id: name.clone(),
+        compatibility_profile: None,
         name,
         version,
         description,
@@ -735,6 +741,7 @@ fn inspect_opencode(
         },
         target_lanes,
         projected_contributions: projected,
+        component_statuses: Vec::new(),
         unsupported_lanes: unsupported,
         diagnostics,
         stages: stages.clone(),

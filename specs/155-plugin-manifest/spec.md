@@ -21,29 +21,25 @@ Out of scope:
 
 ## Manifest Paths
 
-Runtime checks these paths in order from a package root:
+Runtime checks these portable package bases in order from a package root:
 
 ```text
-.psychevo-plugin/plugin.json
 .codex-plugin/plugin.json
 .claude-plugin/plugin.json
 ```
 
-The first existing path wins. If more than one recognized manifest exists,
-runtime loads the first path and reports the others as ignored diagnostics.
+The first existing base wins. If both exist, runtime loads the Codex base and
+reports the Claude-compatible base as shadowed. An optional root-level
+`psychevo.plugin.json` is a companion overlay, not an alternative base.
+Malformed recognized bases or overlays fail closed for that package.
 Hermes `plugin.yaml`/`plugin.yml` and OpenCode package descriptors are adapter
 descriptors, not native manifests, and are handled by plugin inspection rather
 than by the normal manifest loader.
 
-## Native Manifest
+## Codex Package Base
 
-A native manifest requires:
-
-- `name`
-- `version`
-- `description`
-
-The shared Codex-compatible package fields are:
+The normalized `codex-plugin/8604689e` package preserves `name`, optional
+`version`, optional `description`, `keywords`, and these component fields:
 
 - `skills`
 - `mcpServers`
@@ -51,28 +47,46 @@ The shared Codex-compatible package fields are:
 - `apps`
 - `interface`
 
+An absent or blank `name` normalizes to the package-root basename, matching the
+pinned Codex loader; it is not an install failure by itself.
+
+Local development packages without a version use active version `local`.
+Marketplace packages retain `<plugin>@<marketplace>` identity and the version
+selected by the owning marketplace. Package identity is not reconstructed from
+display metadata or a Psychevo source slug.
+
+Codex component defaults are behavior: `skills/`, `hooks/hooks.json`,
+`.mcp.json`, and `.app.json`. `config.toml` belongs to `CODEX_HOME`; it is not a
+package component default. Explicit resource paths must begin with `./`,
+contain no `..`, and remain below the package root. Synthesized defaults pass
+through the same containment check.
+
 `interface.capabilities` is descriptive model/UI metadata. It is not a
 permission grant, runtime capability gate, or fine-grained policy selector.
 Runtime parses Codex-compatible `interface` metadata into a typed display
 record. Supported display fields are `displayName`, `shortDescription`,
 `longDescription`, `developerName`, `category`, `capabilities`, `websiteUrl`,
 `privacyPolicyUrl`, `termsOfServiceUrl`, `brandColor`, `composerIcon`, `logo`,
-`logoDark`, and `screenshots`, including Codex's `*URL` aliases. Path-bearing
-media fields use the same package-relative path safety rules as other manifest
-resources. Invalid display fields are diagnostics and do not make the package
-invalid when the core manifest remains usable.
+`logoDark`, `screenshots`, and `defaultPrompt`, including Codex's `*URL`
+aliases. `defaultPrompt` accepts one string or at most three strings, collapses
+whitespace, and ignores entries over 128 characters. Path-bearing media fields
+use the same package-relative path safety rules as other manifest resources.
+Invalid display fields are diagnostics and do not make the package invalid
+when the core manifest remains usable.
 
-Psychevo-only plugin behavior must live under the top-level `psychevo` object.
-The supported Psychevo extension fields are:
+## Psychevo Companion Overlay
 
-- `psychevo.runtime`
-- `psychevo.commands`
-- `psychevo.providers`
-- `psychevo.agents`
-- `psychevo.toolsets`
+Psychevo-only plugin behavior lives in `psychevo.plugin.json`. Supported
+overlay fields are:
 
-Unknown top-level fields are ignored with diagnostics. Unsupported supported
-field shapes are invalid diagnostics and the affected declaration is skipped.
+- `runtime`
+- `agents`
+- `toolsets`
+
+`commands`, `providers`, and any shared Codex component are unsupported in this
+profile. Unknown or duplicated component fields are preserved for inspection
+and make the overlay unavailable for projection. The overlay never changes the
+normalized Codex base.
 
 The `hooks` field declares candidate hook declarations only. Manifest loading
 does not trust or execute hook handlers; hook declarations are normalized and
@@ -91,32 +105,27 @@ be an object of server descriptors or a package-relative path to a JSON file. If
 present. Manifest loading records malformed server descriptors as diagnostics
 without discarding valid sibling servers.
 
-The `psychevo.toolsets` field uses the same shape as configured custom
+The overlay `toolsets` field uses the same shape as configured custom
 toolsets: each key names a toolset with optional `description`, `tools`, and
 `includes`. Manifest loading parses the descriptors and leaves expansion and
 acceptance to 007 Tool Surface.
 
-`psychevo.commands`, `psychevo.providers`, and `apps` may be recorded as inert
-descriptors until their owning runtime modules define category-specific
-acceptance semantics. `interface` is not executable, but it is supported as
-typed package display metadata for CLI and Gateway read surfaces. Runtime must
-not claim inert descriptors are executable or supported merely because the
-manifest recognized their fields.
-
-`apps` is a Codex-compatible descriptive readiness field in this slice. It may
-produce `Needs setup` diagnostics, but it does not authorize app connector
-execution, OAuth launch, remote auth calls, or UI extension loading.
+`interface` is metadata-only. `apps` are service-owned components: local
+Psychevo-owned imports report `needs_codex_install` or `unavailable`; a
+Codex-owned installed package delegates Apps inventory, authentication,
+elicitation, and MCP tool calls through the Codex capability broker.
 
 ## Compatibility Manifests
 
 `.codex-plugin/plugin.json` is a first-class Codex-compatible package path.
-`.claude-plugin/plugin.json` is a compatibility manifest path. They may load as
-local development packages when native-required fields are missing, but install
-requires a resolvable name and version.
+`.claude-plugin/plugin.json` is a compatibility manifest path. Local
+development packages may use active version `local`; marketplace packages take
+their installable version from the owning catalog.
 
-Compatibility fields are mapped only when their semantics match Psychevo's
-shared package-resource semantics. Compatibility does not imply command, hook,
-app, UI, LSP, theme, or SDK runtime compatibility.
+Compatibility fields are mapped only under the pinned profile. Unknown fields
+are retained in the raw document and reported as a newer-contract diagnostic;
+known components may still be inspected, but the package is not labeled fully
+compatible until the profile is upgraded and its conformance suite passes.
 
 Hermes `plugin.yaml` packages and OpenCode package descriptors are adapter
 inspection inputs, not executable compatibility packages in the manifest loader.
@@ -140,24 +149,22 @@ unsafe components.
 
 ## Worker Manifest Fields
 
-`psychevo.runtime.worker` declares a Psychevo stdio worker:
+`runtime.worker` in the companion overlay declares a Psychevo stdio worker:
 
 ```json
 {
-  "psychevo": {
-    "runtime": {
-      "worker": {
-        "command": "./worker.py",
-        "args": ["--stdio"]
-      }
+  "runtime": {
+    "worker": {
+      "command": "./worker.py",
+      "args": ["--stdio"]
     }
   }
 }
 ```
 
 `command` uses the same local path safety rules. `args` are literal argv values
-and do not grant shell evaluation. A top-level `runtime` field is not a
-Codex-compatible worker field and must not be used for new Psychevo packages.
+and do not grant shell evaluation. The overlay is Psychevo-owned behavior and
+is never interpreted as part of the Codex compatibility profile.
 
 Plugin manifests do not support a static `psychevo.tools` field. Executable
 plugin tools must come from worker `contributions/list`, MCP tool listing, or a

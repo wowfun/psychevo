@@ -51,7 +51,7 @@ pub fn install_plugin(
     let version = inspection
         .version
         .clone()
-        .ok_or_else(|| Error::Config("plugin version is required for install".to_string()))?;
+        .unwrap_or_else(|| "local".to_string());
     let description = inspection.description.clone().unwrap_or_default();
     let source_slug = source_slug(&materialized.source_id);
     let package_root = store
@@ -79,17 +79,17 @@ pub fn install_plugin(
         temp_dir: None,
     };
     let installed_inspection = inspect_materialized_source(&installed, adapter_mode, "Installed")?;
-    let (manifest_resources, psychevo_extensions) =
-        match super::manifest::load_plugin_manifest(&package_root, true) {
-            Ok(manifest) => (
-                manifest.manifest_resources.iter().cloned().collect(),
-                manifest.psychevo_extensions.iter().cloned().collect(),
-            ),
-            Err(_) => (
-                installed_inspection.target_lanes.clone(),
-                installed_inspection.projected_contributions.clone(),
-            ),
-        };
+    let installed_manifest = super::manifest::load_plugin_manifest(&package_root, true).ok();
+    let (manifest_resources, psychevo_extensions) = match installed_manifest.as_ref() {
+        Some(manifest) => (
+            manifest.manifest_resources.iter().cloned().collect(),
+            manifest.psychevo_extensions.iter().cloned().collect(),
+        ),
+        None => (
+            installed_inspection.target_lanes.clone(),
+            installed_inspection.projected_contributions.clone(),
+        ),
+    };
     let data_root = store.data.join(format!(
         "{}-{}",
         sanitize_path_segment(&installed_inspection.name),
@@ -109,6 +109,14 @@ pub fn install_plugin(
         data_root,
         manifest_path: installed_inspection.manifest_path,
         manifest_kind: installed_inspection.framework,
+        compatibility_profile: installed_manifest
+            .as_ref()
+            .map(|manifest| manifest.compatibility_profile.clone())
+            .unwrap_or_default(),
+        component_statuses: installed_manifest
+            .as_ref()
+            .map(|manifest| manifest.component_statuses.clone())
+            .unwrap_or_default(),
         package_fingerprint: installed_inspection.package_fingerprint,
         adapter_mode: options
             .adapter_mode

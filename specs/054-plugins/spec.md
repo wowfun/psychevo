@@ -19,7 +19,7 @@ Out of scope:
 - hosted marketplace accounts, signatures, ratings, sharing, graphical stores, or hot reload
 - in-process third-party plugin ABI
 - whole-process sandboxing of workers, MCP servers, hooks, provider clients, skills, or agents
-- executing Codex apps or foreign dashboard/UI extension runtimes
+- reimplementing hosted Codex Apps without their owning service or credentials
 
 ## Plugin Model
 
@@ -47,14 +47,19 @@ must be mapped by Psychevo host code before use:
 Plugin identity must be preserved for diagnostics, conflict handling, data-root
 selection, and evidence.
 
-Codex-compatible manifest fields keep their Codex semantics. `.codex-plugin`
-packages are first-class compatibility packages when they provide a resolvable
-name and version for install. `skills`, `mcpServers`, `hooks`, `apps`, and
-`interface.*` declare package resources, setup facts, or model/UI metadata.
-Psychevo-only plugin behavior must live under a Psychevo namespace such as
-`psychevo.runtime`; it must not redefine a shared Codex field as executable
-authority. Codex `apps` and auth/setup metadata are descriptive readiness facts
-in this slice, not executable app runtimes.
+Codex-compatible manifest fields keep the pinned behavioral contract
+`codex-plugin/8604689e`. `.codex-plugin` packages are first-class compatibility
+packages. `skills`, `mcpServers`, `hooks`, `apps`, and `interface.*` are parsed,
+inspected, installed, projected, and either executed natively or delegated to
+their owning Codex runtime. Each component reports its highest compatibility
+level and readiness; recognizing a field is never reported as executable
+compatibility.
+
+The Codex manifest is the portable package base. Optional Psychevo-only
+behavior lives in a companion `psychevo.plugin.json` overlay and may declare
+only Psychevo-owned worker, agent, and toolset sources. The overlay must not
+repeat or replace shared Codex components. Duplicate declarations make the
+overlay invalid instead of creating a second precedence system.
 
 Plugin hook declarations are candidate hook declarations. Installing or enabling
 a plugin does not trust or run them. Runtime passes accepted plugin hook
@@ -117,11 +122,33 @@ as mutable plugin state.
 
 ## Compatibility
 
-Psychevo can recognize native Psychevo plugin manifests, Codex package
-manifests, and selected compatibility manifest paths. Compatibility means
-package-entry and field-subset compatibility unless an adapter host explicitly
-claims a target lane. Psychevo does not execute Codex, Claude Code, Hermes, or
-OpenCode in-process plugin APIs directly.
+Psychevo preserves three immutable layers: the raw package document, the
+normalized `codex-plugin/8604689e` package, and the effective thread projection.
+Unknown data remains attached to the raw document; it does not silently become
+runtime authority. A package is fully compatible only when every declared
+component reaches `execute` or `delegate`, or reports an explicit actionable
+readiness blocker.
+
+Compatibility levels are `parse`, `inspect`, `install`, `project`, `execute`,
+and `delegate`. Execution owners are Psychevo native modules, the isolated
+Psychevo worker, the Codex capability broker, or metadata-only presentation.
+Readiness values are `ready`, `disabled`, `needs_trust`, `needs_auth`,
+`needs_setup`, `unavailable`, and `failed`.
+
+Codex catalog packages remain owned by Codex. Psychevo aggregates them with
+profile/project packages in one management surface but keeps authority-qualified
+identity and delegates catalog mutation to Codex. It does not mirror a Codex
+package into the Psychevo cache.
+
+Runtime may read a Codex-owned installed package in place when `plugin/read` or
+Codex hook metadata exposes its materialized root. The resulting selected root
+keeps Codex plugin and marketplace authority in its frozen identity. This is a
+read-only projection, not a second installation. When no root is exposed,
+component status must not claim native execution; effective MCP servers may be
+delegated to Codex, while path-backed skills or hooks report unavailable.
+
+Psychevo does not execute Codex, Claude Code, Hermes, Pi, or OpenCode in-process
+plugin interfaces directly.
 
 Hermes or OpenCode plugin business logic may be inspected by an independent
 Python or Node adapter host, then projected into Psychevo lanes. Supported v1

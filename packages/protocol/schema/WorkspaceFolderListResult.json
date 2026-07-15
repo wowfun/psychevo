@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceFolderEntry": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "current": {
+      "type": "string"
+    },
+    "folders": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceFolderEntry"
+      },
+      "type": "array"
+    },
+    "parent": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "root": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "current",
+    "folders",
+    "root"
+  ],
+  "title": "WorkspaceFolderListResult",
+  "type": "object"
+}

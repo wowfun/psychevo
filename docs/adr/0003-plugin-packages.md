@@ -54,9 +54,10 @@ becomes model-visible, executable, trusted, or durable.
 ## Package Model
 
 A plugin package is a directory or materialized source with one recognized
-manifest. The Psychevo-native manifest is the preferred source of truth.
-Codex-style manifests may be recognized where their fields map cleanly to
-Psychevo semantics.
+portable base manifest. The pinned Codex manifest contract is the portable
+package source of truth. Psychevo-only worker, agent, and toolset sources may be
+declared by a companion overlay that cannot repeat or override Codex
+components.
 
 The manifest describes package identity, display metadata, resource paths, and
 declared extension sources. Local resource paths are package-relative and must
@@ -98,14 +99,16 @@ evidence rules as manifest and worker sources.
 
 ## Compatibility
 
-Compatibility is package-entry and field-subset compatibility, not runtime ABI
-compatibility.
+Compatibility is a versioned behavioral contract, not field-subset acceptance
+or runtime ABI compatibility. Psychevo preserves raw, normalized Codex, and
+effective projection models. Portable components enter their existing owning
+modules; service-owned Apps delegate to an internal Codex capability broker.
+Every component reports parse, inspect, install, project, execute, or delegate
+status and an actionable readiness reason.
 
-Psychevo may read Codex-compatible package manifests and map supported fields
-such as skills, MCP servers, hooks, and display metadata when the semantics
-match. Unsupported Codex, Claude Code, Hermes, or OpenCode package behavior
-must be ignored with diagnostics or adapted through an explicit Psychevo
-mapping.
+Codex catalog packages remain owned by Codex and retain
+`<plugin>@<marketplace>` identity. Psychevo may aggregate and project those
+packages, but it does not mirror them into its package cache.
 
 Psychevo must not execute another host's in-process plugin API directly. Shared
 business logic may be reused behind a Psychevo worker, MCP server, skill,

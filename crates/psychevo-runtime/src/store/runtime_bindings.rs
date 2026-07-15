@@ -77,6 +77,91 @@ impl SqliteStore {
         Ok(record)
     }
 
+    /// Creates a fresh Thread binding from a resolved parent snapshot.
+    ///
+    /// Immutable Agent/Profile identity is copied, while runtime session identity
+    /// and adapter observations are intentionally reset. The caller supplies the
+    /// parent's resolved live controls so the child requests the same effective
+    /// values from its new runtime session.
+    pub fn create_gateway_runtime_binding_from_parent_snapshot(
+        &self,
+        parent_thread_id: &str,
+        child_thread_id: &str,
+        effective_controls: &BTreeMap<String, Value>,
+    ) -> Result<GatewayRuntimeBindingRecord> {
+        if parent_thread_id == child_thread_id {
+            return Err(Error::Message(
+                "runtime binding snapshot requires a distinct child Thread".to_string(),
+            ));
+        }
+        let parent = self
+            .gateway_runtime_binding(parent_thread_id)?
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "resolved runtime binding not found for parent Thread `{parent_thread_id}`"
+                ))
+            })?;
+        if parent.status != GatewayRuntimeBindingStatus::Resolved {
+            return Err(Error::Message(format!(
+                "runtime binding for parent Thread `{parent_thread_id}` is unresolved"
+            )));
+        }
+        let child = self
+            .session_summary(child_thread_id)?
+            .ok_or_else(|| Error::Message(format!("session not found: {child_thread_id}")))?;
+        if child.cwd != parent.cwd {
+            return Err(Error::Message(format!(
+                "runtime binding snapshot cwd does not match child Thread `{child_thread_id}`"
+            )));
+        }
+
+        validate_runtime_control_map("inherited preference", effective_controls)?;
+        let inherited_preferences_json = (!effective_controls.is_empty())
+            .then(|| serde_json::to_string(effective_controls))
+            .transpose()?;
+        let now = now_ms();
+        let inserted = self.write_retry(|conn| {
+            conn.execute(
+                r#"
+                INSERT INTO gateway_runtime_bindings (
+                    thread_id, resolution_status, agent_ref, agent_fingerprint,
+                    agent_definition_json, runtime_ref, backend_kind, native_kind,
+                    native_session_id, cwd, profile_fingerprint, profile_revision,
+                    profile_config_json, adapter_kind, adapter_revision, ownership,
+                    parent_thread_id, binding_revision, thread_preferences_json,
+                    runtime_observed_json, control_revision, unresolved_reason,
+                    created_at_ms, updated_at_ms
+                )
+                SELECT ?1, resolution_status, agent_ref, agent_fingerprint,
+                       agent_definition_json, runtime_ref, backend_kind, native_kind,
+                       NULL, cwd, profile_fingerprint, profile_revision,
+                       profile_config_json, adapter_kind, adapter_revision, ownership,
+                       NULL, 1, ?2, NULL, 1, NULL, ?3, ?3
+                FROM gateway_runtime_bindings
+                WHERE thread_id = ?4 AND resolution_status = 'resolved'
+                ON CONFLICT(thread_id) DO NOTHING
+                "#,
+                params![
+                    child_thread_id,
+                    inherited_preferences_json,
+                    now,
+                    parent_thread_id,
+                ],
+            )
+        })?;
+        if inserted != 1 {
+            return Err(Error::Message(format!(
+                "runtime binding conflict for child Thread `{child_thread_id}`"
+            )));
+        }
+        self.gateway_runtime_binding(child_thread_id)?
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "runtime binding not found after snapshot: {child_thread_id}"
+                ))
+            })
+    }
+
     pub fn resolve_gateway_runtime_binding(
         &self,
         input: GatewayRuntimeBindingInput<'_>,

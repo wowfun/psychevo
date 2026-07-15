@@ -49,6 +49,13 @@ from `hooks.json` files discovered beside profile and project configuration
 layers. Sources are additive; higher-precedence configuration does not erase
 lower-precedence hook declarations.
 
+Codex package hooks execute under the explicit semantic profile
+`codex-plugin/8604689e`. That profile owns Codex event aliases, generated input
+schemas, package/data environment variables, source ordering, matcher behavior,
+normalized trust hashes, concurrent execution, and event-specific output
+folding. Psychevo-only hook events and handler types remain outside the Codex
+profile and must not change its conformance outcomes.
+
 Runtime exposes a metadata/listing interface that reports every normalized
 handler, including handlers skipped for disabled state, untrusted hash, modified
 hash, unsupported handler type, unavailable adapter, malformed command, or

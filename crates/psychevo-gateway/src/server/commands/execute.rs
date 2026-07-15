@@ -1,4 +1,4 @@
-pub(super) fn command_execute_value(
+pub(super) async fn command_execute_value(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::CommandExecuteParams,
@@ -57,7 +57,8 @@ pub(super) fn command_execute_value(
                     active_turn,
                 ) {
                     Ok(effect) => {
-                        command_result_from_effect(state, scope, &raw, action, effect, thread_id)?
+                        command_result_from_effect(state, scope, &raw, action, effect, thread_id)
+                            .await?
                     }
                     Err(message) => command_unsupported(&raw, action, message),
                 }
@@ -84,7 +85,8 @@ pub(super) fn command_execute_value(
                     SlashCommandAction::SkillInvoke,
                     effect,
                     thread_id,
-                )?
+                )
+                .await?
             } else {
                 command_rejected_unknown(
                     &command,
@@ -102,7 +104,7 @@ pub(super) fn command_execute_value(
     Ok(serde_json::to_value(result)?)
 }
 
-fn command_result_from_effect(
+async fn command_result_from_effect(
     state: &WebState,
     scope: &ResolvedScope,
     raw: &str,
@@ -216,7 +218,7 @@ fn command_result_from_effect(
             ))
         }
         SlashCommandEffect::Btw { prompt } => {
-            command_side_conversation_start(state, scope, raw, action, thread_id, prompt)
+            command_side_conversation_start(state, scope, raw, action, thread_id, prompt).await
         }
         SlashCommandEffect::SandboxShow => {
             let options = state.run_options(scope.cwd.clone(), thread_id.clone());
@@ -698,7 +700,7 @@ fn web_desktop_unavailable_message(command: &str, action: SlashCommandAction) ->
     }
 }
 
-fn command_side_conversation_start(
+async fn command_side_conversation_start(
     state: &WebState,
     scope: &ResolvedScope,
     raw: &str,
@@ -729,6 +731,40 @@ fn command_side_conversation_start(
             ),
         ));
     }
+    let parent_binding = state
+        .inner
+        .state
+        .store()
+        .gateway_runtime_binding(&parent_thread_id)?;
+    if !parent_binding.is_some_and(|binding| {
+        binding.status == GatewayRuntimeBindingStatus::Resolved
+            && binding.ownership == GatewayRuntimeBindingOwnership::ReadWrite
+    }) {
+        return Ok(command_unsupported(
+            raw,
+            action,
+            SIDE_CONVERSATION_NO_TARGET_MESSAGE.to_string(),
+        ));
+    }
+    let parent_context = thread_context_read_result_live(
+        state,
+        scope,
+        wire::ThreadContextReadParams {
+            thread_id: Some(parent_thread_id.clone()),
+            target: None,
+            scope: Some(scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    let effective_controls = parent_context
+        .controls
+        .into_iter()
+        .filter_map(|control| {
+            control
+                .effective_value
+                .map(|value| (control.id, value))
+        })
+        .collect::<BTreeMap<_, _>>();
 
     let options = state.run_options(scope.cwd.clone(), Some(parent_thread_id.clone()));
     let side_thread_id = state
@@ -757,6 +793,15 @@ fn command_side_conversation_start(
             }),
             boundary_text: side_conversation_boundary_prompt(),
         })?;
+    state
+        .inner
+        .state
+        .store()
+        .create_gateway_runtime_binding_from_parent_snapshot(
+            &parent_thread_id,
+            &side_thread_id,
+            &effective_controls,
+        )?;
     Ok(command_action(
         raw,
         action,

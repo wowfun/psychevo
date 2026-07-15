@@ -4,7 +4,7 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("display-plugin");
-    let manifest_dir = source.join(".psychevo-plugin");
+    let manifest_dir = source.join(".codex-plugin");
     std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
     std::fs::create_dir_all(source.join("assets")).expect("assets");
     std::fs::write(source.join("assets/icon.png"), "icon").expect("icon");
@@ -133,6 +133,122 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
     assert!(!state.inner.cwd.join(".psychevo/config.toml").exists());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bootstrap = tempfile::tempdir().expect("bootstrap");
+    let script = bootstrap.path().join("fake-codex.py");
+    let log = bootstrap.path().join("calls.log");
+    std::fs::write(
+        &script,
+        format!(
+            r#"#!/usr/bin/env python3
+import json, sys
+LOG = {log}
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "plugin/list":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":False,"enabled":False,"interface":{{"shortDescription":"Review"}}}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
+    elif method == "plugin/read":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":"review@openai","name":"review","installed":False,"enabled":False}},"description":"Review plugin","skills":[],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
+    elif method == "plugin/install":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("install\n")
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
+    elif method == "plugin/uninstall":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("uninstall\n")
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{}}}}), flush=True)
+    elif method == "app/list":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"data":[],"nextCursor":None}}}}), flush=True)
+"#,
+            log = serde_json::to_string(&log).expect("log json"),
+        ),
+    )
+    .expect("script");
+    let mut permissions = std::fs::metadata(&script).expect("metadata").permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&script, permissions).expect("chmod");
+    let (_temp, state) = web_state_with_env(BTreeMap::from([
+        (
+            "PSYCHEVO_CODEX_BIN".to_string(),
+            script.display().to_string(),
+        ),
+        (
+            "PATH".to_string(),
+            std::env::var("PATH").unwrap_or_default(),
+        ),
+    ]));
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let list = capability_rpc(&state, "plugin/list", json!({"scope":scope.clone()}))
+        .await
+        .expect("plugin/list");
+    let codex = list["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .find(|plugin| plugin["selector"] == "codex:review@openai")
+        .expect("Codex plugin");
+    assert_eq!(codex["authority"]["kind"], "codex");
+    assert_eq!(codex["canonical_id"], "review@openai");
+
+    let read = capability_rpc(
+        &state,
+        "plugin/read",
+        json!({"scope":scope.clone(),"selector":"codex:review@openai"}),
+    )
+    .await
+    .expect("plugin/read");
+    assert_eq!(read["plugin"]["authority"]["marketplace"], "openai");
+    assert_eq!(
+        read["plugin"]["component_statuses"][0]["executionOwner"],
+        "codex_broker"
+    );
+
+    let installed = capability_rpc(
+        &state,
+        "plugin/install",
+        json!({"scope":scope.clone(),"source":"codex:review@openai"}),
+    )
+    .await
+    .expect("plugin/install");
+    assert_eq!(installed["authority"]["kind"], "codex");
+    let doctor = capability_rpc(
+        &state,
+        "plugin/doctor",
+        json!({"scope":scope.clone(),"selector":"codex:review@openai"}),
+    )
+    .await
+    .expect("plugin/doctor");
+    assert_eq!(doctor["apps"]["data"], json!([]));
+    let removed = capability_rpc(
+        &state,
+        "plugin/uninstall",
+        json!({"scope":scope,"selector":"codex:review@openai"}),
+    )
+    .await
+    .expect("plugin/uninstall");
+    assert_eq!(removed["authority"]["kind"], "codex");
+    assert_eq!(
+        std::fs::read_to_string(&log).expect("calls"),
+        "install\nuninstall\n"
+    );
+    assert!(!state.inner.home.join("plugins/records").exists());
+    state.inner.codex_capability_broker.stop().await;
+}
+
 #[tokio::test]
 async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     let (temp, state) = web_state();
@@ -247,11 +363,13 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
     .await
     .expect("skill/uninstall");
     assert_eq!(removed["success"], true);
-    assert!(!state
-        .inner
-        .cwd
-        .join(".psychevo/skills/review-flow/SKILL.md")
-        .exists());
+    assert!(
+        !state
+            .inner
+            .cwd
+            .join(".psychevo/skills/review-flow/SKILL.md")
+            .exists()
+    );
 }
 
 #[tokio::test]
@@ -273,10 +391,7 @@ async fn capability_skill_read_and_uninstall_accept_path_selector_for_collisions
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let project_path = state
-        .inner
-        .cwd
-        .join(".psychevo/skills/same-skill/SKILL.md");
+    let project_path = state.inner.cwd.join(".psychevo/skills/same-skill/SKILL.md");
     let profile_path = state.inner.home.join("skills/same-skill/SKILL.md");
 
     let list = capability_rpc(&state, "skill/list", json!({ "scope": scope.clone() }))
@@ -333,7 +448,11 @@ async fn capability_skill_read_and_uninstall_accept_path_selector_for_collisions
     )
     .await
     .expect_err("profile path is not project mutable");
-    assert!(refused.to_string().contains("not removable from project scope"));
+    assert!(
+        refused
+            .to_string()
+            .contains("not removable from project scope")
+    );
 
     let removed = capability_rpc(
         &state,
@@ -371,10 +490,7 @@ async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
-    let project_path = state
-        .inner
-        .cwd
-        .join(".psychevo/skills/same-skill/SKILL.md");
+    let project_path = state.inner.cwd.join(".psychevo/skills/same-skill/SKILL.md");
     let profile_path = state.inner.home.join("skills/same-skill/SKILL.md");
 
     let project = capability_rpc(
@@ -392,9 +508,11 @@ async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
     .expect("project skill/write");
     assert_eq!(project["written"], true);
     assert_eq!(project["target"], "project");
-    assert!(std::fs::read_to_string(&project_path)
-        .expect("project skill")
-        .contains("project updated body"));
+    assert!(
+        std::fs::read_to_string(&project_path)
+            .expect("project skill")
+            .contains("project updated body")
+    );
 
     let profile = capability_rpc(
         &state,
@@ -411,9 +529,11 @@ async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
     .expect("profile skill/write");
     assert_eq!(profile["written"], true);
     assert_eq!(profile["target"], "global");
-    assert!(std::fs::read_to_string(&profile_path)
-        .expect("profile skill")
-        .contains("profile updated body"));
+    assert!(
+        std::fs::read_to_string(&profile_path)
+            .expect("profile skill")
+            .contains("profile updated body")
+    );
 
     let invalid = capability_rpc(
         &state,
@@ -429,9 +549,11 @@ async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
     .await
     .expect_err("invalid markdown is rejected");
     assert!(invalid.to_string().contains("name \"wrong-name\""));
-    assert!(std::fs::read_to_string(&project_path)
-        .expect("project skill unchanged")
-        .contains("project updated body"));
+    assert!(
+        std::fs::read_to_string(&project_path)
+            .expect("project skill unchanged")
+            .contains("project updated body")
+    );
 }
 
 #[tokio::test]
@@ -440,7 +562,12 @@ async fn capability_skill_write_rejects_configured_external_skill() {
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::create_dir_all(state.inner.home.join("skills")).expect("profile skills root");
     let external = temp.path().join("external-skills");
-    write_capability_package_skill(&external, "external-skill", "External skill", "external body");
+    write_capability_package_skill(
+        &external,
+        "external-skill",
+        "External skill",
+        "external body",
+    );
     std::fs::write(
         state.inner.home.join("config.toml"),
         format!("[skills]\npaths = [\"{}\"]\n", external.display()),
@@ -454,9 +581,13 @@ async fn capability_skill_write_rejects_configured_external_skill() {
     let listed = capability_rpc(&state, "skill/list", json!({ "scope": scope.clone() }))
         .await
         .expect("skill/list");
-    assert!(listed["skills"].as_array().expect("skills").iter().any(|skill| {
-        skill["name"] == "external-skill" && skill["source"] == "config"
-    }));
+    assert!(
+        listed["skills"]
+            .as_array()
+            .expect("skills")
+            .iter()
+            .any(|skill| { skill["name"] == "external-skill" && skill["source"] == "config" })
+    );
 
     let rejected = capability_rpc(
         &state,
@@ -471,7 +602,11 @@ async fn capability_skill_write_rejects_configured_external_skill() {
     )
     .await
     .expect_err("configured skill is read-only");
-    assert!(rejected.to_string().contains("not writable from global scope"));
+    assert!(
+        rejected
+            .to_string()
+            .contains("not writable from global scope")
+    );
 }
 
 #[tokio::test]
@@ -659,7 +794,7 @@ async fn capability_plugin_builtin_browser_selector_and_policy_do_not_capture_br
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("browser-package");
-    let manifest_dir = source.join(".psychevo-plugin");
+    let manifest_dir = source.join(".codex-plugin");
     std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
     std::fs::write(
         manifest_dir.join("plugin.json"),
@@ -709,7 +844,11 @@ async fn capability_plugin_builtin_browser_selector_and_policy_do_not_capture_br
     )
     .await
     .expect_err("Browser alias must not select the built-in plugin");
-    assert!(legacy_alias.to_string().contains("plugin not found: Browser"));
+    assert!(
+        legacy_alias
+            .to_string()
+            .contains("plugin not found: Browser")
+    );
 
     capability_rpc(
         &state,
@@ -787,7 +926,11 @@ async fn capability_plugin_builtin_browser_selector_and_policy_do_not_capture_br
     )
     .await
     .expect_err("ordinary browser package was removed");
-    assert!(removed_package.to_string().contains("plugin not found: browser"));
+    assert!(
+        removed_package
+            .to_string()
+            .contains("plugin not found: browser")
+    );
 }
 
 #[tokio::test]
@@ -796,7 +939,7 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("managed-plugin");
-    let manifest_dir = source.join(".psychevo-plugin");
+    let manifest_dir = source.join(".codex-plugin");
     std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
     std::fs::write(
         manifest_dir.join("plugin.json"),
@@ -841,7 +984,10 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
         .as_str()
         .expect("canonical selector")
         .to_string();
-    assert!(selector.starts_with("project:managed-plugin@"), "{selector}");
+    assert!(
+        selector.starts_with("project:managed-plugin@"),
+        "{selector}"
+    );
     assert_eq!(managed["scope_name"], "project");
     assert_eq!(managed["enablement_scope_name"], "project");
     assert_eq!(managed["removable"], true);
@@ -919,7 +1065,7 @@ async fn capability_plugin_scoped_selectors_disambiguate_duplicate_installations
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("dual-scope-plugin");
-    let manifest_dir = source.join(".psychevo-plugin");
+    let manifest_dir = source.join(".codex-plugin");
     std::fs::create_dir_all(&manifest_dir).expect("manifest dir");
     std::fs::write(
         manifest_dir.join("plugin.json"),
@@ -1262,7 +1408,10 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
     )
     .await
     .expect("mcp/upsert");
-    assert_eq!(upserted["server"]["config"]["bearer_token_env_var"], "DOCS_MCP_TOKEN");
+    assert_eq!(
+        upserted["server"]["config"]["bearer_token_env_var"],
+        "DOCS_MCP_TOKEN"
+    );
     assert!(upserted.to_string().contains("DOCS_MCP_TOKEN"));
     assert!(!upserted.to_string().contains("Bearer "));
 

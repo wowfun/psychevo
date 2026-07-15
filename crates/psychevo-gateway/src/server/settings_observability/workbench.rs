@@ -24,7 +24,7 @@ fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo_runtime::
     let options = state.run_options(cwd.to_path_buf(), None);
     let value = psychevo_runtime::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
         json!({
-            "execution": "auto", "backend": "auto", "external_access": "live",
+            "execution": "local", "backend": "exa", "external_access": "live",
             "context_size": "medium", "return_token_budget": "default",
             "content_types": ["text"], "allowed_domains": [], "blocked_domains": [],
             "background_storage_acknowledged": false,

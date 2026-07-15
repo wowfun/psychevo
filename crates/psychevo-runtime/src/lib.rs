@@ -109,12 +109,9 @@ pub use context_usage::{
 };
 pub use error::{Error, Result};
 pub use extensions::{
-    ApprovalReviewContributor, CapabilityRootLocation, ConfigContributor, ContextContributor,
-    ExtensionData, ExtensionDataInit, ExtensionDataScope, ExtensionRegistry,
-    ExtensionRegistryBuilder, McpServerContributor, SelectedCapabilityRoot,
-    ThreadLifecycleContributor, TokenUsageContributor, ToolContributor, ToolLifecycleContributor,
-    TurnInputContributor, TurnItemContributor, TurnLifecycleContributor,
-    resolve_mcp_server_handoffs,
+    CapabilityRootAuthority, CapabilityRootLocation, ExtensionData, ExtensionDataInit,
+    ExtensionDataScope, ExtensionRegistry, ExtensionRegistryBuilder, ExtensionRegistryDiagnostic,
+    McpServerContributor, SelectedCapabilityRoot, ToolContributor, resolve_mcp_server_handoffs,
 };
 pub use host_paths::{
     ExecutableResolveOptions, GitBashRuntime, HostPlatform, PSYCHEVO_GIT_BASH_PATH,
@@ -133,13 +130,14 @@ pub use model_state::{
 };
 pub use paths::{canonicalize_cwd, workspace_snapshot_id};
 pub use plugins::{
-    LoadedPluginManifest, PluginAdapterMode, PluginDiagnostic, PluginInspectOptions,
-    PluginInstallOptions, PluginInstallRecord, PluginInterfaceMetadata, PluginManifestKind,
-    PluginMarketplaceEntry, PluginScope, PluginSourceKind, PluginWorkerSpec, install_plugin,
-    load_plugin_manifest, plugin_doctor_value, plugin_import_inspect_value, plugin_install_value,
-    plugin_list_value, plugin_marketplace_add_value, plugin_marketplace_list_value,
-    plugin_marketplace_remove_value, plugin_set_enabled_value, plugin_set_trust_value,
-    plugin_uninstall_value, plugin_view_value,
+    CODEX_PLUGIN_COMPATIBILITY_PROFILE, LoadedPluginManifest, PluginAdapterMode, PluginAuthority,
+    PluginCompatibilityLevel, PluginComponentKind, PluginComponentStatus, PluginDiagnostic,
+    PluginExecutionOwner, PluginInspectOptions, PluginInstallOptions, PluginInstallRecord,
+    PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry, PluginReadiness,
+    PluginScope, PluginSourceKind, PluginWorkerSpec, install_plugin, load_plugin_manifest,
+    plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
+    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
+    plugin_set_enabled_value, plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
 };
 pub use process_env::{
     ProcessEnvOptions, apply_process_env, apply_pty_process_env, apply_tokio_process_env,

@@ -86,7 +86,7 @@ pub(crate) async fn run() -> Result<ExitCode> {
         Some(Commands::Mcp(args)) => run_mcp_command(args).await,
         Some(Commands::Tui(args)) => tui::run_tui_command(&args).await,
         Some(Commands::Web(args)) => commands::gateway::run_web_command(args).await,
-        Some(Commands::Desktop(args)) => run_desktop_command(args),
+        Some(Commands::Desktop(args)) => run_desktop_command(args).await,
         Some(Commands::Serve(args)) => run_serve_command(args).await,
         Some(Commands::Gateway(args)) => run_gateway_command(args).await,
         Some(Commands::Doctor(args)) => run_doctor_command(args).await,
