@@ -89,3 +89,56 @@ fn bind_source_to_thread_rebinds_existing_session() {
         Some(session_id.as_str())
     );
 }
+
+#[tokio::test]
+async fn deleting_the_idle_current_thread_clears_its_source_binding() {
+    let (_temp, state) = web_state();
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let session_id = state
+        .inner
+        .state
+        .store()
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("session");
+    bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let result = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(1)),
+            method: "thread/delete".to_string(),
+            params: Some(json!({ "threadId": session_id })),
+        },
+    )
+    .await
+    .expect("delete idle current Thread");
+
+    assert_eq!(result["deleted"], true);
+    assert!(
+        state
+            .inner
+            .state
+            .store()
+            .session_summary(&session_id)
+            .expect("session lookup")
+            .is_none()
+    );
+    assert!(
+        state
+            .inner
+            .gateway
+            .resolve_source_thread(&scope.source)
+            .expect("source lookup")
+            .is_none()
+    );
+}

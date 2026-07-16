@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
 use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
@@ -16,6 +17,7 @@ use tokio::time::timeout;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const ELICITATION_TIMEOUT: Duration = Duration::from_secs(120);
 const ELICITATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(125);
+const RUNTIME_INVENTORY_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 struct BrokerCommand {
@@ -45,15 +47,18 @@ pub(super) struct CodexCapabilityBroker {
     command: BrokerCommand,
     env: BTreeMap<String, String>,
     request_timeout: Duration,
+    runtime_inventory_retry_delay: Duration,
     process: Mutex<Option<BrokerProcess>>,
     thread_ids: Mutex<BTreeMap<String, String>>,
-    runtime_profiles: Mutex<BTreeMap<String, CodexRuntimeProfile>>,
+    runtime_inventories: Mutex<BTreeMap<PathBuf, Arc<Mutex<CachedCodexRuntimeInventory>>>>,
+    runtime_profiles: Mutex<BTreeMap<String, Arc<Mutex<Option<CodexRuntimeProfile>>>>>,
 }
 
 pub(super) struct CodexRuntimeContributions {
     pub(super) capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
     pub(super) runtime_tools: Vec<psychevo_runtime::RuntimeTool>,
     pub(super) warnings: Vec<String>,
+    pub(super) unavailable_warnings: Vec<String>,
 }
 
 struct RuntimePluginDetail {
@@ -66,8 +71,36 @@ struct RuntimePluginDetail {
 #[derive(Clone)]
 struct CodexRuntimeProfile {
     capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
+    delegated_tools: Vec<CodexDelegatedToolDescriptor>,
+    warnings: Vec<String>,
+    unavailable_warnings: Vec<String>,
+}
+
+#[derive(Clone)]
+struct CodexRuntimeInventory {
+    capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
     delegated_servers: BTreeSet<String>,
     warnings: Vec<String>,
+}
+
+#[derive(Default)]
+struct CachedCodexRuntimeInventory {
+    inventory: Option<Arc<CodexRuntimeInventory>>,
+    failure: Option<CachedCodexRuntimeInventoryFailure>,
+}
+
+struct CachedCodexRuntimeInventoryFailure {
+    message: String,
+    retry_after: Instant,
+}
+
+#[derive(Clone)]
+struct CodexDelegatedToolDescriptor {
+    name: String,
+    server_name: String,
+    remote_name: String,
+    description: String,
+    parameters: Value,
 }
 
 impl CodexCapabilityBroker {
@@ -76,8 +109,10 @@ impl CodexCapabilityBroker {
             command: BrokerCommand::from_env(env),
             env: env.clone(),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            runtime_inventory_retry_delay: RUNTIME_INVENTORY_RETRY_DELAY,
             process: Mutex::new(None),
             thread_ids: Mutex::new(BTreeMap::new()),
+            runtime_inventories: Mutex::new(BTreeMap::new()),
             runtime_profiles: Mutex::new(BTreeMap::new()),
         }
     }
@@ -88,12 +123,29 @@ impl CodexCapabilityBroker {
         env: BTreeMap<String, String>,
         request_timeout: Duration,
     ) -> Self {
+        Self::with_command_and_runtime_retry(
+            command,
+            env,
+            request_timeout,
+            RUNTIME_INVENTORY_RETRY_DELAY,
+        )
+    }
+
+    #[cfg(test)]
+    fn with_command_and_runtime_retry(
+        command: BrokerCommand,
+        env: BTreeMap<String, String>,
+        request_timeout: Duration,
+        runtime_inventory_retry_delay: Duration,
+    ) -> Self {
         Self {
             command,
             env,
             request_timeout,
+            runtime_inventory_retry_delay,
             process: Mutex::new(None),
             thread_ids: Mutex::new(BTreeMap::new()),
+            runtime_inventories: Mutex::new(BTreeMap::new()),
             runtime_profiles: Mutex::new(BTreeMap::new()),
         }
     }
@@ -108,29 +160,37 @@ impl CodexCapabilityBroker {
         params: Value,
         context: Option<&CodexElicitationContext>,
     ) -> Result<Value> {
-        let mut slot = self.process.lock().await;
-        if slot.is_none() {
-            *slot =
-                Some(BrokerProcess::spawn(&self.command, &self.env, self.request_timeout).await?);
-        }
-        let result = slot
-            .as_mut()
-            .expect("broker process initialized")
-            .request_with_context(
-                method,
-                params,
-                if context.is_some() {
-                    ELICITATION_REQUEST_TIMEOUT
-                } else {
-                    self.request_timeout
-                },
-                context,
-            )
-            .await;
-        if result.is_err()
-            && let Some(mut process) = slot.take()
-        {
-            let _ = process.child.kill().await;
+        let (result, effective_plugins_changed, broker_replaced) = {
+            let mut slot = self.process.lock().await;
+            if slot.is_none() {
+                *slot = Some(
+                    BrokerProcess::spawn(&self.command, &self.env, self.request_timeout).await?,
+                );
+            }
+            let process = slot.as_mut().expect("broker process initialized");
+            let result = process
+                .request_with_context(
+                    method,
+                    params,
+                    if context.is_some() {
+                        ELICITATION_REQUEST_TIMEOUT
+                    } else {
+                        self.request_timeout
+                    },
+                    context,
+                )
+                .await;
+            let effective_plugins_changed = process.take_effective_plugins_changed();
+            if result.is_err()
+                && let Some(mut process) = slot.take()
+            {
+                let _ = process.child.kill().await;
+            }
+            let broker_replaced = result.is_err();
+            (result, effective_plugins_changed, broker_replaced)
+        };
+        if effective_plugins_changed || broker_replaced {
+            self.invalidate_runtime_inventories().await;
         }
         result
     }
@@ -141,6 +201,17 @@ impl CodexCapabilityBroker {
             json!({
                 "cwds": [cwd],
                 "marketplaceKinds": null,
+            }),
+        )
+        .await
+    }
+
+    async fn plugin_installed(&self, cwd: &Path) -> Result<Value> {
+        self.request(
+            "plugin/installed",
+            json!({
+                "cwds": [cwd],
+                "installSuggestionPluginNames": [],
             }),
         )
         .await
@@ -163,15 +234,19 @@ impl CodexCapabilityBroker {
     ) -> Result<Value> {
         let catalog = self.plugin_list(cwd).await?;
         let target = find_catalog_plugin(&catalog, identity)?;
-        self.request(
-            "plugin/install",
-            json!({
-                "pluginName": identity.plugin,
-                "marketplacePath": target.marketplace_path,
-                "remoteMarketplaceName": target.remote_marketplace_name,
-            }),
-        )
-        .await
+        let result = self
+            .request(
+                "plugin/install",
+                json!({
+                    "pluginName": identity.plugin,
+                    "marketplacePath": target.marketplace_path,
+                    "remoteMarketplaceName": target.remote_marketplace_name,
+                }),
+            )
+            .await?;
+        self.invalidate_runtime_inventories().await;
+        let _ = self.prepare_runtime_inventory(cwd).await;
+        Ok(result)
     }
 
     pub(super) async fn plugin_uninstall(
@@ -181,8 +256,12 @@ impl CodexCapabilityBroker {
     ) -> Result<Value> {
         let catalog = self.plugin_list(cwd).await?;
         let target = find_catalog_plugin(&catalog, identity)?;
-        self.request("plugin/uninstall", json!({"pluginId": target.plugin_id}))
-            .await
+        let result = self
+            .request("plugin/uninstall", json!({"pluginId": target.plugin_id}))
+            .await?;
+        self.invalidate_runtime_inventories().await;
+        let _ = self.prepare_runtime_inventory(cwd).await;
+        Ok(result)
     }
 
     #[cfg(test)]
@@ -235,6 +314,18 @@ impl CodexCapabilityBroker {
         }
     }
 
+    async fn forget_ephemeral_thread(&self, psychevo_thread_id: &str) {
+        self.thread_ids.lock().await.remove(psychevo_thread_id);
+    }
+
+    pub(super) async fn prepare_runtime_inventory(&self, cwd: &Path) -> Result<()> {
+        self.runtime_inventory(cwd).await.map(|_| ())
+    }
+
+    async fn invalidate_runtime_inventories(&self) {
+        self.runtime_inventories.lock().await.clear();
+    }
+
     pub(super) async fn runtime_contributions(
         &self,
         state: super::WebState,
@@ -246,78 +337,37 @@ impl CodexCapabilityBroker {
         let profile = self.runtime_profile(cwd, psychevo_thread_id).await?;
         let CodexRuntimeProfile {
             capability_roots,
-            delegated_servers,
+            delegated_tools,
             warnings,
+            unavailable_warnings,
         } = profile;
-        if delegated_servers.is_empty() {
-            return Ok(CodexRuntimeContributions {
-                capability_roots,
-                runtime_tools: Vec::new(),
-                warnings,
-            });
-        }
-        let codex_thread_id = self
-            .ensure_ephemeral_thread(psychevo_thread_id, cwd)
-            .await?;
-        let inventory = self
-            .request(
-                "mcpServerStatus/list",
-                json!({
-                    "threadId": codex_thread_id,
-                    "detail": "toolsAndAuthOnly",
-                }),
-            )
-            .await?;
-        let mut tools = Vec::new();
-        for server in inventory
-            .get("data")
-            .and_then(Value::as_array)
+        let tools = delegated_tools
             .into_iter()
-            .flatten()
-        {
-            let Some(server_name) = server.get("name").and_then(Value::as_str) else {
-                continue;
-            };
-            if !delegated_servers.contains(server_name) {
-                continue;
-            }
-            let Some(server_tools) = server.get("tools").and_then(Value::as_object) else {
-                continue;
-            };
-            for (tool_name, descriptor) in server_tools {
-                let model_name = format!("mcp__{server_name}__{tool_name}");
-                let description = descriptor
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Codex App tool")
-                    .to_string();
-                let parameters = descriptor
-                    .get("inputSchema")
-                    .or_else(|| descriptor.get("input_schema"))
-                    .cloned()
-                    .unwrap_or_else(|| json!({"type":"object","properties":{}}));
-                tools.push(psychevo_runtime::RuntimeTool::with_source(
-                    std::sync::Arc::new(CodexMcpTool {
+            .map(|descriptor| {
+                let source = format!("codex:mcp:{}", descriptor.server_name);
+                psychevo_runtime::RuntimeTool::with_source(
+                    Arc::new(CodexMcpTool {
                         state: state.clone(),
+                        cwd: cwd.to_path_buf(),
                         psychevo_thread_id: psychevo_thread_id.to_string(),
-                        codex_thread_id: codex_thread_id.clone(),
                         turn_id: turn_id.clone(),
                         event_sink: event_sink.clone(),
-                        name: model_name,
-                        server_name: server_name.to_string(),
-                        remote_name: tool_name.clone(),
-                        description,
-                        parameters,
+                        name: descriptor.name,
+                        server_name: descriptor.server_name,
+                        remote_name: descriptor.remote_name,
+                        description: descriptor.description,
+                        parameters: descriptor.parameters,
                     }),
-                    format!("codex:mcp:{server_name}"),
+                    source,
                     "codex_capability_broker",
-                ));
-            }
-        }
+                )
+            })
+            .collect();
         Ok(CodexRuntimeContributions {
             capability_roots,
             runtime_tools: tools,
             warnings,
+            unavailable_warnings,
         })
     }
 
@@ -326,16 +376,104 @@ impl CodexCapabilityBroker {
         cwd: &Path,
         psychevo_thread_id: &str,
     ) -> Result<CodexRuntimeProfile> {
-        if let Some(profile) = self
-            .runtime_profiles
-            .lock()
-            .await
-            .get(psychevo_thread_id)
-            .cloned()
-        {
-            return Ok(profile);
+        let profile_slot = {
+            let mut profiles = self.runtime_profiles.lock().await;
+            profiles
+                .entry(psychevo_thread_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(None)))
+                .clone()
+        };
+        let mut profile_slot = profile_slot.lock().await;
+        if let Some(profile) = profile_slot.as_ref() {
+            return Ok(profile.clone());
         }
-        let (mut plugins, mut warnings) = self.enabled_plugin_details(cwd).await?;
+
+        let inventory = match self.runtime_inventory(cwd).await {
+            Ok(inventory) => inventory,
+            Err(err) => {
+                let profile = CodexRuntimeProfile {
+                    capability_roots: Vec::new(),
+                    delegated_tools: Vec::new(),
+                    warnings: Vec::new(),
+                    unavailable_warnings: vec![err.to_string()],
+                };
+                *profile_slot = Some(profile.clone());
+                return Ok(profile);
+            }
+        };
+        let mut unavailable_warnings = Vec::new();
+        let delegated_tools = if inventory.delegated_servers.is_empty() {
+            Vec::new()
+        } else {
+            match self
+                .load_delegated_tool_descriptors(
+                    cwd,
+                    psychevo_thread_id,
+                    &inventory.delegated_servers,
+                )
+                .await
+            {
+                Ok(tools) => tools,
+                Err(err) => {
+                    self.forget_ephemeral_thread(psychevo_thread_id).await;
+                    unavailable_warnings.push(err.to_string());
+                    Vec::new()
+                }
+            }
+        };
+        let profile = CodexRuntimeProfile {
+            capability_roots: inventory.capability_roots.clone(),
+            delegated_tools,
+            warnings: inventory.warnings.clone(),
+            unavailable_warnings,
+        };
+        *profile_slot = Some(profile.clone());
+        Ok(profile)
+    }
+
+    async fn runtime_inventory(&self, cwd: &Path) -> Result<Arc<CodexRuntimeInventory>> {
+        let key = tokio::fs::canonicalize(cwd)
+            .await
+            .unwrap_or_else(|_| cwd.to_path_buf());
+        let entry_cell = {
+            let mut inventories = self.runtime_inventories.lock().await;
+            inventories
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(CachedCodexRuntimeInventory::default())))
+                .clone()
+        };
+        let mut entry = entry_cell.lock().await;
+        if let Some(inventory) = entry.inventory.as_ref() {
+            return Ok(inventory.clone());
+        }
+        if let Some(failure) = entry.failure.as_ref() {
+            if Instant::now() < failure.retry_after {
+                return Err(Error::Message(failure.message.clone()));
+            }
+            entry.failure = None;
+        }
+
+        match self.load_runtime_inventory(&key).await {
+            Ok(inventory) => {
+                let inventory = Arc::new(inventory);
+                entry.inventory = Some(inventory.clone());
+                Ok(inventory)
+            }
+            Err(err) => {
+                let message = err.to_string();
+                entry.failure = Some(CachedCodexRuntimeInventoryFailure {
+                    message: message.clone(),
+                    retry_after: Instant::now() + self.runtime_inventory_retry_delay,
+                });
+                let mut inventories = self.runtime_inventories.lock().await;
+                inventories.entry(key).or_insert(entry_cell.clone());
+                Err(Error::Message(message))
+            }
+        }
+    }
+
+    async fn load_runtime_inventory(&self, cwd: &Path) -> Result<CodexRuntimeInventory> {
+        let (mut plugins, mut warnings) = self.enabled_installed_plugin_details(cwd).await?;
         self.resolve_hook_package_roots(cwd, &mut plugins, &mut warnings)
             .await;
 
@@ -389,23 +527,18 @@ impl CodexCapabilityBroker {
         capability_roots.sort_by(|left, right| left.id.cmp(&right.id));
         capability_roots.dedup_by(|left, right| left.id == right.id);
 
-        let profile = CodexRuntimeProfile {
+        Ok(CodexRuntimeInventory {
             capability_roots,
             delegated_servers,
             warnings,
-        };
-        let mut profiles = self.runtime_profiles.lock().await;
-        Ok(profiles
-            .entry(psychevo_thread_id.to_string())
-            .or_insert(profile)
-            .clone())
+        })
     }
 
-    async fn enabled_plugin_details(
+    async fn enabled_installed_plugin_details(
         &self,
         cwd: &Path,
     ) -> Result<(Vec<RuntimePluginDetail>, Vec<String>)> {
-        let catalog = self.plugin_list(cwd).await?;
+        let catalog = self.plugin_installed(cwd).await?;
         let mut details = Vec::new();
         let mut warnings = Vec::new();
         for marketplace in catalog
@@ -462,6 +595,62 @@ impl CodexCapabilityBroker {
             }
         }
         Ok((details, warnings))
+    }
+
+    async fn load_delegated_tool_descriptors(
+        &self,
+        cwd: &Path,
+        psychevo_thread_id: &str,
+        delegated_servers: &BTreeSet<String>,
+    ) -> Result<Vec<CodexDelegatedToolDescriptor>> {
+        let codex_thread_id = self
+            .ensure_ephemeral_thread(psychevo_thread_id, cwd)
+            .await?;
+        let inventory = self
+            .request(
+                "mcpServerStatus/list",
+                json!({
+                    "threadId": codex_thread_id,
+                    "detail": "toolsAndAuthOnly",
+                }),
+            )
+            .await?;
+        let mut tools = Vec::new();
+        for server in inventory
+            .get("data")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(server_name) = server.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if !delegated_servers.contains(server_name) {
+                continue;
+            }
+            let Some(server_tools) = server.get("tools").and_then(Value::as_object) else {
+                continue;
+            };
+            for (tool_name, descriptor) in server_tools {
+                tools.push(CodexDelegatedToolDescriptor {
+                    name: format!("mcp__{server_name}__{tool_name}"),
+                    server_name: server_name.to_string(),
+                    remote_name: tool_name.clone(),
+                    description: descriptor
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Codex App tool")
+                        .to_string(),
+                    parameters: descriptor
+                        .get("inputSchema")
+                        .or_else(|| descriptor.get("input_schema"))
+                        .cloned()
+                        .unwrap_or_else(|| json!({"type":"object","properties":{}})),
+                });
+            }
+        }
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(tools)
     }
 
     async fn plugin_read_target(
@@ -944,8 +1133,8 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
 #[derive(Clone)]
 struct CodexMcpTool {
     state: super::WebState,
+    cwd: PathBuf,
     psychevo_thread_id: String,
-    codex_thread_id: String,
     turn_id: Option<String>,
     event_sink: Option<super::GatewayEventSink>,
     name: String,
@@ -985,9 +1174,19 @@ impl ToolBinding for CodexMcpTool {
             }
             let context = CodexElicitationContext {
                 state: tool.state.clone(),
-                psychevo_thread_id: tool.psychevo_thread_id,
-                turn_id: tool.turn_id,
-                event_sink: tool.event_sink,
+                psychevo_thread_id: tool.psychevo_thread_id.clone(),
+                turn_id: tool.turn_id.clone(),
+                event_sink: tool.event_sink.clone(),
+            };
+            let codex_thread_id = match tool
+                .state
+                .inner
+                .codex_capability_broker
+                .ensure_ephemeral_thread(&tool.psychevo_thread_id, &tool.cwd)
+                .await
+            {
+                Ok(thread_id) => thread_id,
+                Err(err) => return ToolOutput::error(err.to_string()),
             };
             match tool
                 .state
@@ -996,7 +1195,7 @@ impl ToolBinding for CodexMcpTool {
                 .request_with_context(
                     "mcpServer/tool/call",
                     json!({
-                        "threadId": tool.codex_thread_id,
+                        "threadId": codex_thread_id,
                         "server": tool.server_name,
                         "tool": tool.remote_name,
                         "arguments": args,
@@ -1009,7 +1208,14 @@ impl ToolBinding for CodexMcpTool {
                     ToolOutput::error(value.to_string())
                 }
                 Ok(value) => ToolOutput::ok(value),
-                Err(err) => ToolOutput::error(err.to_string()),
+                Err(err) => {
+                    tool.state
+                        .inner
+                        .codex_capability_broker
+                        .forget_ephemeral_thread(&tool.psychevo_thread_id)
+                        .await;
+                    ToolOutput::error(err.to_string())
+                }
             }
         })
     }
@@ -1395,6 +1601,7 @@ struct BrokerProcess {
     stdin: ChildStdin,
     stdout: Lines<BufReader<ChildStdout>>,
     next_id: u64,
+    effective_plugins_changed: bool,
 }
 
 impl BrokerProcess {
@@ -1431,6 +1638,7 @@ impl BrokerProcess {
             stdin,
             stdout: BufReader::new(stdout).lines(),
             next_id: 1,
+            effective_plugins_changed: false,
         };
         process
             .request_with_context(
@@ -1502,6 +1710,10 @@ impl BrokerProcess {
                 self.respond_to_server_request(&message, context).await?;
                 continue;
             }
+            if message.get("method").and_then(Value::as_str) == Some("account/updated") {
+                self.effective_plugins_changed = true;
+                continue;
+            }
             let Some(id) = message.get("id").and_then(Value::as_u64) else {
                 continue;
             };
@@ -1521,6 +1733,10 @@ impl BrokerProcess {
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
+    }
+
+    fn take_effective_plugins_changed(&mut self) -> bool {
+        std::mem::take(&mut self.effective_plugins_changed)
     }
 
     async fn respond_to_server_request(
@@ -1579,7 +1795,7 @@ mod tests {
         fs::write(
             &script,
             r#"#!/usr/bin/env python3
-import json, sys
+import json, sys, time
 initialized = False
 for line in sys.stdin:
     msg = json.loads(line)
@@ -1594,6 +1810,8 @@ for line in sys.stdin:
         response = json.loads(sys.stdin.readline())
         assert response["result"]["action"] == "decline"
         print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"marketplaces":[{"name":"openai","path":None,"plugins":[{"id":"review@openai","name":"review","installed":False,"enabled":False}]}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}), flush=True)
+    elif method == "plugin/installed":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"marketplaces":[],"marketplaceLoadErrors":[]}}), flush=True)
     elif method == "plugin/read":
         print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"plugin":{"marketplaceName":"openai","summary":{"name":"review","installed":False,"enabled":False},"description":"Review","skills":[{"name":"review"}],"hooks":[],"apps":[{"id":"review-app","name":"Review"}],"mcpServers":[]}}}), flush=True)
     elif method == "plugin/install":
@@ -1650,6 +1868,509 @@ for line in sys.stdin:
         assert_eq!(uninstall, json!({}));
         assert_eq!(apps["data"], json!([]));
         broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_inventory_is_single_flight_per_canonical_cwd() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        let other_cwd = temp.path().join("other");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::create_dir_all(&other_cwd).expect("other cwd");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("calls.log");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, sys, time
+LOG = {log}
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "plugin/installed":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("plugin-installed\n")
+        time.sleep(0.1)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
+    else:
+        raise AssertionError("unexpected method: " + str(method))
+"#,
+                log = serde_json::to_string(&log).expect("log json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let broker = CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: script,
+                args: Vec::new(),
+            },
+            BTreeMap::from([(
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            )]),
+            Duration::from_secs(1),
+        );
+
+        let (left, right) = tokio::join!(
+            broker.prepare_runtime_inventory(&cwd),
+            broker.prepare_runtime_inventory(&cwd)
+        );
+        left.expect("left inventory");
+        right.expect("right inventory");
+        assert_eq!(
+            fs::read_to_string(&log).expect("single-flight log"),
+            "plugin-installed\n"
+        );
+
+        broker
+            .prepare_runtime_inventory(&other_cwd)
+            .await
+            .expect("other cwd inventory");
+        assert_eq!(
+            fs::read_to_string(&log).expect("per-cwd log"),
+            "plugin-installed\nplugin-installed\n"
+        );
+        broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn account_update_notification_invalidates_runtime_inventory() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        fs::create_dir_all(&cwd).expect("cwd");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("calls.log");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, sys
+LOG = {log}
+count = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "plugin/installed":
+        count += 1
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("plugin-installed\n")
+        if count == 1:
+            print(json.dumps({{"jsonrpc":"2.0","method":"account/updated","params":{{"authMode":"chatgpt"}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
+"#,
+                log = serde_json::to_string(&log).expect("log json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let broker = CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: script,
+                args: Vec::new(),
+            },
+            BTreeMap::from([(
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            )]),
+            Duration::from_secs(1),
+        );
+
+        broker
+            .prepare_runtime_inventory(&cwd)
+            .await
+            .expect("inventory before account update");
+        broker
+            .prepare_runtime_inventory(&cwd)
+            .await
+            .expect("inventory after account update");
+        assert_eq!(
+            fs::read_to_string(&log).expect("account update log"),
+            "plugin-installed\nplugin-installed\n"
+        );
+        broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn initialize_and_thread_start_prewarms_inventory_without_blocking() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        let home = temp.path().join("home");
+        fs::create_dir_all(&cwd).expect("cwd");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("calls.log");
+        let release = temp.path().join("release");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, os, sys, time
+LOG = {log}
+RELEASE = {release}
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "plugin/installed":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("plugin-installed\n")
+        while not os.path.exists(RELEASE):
+            time.sleep(0.005)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
+"#,
+                log = serde_json::to_string(&log).expect("log json"),
+                release = serde_json::to_string(&release).expect("release json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let env = BTreeMap::from([
+            ("HOME".to_string(), temp.path().display().to_string()),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+            (
+                "PSYCHEVO_CODEX_BIN".to_string(),
+                script.display().to_string(),
+            ),
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        ]);
+        let runtime =
+            psychevo_runtime::StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = crate::Gateway::new(runtime);
+        let config = super::super::GatewayWebServerConfig::new(
+            gateway,
+            home,
+            cwd.clone(),
+            None,
+            env,
+            temp.path().join("static"),
+        );
+        let state = super::super::WebState::new(config);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            super::super::handle_rpc(
+                state.clone(),
+                super::super::AuthContext::Bearer,
+                tx.clone(),
+                super::super::RpcRequest {
+                    jsonrpc: "2.0".to_string(),
+                    id: Some(json!(1)),
+                    method: "initialize".to_string(),
+                    params: None,
+                },
+            ),
+        )
+        .await
+        .expect("initialize must not wait for runtime inventory")
+        .expect("initialize response");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !log.exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("inventory prewarm started");
+
+        let thread_state = state.clone();
+        let thread_cwd = cwd.clone();
+        let mut thread_start = tokio::spawn(async move {
+            super::super::handle_rpc(
+                thread_state,
+                super::super::AuthContext::Bearer,
+                tx,
+                super::super::RpcRequest {
+                    jsonrpc: "2.0".to_string(),
+                    id: Some(json!(2)),
+                    method: "thread/start".to_string(),
+                    params: Some(json!({
+                        "scope": {
+                            "cwd": thread_cwd,
+                            "source": {"kind":"web","rawId":"prewarm-test"}
+                        }
+                    })),
+                },
+            )
+            .await
+        });
+        let completed_without_inventory =
+            tokio::time::timeout(Duration::from_millis(100), &mut thread_start).await;
+        let thread_start_was_ready = completed_without_inventory.is_ok();
+        fs::write(&release, "ready").expect("release inventory");
+        match completed_without_inventory {
+            Ok(response) => response
+                .expect("thread/start task")
+                .expect("thread/start response"),
+            Err(_) => thread_start
+                .await
+                .expect("thread/start task after inventory release")
+                .expect("thread/start response after inventory release"),
+        };
+        assert!(
+            thread_start_was_ready,
+            "thread/start must not wait for runtime inventory"
+        );
+        assert_eq!(
+            fs::read_to_string(&log).expect("prewarm log"),
+            "plugin-installed\n"
+        );
+        state.inner.codex_capability_broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_runtime_inventory_is_negative_cached_until_retry_delay() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        fs::create_dir_all(&cwd).expect("cwd");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("calls.log");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, sys
+LOG = {log}
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "plugin/installed":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("plugin-installed\n")
+        sys.exit(1)
+"#,
+                log = serde_json::to_string(&log).expect("log json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let broker = CodexCapabilityBroker::with_command_and_runtime_retry(
+            BrokerCommand {
+                program: script,
+                args: Vec::new(),
+            },
+            BTreeMap::from([(
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            )]),
+            Duration::from_secs(1),
+            Duration::from_millis(10),
+        );
+
+        let first = broker
+            .runtime_profile(&cwd, "thread-frozen")
+            .await
+            .expect("degraded profile");
+        assert_eq!(first.unavailable_warnings.len(), 1);
+        let second = broker
+            .runtime_profile(&cwd, "thread-frozen")
+            .await
+            .expect("frozen degraded profile");
+        assert_eq!(first.unavailable_warnings, second.unavailable_warnings);
+        assert_eq!(
+            fs::read_to_string(&log).expect("negative-cache log"),
+            "plugin-installed\n"
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let frozen_after_retry_delay = broker
+            .runtime_profile(&cwd, "thread-frozen")
+            .await
+            .expect("degraded profile stays frozen");
+        assert_eq!(
+            first.unavailable_warnings,
+            frozen_after_retry_delay.unavailable_warnings
+        );
+        let new_thread = broker
+            .runtime_profile(&cwd, "thread-retry")
+            .await
+            .expect("new thread retries into a degraded profile");
+        assert_eq!(new_thread.unavailable_warnings.len(), 1);
+        assert_eq!(
+            fs::read_to_string(&log).expect("retry log"),
+            "plugin-installed\nplugin-installed\n"
+        );
+        broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_mutation_refreshes_new_threads_without_changing_frozen_threads() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        let home = temp.path().join("home");
+        let alpha = temp.path().join("alpha");
+        let beta = temp.path().join("beta");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::create_dir_all(alpha.join(".codex-plugin")).expect("alpha manifest dir");
+        fs::create_dir_all(beta.join(".codex-plugin")).expect("beta manifest dir");
+        fs::write(alpha.join(".codex-plugin/plugin.json"), "{}").expect("alpha manifest");
+        fs::write(beta.join(".codex-plugin/plugin.json"), "{}").expect("beta manifest");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("calls.log");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, sys
+ALPHA = {alpha}
+BETA = {beta}
+LOG = {log}
+active = "alpha"
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "plugin/installed":
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("installed:" + active + "\n")
+        plugins = [] if active == "none" else [{{"id":active + "@openai","name":active,"installed":True,"enabled":True}}]
+        marketplaces = [] if not plugins else [{{"name":"openai","path":None,"plugins":plugins}}]
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":marketplaces,"marketplaceLoadErrors":[]}}}}), flush=True)
+    elif method == "plugin/list":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"beta@openai","name":"beta","installed":active == "beta","enabled":active == "beta"}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
+    elif method == "plugin/read":
+        name = msg["params"]["pluginName"]
+        path = ALPHA if name == "alpha" else BETA
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":name + "@openai","name":name,"installed":True,"enabled":True,"source":{{"type":"local","path":path}}}},"description":name,"skills":[{{"name":name,"path":path + "/skills/" + name + "/SKILL.md","enabled":True}}],"hooks":[],"apps":[],"mcpServers":[]}}}}}}), flush=True)
+    elif method == "plugin/install":
+        active = "beta"
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("install\n")
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
+    elif method == "plugin/uninstall":
+        active = "none"
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("uninstall\n")
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{}}}}), flush=True)
+    else:
+        raise AssertionError("unexpected method: " + str(method))
+"#,
+                alpha = serde_json::to_string(&alpha).expect("alpha json"),
+                beta = serde_json::to_string(&beta).expect("beta json"),
+                log = serde_json::to_string(&log).expect("log json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let env = BTreeMap::from([
+            ("HOME".to_string(), temp.path().display().to_string()),
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+            (
+                "PSYCHEVO_CODEX_BIN".to_string(),
+                script.display().to_string(),
+            ),
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        ]);
+        let runtime =
+            psychevo_runtime::StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = crate::Gateway::new(runtime);
+        let config = super::super::GatewayWebServerConfig::new(
+            gateway,
+            home,
+            cwd.clone(),
+            None,
+            env,
+            temp.path().join("static"),
+        );
+        let state = super::super::WebState::new(config);
+
+        let alpha_profile = state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(state.clone(), &cwd, "thread-alpha", None, None)
+            .await
+            .expect("alpha profile");
+        assert_eq!(alpha_profile.capability_roots[0].id, "codex:alpha@openai");
+
+        let beta_identity = CodexPluginIdentity {
+            plugin: "beta".to_string(),
+            marketplace: "openai".to_string(),
+        };
+        state
+            .inner
+            .codex_capability_broker
+            .plugin_install(&cwd, &beta_identity)
+            .await
+            .expect("install beta");
+        let frozen_alpha = state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(state.clone(), &cwd, "thread-alpha", None, None)
+            .await
+            .expect("frozen alpha");
+        assert_eq!(frozen_alpha.capability_roots[0].id, "codex:alpha@openai");
+        let beta_profile = state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(state.clone(), &cwd, "thread-beta", None, None)
+            .await
+            .expect("beta profile");
+        assert_eq!(beta_profile.capability_roots[0].id, "codex:beta@openai");
+
+        state
+            .inner
+            .codex_capability_broker
+            .plugin_uninstall(&cwd, &beta_identity)
+            .await
+            .expect("uninstall beta");
+        let frozen_beta = state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(state.clone(), &cwd, "thread-beta", None, None)
+            .await
+            .expect("frozen beta");
+        assert_eq!(frozen_beta.capability_roots[0].id, "codex:beta@openai");
+        let empty_profile = state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(state.clone(), &cwd, "thread-empty", None, None)
+            .await
+            .expect("empty profile");
+        assert!(empty_profile.capability_roots.is_empty());
+        assert_eq!(
+            fs::read_to_string(&log).expect("mutation log"),
+            "installed:alpha\ninstall\ninstalled:beta\nuninstall\ninstalled:none\n"
+        );
+        state.inner.codex_capability_broker.stop().await;
     }
 
     #[test]
@@ -1805,7 +2526,7 @@ for line in sys.stdin:
         let script = temp.path().join("fake-codex.py");
         let script_text = format!(
             r#"#!/usr/bin/env python3
-import json, sys
+import json, sys, time
 PACKAGE = {package}
 LOG = {log}
 initialized = False
@@ -1817,11 +2538,16 @@ for line in sys.stdin:
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
     elif method == "initialized":
         initialized = True
-    elif method == "plugin/list":
+    elif method == "plugin/installed":
         assert initialized
         with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-list\n")
+            handle.write("plugin-installed\n")
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":True,"enabled":True}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
+    elif method == "plugin/list":
+        time.sleep(2)
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("plugin-list\n")
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
     elif method == "plugin/read":
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":"review@openai","name":"review","installed":True,"enabled":True,"source":{{"type":"local","path":PACKAGE}}}},"skills":[{{"name":"review","path":PACKAGE + "/skills/review/SKILL.md","enabled":True}}],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
     elif method == "thread/start":
@@ -1829,6 +2555,8 @@ for line in sys.stdin:
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"thread":{{"id":"codex-thread-1"}}}}}}), flush=True)
     elif method == "mcpServerStatus/list":
         assert msg["params"]["threadId"] == "codex-thread-1"
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write("mcp-status\n")
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"data":[{{"name":"codex_apps","tools":{{"review":{{"description":"Review app","inputSchema":{{"type":"object","properties":{{}}}}}}}}}}],"nextCursor":None}}}}), flush=True)
     elif method == "mcpServer/tool/call":
         print(json.dumps({{"jsonrpc":"2.0","id":9001,"method":"mcpServer/elicitation/request","params":{{"threadId":"codex-thread-1","turnId":"turn-1","serverName":"codex_apps","mode":"form","_meta":{{"source":"test"}},"message":"Continue?","requestedSchema":{{"type":"object","properties":{{"confirmed":{{"type":"boolean"}}}},"required":["confirmed"]}}}}}}), flush=True)
@@ -1879,18 +2607,19 @@ for line in sys.stdin:
             events_for_sink.lock().expect("events").push(event);
         });
 
-        let contributions = state
-            .inner
-            .codex_capability_broker
-            .runtime_contributions(
+        let contributions = tokio::time::timeout(
+            Duration::from_millis(500),
+            state.inner.codex_capability_broker.runtime_contributions(
                 state.clone(),
                 &cwd,
                 "psychevo-thread-1",
                 Some("turn-1".to_string()),
                 Some(event_sink.clone()),
-            )
-            .await
-            .expect("runtime contributions");
+            ),
+        )
+        .await
+        .expect("runtime assembly must not wait for delayed plugin/list")
+        .expect("runtime contributions");
         assert_eq!(contributions.capability_roots.len(), 1);
         assert!(matches!(
             contributions.capability_roots[0].authority,
@@ -1914,11 +2643,38 @@ for line in sys.stdin:
             .await
             .expect("frozen runtime contributions");
         assert_eq!(second.capability_roots, contributions.capability_roots);
+        assert_eq!(second.runtime_tools.len(), 1);
+        assert_eq!(
+            fs::read_to_string(&log).expect("runtime inventory log"),
+            "plugin-installed\nmcp-status\n"
+        );
+
+        let other_thread = state
+            .inner
+            .codex_capability_broker
+            .runtime_contributions(
+                state.clone(),
+                &cwd,
+                "psychevo-thread-2",
+                Some("turn-3".to_string()),
+                None,
+            )
+            .await
+            .expect("shared runtime inventory");
+        assert_eq!(
+            other_thread.capability_roots,
+            contributions.capability_roots
+        );
+        assert_eq!(other_thread.runtime_tools.len(), 1);
+        assert_eq!(
+            fs::read_to_string(&log).expect("shared inventory log"),
+            "plugin-installed\nmcp-status\nmcp-status\n"
+        );
 
         let tool = CodexMcpTool {
             state: state.clone(),
+            cwd: cwd.clone(),
             psychevo_thread_id: "psychevo-thread-1".to_string(),
-            codex_thread_id: "codex-thread-1".to_string(),
             turn_id: Some("turn-1".to_string()),
             event_sink: Some(event_sink),
             name: "mcp__codex_apps__review".to_string(),
@@ -1970,9 +2726,14 @@ for line in sys.stdin:
             .codex_capability_broker
             .archive_ephemeral_thread("psychevo-thread-1")
             .await;
+        state
+            .inner
+            .codex_capability_broker
+            .archive_ephemeral_thread("psychevo-thread-2")
+            .await;
         assert_eq!(
             fs::read_to_string(&log).expect("archive log"),
-            "plugin-list\ncodex-thread-1\n"
+            "plugin-installed\nmcp-status\nmcp-status\ncodex-thread-1\ncodex-thread-1\n"
         );
         state.inner.codex_capability_broker.stop().await;
     }

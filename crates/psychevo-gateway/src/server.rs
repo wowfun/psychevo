@@ -11,7 +11,7 @@ use axum::body::Body;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::header::{
-    AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE,
+    AUTHORIZATION, CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE, COOKIE, LOCATION, SET_COOKIE,
 };
 use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::{IntoResponse, Json};
@@ -210,5 +210,6 @@ mod tests {
     include!("server/tests/session_lifecycle.rs");
     include!("server/tests/history_editing.rs");
     include!("server/tests/managed_lifecycle.rs");
+    include!("server/tests/first_token_performance.rs");
     include!("server/tests/helpers.rs");
 }

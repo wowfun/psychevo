@@ -188,6 +188,7 @@ struct AutomationFakeRun {
 #[derive(Default)]
 struct AutomationFakeBackend {
     runs: Mutex<Vec<AutomationFakeRun>>,
+    dispatch_times: Mutex<Vec<std::time::Instant>>,
     model_tool_args: Mutex<Option<Value>>,
     model_tool_results: Mutex<Vec<Value>>,
     model_tool_errors: Mutex<Vec<String>>,
@@ -211,6 +212,10 @@ impl crate::GatewayBackend for AutomationFakeBackend {
         request: crate::BackendTurnRequest,
     ) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::RunResult>>
     {
+        self.dispatch_times
+            .lock()
+            .expect("dispatch times")
+            .push(std::time::Instant::now());
         let runtime_tools = request
             .options
             .runtime_tools

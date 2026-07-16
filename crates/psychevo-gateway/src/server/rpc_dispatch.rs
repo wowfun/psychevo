@@ -1,5 +1,16 @@
 include!("rpc_dispatch/transport.rs");
 
+fn prewarm_codex_runtime_inventory(state: &WebState, cwd: PathBuf) {
+    let warm_state = state.clone();
+    tokio::spawn(async move {
+        let _ = warm_state
+            .inner
+            .codex_capability_broker
+            .prepare_runtime_inventory(&cwd)
+            .await;
+    });
+}
+
 async fn handle_rpc(
     state: WebState,
     auth: AuthContext,
@@ -9,6 +20,7 @@ async fn handle_rpc(
     match request.method.as_str() {
         "initialize" => {
             let scope = default_resolved_scope(&state, &auth)?;
+            prewarm_codex_runtime_inventory(&state, scope.cwd.clone());
             Ok(json!({
             "server": "psychevo-gateway",
             "version": env!("CARGO_PKG_VERSION"),
@@ -40,6 +52,7 @@ async fn handle_rpc(
                 .release_prepared_agent_session(&scope.source.source_key().0)
                 .await?;
             state.inner.gateway.clear_source_binding(&scope.source)?;
+            prewarm_codex_runtime_inventory(&state, scope.cwd.clone());
             let snapshot_scope = detached_draft_scope(&scope, &auth);
             update_browser_session_scope(&state, &auth, &snapshot_scope);
             thread_snapshot(&state, &snapshot_scope, None)
@@ -167,22 +180,32 @@ async fn handle_rpc(
         "thread/archive" => {
             let params = request.required_params::<wire::ThreadIdParams>()?;
             authorize_thread(&state, &auth, &params.thread_id)?;
-            guard_session_mutation(&state, &auth, &params.thread_id, true)?;
+            guard_session_mutation(&state, &auth, &params.thread_id)?;
             let session = archive_thread(&state, &params.thread_id).await?;
             Ok(json!({"session": session}))
         }
         "thread/restore" => {
             let params = request.required_params::<wire::ThreadIdParams>()?;
             authorize_thread(&state, &auth, &params.thread_id)?;
-            guard_session_mutation(&state, &auth, &params.thread_id, true)?;
+            guard_session_mutation(&state, &auth, &params.thread_id)?;
             let session = restore_thread(&state, &params.thread_id).await?;
             Ok(json!({"session": session}))
         }
         "thread/delete" => {
             let params = request.required_params::<wire::ThreadIdParams>()?;
             authorize_thread(&state, &auth, &params.thread_id)?;
-            guard_session_mutation(&state, &auth, &params.thread_id, false)?;
+            guard_session_mutation(&state, &auth, &params.thread_id)?;
+            let scope = default_resolved_scope(&state, &auth)?;
+            let deleting_current = state
+                .inner
+                .gateway
+                .resolve_source_thread(&scope.source)?
+                .as_deref()
+                == Some(params.thread_id.as_str());
             delete_thread(&state, &params.thread_id).await?;
+            if deleting_current {
+                state.inner.gateway.clear_source_binding(&scope.source)?;
+            }
             Ok(json!({"deleted": true, "threadId": params.thread_id}))
         }
         "thread/context/read" => {

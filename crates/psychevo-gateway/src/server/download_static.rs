@@ -209,27 +209,38 @@ async fn static_asset(
     let Some(static_dir) = &state.inner.static_dir else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let path = uri.path().trim_start_matches('/');
-    let candidate = if path.is_empty() {
+    let request_path = uri.path().trim_start_matches('/');
+    let candidate = if request_path.is_empty() {
         static_dir.join("index.html")
     } else {
-        static_dir.join(path)
+        static_dir.join(request_path)
     };
-    let serves_shell = path.is_empty() || path == "index.html" || !candidate.is_file();
+    let candidate_is_file = tokio::fs::metadata(&candidate)
+        .await
+        .is_ok_and(|metadata| metadata.is_file());
+    let serves_shell = request_path.is_empty() || request_path == "index.html" || !candidate_is_file;
     if serves_shell && state.auth_from_headers(&headers).is_none() {
         return launch_required_page().into_response();
     }
-    let path = if candidate.is_file() {
+    let path = if candidate_is_file {
         candidate
     } else {
         static_dir.join("index.html")
     };
-    match std::fs::read(&path) {
+    match tokio::fs::read(&path).await {
         Ok(bytes) => {
             let mut response = Response::new(Body::from(bytes));
             response.headers_mut().insert(
                 CONTENT_TYPE,
                 HeaderValue::from_static(content_type_for_path(&path)),
+            );
+            response.headers_mut().insert(
+                CACHE_CONTROL,
+                HeaderValue::from_static(if candidate_is_file && is_fingerprinted_asset(request_path) {
+                    "public, max-age=31536000, immutable"
+                } else {
+                    "no-store"
+                }),
             );
             response.into_response()
         }
@@ -239,6 +250,24 @@ async fn static_asset(
         )
             .into_response(),
     }
+}
+
+fn is_fingerprinted_asset(path: &str) -> bool {
+    let Some(filename) = path.strip_prefix("assets/") else {
+        return false;
+    };
+    let stem = filename
+        .strip_suffix(".map")
+        .unwrap_or(filename)
+        .rsplit_once('.')
+        .map_or(filename, |(stem, _)| stem);
+    let bytes = stem.as_bytes();
+    if bytes.len() < 9 || bytes[bytes.len() - 9] != b'-' {
+        return false;
+    }
+    bytes[bytes.len() - 8..]
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn launch_required_page() -> Response<Body> {
@@ -273,6 +302,9 @@ fn launch_required_page() -> Response<Body> {
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
     response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn launch_expired_page(status: StatusCode) -> Response<Body> {
@@ -306,6 +338,9 @@ fn launch_expired_page(status: StatusCode) -> Response<Body> {
         CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     );
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 async fn gateway_fallback(

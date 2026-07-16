@@ -139,6 +139,17 @@ pub(super) async fn run_routed_turn(
                             ),
                         });
                     }
+                    for message in contributions.unavailable_warnings {
+                        event_sink(GatewayEvent::Warning {
+                            kind: "codex_capability_broker".to_string(),
+                            message,
+                            source_path: None,
+                            suggestion: Some(
+                                "Check the current CODEX_HOME and Codex app-server availability."
+                                    .to_string(),
+                            ),
+                        });
+                    }
                 }
             }
             Err(err) => {

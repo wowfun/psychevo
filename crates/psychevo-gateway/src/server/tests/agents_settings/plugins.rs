@@ -156,6 +156,8 @@ for line in sys.stdin:
         pass
     elif method == "plugin/list":
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":False,"enabled":False,"interface":{{"shortDescription":"Review"}}}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
+    elif method == "plugin/installed":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
     elif method == "plugin/read":
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":"review@openai","name":"review","installed":False,"enabled":False}},"description":"Review plugin","skills":[],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
     elif method == "plugin/install":

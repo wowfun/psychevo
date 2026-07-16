@@ -821,6 +821,10 @@ async fn static_shell_without_browser_session_returns_launch_required_page() {
     .into_response();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
     let body = response_text(response).await;
     assert!(body.contains("pevo launch required"), "{body}");
     assert!(body.contains("pevo web --print-url"), "{body}");
@@ -849,13 +853,58 @@ async fn static_shell_with_browser_session_serves_workbench_index() {
         HeaderValue::from_str(&format!("psychevo_gateway_session={session_id}")).expect("cookie"),
     );
 
-    let response = static_asset(State(state), headers, axum::http::Uri::from_static("/"))
+    let response = static_asset(State(state.clone()), headers.clone(), axum::http::Uri::from_static("/"))
         .await
         .into_response();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
     let body = response_text(response).await;
     assert!(body.contains("<title>workbench</title>"), "{body}");
+
+    let fallback = static_asset(
+        State(state),
+        headers,
+        axum::http::Uri::from_static("/sessions/thread-1"),
+    )
+    .await
+    .into_response();
+    assert_eq!(fallback.status(), StatusCode::OK);
+    assert_eq!(
+        fallback.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    assert!(response_text(fallback).await.contains("<title>workbench</title>"));
+}
+
+#[tokio::test]
+async fn fingerprinted_static_asset_is_immutable_cacheable() {
+    let (temp, state) = web_state_with_static();
+    let assets = temp.path().join("static/assets");
+    std::fs::create_dir_all(&assets).expect("assets dir");
+    std::fs::write(assets.join("index-C0FFEE42.js"), "export const ready = true;")
+        .expect("asset");
+
+    let response = static_asset(
+        State(state),
+        HeaderMap::new(),
+        axum::http::Uri::from_static("/assets/index-C0FFEE42.js"),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        Some("public, max-age=31536000, immutable")
+    );
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        Some("text/javascript; charset=utf-8")
+    );
 }
 
 #[tokio::test]
