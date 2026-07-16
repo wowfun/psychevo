@@ -25,6 +25,7 @@ import { parseThreadContext } from "../runtime-context";
 import { idleActivity, normalizeSnapshot } from "../session-utils";
 import {
   hydrateThreadSnapshotHistory,
+  runThreadInterrupt,
   threadApplicationTarget
 } from "../thread-application";
 
@@ -298,15 +299,11 @@ export function ThreadPanel({
 
   async function interrupt() {
     const target = threadApplicationTarget(scope ?? snapshot?.scope, threadId);
-    const interruptAvailable = threadActions.some((action) => action.id === "interrupt" && action.enabled);
-    if (!writable || !client || !target || !interruptAvailable) {
+    if (!writable || !client || !target) {
       return;
     }
     try {
-      await client.request("thread/action/run", {
-        ...target,
-        action: { kind: "interrupt" }
-      });
+      await runThreadInterrupt(client, target);
       await refresh();
     } catch (interruptError) {
       setError(interruptError instanceof Error ? interruptError.message : String(interruptError));

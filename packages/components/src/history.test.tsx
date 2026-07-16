@@ -115,6 +115,47 @@ describe("HistoryPanel", () => {
     expect(onDelete).not.toHaveBeenCalled();
   });
 
+  it("allows archive and delete for the idle current session but not while it is running", () => {
+    const onArchive = vi.fn();
+    const onDelete = vi.fn();
+    const { container, rerender } = renderHistory({
+      currentThreadId: "session-1234567890",
+      onArchive,
+      onDelete
+    });
+
+    fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
+    const idleArchive = screen.getByRole("menuitem", { name: "Archive" }) as HTMLButtonElement;
+    const idleDelete = screen.getByRole("menuitem", { name: "Delete" }) as HTMLButtonElement;
+    expect(idleArchive.disabled).toBe(false);
+    expect(idleDelete.disabled).toBe(false);
+
+    fireEvent.click(idleArchive);
+    expect(onArchive).toHaveBeenCalledWith("session-1234567890");
+    fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(onDelete).toHaveBeenCalledWith("session-1234567890");
+
+    rerender(
+      <HistoryPanel
+        archived={false}
+        currentThreadId="session-1234567890"
+        sessions={[session({ activity: { running: true, activeTurnId: "turn-1", queuedTurns: 0 } })]}
+        onArchive={onArchive}
+        onDelete={onDelete}
+        onExport={vi.fn()}
+        onNew={vi.fn()}
+        onRename={vi.fn()}
+        onRestore={vi.fn()}
+        onResume={vi.fn()}
+        onShare={vi.fn()}
+      />
+    );
+    fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
+    expect((screen.getByRole("menuitem", { name: "Archive" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("labels the workspace action as opening rather than creating", () => {
     const onCreateWorkspace = vi.fn();
     renderHistory({ onCreateWorkspace });

@@ -400,7 +400,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                                     close();
                                     props.onDelete(session.id);
                                   }}
-                                  disabled={props.disabled || active || running || deleteAction?.enabled === false}
+                                  disabled={props.disabled || running || deleteAction?.enabled === false}
                                   type="button"
                                 >
                                   <Trash2 size={15} aria-hidden />

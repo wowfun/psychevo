@@ -118,7 +118,7 @@ describe("Workbench command routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     const overlay = await screen.findByRole("region", { name: "Commands overlay" });
-    fireEvent.click(within(overlay).getByRole("button", { name: /\/st/ }));
+    fireEvent.click(await within(overlay).findByRole("button", { name: /\/st/ }));
 
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -633,7 +633,7 @@ describe("Workbench command routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByRole("region", { name: "Commands overlay" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /\/status/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /\/status/ }));
 
     expect(await screen.findByRole("region", { name: "Workspace status" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Commands overlay" })).toBeNull();
@@ -859,6 +859,53 @@ describe("Workbench command routing", () => {
     });
   });
 
+  it("runs the interrupt command when activity is live but its cached descriptor is stale", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "control",
+      feedbackAnchor: "composer",
+      action: { type: "turnInterrupt" }
+    });
+
+    render(<App />);
+    await resumeSession();
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/context/read",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+    });
+    act(() => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "activityChanged",
+            threadId: "thread-1",
+            activity: { running: true, activeTurnId: "turn-1", queuedTurns: 0 }
+          }
+        });
+      }
+    });
+
+    const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/interrupt" } });
+    fireEvent.submit(textarea.closest("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/action/run",
+        params: {
+          scope: gatewayMock.scope,
+          threadId: "thread-1",
+          action: { kind: "interrupt" }
+        }
+      });
+    });
+  });
+
   it("clears transient slash feedback after switching sessions", async () => {
     gatewayMock.sessionSummaries = [
       sessionSummary("thread-1", "First session"),
@@ -940,6 +987,9 @@ describe("Workbench command routing", () => {
     render(<App />);
 
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.change(textarea, { target: { value: "/x-daily latest" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -1022,6 +1072,9 @@ describe("Workbench command routing", () => {
     render(<App />);
 
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.change(textarea, { target: { value: "/queue hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 

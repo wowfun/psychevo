@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { Bot, Bug, FileText, FolderTree, GitPullRequest, Globe2, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
 import { DismissibleDetails, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
@@ -21,12 +21,25 @@ import { PreviewPanel } from "./right-workspace/preview";
 import { ReviewPanel } from "./right-workspace/review";
 import { TeamPanel } from "./right-workspace/team";
 import { ThreadPanel } from "./right-workspace/thread";
-import { TerminalPanel } from "./right-workspace/terminal";
 import { SessionObservability } from "./right-workspace/usage";
+import {
+  rightWorkspaceTabLabel,
+  rightWorkspaceTabVisibleForSession
+} from "./right-workspace-model";
 
-export { isUnsupportedPreviewFile } from "./right-workspace/files";
-export { fileBasename } from "./right-workspace/tree";
+export {
+  createRightTabId,
+  fileBasename,
+  isUnsupportedPreviewFile,
+  rightWorkspaceDefaultTitle,
+  rightWorkspaceTabLabel,
+  rightWorkspaceTabVisibleForSession
+} from "./right-workspace-model";
 export { SessionUsageGrid, normalizedPercent } from "./right-workspace/usage";
+
+const TerminalPanel = lazy(async () => ({
+  default: (await import("./right-workspace/terminal")).TerminalPanel
+}));
 
 export function RightWorkspace({
   activeTabId,
@@ -200,13 +213,15 @@ export function RightWorkspace({
               />
             )}
             {tab.kind === "terminal" && (
-              <TerminalPanel
-                appearance={appearance}
-                client={client}
-                scope={scope}
-                terminalEvents={terminalEvents}
-                cwd={cwd}
-              />
+              <Suspense fallback={<div className="rightPanelLoading" role="status">Loading terminal…</div>}>
+                <TerminalPanel
+                  appearance={appearance}
+                  client={client}
+                  scope={scope}
+                  terminalEvents={terminalEvents}
+                  cwd={cwd}
+                />
+              </Suspense>
             )}
             {tab.kind === "debug" && debugEnabled && (
               <DebugPanel
@@ -276,16 +291,6 @@ function runtimeActivitiesForThread(
     }
   }
   return activities;
-}
-
-export function rightWorkspaceTabVisibleForSession(tab: RightWorkspaceTab, sessionId: string | null): boolean {
-  if (tab.kind === "browser") {
-    return Boolean(sessionId) && tab.threadId === sessionId;
-  }
-  if (tab.kind !== "sideConversation" && tab.kind !== "agentSession" && tab.kind !== "team") {
-    return true;
-  }
-  return Boolean(sessionId) && (tab.parentThreadId ?? null) === sessionId;
 }
 
 function RightWorkspaceTabs({
@@ -446,38 +451,6 @@ function RightWorkspaceHome({
       </div>
     </section>
   );
-}
-
-export function createRightTabId(kind: RightWorkspaceTabKind): string {
-  return `${kind}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-}
-
-export function rightWorkspaceDefaultTitle(kind: RightWorkspaceTabKind): string {
-  return rightWorkspaceTabLabel(kind);
-}
-
-export function rightWorkspaceTabLabel(kind: RightWorkspaceTabKind): string {
-  switch (kind) {
-    case "files":
-      return "Files";
-    case "terminal":
-      return "Terminal";
-    case "debug":
-      return "Debug";
-    case "sideConversation":
-      return "Side chat";
-    case "agentSession":
-      return "Agent";
-    case "team":
-      return "Team";
-    case "browser":
-      return "Browser";
-    case "preview":
-      return "Preview";
-    case "review":
-    default:
-      return "Review";
-  }
 }
 
 function rightWorkspaceTabIcon(kind: RightWorkspaceTabKind): ReactNode {

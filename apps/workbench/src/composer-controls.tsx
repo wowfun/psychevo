@@ -9,7 +9,7 @@ import type {
   ThreadControlDescriptorView
 } from "@psychevo/protocol";
 import { ModelReasoningSelector, modelOptionsForThreadControl } from "./model-picker";
-import { SessionUsageGrid, normalizedPercent } from "./right-workspace";
+import { SessionUsageGrid, normalizedPercent } from "./right-workspace/usage";
 
 export function ComposerRequests({
   clarifies,
@@ -484,6 +484,7 @@ export function ComposerSubmitControls({
   disabled,
   modelControl,
   reasoningControl,
+  onContextOpen,
   onControlChange
 }: {
   context: ContextReadResult | null;
@@ -493,6 +494,7 @@ export function ComposerSubmitControls({
   disabled: boolean;
   modelControl: ThreadControlDescriptorView | null;
   reasoningControl: ThreadControlDescriptorView | null;
+  onContextOpen?(): void;
   onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
   const contextPercent = normalizedPercent(context?.percent);
@@ -590,7 +592,10 @@ export function ComposerSubmitControls({
           aria-expanded={contextOpen}
           className="contextStatusButton"
           onClick={() => {
-            setContextOpen((value) => !value);
+            setContextOpen((value) => {
+              if (!value) onContextOpen?.();
+              return !value;
+            });
           }}
           title={context?.label ?? "No active context"}
           type="button"

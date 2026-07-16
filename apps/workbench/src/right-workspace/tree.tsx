@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight, FileText, FolderTree, Search } from "lucide-react";
 import type { WorkspaceDiffResult } from "@psychevo/protocol";
+import { fileBasename } from "../right-workspace-model";
 import type { WorkspaceFileTreeItem } from "../types";
 
 export function WorkspaceFileTree({
@@ -223,7 +224,4 @@ export function absoluteWorkspacePath(root: string, path: string): string {
   return `${trimmedRoot}/${normalizedWorkspacePath(trimmedPath)}`;
 }
 
-export function fileBasename(path: string): string {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized.split("/").pop() || normalized || "workspace";
-}
+export { fileBasename } from "../right-workspace-model";

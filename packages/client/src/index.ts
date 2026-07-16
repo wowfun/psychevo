@@ -561,6 +561,21 @@ export function parseThreadSnapshot(value: unknown): ThreadSnapshot {
   return ThreadSnapshotSchema.parse(withThreadSnapshotDefaults(value));
 }
 
+export type ThreadInterruptTarget = {
+  scope: GatewayRequestScope;
+  threadId: string;
+};
+
+export function runThreadInterrupt(
+  client: GatewayClient,
+  target: ThreadInterruptTarget
+): Promise<GatewayRequestResults["thread/action/run"]> {
+  return client.request("thread/action/run", {
+    ...target,
+    action: { kind: "interrupt" }
+  });
+}
+
 export class GatewayClient {
   private nextId = 1;
   private readonly transport: GatewayTransport;

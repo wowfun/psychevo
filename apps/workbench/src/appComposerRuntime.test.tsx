@@ -24,14 +24,8 @@ describe("Workbench first-class Agent runtime controls", () => {
     expect(within(targets).getByRole("radio", { name: "Psychevo · Psychevo (Native)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "Codex · Codex (ACP)" })).toBeTruthy();
     expect(within(targets).getByRole("radio", { name: "OpenCode · OpenCode (ACP)" })).toBeTruthy();
-    await waitFor(() => {
-      expect(gatewayMock.requestLog).toContainEqual({
-        method: "thread/context/read",
-        params: expect.objectContaining({
-          target: { agentRef: null, runtimeProfileRef: "native" }
-        })
-      });
-    });
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read"))
+      .toHaveLength(1);
   });
 
   it.each([

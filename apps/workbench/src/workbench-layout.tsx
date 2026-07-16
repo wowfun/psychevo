@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
 import { ActionButton, Composer, HistoryPanel, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
@@ -10,12 +10,13 @@ import { ComposerEnvironment } from "./composer-environment";
 import { WorkspacePickerDialog } from "./workspace-picker-dialog";
 import { ComposerRuntimeControls } from "./runtime-controls";
 import { ComposerDictationButton, ComposerVoiceOptionSwitches } from "./voice-controls";
-import { RightWorkspace, rightWorkspaceTabLabel } from "./right-workspace";
+import { rightWorkspaceTabLabel } from "./right-workspace-model";
 import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
 import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./capabilities-agents-config";
 import { confirmedSteerTurnId } from "./gateway-event-feed";
 import {
   enabledThreadAction,
+  runThreadInterrupt,
   snapshotThreadApplicationTarget
 } from "./thread-application";
 import type { PendingAttachment, RightWorkspaceTab } from "./types";
@@ -23,6 +24,9 @@ import { DeleteSessionDialog } from "./delete-session-dialog";
 import { SessionArchivePanel } from "./session-archive-panel";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
+const RightWorkspace = lazy(async () => ({
+  default: (await import("./right-workspace")).RightWorkspace
+}));
 
 export function WorkbenchLayout(props: Record<string, any>) {
   const {
@@ -104,6 +108,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     refreshAutomations,
     refreshAgentSurface,
     refreshHistory,
+    refreshObservability,
     refreshSnapshot,
     refreshUsageStats,
     refreshWorkspaceSurface,
@@ -232,7 +237,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
   const steerAvailable = Boolean(steerTurnId)
     && contextMatchesTarget
     && enabledThreadAction(runtimeContext, "steer") !== null;
-  const interruptAvailable = enabledThreadAction(runtimeContext, "interrupt") !== null;
   const historyEditAvailable = enabledThreadAction(runtimeContext, "revertConversation") !== null;
   const pointForkAvailable = enabledThreadAction(runtimeContext, "forkBefore") !== null;
   const forkSource = snapshot.thread?.forkedFromThreadId
@@ -280,11 +284,14 @@ export function WorkbenchLayout(props: Record<string, any>) {
           onConfirm={() => void runAction(async () => {
             setDeleteSessionPending(true);
             try {
+              const deletingCurrent = pendingDeleteSession.id === currentThreadId;
               setDraftSession(null);
               await client?.request("thread/delete", { threadId: pendingDeleteSession.id });
               setPendingDeleteSession(null);
-              await refreshHistory();
-              await refreshHistory(client, true);
+              if (deletingCurrent) {
+                await startNewThread(undefined, { refreshHistory: false });
+              }
+              await Promise.all([refreshHistory(), refreshHistory(client, true)]);
             } finally {
               setDeleteSessionPending(false);
             }
@@ -761,6 +768,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     disabled={disabled || runtimeOptionsLoading}
                     modelControl={modelControl}
                     reasoningControl={reasoningControl}
+                    onContextOpen={() => void refreshObservability(
+                      client,
+                      activeScope ?? init?.scope,
+                      currentThreadId ?? null
+                    )}
                     onControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
                   />
                 </>
@@ -819,7 +831,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
               onInterrupt={() => void runAction(async () => {
                 const target = snapshotThreadApplicationTarget(snapshot);
-                if (!client || !target || !interruptAvailable) {
+                if (!client || !target) {
                   setCommandFeedback?.({
                     accepted: false,
                     command: "interrupt",
@@ -828,10 +840,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   });
                   return;
                 }
-                await client.request("thread/action/run", {
-                  ...target,
-                  action: { kind: "interrupt" }
-                });
+                await runThreadInterrupt(client, target);
                 await refreshSnapshot(client, target.threadId, undefined, true, props.viewEpochRef.current);
               })}
               onModeChange={() => {}}
@@ -898,71 +907,73 @@ export function WorkbenchLayout(props: Record<string, any>) {
             >
               <GripVertical size={15} />
             </button>
-            <RightWorkspace
-              activeTabId={activeRightTabId}
-              activity={activity}
-              appearance={appearance}
-              client={client}
-              context={contextUsage}
-              debugEnabled={debugEnabled}
-              debugEvents={debugEvents}
-              files={workspaceFiles?.entries ?? []}
-              hostKind={host?.platform?.kind ?? "browser"}
-              latestGatewayEvent={latestGatewayEvent}
-              root={workspaceFiles?.root ?? settings?.cwd ?? ""}
-              scope={activeScope ?? init?.scope ?? null}
-              sessionId={snapshot.thread?.id ?? null}
-              status={props.status}
-              usage={sessionUsage}
-              tabs={rightTabs}
-              terminalEvents={terminalEvents}
-              trace={traceState}
-              truncated={workspaceFiles?.truncated ?? false}
-              cwd={settings?.project?.displayPath ?? settings?.cwd ?? ""}
-              workspaceChanges={workspaceChanges}
-              workspaceDiff={workspaceDiff}
-              workspaceFileLinks={workspaceFileLinks}
-              onActivate={setActiveRightTabId}
-              onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
-              onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
-              onClose={props.closeRightWorkspaceTab}
-              onCopyText={copyText}
-              onDirtyTabChange={(tabId, dirty) => {
-                setDirtyRightTabs((current: Record<string, boolean>) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
-              }}
-              onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
-              onOpenAgentSession={openAgentSessionTab}
-              onBrowserStateChange={(tabId, browser) => {
-                setRightTabs((current: RightWorkspaceTab[]) => current.map((tab) => (
-                  tab.id === tabId ? { ...tab, browser } : tab
-                )));
-              }}
-              onOpenExternal={(url) => void runAction(async () => {
-                const result = await host?.open.openExternal(url);
-                if (!result?.ok) {
-                  props.setError(result?.message ?? "Open externally is not supported by this host.");
-                }
-              })}
-              onOpenKind={(kind) => {
-                if (kind === "sideConversation") {
-                  void runAction(async () => executeCommand("/btw", "commandsPanel"));
-                  return;
-                }
-                openRightWorkspaceTab(kind, {}, kind !== "browser");
-              }}
-              onOpenPreview={(preview) => openRightWorkspaceTab("preview", { preview, title: preview.title }, true)}
-              onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}
-              onConsumePendingPrompt={clearRightWorkspaceTabPendingPrompt}
-              onRefresh={() => void runAction(async () => {
-                await refreshSnapshot();
-                await refreshHistory();
-                await refreshAgentSurface();
-                await refreshWorkspaceSurface();
-              })}
-              onRefreshTrace={() => void props.refreshTrace()}
-              onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
-              onShowHome={() => props.revealRightWorkspace(null)}
-            />
+            <Suspense fallback={<div className="rightPanelLoading" role="status">Loading workspace…</div>}>
+              <RightWorkspace
+                activeTabId={activeRightTabId}
+                activity={activity}
+                appearance={appearance}
+                client={client}
+                context={contextUsage}
+                debugEnabled={debugEnabled}
+                debugEvents={debugEvents}
+                files={workspaceFiles?.entries ?? []}
+                hostKind={host?.platform?.kind ?? "browser"}
+                latestGatewayEvent={latestGatewayEvent}
+                root={workspaceFiles?.root ?? settings?.cwd ?? ""}
+                scope={activeScope ?? init?.scope ?? null}
+                sessionId={snapshot.thread?.id ?? null}
+                status={props.status}
+                usage={sessionUsage}
+                tabs={rightTabs}
+                terminalEvents={terminalEvents}
+                trace={traceState}
+                truncated={workspaceFiles?.truncated ?? false}
+                cwd={settings?.project?.displayPath ?? settings?.cwd ?? ""}
+                workspaceChanges={workspaceChanges}
+                workspaceDiff={workspaceDiff}
+                workspaceFileLinks={workspaceFileLinks}
+                onActivate={setActiveRightTabId}
+                onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
+                onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
+                onClose={props.closeRightWorkspaceTab}
+                onCopyText={copyText}
+                onDirtyTabChange={(tabId, dirty) => {
+                  setDirtyRightTabs((current: Record<string, boolean>) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
+                }}
+                onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
+                onOpenAgentSession={openAgentSessionTab}
+                onBrowserStateChange={(tabId, browser) => {
+                  setRightTabs((current: RightWorkspaceTab[]) => current.map((tab) => (
+                    tab.id === tabId ? { ...tab, browser } : tab
+                  )));
+                }}
+                onOpenExternal={(url) => void runAction(async () => {
+                  const result = await host?.open.openExternal(url);
+                  if (!result?.ok) {
+                    props.setError(result?.message ?? "Open externally is not supported by this host.");
+                  }
+                })}
+                onOpenKind={(kind) => {
+                  if (kind === "sideConversation") {
+                    void runAction(async () => executeCommand("/btw", "commandsPanel"));
+                    return;
+                  }
+                  openRightWorkspaceTab(kind, {}, kind !== "browser");
+                }}
+                onOpenPreview={(preview) => openRightWorkspaceTab("preview", { preview, title: preview.title }, true)}
+                onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}
+                onConsumePendingPrompt={clearRightWorkspaceTabPendingPrompt}
+                onRefresh={() => void runAction(async () => {
+                  await refreshSnapshot();
+                  await refreshHistory();
+                  await refreshAgentSurface();
+                  await refreshWorkspaceSurface();
+                })}
+                onRefreshTrace={() => void props.refreshTrace()}
+                onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
+                onShowHome={() => props.revealRightWorkspace(null)}
+              />
+            </Suspense>
           </aside>
         )}
       </div>

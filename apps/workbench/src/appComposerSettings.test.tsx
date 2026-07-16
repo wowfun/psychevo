@@ -1078,7 +1078,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(targets).queryByRole("radio", { name: /cursor/i })).toBeNull();
     expect(within(targets).queryByRole("radio", { name: /opencode/i })).toBeNull();
     expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/context/read")).toBe(true);
-    expect(gatewayMock.requestLog.some((entry) => entry.method === "backend/list")).toBe(true);
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "backend/list")).toBe(false);
   });
 
   it("does not derive Composer Runtime Profiles from ACP peer entrypoints", async () => {

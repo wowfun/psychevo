@@ -10,7 +10,7 @@ import {
   createRightTabId,
   fileBasename,
   rightWorkspaceDefaultTitle
-} from "./right-workspace";
+} from "./right-workspace-model";
 import { clampRightWidth } from "./storage";
 import type {
   CommandOverlay,

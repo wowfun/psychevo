@@ -597,6 +597,9 @@ vi.mock("@psychevo/client", async () => {
     async request(method: string, params?: unknown) {
       gatewayMock.requestLog.push({ method, params });
       if (method === "initialize") {
+        if (gatewayMock.initialize) {
+          return gatewayMock.initialize();
+        }
         return {
           server: "test",
           version: "0.0.0",
@@ -669,6 +672,12 @@ vi.mock("@psychevo/client", async () => {
         const record = params as { threadId: string };
         gatewayMock.archivedSessionSummaries = gatewayMock.archivedSessionSummaries.filter((session) => session.id !== record.threadId);
         return { session: { id: record.threadId, archivedAtMs: null } };
+      }
+      if (method === "thread/delete") {
+        const record = params as { threadId: string };
+        gatewayMock.sessionSummaries = gatewayMock.sessionSummaries.filter((session) => session.id !== record.threadId);
+        gatewayMock.archivedSessionSummaries = gatewayMock.archivedSessionSummaries.filter((session) => session.id !== record.threadId);
+        return { deleted: true, threadId: record.threadId };
       }
       if (method === "thread/list") {
         const record = params as { archived?: boolean } | undefined;
@@ -2605,6 +2614,7 @@ vi.mock("@psychevo/client", async () => {
       };
     },
     reconcileThreadSnapshot: (_current: unknown, next: unknown) => next,
+    runThreadInterrupt: actual.runThreadInterrupt,
     scopeForCwd: (cwd: string) => ({ ...gatewayMock.scope, cwd }),
     turnCompletedEventFromResult: actual.turnCompletedEventFromResult,
     threadTurnStartParams: actual.threadTurnStartParams,

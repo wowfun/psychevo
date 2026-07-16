@@ -44,10 +44,11 @@ import {
   workspacesFromThreadBrowser
 } from "./surface-actions";
 import { normalizeSnapshot } from "./session-utils";
+import { transcriptMayContainWorkspaceFile } from "./search-model";
 import { WorkbenchLayout } from "./workbench-layout";
 import {
   rightWorkspaceTabVisibleForSession
-} from "./right-workspace";
+} from "./right-workspace-model";
 import { runtimeControlAsConfigOption } from "./runtime-controls";
 import {
   parseThreadContext
@@ -130,6 +131,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     threadSnapshotStore.getSnapshot
   );
   const [client, setClient] = useState<GatewayClient | null>(null);
+  const [startupStable, setStartupStable] = useState(false);
   const [host, setHost] = useState<PsychevoHost | null>(null);
   const [endpoint, setEndpoint] = useState<GatewayEndpoint | null>(null);
   const [init, setInit] = useState<InitializeResult | null>(null);
@@ -221,6 +223,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
 
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
+  const workspaceFileLinkDemand = useMemo(
+    () => transcriptMayContainWorkspaceFile(transcriptEntries),
+    [transcriptEntries]
+  );
   const pendingActions = Array.isArray(snapshot.pendingActions) ? snapshot.pendingActions : [];
   const pendingClarifyActions = pendingActions.filter((action) => action.kind === "clarify");
   const pendingPermissionActions = pendingActions.filter((action) => action.kind === "permission");
@@ -260,9 +266,17 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     if (runtimeTargetTransitionRef.current) {
       return;
     }
-    if (!client) {
+    if (!client || !startupStable) {
       setRuntimeContext(null);
       threadController.setContext(null);
+      return;
+    }
+    if (
+      runtimeContextRefreshRevision === 0
+      && runtimeContextDraftTargetKey
+      && runtimeContextTargetId === runtimeContextDraftTargetKey
+      && pendingTargetSelectionRef.current === null
+    ) {
       return;
     }
     let cancelled = false;
@@ -318,7 +332,8 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     runtimeContextScope.cwd,
     runtimeContextScope.source.kind,
     runtimeContextScope.source.lifetime,
-    runtimeContextScope.source.rawId
+    runtimeContextScope.source.rawId,
+    startupStable
   ]);
 
   const controls = settings?.controls ?? null;
@@ -366,10 +381,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     refreshAgentSurface,
     refreshCommands,
     refreshHistory,
+    refreshObservability,
     refreshRevertedThreadSnapshot,
     refreshSettings,
     refreshSnapshot,
     refreshTrace,
+    refreshWorkspaceFiles,
     refreshWorkspaceSurface,
     runAction
   } = createSurfaceActions({
@@ -401,8 +418,28 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setTraceState,
     setWorkspaceChanges,
     setWorkspaceDiff,
-    setWorkspaceFiles
+    setWorkspaceFiles,
+    onSnapshotAdopted: () => setStartupStable(true)
   });
+
+  useEffect(() => {
+    if (
+      !startupStable
+      || !client
+      || !activeScope
+      || !workspaceFileLinkDemand
+      || workspaceFiles?.root === activeScope.cwd
+    ) {
+      return;
+    }
+    void refreshWorkspaceFiles(client, activeScope, viewEpochRef.current);
+  }, [
+    startupStable,
+    client,
+    activeScope,
+    workspaceFileLinkDemand,
+    workspaceFiles?.root
+  ]);
 
   async function refreshAgentSurfaceAndRuntimeContext(
     nextClient: GatewayClient | null = client,
@@ -505,6 +542,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   }, [client, mainView, settingsSection]);
 
   useWorkbenchEffects({
+    activeCommandOverlay,
     activeRightTabKind: activeRightTab?.kind ?? null,
     activeRightTabId,
     activeScope,
@@ -528,6 +566,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     pendingDetachedShellRef,
     pinnedSessionIds,
     rightTabs,
+    rightWorkspaceOpen: showSessionChrome && !rightCollapsed,
     rightWidthPx,
     runtimeTargetTransitionRef,
     scopeRef,
@@ -537,6 +576,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     showSessionChrome,
     skipNextPinnedPersistRef,
     snapshot,
+    startupStable,
     threadController,
     viewEpochRef,
     adoptSnapshotScope,
@@ -571,6 +611,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setRightTabs,
     setSnapshot,
     setStatus,
+    setStartupStable,
     setTerminalEvents,
     setTraceState,
     updateMainView
@@ -1124,7 +1165,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     openAutomationThread,
     onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
     pendingClarifyActions, pendingPermissionActions, pinnedSessionIds, pinnedSessions, pollWechatQrSetup,
-    refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext, refreshHistory, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
+    refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext, refreshHistory, refreshObservability, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
     readWorkspaceFolders, readWorkspaceGitBranches, checkoutWorkspaceGitBranch,
     revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runAction,
     deleteAutomation, draftAutomation, pauseAutomation, refreshAutomations, resumeAutomation, runAutomation, saveAutomation,

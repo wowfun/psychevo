@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
-import type { SessionSummary, ThreadSnapshot } from "@psychevo/protocol";
-import { asRecord, stringField } from "./data";
+import type { SessionSummary } from "@psychevo/protocol";
 import { shortSessionId } from "./session-utils";
 import type { SearchResult } from "./types";
 
@@ -110,23 +109,7 @@ export function SearchPage({
   );
 }
 
-export function transcriptSearchText(entries: ThreadSnapshot["entries"]): string {
-  return entries
-    .flatMap((entry) => [
-      entry.role,
-      ...entry.blocks.flatMap((block) => {
-        const record = asRecord(block);
-        return [
-          stringField(record.title),
-          stringField(record.body),
-          stringField(record.preview),
-          stringField(record.detail)
-        ];
-      })
-    ])
-    .filter(Boolean)
-    .join("\n");
-}
+export { transcriptSearchText } from "./search-model";
 
 function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase();

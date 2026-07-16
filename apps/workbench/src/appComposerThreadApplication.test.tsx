@@ -9,6 +9,101 @@ import { App } from "./App";
 afterEach(() => vi.restoreAllMocks());
 
 describe("Workbench public Thread Application interactions", () => {
+  it("starts the initial Session browse without waiting for initialize or thread/start", async () => {
+    const initialize = deferred<Record<string, unknown>>();
+    const threadStart = deferred<Record<string, unknown>>();
+    gatewayMock.initialize = () => initialize.promise;
+    gatewayMock.threadStart = () => threadStart.promise;
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Early session")];
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.map((entry) => entry.method)).toEqual(expect.arrayContaining([
+        "initialize",
+        "thread/browser"
+      ]));
+    });
+
+    await act(async () => {
+      initialize.resolve({
+        server: "test",
+        version: "0.0.0",
+        cwd: gatewayMock.scope.cwd,
+        scope: gatewayMock.scope,
+        source: gatewayMock.source,
+        capabilities: {}
+      });
+      await initialize.promise;
+    });
+    expect(await screen.findByText("Early session")).toBeTruthy();
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/start")).toHaveLength(1);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read")).toHaveLength(0);
+    expect(gatewayMock.requestLog.some((entry) => [
+      "settings/read",
+      "workspace/files",
+      "agent/list",
+      "backend/list",
+      "command/list"
+    ].includes(entry.method))).toBe(false);
+
+    await act(async () => {
+      threadStart.resolve({
+        ...gatewayMock.snapshot,
+        thread: null,
+        entries: [],
+        activity: { ...gatewayMock.snapshot.activity }
+      });
+      await threadStart.promise;
+    });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read")).toHaveLength(1);
+    });
+    expect(gatewayMock.requestLog.some((entry) => [
+      "workspace/files",
+      "agent/list",
+      "backend/list",
+      "command/list"
+    ].includes(entry.method))).toBe(false);
+  });
+
+  it("does not start a stale startup draft after a Session is selected during initialize", async () => {
+    const initialize = deferred<Record<string, unknown>>();
+    gatewayMock.initialize = () => initialize.promise;
+    gatewayMock.sessionSummaries = [sessionSummary("thread-early", "Selected before initialize")];
+
+    const { container } = render(<App />);
+    fireEvent.click(await screen.findByText("Selected before initialize"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "thread-early" })
+      });
+      expect(container.querySelector(".pevo-sessionRow.is-active")?.textContent)
+        .toContain("Selected before initialize");
+    });
+
+    await act(async () => {
+      initialize.resolve({
+        server: "test",
+        version: "0.0.0",
+        cwd: gatewayMock.scope.cwd,
+        scope: gatewayMock.scope,
+        source: gatewayMock.source,
+        capabilities: {}
+      });
+      await initialize.promise;
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Agent target" })).toBeTruthy();
+    });
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/start")).toHaveLength(0);
+    expect(container.querySelector(".pevo-sessionRow.is-active")?.textContent)
+      .toContain("Selected before initialize");
+  });
+
   it("renders the resumed snapshot without waiting for paginated history", async () => {
     const history = deferred<Record<string, unknown>>();
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Snapshot session")];
@@ -25,7 +120,7 @@ describe("Workbench public Thread Application interactions", () => {
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/history/read")).toHaveLength(0);
   });
 
-  it("deduplicates auxiliary refreshes when a session activates", async () => {
+  it("does not preload auxiliary surfaces when a session activates", async () => {
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Auxiliary session")];
     render(<App />);
 
@@ -33,22 +128,22 @@ describe("Workbench public Thread Application interactions", () => {
     gatewayMock.requestLog.length = 0;
     fireEvent.click(await screen.findByText("Auxiliary session"));
 
-    await waitFor(() => {
-      expect(gatewayMock.requestLog.some((entry) => entry.method === "observability/read")).toBe(true);
-      expect(gatewayMock.requestLog.some((entry) => entry.method === "command/list")).toBe(true);
-    });
+    await waitForBoundContext();
     await act(async () => {
       await Promise.resolve();
     });
+    expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "settings/read"
+      && (entry.params as { threadId?: string | null }).threadId === "thread-1"
+    ))).toHaveLength(1);
     for (const method of [
-      "settings/read",
       "workspace/files",
       "workspace/diff",
       "workspace/changes",
       "observability/read",
       "command/list"
     ]) {
-      expect(gatewayMock.requestLog.filter((entry) => entry.method === method), method).toHaveLength(1);
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === method), method).toHaveLength(0);
     }
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "agent/list")).toHaveLength(0);
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "backend/list")).toHaveLength(0);
@@ -216,12 +311,15 @@ describe("Workbench public Thread Application interactions", () => {
     });
   });
 
-  it("interrupts only through an enabled Thread action descriptor", async () => {
-    gatewayMock.snapshot.activity = { running: true, activeTurnId: "turn-1", queuedTurns: 0 };
-
+  it("interrupts a running snapshot even when the cached action descriptor is stale", async () => {
     render(<App />);
     await resumeSession();
     await waitForBoundContext();
+    emit("gateway/event", {
+      type: "activityChanged",
+      threadId: "thread-1",
+      activity: { running: true, activeTurnId: "turn-1", queuedTurns: 0 }
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Interrupt active turn" }));
 
     await waitFor(() => {

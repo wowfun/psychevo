@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { Terminal as XTermTerminal, ITheme } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
 import { psychevoDesignSystem } from "@psychevo/assets";
 import type { GatewayClient } from "@psychevo/client";
 import type { GatewayRequestScope } from "@psychevo/protocol";
@@ -41,7 +40,8 @@ export function TerminalPanel({
     let resizeObserver: ResizeObserver | null = null;
     void Promise.all([
       import("@xterm/xterm"),
-      import("@xterm/addon-fit")
+      import("@xterm/addon-fit"),
+      import("@xterm/xterm/css/xterm.css")
     ]).then(([xterm, fitModule]) => {
       if (cancelled || !containerRef.current) {
         return;

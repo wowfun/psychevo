@@ -30,13 +30,13 @@ describe("Workbench session status observability", () => {
         params: expect.objectContaining({ threadId: longSessionId })
       });
     });
+    fireEvent.click(await screen.findByLabelText("Show right inspector"));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "observability/read",
         params: expect.objectContaining({ threadId: longSessionId })
       });
     });
-    fireEvent.click(await screen.findByLabelText("Show right inspector"));
     const home = await screen.findByRole("region", { name: "Workspace status" });
     expect(await within(home).findByText(longSessionId)).toBeTruthy();
     expect(within(home).queryByText("/tmp/project")).toBeNull();
@@ -190,9 +190,11 @@ describe("Workbench session status observability", () => {
         method: "thread/resume",
         params: expect.objectContaining({ threadId: "parent-thread" })
       });
-      expect(gatewayMock.requestLog.some((entry) => entry.method === "workspace/files")).toBe(true);
     });
     fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "workspace/files")).toBe(true);
+    });
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
@@ -276,7 +278,7 @@ describe("Workbench session status observability", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Context usage" }));
 
     const popover = await screen.findByRole("dialog", { name: "Context usage" });
-    expect(within(popover).getByText("12.3k")).toBeTruthy();
+    expect(await within(popover).findByText("12.3k")).toBeTruthy();
     expect(within(popover).getByText("12,345 tokens · Limit unavailable")).toBeTruthy();
     expect(within(popover).queryByText("0%")).toBeNull();
   });

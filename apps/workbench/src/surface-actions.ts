@@ -3,7 +3,10 @@ import {
   parseThreadSnapshot,
   reconcileThreadSnapshot,
   scopeForCwd,
-  type GatewayClient
+  type GatewayClient,
+  type GatewayMethod,
+  type GatewayRequestInit,
+  type GatewayRequestResults
 } from "@psychevo/client";
 import {
   ObservabilityReadResultSchema,
@@ -45,6 +48,34 @@ import type {
 } from "./types";
 import { shouldApplyReadOnlySnapshot } from "./viewGuard";
 
+const inFlightReads = new WeakMap<GatewayClient, Map<string, Promise<unknown>>>();
+
+function requestOnce<M extends GatewayMethod>(
+  client: GatewayClient,
+  method: M,
+  params?: GatewayRequestInit<M>
+): Promise<GatewayRequestResults[M]> {
+  let requests = inFlightReads.get(client);
+  if (!requests) {
+    requests = new Map();
+    inFlightReads.set(client, requests);
+  }
+  const key = `${method}:${JSON.stringify(params ?? null)}`;
+  const existing = requests.get(key);
+  if (existing) {
+    return existing as Promise<GatewayRequestResults[M]>;
+  }
+  const request = client.request(method, params);
+  requests.set(key, request);
+  const clear = () => {
+    if (requests?.get(key) === request) {
+      requests.delete(key);
+    }
+  };
+  request.then(clear, clear);
+  return request;
+}
+
 type SurfaceActionsParams = {
   activeScope: GatewayRequestScope | null;
   client: GatewayClient | null;
@@ -75,6 +106,7 @@ type SurfaceActionsParams = {
   setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   setWorkspaceFiles: Dispatch<SetStateAction<WorkspaceFilesResult | null>>;
+  onSnapshotAdopted(): void;
 };
 
 function sameScopeIdentity(left: GatewayRequestScope | null, right: GatewayRequestScope): boolean {
@@ -125,6 +157,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
         return;
       }
       await refreshObservability(nextClient, nextSnapshot.scope, nextSnapshot.thread?.id ?? threadId, expectedEpoch);
+      params.onSnapshotAdopted();
       return;
     }
     const nextScope = scope ?? defaultScope();
@@ -152,6 +185,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     await adoptSnapshotScope(nextClient, nextSnapshot);
+    params.onSnapshotAdopted();
   }
 
   async function refreshRevertedThreadSnapshot(
@@ -188,7 +222,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !cwd) {
       return;
     }
-    const settingsValue = await nextClient.request("settings/read", { threadId, cwd });
+    const settingsValue = await requestOnce(nextClient, "settings/read", { threadId, cwd });
     const nextSettings = SettingsReadResultSchema.parse(settingsValue);
     params.setSettings(nextSettings);
     applyInitialControls(nextSettings);
@@ -200,7 +234,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     }
     if (!includeArchived) {
       const result = ThreadBrowserResultSchema.parse(
-        await nextClient.request("thread/browser", {
+        await requestOnce(nextClient, "thread/browser", {
           archived: false,
           cursor: null,
           includeSessionIds: browserIncludeSessionIds(),
@@ -215,7 +249,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return nextSessions;
     }
     const result = ThreadListResultSchema.parse(
-      await nextClient.request("thread/list", { archived: includeArchived, limit: 100, cwd: cwd || null })
+      await requestOnce(nextClient, "thread/list", { archived: includeArchived, limit: 100, cwd: cwd || null })
     );
     const nextSessions = result.sessions.map(normalizeSessionSummary);
     if (includeArchived) {
@@ -238,8 +272,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       return;
     }
     const [agentList, backendList] = await Promise.all([
-      nextClient.request("agent/list", { scope }),
-      nextClient.request("backend/list", { scope })
+      requestOnce(nextClient, "agent/list", { scope }),
+      requestOnce(nextClient, "backend/list", { scope })
     ]);
     params.setAgents(parseAgentList(agentList));
     params.setBackends(parseBackendList(backendList));
@@ -253,7 +287,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (!nextClient || !scope) {
       return;
     }
-    const commandList = await nextClient.request("command/list", { scope, threadId });
+    const commandList = await requestOnce(nextClient, "command/list", { scope, threadId });
     params.setCommands(parseCommandList(commandList));
   }
 
@@ -281,10 +315,10 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setContextUsage(null);
     }
     const [files, diff, changes, nextObservability] = await Promise.all([
-      nextClient.request("workspace/files", { scope }),
-      nextClient.request("workspace/diff", { scope, path: null }),
-      nextClient.request("workspace/changes", { scope }),
-      threadId ? nextClient.request("observability/read", { scope, threadId }) : Promise.resolve(null)
+      requestOnce(nextClient, "workspace/files", { scope }),
+      requestOnce(nextClient, "workspace/diff", { scope, path: null }),
+      requestOnce(nextClient, "workspace/changes", { scope }),
+      threadId ? requestOnce(nextClient, "observability/read", { scope, threadId }) : Promise.resolve(null)
     ]);
     if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
       return;
@@ -295,6 +329,21 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     if (nextObservability && shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
       applyObservability(nextObservability);
     }
+  }
+
+  async function refreshWorkspaceFiles(
+    nextClient = params.client,
+    scope = params.activeScope ?? params.initScope ?? undefined,
+    expectedEpoch: number | null = params.viewEpochRef.current
+  ) {
+    if (!nextClient || !scope) {
+      return;
+    }
+    const files = await requestOnce(nextClient, "workspace/files", { scope });
+    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
+      return;
+    }
+    params.setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
   }
 
   async function refreshObservability(
@@ -308,7 +357,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
       params.setContextUsage(null);
       return;
     }
-    const nextObservability = await nextClient.request("observability/read", { scope, threadId });
+    const nextObservability = await requestOnce(nextClient, "observability/read", { scope, threadId });
     if (!shouldApplyAsyncSurfaceResult(scope, expectedEpoch, threadId)) {
       return;
     }
@@ -417,6 +466,7 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     refreshSnapshot,
     refreshSettings,
     refreshTrace,
+    refreshWorkspaceFiles,
     refreshWorkspaceSurface,
     runAction
   };

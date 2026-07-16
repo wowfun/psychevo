@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   GatewayClient,
   parseThreadSnapshot,
+  runThreadInterrupt,
   scopeForCwd,
   type GatewayRawMessageHandler,
   type GatewayTransport
@@ -194,11 +195,7 @@ describe("GatewayClient transport", () => {
     const scope = scopeForCwd("/tmp/project");
     await client.connect();
 
-    const action = client.request("thread/action/run", {
-      action: { kind: "interrupt" },
-      scope,
-      threadId: "thread-1"
-    });
+    const action = runThreadInterrupt(client, { scope, threadId: "thread-1" });
     expect(JSON.parse(transport.sent.at(-1)!)).toMatchObject({
       method: "thread/action/run",
       params: { action: { kind: "interrupt" }, threadId: "thread-1" }

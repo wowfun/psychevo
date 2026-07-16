@@ -1,4 +1,4 @@
-import type { GatewayClient } from "@psychevo/client";
+import { runThreadInterrupt, type GatewayClient } from "@psychevo/client";
 import type {
   GatewayRequestScope,
   ThreadActionKind,
@@ -43,6 +43,8 @@ export function snapshotThreadApplicationTarget(
   }
   return { scope: snapshot.scope, threadId };
 }
+
+export { runThreadInterrupt };
 
 export function threadActionDescriptor(
   context: ThreadContextReadResult | null | undefined,

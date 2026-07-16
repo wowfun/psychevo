@@ -113,6 +113,11 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
+              name: "vite-preload-helper",
+              priority: 110,
+              test: (id) => normalizedModuleId(id).includes("vite/preload-helper")
+            },
+            {
               name: "vendor-react",
               priority: 100,
               test: (id) => {
@@ -158,6 +163,11 @@ export default defineConfig({
               name: "vendor-highlight",
               priority: 90,
               test: (id) => includesNodePackage(normalizedModuleId(id), "highlight.js")
+            },
+            {
+              name: "vendor-yaml",
+              priority: 89,
+              test: (id) => includesNodePackage(normalizedModuleId(id), "yaml")
             },
             {
               name: "vendor-markdown",

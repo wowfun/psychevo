@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { CalendarClock, Pin, Settings, Wrench, X } from "lucide-react";
 import type {
   GatewayClient,
@@ -16,10 +16,6 @@ import type {
   SessionSummary,
   SettingsReadResult
 } from "@psychevo/protocol";
-import { AutomationsPage } from "./automations-panel";
-import { CapabilitiesPage } from "./capabilities-page";
-import { SearchPage } from "./search";
-import { SettingsPage } from "./settings-panels";
 import { shortSessionId } from "./session-utils";
 import type {
   Appearance,
@@ -38,6 +34,23 @@ import type {
 } from "./types";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
+
+const AutomationsPage = lazy(async () => ({
+  default: (await import("./automations-panel")).AutomationsPage
+}));
+const CapabilitiesPage = lazy(async () => ({
+  default: (await import("./capabilities-page")).CapabilitiesPage
+}));
+const SearchPage = lazy(async () => ({
+  default: (await import("./search")).SearchPage
+}));
+const SettingsPage = lazy(async () => ({
+  default: (await import("./settings-panels")).SettingsPage
+}));
+
+function SurfaceLoading({ label }: { label: string }) {
+  return <div className="mainSurfaceLoading" role="status">{label}</div>;
+}
 
 export function LeftUtilityRail({
   value,
@@ -245,98 +258,106 @@ export function MainSurface({
   }
   if (mainView === "settings") {
     return (
-      <SettingsPage
-        appearance={appearance}
-        channelDoctor={channelDoctor}
-        channels={channels}
-        client={client}
-        controls={controls}
-        debugEnabled={debugEnabled}
-        disabled={disabled}
-        section={settingsSection}
-        usageStats={usageStats}
-        usageStatsError={usageStatsError}
-        usageStatsLoading={usageStatsLoading}
-        onAppearanceChange={onAppearanceChange}
-        onDebugChange={onDebugChange}
-        onDeleteChannel={onDeleteChannel}
-        onDoctorChannel={onDoctorChannel}
-        onDoctorChannels={onDoctorChannels}
-        onModelAssignmentSaved={onModelAssignmentSaved}
-        onModelCatalogLoaded={onModelCatalogLoaded}
-        onOpenTranscript={() => onMainViewChange("transcript")}
-        onLoadChannelSources={onLoadChannelSources}
-        onPollWechatQrSetup={onPollWechatQrSetup}
-        onRefreshUsageStats={onRefreshUsageStats}
-        onSectionChange={onSettingsSectionChange}
-        onSetChannelEnabled={onSetChannelEnabled}
-        onSlashSettingsSaved={onSlashSettingsSaved}
-        onStartWechatQrSetup={onStartWechatQrSetup}
-        onUpdateChannel={onUpdateChannel}
-        runtimeProfiles={runtimeProfiles}
-        sessionBrowserWorkspaces={sessionBrowserWorkspaces}
-        cwd={cwd}
-      />
+      <Suspense fallback={<SurfaceLoading label="Loading settings…" />}>
+        <SettingsPage
+          appearance={appearance}
+          channelDoctor={channelDoctor}
+          channels={channels}
+          client={client}
+          controls={controls}
+          debugEnabled={debugEnabled}
+          disabled={disabled}
+          section={settingsSection}
+          usageStats={usageStats}
+          usageStatsError={usageStatsError}
+          usageStatsLoading={usageStatsLoading}
+          onAppearanceChange={onAppearanceChange}
+          onDebugChange={onDebugChange}
+          onDeleteChannel={onDeleteChannel}
+          onDoctorChannel={onDoctorChannel}
+          onDoctorChannels={onDoctorChannels}
+          onModelAssignmentSaved={onModelAssignmentSaved}
+          onModelCatalogLoaded={onModelCatalogLoaded}
+          onOpenTranscript={() => onMainViewChange("transcript")}
+          onLoadChannelSources={onLoadChannelSources}
+          onPollWechatQrSetup={onPollWechatQrSetup}
+          onRefreshUsageStats={onRefreshUsageStats}
+          onSectionChange={onSettingsSectionChange}
+          onSetChannelEnabled={onSetChannelEnabled}
+          onSlashSettingsSaved={onSlashSettingsSaved}
+          onStartWechatQrSetup={onStartWechatQrSetup}
+          onUpdateChannel={onUpdateChannel}
+          runtimeProfiles={runtimeProfiles}
+          sessionBrowserWorkspaces={sessionBrowserWorkspaces}
+          cwd={cwd}
+        />
+      </Suspense>
     );
   }
   if (mainView === "automations") {
     return (
-      <AutomationsPage
-        automations={automations}
-        currentThreadId={currentThreadId}
-        disabled={disabled}
-        error={automationsError}
-        loading={automationsLoading}
-        scope={scope}
-        sessionBrowserWorkspaces={sessionBrowserWorkspaces}
-        sessions={sessions}
-        cwd={cwd}
-        onDelete={onDeleteAutomation}
-        onDraft={onDraftAutomation}
-        onOpenSession={onOpenAutomationThread}
-        onPause={onPauseAutomation}
-        onRefresh={onRefreshAutomations}
-        onResume={onResumeAutomation}
-        onRun={onRunAutomation}
-        onSave={onSaveAutomation}
-      />
+      <Suspense fallback={<SurfaceLoading label="Loading automations…" />}>
+        <AutomationsPage
+          automations={automations}
+          currentThreadId={currentThreadId}
+          disabled={disabled}
+          error={automationsError}
+          loading={automationsLoading}
+          scope={scope}
+          sessionBrowserWorkspaces={sessionBrowserWorkspaces}
+          sessions={sessions}
+          cwd={cwd}
+          onDelete={onDeleteAutomation}
+          onDraft={onDraftAutomation}
+          onOpenSession={onOpenAutomationThread}
+          onPause={onPauseAutomation}
+          onRefresh={onRefreshAutomations}
+          onResume={onResumeAutomation}
+          onRun={onRunAutomation}
+          onSave={onSaveAutomation}
+        />
+      </Suspense>
     );
   }
   if (mainView === "capabilities") {
     return (
-      <CapabilitiesPage
-        activeTab={capabilitiesTab}
-        backendDraft={backendDraft}
-        backendDoctor={backendDoctor}
-        backends={backends}
-        client={client}
-        cwd={cwd}
-        disabled={disabled}
-        onActiveTabChange={onCapabilitiesTabChange}
-        onAgentSurfaceChanged={onAgentSurfaceChanged}
-        onCancelBackendEdit={onCancelBackendEdit}
-        onChangeBackendDraft={onChangeBackendDraft}
-        onCopyText={onCopyText}
-        onDeleteBackend={onDeleteBackend}
-        onDoctorBackend={onDoctorBackend}
-        onEditBackend={onEditBackend}
-        onNewBackend={onNewBackend}
-        onOpenSession={onOpenSession}
-        onSaveBackendDraft={onSaveBackendDraft}
-        onSetBackendEnabled={onSetBackendEnabled}
-        onSetBackendEntrypoints={onSetBackendEntrypoints}
-        scope={scope}
-      />
+      <Suspense fallback={<SurfaceLoading label="Loading capabilities…" />}>
+        <CapabilitiesPage
+          activeTab={capabilitiesTab}
+          backendDraft={backendDraft}
+          backendDoctor={backendDoctor}
+          backends={backends}
+          client={client}
+          cwd={cwd}
+          disabled={disabled}
+          onActiveTabChange={onCapabilitiesTabChange}
+          onAgentSurfaceChanged={onAgentSurfaceChanged}
+          onCancelBackendEdit={onCancelBackendEdit}
+          onChangeBackendDraft={onChangeBackendDraft}
+          onCopyText={onCopyText}
+          onDeleteBackend={onDeleteBackend}
+          onDoctorBackend={onDoctorBackend}
+          onEditBackend={onEditBackend}
+          onNewBackend={onNewBackend}
+          onOpenSession={onOpenSession}
+          onSaveBackendDraft={onSaveBackendDraft}
+          onSetBackendEnabled={onSetBackendEnabled}
+          onSetBackendEntrypoints={onSetBackendEntrypoints}
+          scope={scope}
+        />
+      </Suspense>
     );
   }
   if (mainView === "search") {
     return (
-      <SearchPage
-        loadThreadSearchText={loadThreadSearchText}
-        sessions={sessions}
-        onOpenSession={onOpenSession}
-        onOpenTranscript={() => onMainViewChange("transcript")}
-      />
+      <Suspense fallback={<SurfaceLoading label="Loading search…" />}>
+        <SearchPage
+          loadThreadSearchText={loadThreadSearchText}
+          sessions={sessions}
+          onOpenSession={onOpenSession}
+          onOpenTranscript={() => onMainViewChange("transcript")}
+        />
+      </Suspense>
     );
   }
   return <>{transcript}</>;

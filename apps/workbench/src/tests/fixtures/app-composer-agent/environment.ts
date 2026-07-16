@@ -186,6 +186,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   gatewayMock.scope.cwd = "/tmp/project";
+  gatewayMock.initialize = null;
   gatewayMock.commandExecute = (command: string) => ({
     accepted: false,
     command,

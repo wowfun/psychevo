@@ -64,6 +64,29 @@ describe("Workbench layout and workspace panels", () => {
     });
   });
 
+  it("deletes the idle current session and returns to an empty draft", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Current idle session")];
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByText("Current idle session"));
+    await waitFor(() => expect(container.querySelector(".pevo-sessionRow.is-active")).toBeTruthy());
+    fireEvent.click(container.querySelector(".pevo-sessionMenu summary") as HTMLElement);
+    const deleteAction = screen.getByRole("menuitem", { name: "Delete" }) as HTMLButtonElement;
+    expect(deleteAction.disabled).toBe(false);
+    fireEvent.click(deleteAction);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Delete session?" }))
+      .getByRole("button", { name: "Delete session" }));
+
+    await waitFor(() => {
+      const methods = gatewayMock.requestLog.map((entry) => entry.method);
+      const deleteIndex = methods.lastIndexOf("thread/delete");
+      const nextStartIndex = methods.findIndex((method, index) => index > deleteIndex && method === "thread/start");
+      expect(deleteIndex).toBeGreaterThan(-1);
+      expect(nextStartIndex).toBeGreaterThan(deleteIndex);
+    });
+    await waitFor(() => expect(container.querySelector(".pevo-sessionRow.is-active")).toBeNull());
+  });
+
   it("keeps missing fork provenance visible but disables source navigation", async () => {
     gatewayMock.sessionSummaries = [{
       ...sessionSummary("fork-child", "Detached fork"),
@@ -224,9 +247,12 @@ describe("Workbench layout and workspace panels", () => {
     expect(container.querySelectorAll(".pevo-sessionRow.is-draft")).toHaveLength(0);
     expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
     const status = screen.getByLabelText("Composer environment");
-    expect(within(status).getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
+    await waitFor(() => {
+      expect(within(status).getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
+    });
+    const permission = within(status).getByRole("combobox", { name: "Permission mode" });
     expect(within(status).getByRole("button", { name: "Workspace" })).toBeTruthy();
-    expect(within(status).getByRole("combobox", { name: "Permission mode" }).compareDocumentPosition(
+    expect(permission.compareDocumentPosition(
       within(status).getByRole("button", { name: "Workspace" })
     ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(container.querySelector(".composerRuntimeControls")?.querySelector('[aria-label="Permission mode"]')).toBeNull();
@@ -746,7 +772,12 @@ describe("Workbench layout and workspace panels", () => {
 
     render(<App />);
     fireEvent.click(await screen.findByText("Artifact links"));
-
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+    });
     const pathButton = (label: string): HTMLButtonElement => {
       return screen.getByRole("button", { name: `Open file ${label}` }) as HTMLButtonElement;
     };

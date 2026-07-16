@@ -15,6 +15,7 @@ import {
 import { MarkdownText } from "@psychevo/components";
 import type { WorkspaceFileEntry, WorkspaceFileReadResult, WorkspaceFileWriteResult } from "@psychevo/protocol";
 import { highlightToHtml, languageForPath } from "../highlight";
+import { isUnsupportedPreviewFile } from "../right-workspace-model";
 import type { WorkspaceFileTreeItem } from "../types";
 import { HtmlStaticPreview } from "./preview";
 import { WorkspaceFileTree, absoluteWorkspacePath } from "./tree";
@@ -420,38 +421,4 @@ function isHtmlFile(path: string): boolean {
   return extension === "html" || extension === "htm";
 }
 
-export function isUnsupportedPreviewFile(path: string): boolean {
-  const extension = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
-  return Boolean(extension && UNSUPPORTED_PREVIEW_EXTENSIONS.has(extension));
-}
-
-const UNSUPPORTED_PREVIEW_EXTENSIONS = new Set([
-  "7z",
-  "avif",
-  "bin",
-  "bmp",
-  "bz2",
-  "dylib",
-  "exe",
-  "gif",
-  "gz",
-  "ico",
-  "jpeg",
-  "jpg",
-  "mov",
-  "mp3",
-  "mp4",
-  "o",
-  "parquet",
-  "pdf",
-  "png",
-  "rar",
-  "so",
-  "tar",
-  "tgz",
-  "wasm",
-  "webp",
-  "xz",
-  "zip",
-  "zst"
-]);
+export { isUnsupportedPreviewFile } from "../right-workspace-model";

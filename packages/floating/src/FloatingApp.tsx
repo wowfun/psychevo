@@ -1,6 +1,7 @@
 import {
   GatewayClient,
   emptyThreadSnapshot,
+  runThreadInterrupt,
   ThreadController,
   type ThreadTurnControls
 } from "@psychevo/client";
@@ -327,10 +328,9 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
       return;
     }
     try {
-      await client.request("thread/action/run", {
+      await runThreadInterrupt(client, {
         scope: floatingScope(cwd || "/", state.activationId),
-        threadId: state.threadId,
-        action: { kind: "interrupt" }
+        threadId: state.threadId
       });
       dispatch({ running: false, type: "running" });
     } catch (error) {

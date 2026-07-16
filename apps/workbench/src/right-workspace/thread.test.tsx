@@ -251,6 +251,46 @@ describe("ThreadPanel live event feed", () => {
     expect(client.request).not.toHaveBeenCalledWith("thread/action/run", expect.anything());
   });
 
+  it("interrupts a running child snapshot when its cached context omits the action", async () => {
+    const running = {
+      ...childHistorySnapshot(),
+      activity: { running: true, activeTurnId: "child-turn", queuedTurns: 0 }
+    } satisfies ThreadSnapshot;
+    const client = {
+      request: vi.fn(async (method: string) => {
+        if (method === "thread/read") return running;
+        if (method === "thread/history/read") return historyReadResult(running);
+        if (method === "thread/context/read") return threadContext("readWrite", "full");
+        if (method === "thread/action/run") {
+          return { kind: "interrupt", threadId: "child-thread", interrupted: true, cleared: 0 };
+        }
+        throw new Error(`unexpected request: ${method}`);
+      })
+    } as unknown as GatewayClient & { request: ReturnType<typeof vi.fn> };
+
+    render(
+      <ThreadPanel
+        client={client}
+        disabled={false}
+        gatewayEventFeed={EMPTY_GATEWAY_EVENT_FEED}
+        kind="agentSession"
+        parentThreadId="parent-thread"
+        scope={null}
+        threadId="child-thread"
+        title="Running child"
+      />
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Interrupt active turn" }));
+    await waitFor(() => {
+      expect(client.request).toHaveBeenCalledWith("thread/action/run", {
+        scope: running.scope,
+        threadId: "child-thread",
+        action: { kind: "interrupt" }
+      });
+    });
+  });
+
   it("keeps one prompt owner while a writable child follow-up commits before turn acceptance", async () => {
     const turnStart = deferred<Record<string, unknown>>();
     const initial = childHistorySnapshot();

@@ -43,6 +43,7 @@ import type {
 import type { PendingDetachedShell } from "./viewGuard";
 import {
   enabledThreadAction,
+  runThreadInterrupt,
   snapshotThreadApplicationTarget,
   threadActionDescriptor
 } from "./thread-application";
@@ -361,7 +362,7 @@ export function createCommandActions(params: CommandActionsParams) {
       case "turnInterrupt":
         {
           const target = snapshotThreadApplicationTarget(params.snapshot);
-          if (!params.client || !target || !enabledThreadAction(params.runtimeContext, "interrupt")) {
+          if (!params.client || !target) {
             params.setCommandFeedback({
               accepted: false,
               command: "interrupt",
@@ -370,10 +371,7 @@ export function createCommandActions(params: CommandActionsParams) {
             });
             break;
           }
-          await params.client.request("thread/action/run", {
-            ...target,
-            action: { kind: "interrupt" }
-          });
+          await runThreadInterrupt(params.client, target);
           await params.refreshSnapshot(params.client, target.threadId, undefined, true, params.viewEpochRef.current);
         }
         break;

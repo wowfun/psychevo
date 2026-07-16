@@ -53,6 +53,7 @@ const gatewayMock = vi.hoisted(() => {
     return [...merged.values()];
   }
   return {
+    initialize: null as null | (() => unknown | Promise<unknown>),
     commandExecute: ((command: string): unknown => {
       return {
         accepted: false,

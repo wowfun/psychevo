@@ -38,7 +38,7 @@ import {
   parseBackendDoctor
 } from "./data";
 import { backendDraftFromBackend, parseBackendCommandJson } from "./capabilities-agents-config";
-import { transcriptSearchText } from "./search";
+import { transcriptSearchText } from "./search-model";
 import {
   multilineList,
   normalizeSnapshot
@@ -66,7 +66,7 @@ import {
 import {
   fileBasename,
   isUnsupportedPreviewFile
-} from "./right-workspace";
+} from "./right-workspace-model";
 import { parseThreadContext, runtimeControlSelections } from "./runtime-context";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
