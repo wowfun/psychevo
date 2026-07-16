@@ -17,6 +17,7 @@ use crate::profiles::{PROFILE_ENV, PROFILE_HOME_ENV};
 
 pub(crate) const DESKTOP_CWD_ENV: &str = "PSYCHEVO_DESKTOP_CWD";
 pub(crate) const PEVO_BIN_ENV: &str = "PSYCHEVO_PEVO_BIN";
+const CARGO_HTTP_CHECK_REVOKE_ENV: &str = "CARGO_HTTP_CHECK_REVOKE";
 const LIBGL_ALWAYS_SOFTWARE_ENV: &str = "LIBGL_ALWAYS_SOFTWARE";
 const PNPM_RUNTIME_ENV_DEFAULTS: [(&str, &str); 4] = [
     ("COREPACK_ENABLE_PROJECT_SPEC", "0"),
@@ -94,6 +95,7 @@ fn desktop_command_for_platform(
         apply_pevo_bin_env(command, pevo_bin);
         apply_profile_env(command, env_map);
         apply_pnpm_runtime_env(command, env_map);
+        apply_cargo_runtime_env(command, env_map, platform);
     }
     Ok(command)
 }
@@ -103,6 +105,19 @@ fn apply_pnpm_runtime_env(command: &mut Command, env_map: &BTreeMap<String, Stri
         if psychevo_runtime::env_value_case_insensitive(env_map, name).is_none() {
             command.env(name, value);
         }
+    }
+}
+
+fn apply_cargo_runtime_env(
+    command: &mut Command,
+    env_map: &BTreeMap<String, String>,
+    platform: HostPlatform,
+) {
+    if platform == HostPlatform::Windows
+        && psychevo_runtime::env_value_case_insensitive(env_map, CARGO_HTTP_CHECK_REVOKE_ENV)
+            .is_none()
+    {
+        command.env(CARGO_HTTP_CHECK_REVOKE_ENV, "false");
     }
 }
 
@@ -327,6 +342,109 @@ mod tests {
             assert!(args[4].contains("\"tauri:dev\""), "{args:?}");
         }
         assert_eq!(command.get_current_dir(), Some(source_root.as_path()));
+    }
+
+    #[test]
+    fn desktop_command_defaults_cargo_revocation_check_off_on_windows() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("pnpm.cmd"), "@echo off\n").expect("pnpm shim");
+        let env_map = BTreeMap::from([
+            ("PATH".to_string(), bin.display().to_string()),
+            ("PATHEXT".to_string(), ".CMD".to_string()),
+            (
+                "COMSPEC".to_string(),
+                r"C:\Windows\System32\cmd.exe".to_string(),
+            ),
+        ]);
+
+        let command = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new(r"C:\Tools\pevo.exe"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Windows,
+        )
+        .expect("desktop command");
+
+        assert_eq!(
+            command_env_value(command.as_std(), "CARGO_HTTP_CHECK_REVOKE").as_deref(),
+            Some("false")
+        );
+    }
+
+    #[test]
+    fn desktop_command_preserves_explicit_cargo_revocation_settings_on_windows() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("pnpm.cmd"), "@echo off\n").expect("pnpm shim");
+
+        for (key, value) in [
+            (CARGO_HTTP_CHECK_REVOKE_ENV, "true"),
+            ("cargo_http_check_revoke", "false"),
+        ] {
+            let env_map = BTreeMap::from([
+                ("PATH".to_string(), bin.display().to_string()),
+                ("PATHEXT".to_string(), ".CMD".to_string()),
+                (
+                    "COMSPEC".to_string(),
+                    r"C:\Windows\System32\cmd.exe".to_string(),
+                ),
+                (key.to_string(), value.to_string()),
+            ]);
+
+            let command = desktop_command_for_platform(
+                &source_root,
+                &desktop_cwd,
+                Path::new(r"C:\Tools\pevo.exe"),
+                &env_map,
+                psychevo_runtime::HostPlatform::Windows,
+            )
+            .expect("desktop command");
+
+            assert_eq!(
+                command_env_value(command.as_std(), CARGO_HTTP_CHECK_REVOKE_ENV),
+                None,
+                "explicit {key}={value} must remain inherited"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_command_does_not_set_cargo_revocation_check_off_windows() {
+        let temp = tempdir().expect("temp");
+        let source_root = temp.path().join("source");
+        let desktop_cwd = temp.path().join("workspace");
+        let bin = temp.path().join("bin");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::create_dir_all(&desktop_cwd).expect("desktop cwd");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("pnpm"), "#!/bin/sh\n").expect("pnpm");
+        let env_map = BTreeMap::from([("PATH".to_string(), bin.display().to_string())]);
+
+        let command = desktop_command_for_platform(
+            &source_root,
+            &desktop_cwd,
+            Path::new("/tmp/pevo"),
+            &env_map,
+            psychevo_runtime::HostPlatform::Posix,
+        )
+        .expect("desktop command");
+
+        assert_eq!(
+            command_env_value(command.as_std(), CARGO_HTTP_CHECK_REVOKE_ENV),
+            None
+        );
     }
 
     #[test]
