@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-16
+
+- Improved Workbench startup and turn latency with lazy feature loading,
+  concurrent boot, immutable static assets, on-demand workspace refreshes, and
+  reliable Interrupt dispatch.
+- Reworked session and workspace flows so late startup cannot replace an
+  explicit selection, idle current sessions can be archived or deleted safely,
+  and archived ACP imports remain transcript-first.
+- Decoupled Codex runtime assembly from marketplace catalogs with canonical-cwd
+  inventory prewarming, frozen per-Thread delegated tools, and native
+  plugin/App capability projection.
+- Fixed Windows Git Bash/Desktop startup and Cargo dependency fetches under
+  Schannel revocation-check failures.
+
 ## 2026-07-15
 
 - Reworked Workbench sessions, workspace picking, and Git branch switching;

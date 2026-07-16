@@ -161,6 +161,13 @@ child invocation and settle the parent turn promptly. Persisted child-agent
 edges must close when the child completes, fails, or is interrupted, so
 Workbench Status and session reloads do not continue to show stale running
 agents.
+The authoritative activity snapshot controls whether Workbench presents
+Interrupt. Once presented, every Workbench interrupt entry point sends the
+request for the exact target Thread even when its cached context descriptor is
+stale; Gateway re-reads the live descriptor and returns the precise unavailable
+reason when the action is genuinely no longer valid. A cached disabled
+descriptor must never produce a client-side `Interrupt is not available for the
+active Thread.` rejection for a running snapshot.
 
 Startup and reconnect call source-default `thread/resume` with `params.scope`.
 Gateway returns the current thread snapshot when a binding exists, or an empty
@@ -379,7 +386,10 @@ in history rows/search or decide whether GUI, TUI, ACP, Web, or Desktop
 sessions are visible by default.
 
 Workbench issues exactly one initial `thread/browser` request during boot and
-awaits it before deriving the startup scope. Until that request succeeds, the
+starts it concurrently with `initialize`, then awaits both before deriving the
+startup scope. The Sessions result is committed immediately when the browse
+completes and does not wait for `thread/start` or auxiliary surface requests.
+Until that request succeeds, the
 Sessions browser is busy and must not render the successful-empty `No sessions`
 state. A failed first request uses the existing error presentation; later
 refreshes keep the current rows visible instead of reverting to an initial
@@ -399,7 +409,9 @@ tree, `@` completion, diff/status panes, agents, skills, and subsequent turns
 refresh against the resumed cwd. Cross-cwd resume must not splice the
 old session's transcript into the launch cwd. Archiving, restoring,
 renaming, and deleting sessions operate from the same global list and must
-respect running/current-session guards across every source.
+respect the running-session guard across every source. The idle current session
+remains archivable and deletable; deleting it clears the current Web source
+binding after the lifecycle operation succeeds.
 Starting a new session from another cwd group switches the active browser
 scope to that stored cwd and returns an empty source snapshot for that
 cwd, without first requiring the user to resume an older session.

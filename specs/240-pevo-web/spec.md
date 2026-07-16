@@ -129,6 +129,13 @@ generated protocol schema modules or their validation vendor dependencies.
 Lazy-loaded rich-renderer dependencies, including Mermaid and its parser,
 layout, math, and diagram-rendering packages, must stay in named async vendor
 groups instead of being absorbed into a monolithic fallback `vendor` chunk.
+The initial production navigation must not request Mermaid, Terminal, or
+off-screen Settings, Capabilities, Automations, Search, and right-workspace
+implementation chunks. Those chunks load only when their owning surface or
+content becomes visible. Under the deterministic production-build Chromium
+harness, initial JavaScript encoded size is capped at 1.8 MB; the harness
+records the resource set and byte total so intentional budget changes remain
+reviewable rather than silently expanding the startup graph.
 If an upstream lazy dependency ships a single generated ESM module that cannot
 be split by maintainable package or feature boundaries, the warning limit may
 be raised narrowly to the smallest stable value that admits that module after
@@ -215,6 +222,20 @@ context read on activation, and applying that response must not schedule the
 same read again. Auxiliary Settings, Workspace, Observability, Agent catalog,
 and command refreshes are deduplicated by their owning scope and do not block
 the selected Transcript or Composer controls.
+
+Workbench boot treats initialization and the first global session browse as
+one bounded transaction. It starts `initialize` and the single initial
+`thread/browser` request as soon as transport is connected, commits the
+Sessions result without waiting for `thread/start`, and suppresses reactive
+context and auxiliary refreshes until the startup Thread snapshot is stable.
+If the user explicitly selects a Session after browsing completes but before
+initialization does, the startup view epoch is stale and Workbench must omit
+the draft `thread/start` request itself, not merely ignore its response. The
+explicit `thread/resume` binding remains authoritative and cannot be cleared by
+late startup work.
+The stable target receives one context read. Workspace, Agent/backend, and
+command catalogs load on demand for the surface that consumes them and coalesce
+concurrent reads for the same scope.
 
 Changing immutable Agent provenance on a bound Session starts a new Thread and
 immediately prepares the requested draft target. The critical path is
@@ -324,7 +345,12 @@ Session menus render Gateway lifecycle descriptors. Fork is visible only for a
 negotiated fork-capable Agent. Delete remains visible but disabled with its
 Gateway reason when an ACP Agent cannot delete its session. Remote deletion uses
 an explicit confirmation that names both the Psychevo Thread and Agent-owned
-session; Native deletion retains its existing local meaning.
+session; Native deletion retains its existing local meaning. Current selection
+alone does not disable Archive or Delete: both actions remain available for the
+idle current Thread and become unavailable while that Thread is running.
+Archiving the current Thread keeps its Transcript visible as an archived visit;
+deleting it clears the selected Transcript and returns Workbench to an empty
+new-session draft after confirmation.
 
 ## Visual Direction
 

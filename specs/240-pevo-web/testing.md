@@ -131,6 +131,27 @@ required. They must not print tokens or secrets.
 - Sessions-browser tests cover long title truncation without horizontal
   scrolling, while preserving recent-update time, running state, and row action
   visibility.
+- Startup tests delay `thread/start` and auxiliary RPCs to prove Sessions become
+  usable as soon as the single initial `thread/browser` completes. They also
+  prove initialization and browsing overlap, context is not read before the
+  startup Thread stabilizes, and scope-owned auxiliary reads are on-demand and
+  coalesced. A delayed `initialize` fixture selects a visible Session before
+  initialization completes and proves no stale startup `thread/start` request
+  is sent after the resulting `thread/resume`.
+- Production-build browser validation records the initial resource set and
+  encoded JavaScript total, enforces the 1.8 MB startup budget, and proves
+  Mermaid and Terminal chunks are absent until the corresponding content or
+  panel is opened. A same-profile reload proves immutable assets are reused.
+- Interrupt regressions cover an idle cached descriptor followed by a running
+  activity snapshot. Main Composer, command, child Thread, and floating entry
+  points send `thread/action/run` for the exact target and surface Gateway's
+  precise error if the live action is unavailable.
+- Paired GUI/TUI first-token tests use the same deterministic provider and
+  prompt. A delayed Codex `plugin/list` cannot delay Web provider dispatch;
+  after Gateway initialization the median Web pre-provider overhead stays
+  within 150 ms of TUI, while a separate new-session-to-first-token measure
+  prevents moving the same wait into Composer loading. Draft `thread/start`
+  must return while an inventory prewarm is still in flight.
 
 ## Validation Boundaries
 

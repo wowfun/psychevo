@@ -179,6 +179,16 @@ come from the focused command and smoke tests below.
 - `allow always` approval writes project-local TOML and skips exact duplicate
   rules.
 
+## Desktop Launcher Coverage
+
+- Platform-parameterized launcher coverage verifies that every Windows
+  `pevo desktop` child defaults to `CARGO_HTTP_CHECK_REVOKE=false`, explicit
+  caller values are preserved case-insensitively, and non-Windows children do
+  not receive that Cargo setting.
+- Existing coverage keeps Windows pnpm shim resolution, Corepack defaults,
+  source-root cwd, active profile propagation, and WSL software-GL behavior
+  independent from the Cargo revocation-check default.
+
 ## Install Script Coverage
 
 - `scripts/install.sh` passes POSIX shell syntax validation with `sh -n`.

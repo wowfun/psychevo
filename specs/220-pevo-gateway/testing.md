@@ -26,6 +26,9 @@ Define acceptance expectations and validation scenarios for the managed
   Web Shell URL.
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
+- Fingerprinted `/assets/` responses are immutable-cacheable, while HTML, SPA
+  fallbacks, and non-fingerprinted files are `no-store`; static reads preserve
+  existing content-type and authorization behavior.
 - `stop` requests authenticated shutdown, waits for managed cleanup, uses only
   the verified process group or Windows Job Object as fallback, and proves both
   the managed server and an exercised fake ACP Agent child have exited before

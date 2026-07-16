@@ -222,6 +222,12 @@ boundary, including Windows `PATH`/`PATHEXT` command shims, and defaults the
 pnpm child to the installed usable package-manager version instead of requiring
 Corepack to download the repository's recommended exact version. These
 Corepack defaults are subprocess-scoped and preserve explicit caller settings.
+On every Windows host, the launcher also defaults the child environment to
+`CARGO_HTTP_CHECK_REVOKE=false` unless the caller explicitly set that variable,
+so the Tauri-spawned Cargo process can fetch dependencies when Schannel cannot
+complete certificate revocation checks. This default does not persist Cargo or
+shell configuration, does not change other Cargo network settings, and preserves
+explicit values such as `CARGO_HTTP_CHECK_REVOKE=true`.
 The command preserves active profile selection for the Desktop child process
 and passes the current `pevo` executable path as `PSYCHEVO_PEVO_BIN` so Desktop
 managed Gateway startup uses the same CLI build that launched the native shell.

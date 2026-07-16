@@ -57,7 +57,11 @@ must not navigate the browser, construct a raw `file://` URL, or create a second
 artifact-card surface. Completion of a main, side-conversation, or child-agent
 turn refreshes the workspace-scoped file inventory independently of which
 thread owns the visible primary transcript, so newly created files can be
-promoted when the transcript rerenders.
+promoted when the transcript rerenders. When Workbench defers the initial
+`workspace/files` read, its cheap transcript demand check is a conservative
+superset of these supported Markdown forms, including root-level filenames,
+inline-code paths with line suffixes, and Markdown link destinations with line
+fragments. Exact inventory matching remains the authority for promotion.
 
 Markdown preview uses the shared `@psychevo/components` Markdown renderer
 everywhere Workbench previews Markdown: transcript, Files, Review, capability
@@ -183,6 +187,9 @@ Default validation uses deterministic local harnesses and fake providers.
   promotion across relative, POSIX, Windows, Git Bash/MSYS, and UNC spellings;
   stable streaming boundaries; line suffixes; and the excluded message, block,
   URL, image, directory, missing-file, and outside-workspace cases.
+- Workbench demand-detection tests cover plain root-level filenames, inline-code
+  paths with line suffixes, and relative Markdown link destinations so lazy
+  inventory loading cannot make supported promotion forms unreachable.
 - Workbench tests cover per-thread Browser tab creation/reuse and A-B-A state
   restoration, Web preview-only automation messaging, public and loopback
   host/port normalization, explicit scheme rejection, unsandboxed Browser

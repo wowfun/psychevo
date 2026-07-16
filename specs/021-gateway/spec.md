@@ -234,7 +234,11 @@ active turn. The active turn remains keyed by its thread id and continues in the
 background. Source-scoped control resolves against the currently bound thread;
 thread-scoped control can still interrupt, steer, or answer requests for a
 background thread. Running threads may not be archived or deleted until their
-active turn finishes or is interrupted.
+active turn finishes or is interrupted. An idle thread may be archived or
+deleted even when it is the thread currently bound to the requesting source.
+Deleting that current thread clears the source binding only after the lifecycle
+delete succeeds, so the source cannot remain bound to a missing Thread and a
+failed Agent-owned delete keeps the current binding intact.
 
 Resetting a source is stronger than ordinary thread navigation: it creates or
 selects a new thread and rebinds the source key. The old runtime session
@@ -514,6 +518,14 @@ surfaces. They may accept an optional `cwd` as a target or filter, but must not
 reject a request merely because the requested cwd differs from the browser
 launch directory. Execution RPCs continue to carry explicit cwd/scope and remain
 bounded by runtime permission, sandbox, and tool-policy enforcement.
+
+Management catalogs are not turn dependencies. In particular, a Web
+`turn/start` must not synchronously enumerate the Codex plugin marketplace or
+repeat an installed-capability scan already prepared for the canonical cwd.
+Gateway may bind a new Thread to the current prepared runtime inventory and may
+initialize that Thread's delegated runtime, but unrelated catalog latency must
+not delay provider dispatch or first-token delivery. Repeated turns reuse the
+Thread's frozen capability and delegated-tool descriptors.
 
 Gateway protocol naming follows Codex and Hermes reference products: machine
 and wire fields use `cwd` for current working directory. Workbench may continue

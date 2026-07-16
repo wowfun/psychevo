@@ -178,6 +178,14 @@ launch, authorization, and static-asset serving concerns. The concrete
 Workbench product surface, browser host behavior, source binding, panels,
 commands, settings, files, and browser validation belong to `240`.
 
+Static files are read without blocking the async server executor. Fingerprinted
+files below `/assets/` return
+`Cache-Control: public, max-age=31536000, immutable`; HTML, SPA fallbacks, and
+non-fingerprinted files return `Cache-Control: no-store` so an updated managed
+server cannot reuse a stale shell. The local server does not add on-the-fly
+compression; Workbench's lazy initial graph and immutable repeat-load cache are
+the primary startup controls.
+
 The Web/Gateway implementation follows the architecture large-file limit from
 [001 Architecture](../001-architecture/spec.md). `server.rs` should remain a
 thin router/facade over modules for managed binding, launch/auth/static assets,

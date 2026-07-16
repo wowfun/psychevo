@@ -149,10 +149,27 @@ Profile and not a dormant direct Codex Agent path. It owns Codex catalog
 mutation, Apps inventory, Apps authentication, server-initiated elicitation,
 and app-backed MCP tool calls. Each Psychevo thread that needs delegation uses
 one non-persistent Codex ephemeral thread and archives it during thread cleanup.
+Catalog management and runtime assembly are separate broker planes. Capabilities
+management may use Codex `plugin/list`, `plugin/read`, install, and uninstall,
+including remote marketplace data. Runtime assembly never calls `plugin/list`:
+it reads only `plugin/installed` plus the enabled installed package details and
+stores the result in a process-lifetime, canonical-cwd inventory. Concurrent
+inventory loads for one cwd are single-flight and a temporary broker failure is
+negative-cached for five seconds before one retry is admitted. Gateway
+`initialize` and `thread/start` may start or join that prewarm only in the
+background: draft creation never awaits `plugin/installed`, package detail
+reads, hook scanning, or their request timeout.
+
 The installed-package selectors, package-root locators, execution owners, and
-compatibility profile are frozen when that Psychevo thread first assembles
-Codex contributions. Later turns reuse the snapshot; archive/delete clears it,
-and a new thread observes later Codex catalog changes.
+compatibility profile are copied from that inventory and frozen when a
+Psychevo thread first assembles Codex contributions. Later inventory refreshes
+affect only new threads. A delegated thread lists its effective MCP tools once,
+stores immutable tool descriptors in the frozen snapshot, and creates
+turn-local bindings from those descriptors without repeating discovery. Later
+turns reuse the snapshot; archive/delete clears it and archives the one
+non-persistent Codex ephemeral thread. Successful Codex install/uninstall,
+account changes, and broker replacement invalidate the shared inventory while
+preserving existing thread snapshots.
 
 The broker advertises the pinned app-server elicitation capabilities that the
 Workbench can faithfully answer: MCP standard forms (including titled single-

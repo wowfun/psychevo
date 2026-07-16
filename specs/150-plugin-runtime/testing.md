@@ -92,12 +92,23 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - Codex authority preserves `<plugin>@<marketplace>` identity, does not create
   a Psychevo mirror record, and keeps same-name rows from different authorities
   distinct.
+- Runtime discovery uses `plugin/installed`, never `plugin/list`, and concurrent
+  first use by multiple threads in one canonical cwd performs one inventory
+  load. Different cwd values have independent inventories. A blocked fake
+  inventory proves both `initialize` and `thread/start` return without waiting
+  while the one background load remains in flight.
 - An enabled installed Codex package root is resolved in place, keeps Codex
   authority in the selected-root record, and is frozen across later turns of
   that Psychevo thread. Archive/delete clears both the snapshot and ephemeral
   Codex thread.
 - A Codex MCP whose package root is not exposed is delegated by effective
   server name and is never projected both natively and through the broker.
+- A delegated Codex thread lists MCP tool descriptors once. Later turns reuse
+  those descriptors with their own turn and event context, without another
+  inventory or MCP-status request.
+- Successful Codex install/uninstall and account or broker changes refresh the
+  shared inventory for new threads without mutating existing frozen threads.
+  Broker failure is retried only after the bounded negative-cache interval.
 - Apps inventory, OAuth, standard/openai/URL elicitation, app-backed MCP calls,
   ephemeral thread cleanup, profile mismatch, and post-delivery disconnects
   are exercised through the broker interface.
@@ -127,6 +138,7 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - Timeout tests must use bounded local workers and must not rely on wall-clock
   sleeps longer than the runtime timeout under test.
 - The opt-in `codex-plugin-broker-live` check uses the current Codex executable
-  and `CODEX_HOME` only for initialize and read-only `plugin/list` projection.
+  and `CODEX_HOME` only for initialize and read-only catalog or installed-plugin
+  projection.
   It must not install, uninstall, enable, authenticate, or execute a plugin, and
   it does not require an LLM-provider credential.

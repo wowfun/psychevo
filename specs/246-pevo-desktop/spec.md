@@ -174,6 +174,16 @@ launcher does not modify user Corepack, pnpm, registry, proxy, or CA
 configuration, and pnpm launch or compatibility failures remain visible on the
 inherited stderr stream.
 
+On Windows, the launcher also defaults the pnpm child to
+`CARGO_HTTP_CHECK_REVOKE=false` when the caller has not explicitly set that
+variable. The value is inherited by the Tauri-spawned Cargo process so Desktop
+development can fetch crates when Windows Schannel cannot complete certificate
+revocation checks. This default applies to every Windows `pevo desktop` launch,
+is scoped to the launcher subprocess, and preserves explicit caller values,
+including `CARGO_HTTP_CHECK_REVOKE=true`. It does not change Cargo timeout,
+retry, multiplexing, proxy, registry, mirror, or CA settings, and direct package
+scripts remain caller-owned.
+
 `pevo desktop [--dir <DIR>]` preserves the active Psychevo profile for the
 Desktop child process through `PSYCHEVO_HOME`, `PSYCHEVO_PROFILE`, and
 `PSYCHEVO_PROFILE_HOME`. The Desktop workspace cwd is the caller's cwd by
