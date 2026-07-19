@@ -319,7 +319,8 @@ function detachedSnapshotCanAcceptThreadedEvent(snapshot: ThreadSnapshot, event:
   if ("turnId" in event && activeTurnId && event.turnId === activeTurnId) {
     return true;
   }
-  return event.type === "turnStarted" && hasUnboundOptimisticPrompt(snapshot);
+  return (event.type === "turnStarted" || event.type === "turnCompleted")
+    && hasUnboundOptimisticPrompt(snapshot);
 }
 
 function hasUnboundOptimisticPrompt(snapshot: ThreadSnapshot): boolean {

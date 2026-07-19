@@ -189,12 +189,12 @@ function toolDisplaySpec(toolName: string, metadata: Record<string, unknown>): T
   if (toolName === "web_search") {
     return {
       ...genericDisplaySpec(),
-      bodyKeys: ["results", "items", "content", "output"],
-      bodyPolicy: "summary",
+      bodyKeys: ["payload", "error"],
+      bodyPolicy: "body",
       category: "explore",
-      summaryKeys: ["error", "status", "count", "matches", "truncated"],
+      summaryKeys: ["provider", "truncated", "error"],
       titleArgKeys: ["query"],
-      titleResultKeys: ["query"]
+      titleResultKeys: ["query", "provider"]
     };
   }
   if (toolName === "mcp" || toolName === "mcp_call" || toolName.startsWith("mcp__")) {

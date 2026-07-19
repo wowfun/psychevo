@@ -18,6 +18,7 @@ export interface ComposerProps {
   promptSubmitBlockReason?: string | undefined;
   promptSubmitDisabled?: boolean;
   promptTextUnavailableReason?: string | null;
+  retainDraftUntilAccepted?: boolean;
   requestPanel?: ReactNode;
   rightControls?: ReactNode;
   running: boolean;
@@ -31,7 +32,12 @@ export interface ComposerProps {
   onRemoveAttachment?(id: string): void;
   onShell?(command: string): void;
   onSteer(text: string): void;
-  onSubmit(text: string, mentions: GatewayMention[], orderedInput?: ThreadEditableInputPart[]): void;
+  onSubmit(
+    text: string,
+    mentions: GatewayMention[],
+    orderedInput?: ThreadEditableInputPart[],
+    isInputCurrent?: () => boolean
+  ): void | boolean | Promise<void | boolean>;
 }
 
 export interface ComposerDraftPatch {
@@ -64,6 +70,7 @@ export function Composer({
   promptSubmitBlockReason,
   promptSubmitDisabled = false,
   promptTextUnavailableReason,
+  retainDraftUntilAccepted = false,
   requestPanel,
   rightControls,
   running,
@@ -85,6 +92,8 @@ export function Composer({
   const [inputMode, setInputMode] = useState<"prompt" | "shell">("prompt");
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [completion, setCompletion] = useState<CompletionListResult | null>(null);
+  const [submissionPending, setSubmissionPending] = useState(false);
+  const [submissionStartedAtMs, setSubmissionStartedAtMs] = useState<number | null>(null);
   const [activeCompletion, setActiveCompletion] = useState(0);
   const [elapsedNowMs, setElapsedNowMs] = useState(() => Date.now());
   const [observedRunningStartedAtMs, setObservedRunningStartedAtMs] = useState<number | null>(null);
@@ -94,12 +103,15 @@ export function Composer({
   const completionTimer = useRef<number | null>(null);
   const completionSequence = useRef(0);
   const attachMenuRef = useRef<HTMLDivElement | null>(null);
+  const draftRevisionRef = useRef(0);
   const trimmed = draft.trim();
   const completionItems = completion?.items ?? [];
   const completionRows = completionRowsForItems(completionItems);
   const shellMode = inputMode === "shell";
   const planMode = planModeAvailable && mode === "plan";
   const attachmentItems = attachments ?? [];
+  const attachmentSignatureRef = useRef("");
+  attachmentSignatureRef.current = JSON.stringify(attachmentItems.map(({ id }) => id));
   const hasPromptPayload = Boolean(trimmed) || attachmentItems.length > 0;
   const promptTextBlocked = Boolean(trimmed) && Boolean(promptTextUnavailableReason);
   const effectivePromptBlockReason = promptTextBlocked
@@ -115,6 +127,9 @@ export function Composer({
     : observedRunningStartedAtMs;
   const runningElapsed = running ? compactElapsedLabel(effectiveRunningStartedAtMs, elapsedNowMs) : null;
   const runningSpinner = running ? activitySpinnerFrame(effectiveRunningStartedAtMs, elapsedNowMs) : null;
+  const preparingElapsed = submissionPending
+    ? compactElapsedLabel(submissionStartedAtMs, elapsedNowMs)
+    : null;
 
   useEffect(() => {
     if (!running) {
@@ -125,7 +140,8 @@ export function Composer({
   }, [running]);
 
   useEffect(() => {
-    if (!running || !isPositiveTimestamp(effectiveRunningStartedAtMs)) {
+    const activeStartedAtMs = running ? effectiveRunningStartedAtMs : submissionStartedAtMs;
+    if ((!running && !submissionPending) || !isPositiveTimestamp(activeStartedAtMs)) {
       return;
     }
     setElapsedNowMs(Date.now());
@@ -133,7 +149,7 @@ export function Composer({
       setElapsedNowMs(Date.now());
     }, 120);
     return () => window.clearInterval(timer);
-  }, [running, effectiveRunningStartedAtMs]);
+  }, [running, submissionPending, effectiveRunningStartedAtMs, submissionStartedAtMs]);
 
   useLayoutEffect(() => {
     resizeTextarea(textareaRef.current);
@@ -149,6 +165,7 @@ export function Composer({
     if (!draftPatch) {
       return;
     }
+    draftRevisionRef.current += 1;
     cancelCompletion();
     setInputMode("prompt");
     setDraft(draftPatch.text);
@@ -181,6 +198,7 @@ export function Composer({
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
         setAttachMenuOpen(false);
+        attachMenuRef.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus();
       }
     }
     document.addEventListener("mousedown", onPointerDown);
@@ -191,9 +209,9 @@ export function Composer({
     };
   }, [attachMenuOpen]);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    if (disabled || (shellMode ? !trimmed : !hasPromptPayload)) {
+    if (disabled || submissionPending || (shellMode ? !trimmed : !hasPromptPayload)) {
       return;
     }
     cancelCompletion();
@@ -223,12 +241,31 @@ export function Composer({
         trimmed,
         attachmentItems.length
       );
-      if (orderedInput) {
-        onSubmit(trimmed, activeMentions, orderedInput);
-      } else {
-        onSubmit(trimmed, activeMentions);
+      const submittedRevision = draftRevisionRef.current;
+      const submittedAttachmentSignature = attachmentSignatureRef.current;
+      const isInputCurrent = () => draftRevisionRef.current === submittedRevision
+        && attachmentSignatureRef.current === submittedAttachmentSignature;
+      const result = retainDraftUntilAccepted
+        ? onSubmit(trimmed, activeMentions, orderedInput, isInputCurrent)
+        : orderedInput
+          ? onSubmit(trimmed, activeMentions, orderedInput)
+          : onSubmit(trimmed, activeMentions);
+      if (retainDraftUntilAccepted && result instanceof Promise) {
+        setSubmissionStartedAtMs(Date.now());
+        setSubmissionPending(true);
+        let accepted = false;
+        try {
+          accepted = await result === true;
+        } finally {
+          setSubmissionPending(false);
+          setSubmissionStartedAtMs(null);
+        }
+        if (accepted !== true || !isInputCurrent()) {
+          return;
+        }
       }
     }
+    draftRevisionRef.current += 1;
     setDraft("");
     setDraftInputParts(null);
     updateMentions([]);
@@ -247,7 +284,8 @@ export function Composer({
     if (!completionProvider) {
       return;
     }
-    if (nextInputMode === "shell" && activeCompletionSigil(text, cursor) === "/") {
+    const sigil = activeCompletionSigil(text, cursor);
+    if (!sigil || (nextInputMode === "shell" && sigil === "/")) {
       cancelCompletion();
       return;
     }
@@ -285,6 +323,7 @@ export function Composer({
     const insertText = completionInsertTextWithSpacing(item);
     const nextDraft = `${draft.slice(0, start)}${insertText}${draft.slice(end)}`;
     const cursor = start + insertText.length;
+    draftRevisionRef.current += 1;
     setDraft(nextDraft);
     cancelCompletion();
     const target = item.target;
@@ -391,7 +430,7 @@ export function Composer({
     <button
       aria-label={shellMode ? "Run shell command" : "Send message"}
       className="pevo-primaryButton pevo-sendButton"
-      disabled={disabled || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload || ((promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate))}
+      disabled={disabled || submissionPending || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload || ((promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate))}
       title={!shellMode && (promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate ? effectivePromptBlockReason : undefined}
       type="submit"
     >
@@ -430,11 +469,13 @@ export function Composer({
             if (enteringShell) {
               setInputMode("shell");
             }
+            draftRevisionRef.current += 1;
             setDraft(nextDraft);
             updateMentions(activeMentionsForDraft(nextDraft, mentionsRef.current));
             scheduleCompletion(nextDraft, enteringShell ? Math.max(0, event.target.selectionStart - 1) : event.target.selectionStart, nextMode);
           }}
           onKeyDown={handleKeyDown}
+          onBlur={cancelCompletion}
           onPaste={handlePaste}
           onSelect={(event) => scheduleCompletion(event.currentTarget.value, event.currentTarget.selectionStart)}
           placeholder={shellMode ? "shell command" : "Ask Psychevo..."}
@@ -473,7 +514,7 @@ export function Composer({
         </div>
       )}
       {completionItems.length > 0 && (
-        <div className="pevo-completionPopover" role="listbox">
+        <div aria-label="Composer completion" className="pevo-completionPopover pevo-controlPopover" role="listbox">
           {completionRows.map((row) => {
             if (row.type === "header") {
               return (
@@ -484,6 +525,7 @@ export function Composer({
             }
             const item = row.item;
             const rightLabel = completionRightLabel(item);
+            const title = [item.label, item.detail, rightLabel].filter(Boolean).join(" · ");
             return (
               <button
                 aria-selected={row.index === activeCompletion}
@@ -497,6 +539,7 @@ export function Composer({
                   acceptCompletion(item);
                 }}
                 role="option"
+                title={title}
                 type="button"
               >
                 <span className="pevo-completionIcon" aria-hidden>
@@ -521,11 +564,12 @@ export function Composer({
               disabled={disabled}
               type="button"
               aria-expanded={attachMenuOpen}
+              aria-haspopup="dialog"
             >
               <Plus size={18} />
             </IconButton>
             {attachMenuOpen && (
-              <div className="pevo-addPopover" role="menu">
+              <div aria-label="Add options" className="pevo-addPopover pevo-controlPopover" role="dialog">
                 <button
                   className="pevo-addFileRow"
                   disabled={!onAttach}
@@ -533,7 +577,6 @@ export function Composer({
                     setAttachMenuOpen(false);
                     onAttach?.();
                   }}
-                  role="menuitem"
                   title={attachmentUnavailableReason ?? undefined}
                   type="button"
                 >
@@ -570,14 +613,17 @@ export function Composer({
             </div>
           )}
         </div>
-        {runningElapsed && (
-          <span className="pevo-composerTurnStatus" aria-label="Active turn elapsed">
+        {(runningElapsed || preparingElapsed) && (
+          <span
+            className="pevo-composerTurnStatus"
+            aria-label={running ? "Active turn elapsed" : "Submission preparing elapsed"}
+          >
             {runningSpinner && (
               <span className="pevo-composerTurnSpinner" aria-hidden="true">
                 {runningSpinner}
               </span>
             )}
-            <span>{runningElapsed}</span>
+            <span>{running ? runningElapsed : `Preparing · ${preparingElapsed}`}</span>
           </span>
         )}
         <div className="pevo-composerRightControls">

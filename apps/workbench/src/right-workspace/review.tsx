@@ -121,8 +121,17 @@ function ReviewChanges({
         <section className="reviewChangeGroup" key={group.turnId}>
           <header>
             <span>{shortSessionId(group.turnId)}</span>
-            <b>{group.files.length}</b>
+            <b>{group.files.length + (group.invalidations?.length ?? 0)}</b>
           </header>
+          {(group.invalidations ?? []).map((invalidation, index) => (
+            <div className="reviewChangeFile is-conflict" key={`${group.turnId}:invalidation:${index}`}>
+              <span className="reviewChangePath" title={invalidation.message}>
+                <span>{invalidation.source}</span>
+                <small>inspect diff</small>
+              </span>
+              <em title={invalidation.message}>{invalidation.message}</em>
+            </div>
+          ))}
           {group.files.map((file) => (
             <div className={`reviewChangeFile is-${file.reviewStatus}`} key={`${group.turnId}:${file.path}`}>
               <button className="reviewChangePath" onClick={() => onChangedFile(file.path)} title={file.path} type="button">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Check } from "lucide-react";
 import type {
   RunnableTargetView,
@@ -6,7 +6,7 @@ import type {
   RuntimeProfileView,
   ThreadControlDescriptorView
 } from "@psychevo/protocol";
-import { StatusSelect } from "./composer-controls";
+import { usePopoverDismiss } from "./popover-dismiss";
 import {
   runtimeControlDependencyMatches,
   runtimeControlValueLabel,
@@ -90,6 +90,7 @@ function AgentRuntimeSelector({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedTarget = targets.find((target) => target.targetId === targetId) ?? null;
   const agentLabel = selectedTarget?.agentLabel || "Select Agent";
   const profileLabel = selectedTarget?.profileLabel || "Runtime Profile";
@@ -99,7 +100,7 @@ function AgentRuntimeSelector({
   ));
   const selectedPairingReason = runnableTargetUnavailableReason(selectedTarget);
   const startsNewBoundThread = binding != null;
-  usePopoverDismiss(open, rootRef, () => setOpen(false));
+  usePopoverDismiss(open, rootRef, triggerRef, () => setOpen(false));
 
   return (
     <div ref={rootRef} className="agentRuntimeSelector" onKeyDown={(event) => {
@@ -112,13 +113,14 @@ function AgentRuntimeSelector({
         className="agentRuntimeButton"
         disabled={disabled || contextLoading}
         onClick={() => setOpen((current) => !current)}
+        ref={triggerRef}
         title={`${agentLabel} · ${profileLabel}`}
         type="button"
       >
         <span>{displayLabel}</span>
       </button>
       {open && (
-        <div className="agentRuntimePopover agentDefinitionPopover" role="dialog" aria-label="Agent target">
+        <div className="agentRuntimePopover agentDefinitionPopover pevo-controlPopover" role="dialog" aria-label="Agent target">
           <div className="agentRuntimeGroup">
             <div className="agentRuntimeRows" role="radiogroup" aria-label="Agent target">
               {targets.map((target) => {
@@ -224,12 +226,11 @@ export function RuntimeControlFields({
       ]))
     };
     return (
-      <StatusSelect
+      <RuntimeControlSelect
         disabled={disabled}
         key={control.id}
         label={control.label}
         optionLabels={optionLabels}
-        renderDisplayValue={(key) => optionLabels[key] ?? valueLabel}
         value={selectedKey}
         values={optionKeys}
         onChange={(key) => {
@@ -240,6 +241,130 @@ export function RuntimeControlFields({
       />
     );
   })}</>;
+}
+
+function RuntimeControlSelect({
+  disabled,
+  label,
+  optionLabels,
+  value,
+  values,
+  onChange
+}: {
+  disabled: boolean;
+  label: string;
+  optionLabels: Record<string, string>;
+  value: string;
+  values: string[];
+  onChange(value: string): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const listboxId = useId();
+  const displayValue = optionLabels[value] ?? value;
+  const initialFocusValue = values.includes(value) && value !== "__unavailable__"
+    ? value
+    : values.find((option) => option !== "__unavailable__") ?? null;
+  usePopoverDismiss(open, rootRef, triggerRef, () => setOpen(false));
+
+  useEffect(() => {
+    if (!open) return;
+    const options = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []);
+    const selected = options.find((option) => option.getAttribute("aria-selected") === "true" && !option.disabled);
+    const initial = selected ?? options.find((option) => !option.disabled);
+    for (const option of options) option.tabIndex = option === initial ? 0 : -1;
+    initial?.focus();
+  }, [open, initialFocusValue]);
+
+  function moveOptionFocus(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") {
+      return;
+    }
+    const options = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? []);
+    if (options.length === 0) return;
+    event.preventDefault();
+    const focusedIndex = options.findIndex((option) => option === document.activeElement);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? options.length - 1
+        : event.key === "ArrowDown"
+          ? (focusedIndex + 1 + options.length) % options.length
+          : (focusedIndex - 1 + options.length) % options.length;
+    for (const option of options) option.tabIndex = -1;
+    const next = options[nextIndex];
+    if (next) {
+      next.tabIndex = 0;
+      next.focus();
+    }
+  }
+
+  return (
+    <div
+      className="runtimeControlSelect"
+      data-status={label.toLowerCase().replace(/\s+/g, "-")}
+      ref={rootRef}
+    >
+      <button
+        aria-controls={open ? listboxId : undefined}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={label}
+        className="runtimeControlButton"
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        ref={triggerRef}
+        role="combobox"
+        title={displayValue}
+        type="button"
+      >
+        <span>{displayValue}</span>
+      </button>
+      {open ? (
+        <div
+          aria-label={label}
+          className="runtimeControlPopover pevo-controlPopover"
+          id={listboxId}
+          onKeyDown={moveOptionFocus}
+          ref={listRef}
+          role="listbox"
+        >
+          {values.map((option) => {
+            const selected = option === value;
+            const optionLabel = optionLabels[option] ?? option;
+            return (
+              <button
+                aria-selected={selected}
+                className={`runtimeControlOption pevo-controlPopoverRow ${selected ? "is-selected" : ""}`}
+                disabled={option === "__unavailable__"}
+                key={option}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(option);
+                  triggerRef.current?.focus();
+                }}
+                role="option"
+                tabIndex={option === initialFocusValue ? 0 : -1}
+                title={optionLabel}
+                type="button"
+              >
+                <span>{optionLabel}</span>
+                {selected ? <Check aria-hidden="true" size={13} /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function runtimeControlChoiceLabel(
@@ -287,7 +412,7 @@ function AgentRuntimeRow({
     <button
       aria-checked={selected}
       aria-label={ariaLabel}
-      className={`agentRuntimeRow ${selected ? "is-selected" : ""}`}
+      className={`agentRuntimeRow pevo-controlPopoverRow ${selected ? "is-selected" : ""}`}
       disabled={disabled}
       onClick={onSelect}
       role="radio"
@@ -305,19 +430,6 @@ function agentTargetDisplayLabel(target: RunnableTargetView, profiles: RuntimePr
   return profile?.runtime.toLowerCase() === "acp"
     ? `${target.agentLabel} (ACP)`
     : target.agentLabel;
-}
-
-function usePopoverDismiss(open: boolean, rootRef: RefObject<HTMLDivElement | null>, close: () => void) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && rootRef.current?.contains(target)) return;
-      close();
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [close, open, rootRef]);
 }
 
 function valuesEqual(left: unknown, right: unknown): boolean {

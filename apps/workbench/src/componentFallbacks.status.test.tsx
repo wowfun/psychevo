@@ -41,6 +41,8 @@ describe("component fallback rendering", () => {
           available: true,
           label: "200/1.0k (20.0%)",
           status: "provider_usage",
+          basis: "latest_provider_turn",
+          appliesToSessionSeq: 2,
           usedTokens: 200,
           contextLimit: 1000,
           percent: 20,
@@ -79,7 +81,11 @@ describe("component fallback rendering", () => {
           reasoningTokens: 12,
           cacheReadTokens: 80,
           cacheWriteTokens: 10,
-          reportedTotalTokens: 250,
+          effectiveTotalTokens: 230,
+          reportedTotalTokens: 150,
+          totalStatus: "partial",
+          accountedProviderCallCount: 1,
+          unaccountedProviderCallCount: 1,
           estimatedCostNanodollars: 10_000_000,
           costStatus: "estimated",
           estimatedPricingCount: 1,
@@ -97,6 +103,7 @@ describe("component fallback rendering", () => {
     expect(html).toContain("Prompt tokens");
     expect(html).toContain("Developer prompt");
     expect(html).toContain("design");
+    expect(html).toContain("≥230");
     expect(html).not.toContain("pevo-contextRing");
     expect(html).not.toContain("pevo-contextBar");
   });

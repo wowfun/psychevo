@@ -27,7 +27,9 @@ describe("runtime composer controls", () => {
     );
 
     expect(screen.queryByRole("combobox", { name: "Permission mode" })).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Mode" })).toBeTruthy();
+    const mode = screen.getByRole("combobox", { name: "Mode" });
+    expect(mode.tagName).toBe("BUTTON");
+    expect(mode.textContent).toBe("Default");
     fireEvent.click(screen.getByRole("button", { name: "Agent target" }));
 
     const dialog = screen.getByRole("dialog", { name: "Agent target" });
@@ -63,7 +65,11 @@ describe("runtime composer controls", () => {
         />
       );
 
-      expect((screen.getByRole("combobox", { name: "Mode" }) as HTMLSelectElement).value).toBe("1");
+      const mode = screen.getByRole("combobox", { name: "Mode" });
+      expect(mode.tagName).toBe("BUTTON");
+      expect(mode.textContent).toBe("Plan");
+      fireEvent.click(mode);
+      expect(screen.getByRole("option", { name: "Plan" }).getAttribute("aria-selected")).toBe("true");
     }
   );
 
@@ -84,15 +90,73 @@ describe("runtime composer controls", () => {
         />
       );
 
-      expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("0");
+      const model = screen.getByRole("combobox", { name: "Model" });
+      expect(model.tagName).toBe("BUTTON");
+      expect(model.textContent).toBe("Model A");
       expect(screen.getByLabelText("Reasoning: high (read-only)")).toBeTruthy();
-      fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: "1" } });
+      fireEvent.click(model);
+      fireEvent.click(screen.getByRole("option", { name: "Model B" }));
       expect(onChange).toHaveBeenCalledWith(
         context.controls.find((control) => control.id === "model"),
         `${runtimeProfileRef}/model-b`
       );
     }
   );
+
+  it("light-dismisses rendered control menus and restores trigger focus", () => {
+    const context = firstClassContext("native");
+    render(
+      <RuntimeControlFields
+        controls={context.controls.filter((control) => (
+          control.id === "mode" || control.id === "permissionMode"
+        ))}
+        disabled={false}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    );
+
+    const mode = screen.getByRole("combobox", { name: "Mode" });
+    const permission = screen.getByRole("combobox", { name: "Permission mode" });
+    fireEvent.click(mode);
+    expect(screen.getByRole("listbox", { name: "Mode" })).toBeTruthy();
+
+    fireEvent.pointerDown(permission);
+    fireEvent.click(permission);
+    expect(screen.queryByRole("listbox", { name: "Mode" })).toBeNull();
+    expect(screen.getByRole("listbox", { name: "Permission mode" })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Permission mode" })).toBeNull();
+    expect(document.activeElement).toBe(permission);
+  });
+
+  it("opens an unavailable selection on the first enabled option with one tab stop", () => {
+    const context = firstClassContext("native");
+    const mode = context.controls.find((control) => control.id === "mode")!;
+    render(
+      <RuntimeControlFields
+        controls={[{ ...mode, effectiveValue: "missing-mode" }]}
+        disabled={false}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Mode" });
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const listbox = screen.getByRole("listbox", { name: "Mode" });
+    const options = within(listbox).getAllByRole("option") as HTMLButtonElement[];
+    expect(options[0]?.textContent).toContain("Choose Mode");
+    expect(options[0]?.disabled).toBe(true);
+    expect(document.activeElement).toBe(options[1]);
+    expect(options.filter((option) => option.tabIndex === 0)).toEqual([options[1]]);
+
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(options[2]);
+    expect(options.filter((option) => option.tabIndex === 0)).toEqual([options[2]]);
+  });
 });
 
 function firstClassContext(runtimeProfileRef: "native" | "codex" | "opencode") {

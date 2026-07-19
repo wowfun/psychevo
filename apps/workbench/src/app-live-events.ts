@@ -1,32 +1,13 @@
 import { useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import {
-  type GatewayClient,
-  type ThreadController
-} from "@psychevo/client";
-import type {
-  GatewayEvent,
-  GatewayRequestScope
-} from "@psychevo/protocol";
+import { type ThreadController } from "@psychevo/client";
+import type { GatewayEvent } from "@psychevo/protocol";
 import { applyTurnCompletionQueueBarrier } from "./liveTranscript";
 import { appendGatewayEventFeed, type GatewayThreadEventFeed } from "./gateway-event-feed";
 
-export const LIVE_EVENT_REFRESH_SETTLE_MS = 650;
-
-type RefreshSnapshot = (
-  nextClient?: GatewayClient | null,
-  threadId?: string,
-  scope?: GatewayRequestScope,
-  readOnly?: boolean,
-  expectedEpoch?: number | null,
-  allowDetachedAdoption?: boolean
-) => Promise<void>;
-
 type GatewayLiveEventsParams = {
-  refreshSnapshot: RefreshSnapshot;
   selectedThreadIdRef: MutableRefObject<string | null>;
   setLatestGatewayEvent: Dispatch<SetStateAction<GatewayThreadEventFeed>>;
   threadController: ThreadController;
-  viewEpochRef: MutableRefObject<number>;
 };
 
 function pacedGatewayEvent(event: GatewayEvent): boolean {
@@ -35,15 +16,91 @@ function pacedGatewayEvent(event: GatewayEvent): boolean {
     event.type === "entryCompleted";
 }
 
+function enqueuePacedGatewayEvent(queue: GatewayEvent[], event: GatewayEvent): void {
+  if (event.type === "entryUpdated") {
+    const existing = queue.findIndex((candidate) => (
+      candidate.type === "entryUpdated"
+      && candidate.turnId === event.turnId
+      && candidate.entry.id === event.entry.id
+    ));
+    if (existing >= 0) {
+      queue[existing] = event;
+      return;
+    }
+  }
+  queue.push(event);
+}
+
+function recordJourneyDiagnostic(id: string, data: Record<string, unknown>): void {
+  if (typeof window === "undefined" || typeof CustomEvent === "undefined") return;
+  if (!(window as Window & { __psychevoJourneyDiagnosticsEnabled?: boolean })
+    .__psychevoJourneyDiagnosticsEnabled) return;
+  window.dispatchEvent(new CustomEvent("psychevo:journey-diagnostic", {
+    detail: { data, id }
+  }));
+}
+
+function journeyEventTurnId(event: GatewayEvent): string | null {
+  return "turnId" in event && typeof event.turnId === "string" ? event.turnId : null;
+}
+
+function hasNonEmptyAssistantText(event: GatewayEvent): boolean {
+  if (
+    event.type !== "entryStarted"
+    && event.type !== "entryUpdated"
+    && event.type !== "entryCompleted"
+  ) {
+    return false;
+  }
+  return event.entry.role === "assistant" && event.entry.blocks.some((block) => (
+    block.kind === "text"
+    && [block.body, block.preview, block.detail].some((value) => (
+      typeof value === "string" && Boolean(value.trim())
+    ))
+  ));
+}
+
 export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
   const gatewayEventQueueRef = useRef<GatewayEvent[]>([]);
   const gatewayEventRafRef = useRef<number | null>(null);
+  const firstNonEmptyAssistantAppliedRef = useRef(new Set<string>());
 
-  function reduceGatewayEvent(event: GatewayEvent) {
-    const application = params.threadController.applyGatewayEvent(event);
+  function recordApplication(
+    event: GatewayEvent,
+    application: ReturnType<ThreadController["applyGatewayEvent"]>
+  ) {
     if (application.applied) {
       params.selectedThreadIdRef.current = application.snapshot?.thread?.id ?? null;
     }
+    const turnId = journeyEventTurnId(event);
+    if (
+      application.applied
+      && turnId
+      && hasNonEmptyAssistantText(event)
+      && !firstNonEmptyAssistantAppliedRef.current.has(turnId)
+    ) {
+      firstNonEmptyAssistantAppliedRef.current.add(turnId);
+      recordJourneyDiagnostic("controller_first_nonempty_assistant_applied", {
+        eventType: event.type,
+        turnId
+      });
+    }
+    if (event.type === "turnCompleted") {
+      recordJourneyDiagnostic("turn_completed_applied", {
+        applied: application.applied,
+        queueDepth: gatewayEventQueueRef.current.length,
+        turnId: event.turnId
+      });
+    }
+  }
+
+  function reduceGatewayEvent(event: GatewayEvent) {
+    recordApplication(event, params.threadController.applyGatewayEvent(event));
+  }
+
+  function reduceGatewayEvents(events: GatewayEvent[]) {
+    const applications = params.threadController.applyGatewayEvents(events);
+    events.forEach((event, index) => recordApplication(event, applications[index]!));
   }
 
   function scheduleGatewayEventFlush() {
@@ -52,10 +109,14 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
     }
     gatewayEventRafRef.current = window.requestAnimationFrame(() => {
       gatewayEventRafRef.current = null;
-      const event = gatewayEventQueueRef.current.shift();
-      if (event) reduceGatewayEvent(event);
-      if (gatewayEventQueueRef.current.length > 0) {
-        scheduleGatewayEventFlush();
+      const batch = gatewayEventQueueRef.current.splice(0);
+      reduceGatewayEvents(batch);
+      for (const event of batch) {
+        recordJourneyDiagnostic("frontend_queue_applied", {
+          eventType: event.type,
+          queueDepth: gatewayEventQueueRef.current.length,
+          turnId: journeyEventTurnId(event)
+        });
       }
     });
   }
@@ -68,6 +129,10 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
     publishGatewayEvent(event);
     if (event.type === "turnCompleted") {
       gatewayEventQueueRef.current = applyTurnCompletionQueueBarrier(gatewayEventQueueRef.current, event);
+      if (gatewayEventQueueRef.current.length === 0 && gatewayEventRafRef.current !== null) {
+        window.cancelAnimationFrame(gatewayEventRafRef.current);
+        gatewayEventRafRef.current = null;
+      }
       reduceGatewayEvent(event);
       return;
     }
@@ -75,28 +140,27 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
       reduceGatewayEvent(event);
       return;
     }
-    gatewayEventQueueRef.current.push(event);
+    const turnId = journeyEventTurnId(event);
+    if (
+      turnId
+      && hasNonEmptyAssistantText(event)
+      && !firstNonEmptyAssistantAppliedRef.current.has(turnId)
+    ) {
+      reduceGatewayEvent(event);
+      return;
+    }
+    enqueuePacedGatewayEvent(gatewayEventQueueRef.current, event);
+    recordJourneyDiagnostic("frontend_queue_enqueued", {
+      eventType: event.type,
+      queueDepth: gatewayEventQueueRef.current.length,
+      turnId: journeyEventTurnId(event)
+    });
     scheduleGatewayEventFlush();
-  }
-
-  function scheduleSnapshotRefreshAfterLiveSettle(
-    nextClient: GatewayClient,
-    threadId: string | null,
-    epoch = params.viewEpochRef.current
-  ) {
-    window.setTimeout(() => {
-      if (threadId) {
-        void params.refreshSnapshot(nextClient, threadId, undefined, true, epoch);
-      } else {
-        void params.refreshSnapshot(nextClient);
-      }
-    }, LIVE_EVENT_REFRESH_SETTLE_MS);
   }
 
   return {
     applyGatewayEvent,
     gatewayEventQueueRef,
-    gatewayEventRafRef,
-    scheduleSnapshotRefreshAfterLiveSettle
+    gatewayEventRafRef
   };
 }

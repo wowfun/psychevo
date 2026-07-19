@@ -55,6 +55,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     client,
     commandFeedback,
     commands,
+    composerPresentationReady,
     contextUsage,
     controls,
     copyText,
@@ -133,6 +134,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     saveAutomation,
     saveFileFromEditor,
     selectedTargetId,
+    workspaceBranch,
     contextMatchesTarget,
     sessionBrowserWorkspaces,
     sessionUsage,
@@ -162,6 +164,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     startNewThread,
     startShell,
     startWechatQrSetup,
+    status,
     submitTurn,
     submitThreadTurn,
     switchMainView,
@@ -213,7 +216,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
   const reasoningControl = activeRuntimeControls.find((control: any) => control.surfaceRole === "reasoning") ?? null;
   const inputCapabilities = contextMatchesTarget ? runtimeContext?.inputCapabilities ?? [] : [];
   const textCapability = inputCapabilities.find((capability: any) => capability.kind === "text") ?? null;
-  const promptTextUnavailableReason = textCapability?.enabled
+  const promptTextUnavailableReason = !currentThreadId && runtimeOptionsLoading
+    ? null
+    : textCapability?.enabled
     ? null
     : textCapability?.unavailableReason ?? turnBlockReason;
   const attachmentCapabilities = inputCapabilities.filter((capability: any) => (
@@ -249,11 +254,26 @@ export function WorkbenchLayout(props: Record<string, any>) {
   const [deleteSessionPending, setDeleteSessionPending] = useState(false);
   const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
   const draftSession = showSessionChrome && !currentThreadId;
+  const composerJourneyState = currentThreadId
+    ? "bound"
+    : runtimeOptionsError
+      ? "blocked"
+      : runtimeOptionsLoading || !contextMatchesTarget
+        ? "opening"
+        : turnSendable
+          ? "ready"
+          : "blocked";
   const composerDockRef = useRef<HTMLDivElement | null>(null);
-  useComposerDockTransition(composerDockRef, draftSession);
+  useComposerDockTransition(composerDockRef, draftSession, composerPresentationReady);
 
   return (
-    <main className="appShell" data-main-view={mainView}>
+    <main
+      className="appShell"
+      data-composer-state={composerJourneyState}
+      data-gateway-status={status}
+      data-main-view={mainView}
+      data-turn-state={running ? "running" : "idle"}
+    >
       {error && (
         <div className="errorBand" role="alert">
           <AlertTriangle size={17} aria-hidden />
@@ -672,7 +692,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               />
             )}
           </div>
-          {showSessionChrome && <div className="composerDock" ref={composerDockRef}>
+          {showSessionChrome && composerPresentationReady && <div className="composerDock" ref={composerDockRef}>
             {snapshot.historyEditing?.kind === "conversationEdit" && (
               <div className="historyEditingStrip" role="status">
                 <span>{snapshot.historyEditing.hiddenEntryCount} hidden {snapshot.historyEditing.hiddenEntryCount === 1 ? "entry" : "entries"}</span>
@@ -758,6 +778,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               promptSubmitBlockReason={turnBlockReason}
               promptSubmitDisabled={!turnSendable}
               promptTextUnavailableReason={promptTextUnavailableReason}
+              retainDraftUntilAccepted
               rightControls={(
                 <>
                   <ComposerSubmitControls
@@ -871,20 +892,29 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   });
                 }
               })}
-              onSubmit={(text, mentions, orderedInput) => void runAction(async () => submitTurn(text, mentions, undefined, orderedInput))}
+              onSubmit={(text, mentions, orderedInput, isInputCurrent) => runAction(
+                async () => submitTurn(text, mentions, undefined, orderedInput, isInputCurrent)
+              ).then((accepted: unknown) => accepted === true)}
             />
             <ComposerEnvironment
-              branch={settings?.project?.branch ?? null}
+              branch={workspaceBranch !== undefined
+                ? workspaceBranch
+                : settings?.project?.branch ?? null}
               branchDisabled={running}
               controlValues={runtimeControlDrafts}
               controls={activeRuntimeControls}
-              cwd={settings?.cwd ?? activeWorkbenchCwd}
-              disabled={disabled}
+              cwd={activeWorkbenchCwd}
+              disabled={disabled || runtimeOptionsLoading}
               draft={draftSession}
-              path={settings?.project?.displayPath ?? settings?.cwd ?? activeWorkbenchCwd}
+              path={settings?.cwd === activeWorkbenchCwd
+                ? settings?.project?.displayPath ?? activeWorkbenchCwd
+                : init?.scope.cwd === activeWorkbenchCwd
+                  ? init.displayCwd
+                  : sessionBrowserWorkspaces.find((workspace: any) => workspace.cwd === activeWorkbenchCwd)?.displayPath
+                    ?? activeWorkbenchCwd}
               runtimeSafetyLabel={runtimeSafetyLabel}
               profile={init?.profile ?? null}
-              workspaceCwds={sessionBrowserWorkspaces.map((workspace: any) => workspace.cwd)}
+              workspaces={sessionBrowserWorkspaces}
               onBranchChange={(nextBranch, create) => checkoutWorkspaceGitBranch(nextBranch, create)}
               onOpenFiles={() => openRightWorkspaceTab("files")}
               onReadBranches={() => readWorkspaceGitBranches()}
@@ -983,7 +1013,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
 
 function useComposerDockTransition(
   ref: RefObject<HTMLDivElement | null>,
-  draftSession: boolean
+  draftSession: boolean,
+  present: boolean
 ) {
   const previousRectRef = useRef<DOMRect | null>(null);
   const previousDraftRef = useRef(draftSession);
@@ -1015,7 +1046,7 @@ function useComposerDockTransition(
     }
     previousRectRef.current = nextRect;
     previousDraftRef.current = draftSession;
-  }, [draftSession, ref]);
+  }, [draftSession, present, ref]);
 }
 
 function editableDraftText(parts: ThreadEditableInputPart[]): string {

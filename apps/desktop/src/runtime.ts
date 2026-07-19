@@ -88,13 +88,16 @@ export function createDesktopFloatingRuntime(connectionId: string): FloatingRunt
       });
       const discoveryController = new ThreadController();
       discoveryController.setContext(discovery);
-      const target = threadId ? null : discoveryController.contextReadTarget(discovery.targetId);
+      const discoveryTargetId = discovery.selectedTargetId ?? discovery.suggestedTargetId;
+      const target = threadId || !discoveryTargetId
+        ? null
+        : discoveryController.contextReadTarget(discoveryTargetId);
       const context = target
         ? await client.request("thread/context/read", { threadId: null, target, scope })
         : discovery;
       const controller = new ThreadController();
       controller.setContext(context);
-      const controls = controller.turnControls(context.targetId, Object.fromEntries(
+      const controls = controller.turnControls(context.selectedTargetId ?? "", Object.fromEntries(
         context.controls.flatMap((control) => (
           control.effectiveValue == null ? [] : [[control.id, control.effectiveValue]]
         ))

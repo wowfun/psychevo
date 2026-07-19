@@ -13,6 +13,7 @@ import {
   selectMainAgent,
   selectRuntime,
   sessionSummary,
+  usageReadResult,
   workspaceDiffAction
 } from "./appComposerAgent.fixture";
 import { App } from "./App";
@@ -361,6 +362,26 @@ describe("Workbench settings and backend controls", () => {
       entry.method === "usage/read"
       && (entry.params as { activityDays?: number }).activityDays === 365
     ))).toBe(true);
+  });
+
+  it("renders unavailable usage totals without fabricating an exact zero", async () => {
+    const result = usageReadResult() as {
+      windows: Array<Record<string, unknown>>;
+    };
+    result.windows[0] = {
+      ...result.windows[0],
+      effectiveTotalTokens: 0,
+      totalStatus: "unavailable"
+    };
+    gatewayMock.usageRead = () => result;
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    const settingsRegion = await screen.findByRole("region", { name: "Settings" });
+    fireEvent.click(within(settingsRegion).getByRole("button", { name: "Usage" }));
+    const allTime = await within(settingsRegion).findByRole("region", { name: "All time" });
+
+    expect(allTime.querySelector("header strong")?.textContent).toBe("Unavailable");
   });
 
   it("does not expose Agent management from Settings", async () => {
@@ -1077,7 +1098,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(targets).getByRole("radio", { name: "translate · Psychevo (Native)" })).toBeTruthy();
     expect(within(targets).queryByRole("radio", { name: /cursor/i })).toBeNull();
     expect(within(targets).queryByRole("radio", { name: /opencode/i })).toBeNull();
-    expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/context/read")).toBe(true);
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/context/read")).toBe(false);
     expect(gatewayMock.requestLog.some((entry) => entry.method === "backend/list")).toBe(false);
   });
 
@@ -1113,9 +1134,12 @@ describe("Workbench settings and backend controls", () => {
       method: "thread/draft/prepare",
       params: expect.objectContaining({ targetId: "target:opencode:opencode" })
     });
-    const mode = screen.getByRole("combobox", { name: "Session Mode" }) as HTMLSelectElement;
-    expect(mode.options[mode.selectedIndex]?.textContent).toBe("build");
-    expect(Array.from(mode.options).map((option) => option.textContent)).toEqual(["build", "plan"]);
+    const mode = screen.getByRole("combobox", { name: "Session Mode" });
+    expect(mode.textContent).toBe("build");
+    fireEvent.click(mode);
+    expect(within(screen.getByRole("listbox", { name: "Session Mode" }))
+      .getAllByRole("option").map((option) => option.textContent)).toEqual(["build", "plan"]);
+    fireEvent.keyDown(document, { key: "Escape" });
     const modelPicker = await openComposerModelPicker();
     expect(within(modelPicker).getByRole("radiogroup", { name: "Model" }).querySelectorAll('[role="radio"]')).toHaveLength(2);
     fireEvent.keyDown(modelPicker, { key: "Escape" });

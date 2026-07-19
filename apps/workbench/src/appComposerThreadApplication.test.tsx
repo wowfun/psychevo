@@ -9,11 +9,183 @@ import { App } from "./App";
 afterEach(() => vi.restoreAllMocks());
 
 describe("Workbench public Thread Application interactions", () => {
-  it("starts the initial Session browse without waiting for initialize or thread/start", async () => {
+  it("keeps an atomic New Session open authoritative without a redundant context read", async () => {
+    gatewayMock.draftOpen = () => draftOpenResult();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(1);
+    });
+    const contextReadsBefore = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/context/read"
+    )).length;
+
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Agent target" }).textContent)
+        .toContain("Psychevo");
+    });
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read"))
+      .toHaveLength(contextReadsBefore);
+  });
+
+  it("commits draft controls and the current branch as one environment generation", async () => {
+    const draftOpen = deferred<Record<string, unknown>>();
+    const branches = deferred<Record<string, unknown>>();
+    gatewayMock.draftOpen = () => draftOpen.promise;
+    gatewayMock.workspaceGitBranches = () => branches.promise;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.map((entry) => entry.method)).toEqual(expect.arrayContaining([
+        "thread/draft/open",
+        "workspace/git/branches"
+      ]));
+    });
+    await act(async () => {
+      draftOpen.resolve(draftOpenResult());
+      await draftOpen.promise;
+    });
+    expect(screen.queryByRole("button", { name: "Agent target" })).toBeNull();
+
+    await act(async () => {
+      branches.resolve(gatewayMock.workspaceGitBranchesResult);
+      await branches.promise;
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Agent target" }).textContent)
+        .toContain("Psychevo");
+      expect(screen.getByRole("button", { name: "Git branch" }).textContent)
+        .toContain(gatewayMock.projectBranch);
+    });
+  });
+
+  it("queues one first-turn click while draft open is pending and clears only after acceptance", async () => {
+    const draftOpen = deferred<Record<string, unknown>>();
+    const turnStart = deferred<Record<string, unknown>>();
+    gatewayMock.turnStart = () => turnStart.promise;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(1);
+    });
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    gatewayMock.draftOpen = () => draftOpen.promise;
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(2);
+    });
+    fireEvent.change(input, { target: { value: "send after ready" } });
+    const send = screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+    expect(input.value).toBe("send after ready");
+    expect(screen.getByLabelText("Submission preparing elapsed").textContent).toContain("Preparing");
+    expect(screen.queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
+
+    await act(async () => {
+      draftOpen.resolve(draftOpenResult());
+      await draftOpen.promise;
+    });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "turn/start"))
+        .toHaveLength(1);
+    });
+    expect(input.value).toBe("send after ready");
+
+    await act(async () => {
+      turnStart.resolve(turnStartResult());
+      await turnStart.promise;
+    });
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "turn/start"))
+      .toHaveLength(1);
+  });
+
+  it("cancels pending first-turn auto-submit when the input changes", async () => {
+    const draftOpen = deferred<Record<string, unknown>>();
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(1);
+    });
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    gatewayMock.draftOpen = () => draftOpen.promise;
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(2);
+    });
+    fireEvent.change(input, { target: { value: "original pending text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.change(input, { target: { value: "edited while loading" } });
+
+    await act(async () => {
+      draftOpen.resolve(draftOpenResult());
+      await draftOpen.promise;
+    });
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled)
+        .toBe(false);
+    });
+    expect(input.value).toBe("edited while loading");
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("cancels a pending draft submit when an existing Session is selected", async () => {
+    const abandonedOpen = deferred<Record<string, unknown>>();
+    let openCount = 0;
+    gatewayMock.draftOpen = () => {
+      openCount += 1;
+      return openCount === 1 ? draftOpenResult() : abandonedOpen.promise;
+    };
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Existing session")];
+    render(<App />);
+
+    await screen.findByRole("button", { name: "Agent target" });
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+    await waitFor(() => expect(openCount).toBe(2));
+    const input = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "abandoned draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(await screen.findByText("Existing session"));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/context/read",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+    });
+    const sessionInput = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    fireEvent.change(sessionInput, { target: { value: "send in the existing session" } });
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled)
+        .toBe(false);
+    });
+
+    await act(async () => {
+      abandonedOpen.resolve(draftOpenResult());
+      await abandonedOpen.promise;
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
+  });
+
+  it("starts the initial Session browse without waiting for initialize or draft open", async () => {
     const initialize = deferred<Record<string, unknown>>();
-    const threadStart = deferred<Record<string, unknown>>();
+    const draftOpen = deferred<Record<string, unknown>>();
     gatewayMock.initialize = () => initialize.promise;
-    gatewayMock.threadStart = () => threadStart.promise;
+    gatewayMock.draftOpen = () => draftOpen.promise;
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Early session")];
 
     render(<App />);
@@ -30,6 +202,7 @@ describe("Workbench public Thread Application interactions", () => {
         server: "test",
         version: "0.0.0",
         cwd: gatewayMock.scope.cwd,
+        displayCwd: gatewayMock.scope.cwd,
         scope: gatewayMock.scope,
         source: gatewayMock.source,
         capabilities: {}
@@ -37,7 +210,7 @@ describe("Workbench public Thread Application interactions", () => {
       await initialize.promise;
     });
     expect(await screen.findByText("Early session")).toBeTruthy();
-    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/start")).toHaveLength(1);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open")).toHaveLength(1);
     expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read")).toHaveLength(0);
     expect(gatewayMock.requestLog.some((entry) => [
       "settings/read",
@@ -48,16 +221,47 @@ describe("Workbench public Thread Application interactions", () => {
     ].includes(entry.method))).toBe(false);
 
     await act(async () => {
-      threadStart.resolve({
-        ...gatewayMock.snapshot,
-        thread: null,
-        entries: [],
-        activity: { ...gatewayMock.snapshot.activity }
+      draftOpen.resolve({
+        snapshot: {
+          ...gatewayMock.snapshot,
+          thread: null,
+          entries: [],
+          activity: { ...gatewayMock.snapshot.activity }
+        },
+        context: {
+          selectedTargetId: "target:default:native",
+          suggestedTargetId: null,
+          runtimeProfileRef: "native",
+          selectionState: "draft",
+          profiles: [],
+          binding: null,
+          controls: [],
+          stability: "stable",
+          capabilities: [],
+          compatibleTargets: [{
+            targetId: "target:default:native",
+            agentRef: null,
+            runtimeProfileRef: "native",
+            agentLabel: "Psychevo",
+            profileLabel: "Psychevo (Native)",
+            label: "Psychevo · Psychevo (Native)",
+            ready: true,
+            unavailableReason: null
+          }],
+          inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+          actions: [],
+          sendability: { allowed: true, reason: null, recoveryAction: null },
+          history: { owner: "psychevo", fidelity: "unavailable", cursor: null, hint: null },
+          pendingInteractions: [],
+          contextRevision: "context-native",
+          controlRevision: "controls-native"
+        },
+        problem: null
       });
-      await threadStart.promise;
+      await draftOpen.promise;
     });
     await waitFor(() => {
-      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read")).toHaveLength(1);
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read")).toHaveLength(0);
     });
     expect(gatewayMock.requestLog.some((entry) => [
       "workspace/files",
@@ -65,6 +269,25 @@ describe("Workbench public Thread Application interactions", () => {
       "backend/list",
       "command/list"
     ].includes(entry.method))).toBe(false);
+  });
+
+  it("renders the connected Composer and opens its draft without waiting for Session history", async () => {
+    const history = deferred<Record<string, unknown>>();
+    gatewayMock.threadBrowser = () => history.promise;
+
+    render(<App />);
+
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(1);
+    });
+
+    await act(async () => {
+      history.resolve({ workspaces: [] });
+      await history.promise;
+    });
   });
 
   it("does not start a stale startup draft after a Session is selected during initialize", async () => {
@@ -88,6 +311,7 @@ describe("Workbench public Thread Application interactions", () => {
         server: "test",
         version: "0.0.0",
         cwd: gatewayMock.scope.cwd,
+        displayCwd: gatewayMock.scope.cwd,
         scope: gatewayMock.scope,
         source: gatewayMock.source,
         capabilities: {}
@@ -99,7 +323,7 @@ describe("Workbench public Thread Application interactions", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Agent target" })).toBeTruthy();
     });
-    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/start")).toHaveLength(0);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open")).toHaveLength(0);
     expect(container.querySelector(".pevo-sessionRow.is-active")?.textContent)
       .toContain("Selected before initialize");
   });
@@ -135,7 +359,7 @@ describe("Workbench public Thread Application interactions", () => {
     expect(gatewayMock.requestLog.filter((entry) => (
       entry.method === "settings/read"
       && (entry.params as { threadId?: string | null }).threadId === "thread-1"
-    ))).toHaveLength(1);
+    ))).toHaveLength(0);
     for (const method of [
       "workspace/files",
       "workspace/diff",
@@ -352,7 +576,6 @@ describe("Workbench public Thread Application interactions", () => {
     const beginTurn = vi.spyOn(ThreadController.prototype, "beginTurn");
     const acceptTurnStart = vi.spyOn(ThreadController.prototype, "acceptTurnStart");
     const applyGatewayEvent = vi.spyOn(ThreadController.prototype, "applyGatewayEvent");
-    const applyTurnResult = vi.spyOn(ThreadController.prototype, "applyTurnResult");
 
     render(<App />);
     await waitForDraftContext();
@@ -378,10 +601,9 @@ describe("Workbench public Thread Application interactions", () => {
     });
     expect(await screen.findByText("Streaming before acceptance.")).toBeTruthy();
 
-    emit("turn/result", turnResult("Completed before acceptance."));
+    emit("gateway/event", turnCompletedEvent("Completed before acceptance."));
     expect(await screen.findByText("Completed before acceptance.")).toBeTruthy();
     expect(applyGatewayEvent).toHaveBeenCalled();
-    expect(applyTurnResult).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       pending.resolve(turnStartResult());
@@ -392,11 +614,11 @@ describe("Workbench public Thread Application interactions", () => {
     expect(screen.queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
   });
 
-  it("routes a terminal error through ThreadController without resurrecting its turn on acceptance", async () => {
+  it("routes a failed turnCompleted event without resurrecting its turn on acceptance", async () => {
     const pending = deferred<Record<string, unknown>>();
     gatewayMock.turnStart = () => pending.promise;
     const acceptTurnStart = vi.spyOn(ThreadController.prototype, "acceptTurnStart");
-    const applyTurnError = vi.spyOn(ThreadController.prototype, "applyTurnError");
+    const applyGatewayEvent = vi.spyOn(ThreadController.prototype, "applyGatewayEvent");
 
     render(<App />);
     await waitForDraftContext();
@@ -417,21 +639,9 @@ describe("Workbench public Thread Application interactions", () => {
       turnId: "turn-first",
       type: "turnStarted"
     });
-    emit("turn/error", {
-      error: {
-        code: "fixture_failure",
-        delivery: "notDelivered",
-        diagnosticRef: null,
-        message: "Turn failed before acceptance.",
-        recoveryAction: null,
-        retryClass: "retry",
-        stage: "runtime"
-      },
-      threadId: "thread-first",
-      turnId: "turn-first"
-    });
-    expect(await screen.findByText("Turn failed before acceptance.")).toBeTruthy();
-    expect(applyTurnError).toHaveBeenCalledTimes(1);
+    emit("gateway/event", turnCompletedEvent("Turn failed before acceptance.", "failed"));
+    expect((await screen.findAllByText("Turn failed before acceptance.")).length).toBeGreaterThan(0);
+    expect(applyGatewayEvent).toHaveBeenCalled();
 
     await act(async () => {
       pending.resolve(turnStartResult());
@@ -465,7 +675,7 @@ describe("Workbench public Thread Application interactions", () => {
       "Thread Context changed; refresh it before starting the turn."
     )).toBeTruthy();
     await waitFor(() => expect(rejectTurnStart).toHaveBeenCalledTimes(1));
-    expect(screen.queryByText("say hi")).toBeNull();
+    expect((screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement).value).toBe("say hi");
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => (
         entry.method === "thread/context/read"
@@ -489,25 +699,62 @@ function turnStartResult(): Record<string, unknown> {
   };
 }
 
-function turnResult(body: string): Record<string, unknown> {
+function draftOpenResult(): Record<string, unknown> {
   return {
-    thread: gatewayThread(),
+    snapshot: {
+      ...gatewayMock.snapshot,
+      thread: null,
+      entries: [],
+      activity: { ...gatewayMock.snapshot.activity }
+    },
+    context: {
+      selectedTargetId: "target:default:native",
+      suggestedTargetId: null,
+      runtimeProfileRef: "native",
+      selectionState: "draft",
+      profiles: [],
+      binding: null,
+      controls: [],
+      stability: "stable",
+      capabilities: [],
+      compatibleTargets: [{
+        targetId: "target:default:native",
+        agentRef: null,
+        runtimeProfileRef: "native",
+        agentLabel: "Psychevo",
+        profileLabel: "Psychevo (Native)",
+        label: "Psychevo · Psychevo (Native)",
+        ready: true,
+        unavailableReason: null
+      }],
+      inputCapabilities: [{ kind: "text", enabled: true, unavailableReason: null }],
+      actions: [],
+      sendability: { allowed: true, reason: null, recoveryAction: null },
+      history: { owner: "psychevo", fidelity: "unavailable", cursor: null, hint: null },
+      pendingInteractions: [],
+      contextRevision: "context-native",
+      controlRevision: "controls-native"
+    },
+    problem: null
+  };
+}
+
+function turnCompletedEvent(
+  body: string,
+  status: "completed" | "failed" = "completed"
+): Record<string, unknown> {
+  return {
+    type: "turnCompleted",
+    threadId: "thread-first",
+    turnId: "turn-first",
     turn: {
       completedAtMs: 2_000,
-      error: null,
+      error: status === "failed" ? { message: body } : null,
       id: "turn-first",
-      outcome: "completed",
+      outcome: status,
       startedAtMs: 1_000,
-      status: "completed",
+      status,
       threadId: "thread-first"
-    },
-    result: {
-      finalAnswer: body,
-      model: "fixture/default",
-      outcome: "completed",
-      provider: "fixture",
-      sessionId: "thread-first",
-      toolFailures: 0
     },
     committedEntries: [transcriptEntry(body, "completed", "thread-first", 2)]
   };
@@ -583,8 +830,8 @@ async function waitForBoundContext() {
 async function waitForDraftContext() {
   await waitFor(() => {
     expect(gatewayMock.requestLog).toContainEqual({
-      method: "thread/context/read",
-      params: expect.objectContaining({ threadId: null })
+      method: "thread/draft/open",
+      params: expect.objectContaining({ targetIntent: { kind: "default" } })
     });
     expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(false);
   });

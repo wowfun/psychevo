@@ -160,7 +160,8 @@ export function channelProspectiveTarget(
 ): RunnableTargetView | null {
   const normalized = runtimeRef.trim();
   if (!normalized) {
-    return context.compatibleTargets.find((target) => target.targetId === context.targetId) ?? null;
+    const targetId = context.selectedTargetId ?? context.suggestedTargetId;
+    return context.compatibleTargets.find((target) => target.targetId === targetId) ?? null;
   }
   const candidates = context.compatibleTargets.filter((target) => target.runtimeProfileRef === normalized);
   const profile = context.profiles.find((candidate) => candidate.id === normalized);

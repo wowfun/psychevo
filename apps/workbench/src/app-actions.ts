@@ -22,6 +22,7 @@ import {
   type GatewayRequestScope,
   type ObservabilityReadResult,
   type ThreadControlDescriptorView,
+  type ThreadContextReadResult,
   type SettingsReadResult,
   type ThreadSnapshot,
   type WorkspaceChangesResult,
@@ -68,12 +69,13 @@ import {
   isUnsupportedPreviewFile
 } from "./right-workspace-model";
 import { parseThreadContext, runtimeControlSelections } from "./runtime-context";
+import type { ComposerSessionCoordinator } from "./composer-session-coordinator";
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
 type StartNewThreadOptions = {
-  preserveRuntimeSelection?: boolean;
   refreshHistory?: boolean;
+  targetId?: string;
 };
 
 type RefreshSnapshot = (
@@ -96,6 +98,7 @@ type AppActionsParams = {
   activeScope: GatewayRequestScope | null;
   attachments: PendingAttachment[];
   client: GatewayClient | null;
+  composerSessionCoordinator: ComposerSessionCoordinator;
   currentThreadId: string | null;
   detachedShellTokenRef: MutableRefObject<number>;
   host: PsychevoHost | null;
@@ -104,6 +107,7 @@ type AppActionsParams = {
   fallbackCwd: string;
   turnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
+  firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   runtimeControls: ThreadControlDescriptorView[];
   runtimeControlDrafts: Record<string, unknown>;
   selectedTargetId: string;
@@ -135,6 +139,9 @@ type AppActionsParams = {
   setRightTabs: Dispatch<SetStateAction<RightWorkspaceTab[]>>;
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
   setRuntimeOptionsLoading: Dispatch<SetStateAction<boolean>>;
+  setWorkspaceBranch: Dispatch<SetStateAction<string | null | undefined>>;
+  setRuntimeContext: Dispatch<SetStateAction<ThreadContextReadResult | null>>;
+  setRuntimeContextTargetId: Dispatch<SetStateAction<string>>;
   setSelectedTargetId: Dispatch<SetStateAction<string>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
   setSettings: Dispatch<SetStateAction<SettingsReadResult | undefined>>;
@@ -159,12 +166,6 @@ export function createAppActions(params: AppActionsParams) {
       ?? scopeForCwd(params.settings?.cwd || params.fallbackCwd);
   }
 
-  function resetRuntimeSelection() {
-    params.setSelectedTargetId("");
-    params.setRuntimeOptionsLoading(false);
-    params.setRuntimeOptionsError(null);
-  }
-
   function clearSessionObservability() {
     params.setObservability(null);
     params.setContextUsage(null);
@@ -176,38 +177,80 @@ export function createAppActions(params: AppActionsParams) {
       return;
     }
     const epoch = params.beginExplicitViewSwitch();
-    if (!options.preserveRuntimeSelection) {
-      resetRuntimeSelection();
-    }
+    const previousScope = scope();
+    const nextScope = cwd == null || cwd === previousScope.cwd
+      ? previousScope
+      : scopeForCwd(cwd);
+    const inheritedTargetId = options.targetId
+      ?? (cwd == null || cwd === previousScope.cwd ? params.selectedTargetId : "");
     clearSessionObservability();
     params.updateMainView("transcript");
     params.setMobilePanel("transcript");
-    const nextScope = cwd
-      ? scopeForCwd(cwd)
-      : scope();
-    if (options.preserveRuntimeSelection) {
-      const optimisticDraft = normalizeSnapshot({
-        source: params.snapshot.source,
-        scope: nextScope,
-        thread: null,
-        history: params.snapshot.history,
-        entries: [],
-        activity: { running: false, activeTurnId: null, queuedTurns: 0 },
-        pendingActions: []
-      });
-      params.selectedThreadIdRef.current = null;
-      params.setSnapshot(optimisticDraft);
-      params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
+    const optimisticDraft = normalizeSnapshot({
+      source: params.snapshot.source,
+      scope: nextScope,
+      thread: null,
+      history: params.snapshot.history,
+      entries: [],
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      pendingActions: []
+    });
+    params.selectedThreadIdRef.current = null;
+    params.setSnapshot(optimisticDraft);
+    params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
+    params.setRuntimeOptionsLoading(true);
+    params.setRuntimeOptionsError(null);
+    const openToken = params.composerSessionCoordinator.beginDraftOpen(epoch);
+    const draftOpenRequest = params.client.request("thread/draft/open", {
+      origin: nextScope,
+      targetIntent: inheritedTargetId
+        ? { kind: "exact", targetId: inheritedTargetId }
+        : { kind: "default" }
+    });
+    const branchRequest = params.client.request("workspace/git/branches", {
+      scope: nextScope
+    }).then((result) => result.current?.trim() || null).catch(() => null);
+    let opened;
+    let workspaceBranch: string | null;
+    try {
+      [opened, workspaceBranch] = await Promise.all([draftOpenRequest, branchRequest]);
+    } catch (error) {
+      params.composerSessionCoordinator.failDraftOpen(openToken);
+      if (params.viewEpochRef.current === epoch) {
+        params.setRuntimeOptionsLoading(false);
+      }
+      throw error;
     }
-    const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: nextScope }));
+    const nextSnapshot = parseThreadSnapshot(opened.snapshot);
+    const nextContext = parseThreadContext(opened.context);
     const normalized = normalizeSnapshot(nextSnapshot);
+    if (params.viewEpochRef.current === epoch) {
+      await params.adoptSnapshotScope(params.client, nextSnapshot);
+    }
     if (params.viewEpochRef.current === epoch) {
       params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
       params.setSnapshot(normalized);
       params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
-      await params.adoptSnapshotScope(params.client, nextSnapshot);
+      params.threadController.setContext(nextContext);
+      params.setRuntimeContext(nextContext);
+      params.setWorkspaceBranch(workspaceBranch);
+      params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
+      params.setSelectedTargetId(
+        nextContext.selectedTargetId
+        ?? nextContext.suggestedTargetId
+        ?? ""
+      );
+      params.setRuntimeOptionsError(opened.problem?.message ?? null);
+      if (opened.problem) {
+        params.composerSessionCoordinator.failDraftOpen(openToken);
+      } else {
+        params.composerSessionCoordinator.completeDraftOpen(openToken);
+      }
     }
-    if (options.refreshHistory !== false) {
+    if (params.viewEpochRef.current === epoch) {
+      params.setRuntimeOptionsLoading(false);
+    }
+    if (options.refreshHistory === true) {
       await params.refreshHistory(params.client);
     }
     return normalized;
@@ -221,18 +264,7 @@ export function createAppActions(params: AppActionsParams) {
       name,
       parent
     }));
-    const epoch = params.beginExplicitViewSwitch();
-    resetRuntimeSelection();
-    clearSessionObservability();
-    const nextSnapshot = parseThreadSnapshot(await params.client.request("thread/start", { scope: created.scope }));
-    if (params.viewEpochRef.current === epoch) {
-      const normalized = normalizeSnapshot(nextSnapshot);
-      params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
-      params.setSnapshot(normalized);
-      params.setDraftSession(createHistoryDraftSession(epoch, created.cwd));
-      await params.adoptSnapshotScope(params.client, nextSnapshot);
-    }
-    await params.refreshHistory(params.client);
+    await startNewThread(created.cwd);
     params.updateMainView("transcript");
     params.setMobilePanel("transcript");
   }
@@ -248,7 +280,12 @@ export function createAppActions(params: AppActionsParams) {
     if (!params.client) {
       throw new Error("Gateway client is unavailable.");
     }
-    return params.client.request("workspace/git/branches", { scope: scope() });
+    const epoch = params.viewEpochRef.current;
+    const result = await params.client.request("workspace/git/branches", { scope: scope() });
+    if (params.viewEpochRef.current === epoch) {
+      params.setWorkspaceBranch(result.current?.trim() || null);
+    }
+    return result;
   }
 
   async function checkoutWorkspaceGitBranch(
@@ -258,12 +295,17 @@ export function createAppActions(params: AppActionsParams) {
     if (!params.client) {
       throw new Error("Gateway client is unavailable.");
     }
+    const epoch = params.viewEpochRef.current;
     const nextScope = scope();
     const result = await params.client.request("workspace/git/checkout", {
       scope: nextScope,
       branch,
       create
     });
+    if (params.viewEpochRef.current !== epoch) {
+      return result;
+    }
+    params.setWorkspaceBranch(result.current?.trim() || null);
     params.setSettings((current) => current
       ? {
           ...current,
@@ -277,15 +319,20 @@ export function createAppActions(params: AppActionsParams) {
         cwd: nextScope.cwd,
         threadId: params.currentThreadId
       }));
+      if (params.viewEpochRef.current !== epoch) {
+        return result;
+      }
       params.setSettings(nextSettings);
       await params.refreshWorkspaceSurface(
         params.client,
         nextScope,
         params.currentThreadId,
-        params.viewEpochRef.current
+        epoch
       );
     } catch (error) {
-      params.setError(error instanceof Error ? error.message : String(error));
+      if (params.viewEpochRef.current === epoch) {
+        params.setError(error instanceof Error ? error.message : String(error));
+      }
     }
     return result;
   }
@@ -294,20 +341,33 @@ export function createAppActions(params: AppActionsParams) {
     text: string,
     mentions: GatewayMention[],
     displayText?: string | null,
-    inputOverride?: GatewayInputPart[]
-  ) {
-    if (!params.client) return;
+    inputOverride?: GatewayInputPart[],
+    isInputCurrent: () => boolean = () => true
+  ): Promise<boolean> {
+    if (!params.client) return false;
+    const submittedAtMs = Date.now();
     const nextInput: GatewayInputPart[] = inputOverride ?? [
       ...(text.trim() ? [{ type: "text" as const, text }] : []),
       ...params.attachments.map((attachment) => attachment.input)
     ];
-    if (nextInput.length === 0) return;
+    if (nextInput.length === 0) return false;
+    const turnEpoch = params.viewEpochRef.current;
+    if (params.composerSessionCoordinator.isReadinessPending(turnEpoch)) {
+      const ready = await params.composerSessionCoordinator.waitToSubmit(turnEpoch, isInputCurrent);
+      if (!ready) return false;
+    }
+    if (!isInputCurrent()) return false;
     const optimisticText = displayText?.trim()
       || text.trim()
       || params.attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
-    const turnOverrides = runtimeControlSelections(params.runtimeControls, params.runtimeControlDrafts);
-    const selectedThreadId = params.snapshot.thread?.id ?? null;
-    let turnTargetId = params.selectedTargetId;
+    const liveSnapshot = params.threadController.snapshot() ?? params.snapshot;
+    const liveContext = params.threadController.context();
+    const turnOverrides = runtimeControlSelections(
+      liveContext?.controls ?? params.runtimeControls,
+      params.runtimeControlDrafts
+    );
+    const selectedThreadId = liveSnapshot.thread?.id ?? null;
+    let turnTargetId = liveContext?.selectedTargetId ?? params.selectedTargetId;
     if (selectedThreadId && params.isThreadArchived(selectedThreadId)) {
       await params.client.request("thread/restore", { threadId: selectedThreadId });
       await Promise.all([
@@ -320,7 +380,7 @@ export function createAppActions(params: AppActionsParams) {
         scope: scope()
       }));
       params.threadController.setContext(restoredContext);
-      turnTargetId = restoredContext.targetId;
+      turnTargetId = restoredContext.selectedTargetId ?? "";
       params.refreshRuntimeContext();
     }
     const turnControls = params.threadController.turnControls(
@@ -335,22 +395,24 @@ export function createAppActions(params: AppActionsParams) {
         message: admission.reason ?? params.turnBlockReason,
         feedbackAnchor: "composer"
       });
-      return;
+      return false;
     }
     params.pendingDetachedShellRef.current = null;
     params.clearCommandTransientUi();
-    const turnEpoch = params.viewEpochRef.current;
+    params.firstTurnContextRefreshPendingRef.current = selectedThreadId === null;
     const plan = params.threadController.beginTurn({
       controls: turnControls,
       input: nextInput,
       mentions,
       optimisticText,
-      scope: scope(),
-      threadId: params.snapshot.thread?.id ?? null
+      scope: liveSnapshot.scope,
+      startedAtMs: submittedAtMs,
+      threadId: liveSnapshot.thread?.id ?? null
     });
     const result = await params.client.request("turn/start", plan.params).catch((error) => {
       if (params.viewEpochRef.current === turnEpoch) {
         params.threadController.rejectTurnStart(plan.prepared);
+        params.firstTurnContextRefreshPendingRef.current = false;
         params.refreshRuntimeContext();
       }
       throw error;
@@ -358,10 +420,12 @@ export function createAppActions(params: AppActionsParams) {
     if (params.viewEpochRef.current === turnEpoch) {
       const accepted = params.threadController.acceptTurnStart(result, plan.prepared);
       params.selectedThreadIdRef.current = accepted.threadId;
-      params.refreshRuntimeContext();
     }
     params.setAttachments([]);
-    await params.refreshHistory();
+    if (selectedThreadId === null) {
+      await params.refreshHistory();
+    }
+    return true;
   }
 
   async function startShell(command: string) {

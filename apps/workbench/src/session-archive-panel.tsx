@@ -354,7 +354,7 @@ function ArchivedSessionRow({
         summaryProps={{ "aria-label": "Session actions", title: "Session actions" }}
       >
         {({ close }) => (
-          <div aria-label="Session actions" className="pevo-sessionMenuPopover" role="menu">
+          <div aria-label="Session actions" className="pevo-sessionMenuPopover pevo-controlPopover" role="menu">
             <button disabled={disabled} onClick={() => { close(); onActivate(); }} role="menuitem" type="button">
               <RotateCcw size={15} aria-hidden /><span>Activate</span>
             </button>
@@ -406,7 +406,7 @@ function AgentCandidateRow({
         summaryProps={{ "aria-label": "Session actions", title: "Session actions" }}
       >
         {({ close }) => (
-          <div aria-label="Session actions" className="pevo-sessionMenuPopover" role="menu">
+          <div aria-label="Session actions" className="pevo-sessionMenuPopover pevo-controlPopover" role="menu">
             <button disabled={disabled} onClick={() => { close(); onActivate(); }} role="menuitem" type="button">
               <Check size={15} aria-hidden /><span>Activate</span>
             </button>

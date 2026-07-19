@@ -7,6 +7,7 @@ import type {
   WorkspaceGitBranchesResult
 } from "@psychevo/protocol";
 import { RuntimeControlFields } from "./runtime-controls";
+import { usePopoverDismiss } from "./popover-dismiss";
 import { WorkspacePickerDialog } from "./workspace-picker-dialog";
 
 export function ComposerEnvironment({
@@ -20,7 +21,7 @@ export function ComposerEnvironment({
   path,
   profile,
   runtimeSafetyLabel,
-  workspaceCwds,
+  workspaces,
   onBranchChange,
   onOpenFiles,
   onReadBranches,
@@ -38,7 +39,7 @@ export function ComposerEnvironment({
   path: string;
   profile: InitializeResult["profile"] | null;
   runtimeSafetyLabel?: string | null;
-  workspaceCwds: string[];
+  workspaces: Array<{ cwd: string; displayPath?: string }>;
   onBranchChange(branch: string, create: boolean): Promise<WorkspaceGitBranchesResult>;
   onOpenFiles(): void;
   onReadBranches(): Promise<WorkspaceGitBranchesResult>;
@@ -46,7 +47,10 @@ export function ComposerEnvironment({
   onRuntimeControlChange(control: ThreadControlDescriptorView, value: unknown): void;
   onWorkspaceChange(cwd: string): Promise<unknown>;
 }) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const workspaceRootRef = useRef<HTMLDivElement | null>(null);
+  const branchRootRef = useRef<HTMLDivElement | null>(null);
+  const workspaceTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const branchTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchState, setBranchState] = useState<WorkspaceGitBranchesResult | null>(null);
@@ -54,32 +58,37 @@ export function ComposerEnvironment({
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [folderDialogOpen, setFolderDialogOpen] = useState(false);
   const [newBranchOpen, setNewBranchOpen] = useState(false);
+  const visibleBranch = branch?.trim() || null;
   const permissionControls = controls.filter((control) => control.id === "permissionMode");
   const profileLabel = profile && !profile.default ? profile.name : null;
   const knownWorkspaces = useMemo(
-    () => Array.from(new Set([cwd, ...workspaceCwds].filter((candidate) => candidate.trim()))),
-    [cwd, workspaceCwds]
+    () => {
+      const byCwd = new Map<string, { cwd: string; displayPath: string }>();
+      for (const workspace of [{ cwd, displayPath: path }, ...workspaces]) {
+        const canonicalCwd = workspace.cwd.trim();
+        if (!canonicalCwd) continue;
+        byCwd.set(canonicalCwd, {
+          cwd: canonicalCwd,
+          displayPath: workspace.displayPath?.trim() || canonicalCwd
+        });
+      }
+      return Array.from(byCwd.values());
+    },
+    [cwd, path, workspaces]
   );
 
+  usePopoverDismiss(workspaceMenuOpen, workspaceRootRef, workspaceTriggerRef, () => setWorkspaceMenuOpen(false));
+  usePopoverDismiss(branchMenuOpen, branchRootRef, branchTriggerRef, () => setBranchMenuOpen(false));
+
   useEffect(() => {
-    const dismiss = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setWorkspaceMenuOpen(false);
-        setBranchMenuOpen(false);
-      }
-    };
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setWorkspaceMenuOpen(false);
-        setBranchMenuOpen(false);
         setFolderDialogOpen(false);
         setNewBranchOpen(false);
       }
     };
-    document.addEventListener("mousedown", dismiss);
     document.addEventListener("keydown", escape);
     return () => {
-      document.removeEventListener("mousedown", dismiss);
       document.removeEventListener("keydown", escape);
     };
   }, []);
@@ -123,7 +132,7 @@ export function ComposerEnvironment({
 
   return (
     <>
-      <div className="composerStatusLine" aria-label="Composer environment" ref={rootRef}>
+      <div className="composerStatusLine" aria-label="Composer environment">
         {runtimeSafetyLabel ? (
           <span className="profileStatusPill" aria-label="Runtime Profile safety policy" title={runtimeSafetyLabel}>
             <span>{runtimeSafetyLabel}</span>
@@ -135,14 +144,7 @@ export function ComposerEnvironment({
             <span>{profileLabel}</span>
           </span>
         ) : null}
-        <RuntimeControlFields
-          controls={permissionControls}
-          dependencyControls={controls}
-          disabled={disabled}
-          values={controlValues}
-          onChange={onRuntimeControlChange}
-        />
-        <div className="composerEnvironmentControl is-workspace">
+        <div className="composerEnvironmentControl is-workspace" ref={workspaceRootRef}>
           <button
             aria-expanded={draft ? workspaceMenuOpen : undefined}
             aria-haspopup={draft ? "menu" : undefined}
@@ -158,7 +160,8 @@ export function ComposerEnvironment({
               setMenuError(null);
               setWorkspaceMenuOpen((open) => !open);
             }}
-            title={path}
+            ref={workspaceTriggerRef}
+            title={cwd}
             type="button"
           >
             {path || "workspace"}
@@ -167,15 +170,15 @@ export function ComposerEnvironment({
             <EnvironmentMenu ariaLabel="Workspace">
               {knownWorkspaces.map((candidate) => (
                 <button
-                  aria-current={candidate === cwd ? "true" : undefined}
-                  key={candidate}
-                  onClick={() => void changeWorkspace(candidate)}
+                  aria-current={candidate.cwd === cwd ? "true" : undefined}
+                  key={candidate.cwd}
+                  onClick={() => void changeWorkspace(candidate.cwd)}
                   role="menuitem"
-                  title={candidate}
+                  title={candidate.cwd}
                   type="button"
                 >
-                  <span>{candidate}</span>
-                  {candidate === cwd ? <Check size={13} aria-hidden /> : null}
+                  <span>{candidate.displayPath}</span>
+                  {candidate.cwd === cwd ? <Check size={13} aria-hidden /> : null}
                 </button>
               ))}
               {menuError ? <div className="composerEnvironmentMenuState is-error" role="alert">{menuError}</div> : null}
@@ -194,8 +197,8 @@ export function ComposerEnvironment({
             </EnvironmentMenu>
           ) : null}
         </div>
-        {branch?.trim() ? (
-          <div className="composerEnvironmentControl is-branch">
+        {draft || visibleBranch ? (
+          <div className="composerEnvironmentControl is-branch" ref={branchRootRef}>
             <button
               aria-expanded={branchMenuOpen}
               aria-haspopup="menu"
@@ -203,11 +206,12 @@ export function ComposerEnvironment({
               className="branchStatusButton"
               disabled={disabled || branchDisabled}
               onClick={() => void openBranchMenu()}
-              title={branch}
+              ref={branchTriggerRef}
+              title={visibleBranch ?? "Git branch"}
               type="button"
             >
               <GitBranch size={13} />
-              <span>{branch}</span>
+              <span>{visibleBranch ?? "Git branch"}</span>
             </button>
             {branchMenuOpen ? (
               <EnvironmentMenu ariaLabel="Git branch">
@@ -219,6 +223,7 @@ export function ComposerEnvironment({
                     key={candidate}
                     onClick={() => void changeBranch(candidate, false)}
                     role="menuitem"
+                    title={candidate}
                     type="button"
                   >
                     <span>{candidate}</span>
@@ -243,6 +248,13 @@ export function ComposerEnvironment({
             ) : null}
           </div>
         ) : null}
+        <RuntimeControlFields
+          controls={permissionControls}
+          dependencyControls={controls}
+          disabled={disabled}
+          values={controlValues}
+          onChange={onRuntimeControlChange}
+        />
       </div>
       {folderDialogOpen ? (
         <WorkspacePickerDialog
@@ -268,7 +280,7 @@ export function ComposerEnvironment({
 }
 
 function EnvironmentMenu({ ariaLabel, children }: { ariaLabel: string; children: ReactNode }) {
-  return <div aria-label={ariaLabel} className="composerEnvironmentMenu" role="menu">{children}</div>;
+  return <div aria-label={ariaLabel} className="composerEnvironmentMenu pevo-controlPopover" role="menu">{children}</div>;
 }
 
 function NewBranchDialog({

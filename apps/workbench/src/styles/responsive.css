@@ -187,36 +187,13 @@
     gap: 4px;
   }
 
-  .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
-    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
-    max-width: 38vw;
-  }
-
-  .composerSubmitControls .statusSelect[data-status="variant"] select {
-    width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
-    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 14px);
-  }
-
   .composerStatusLine {
     gap: 6px;
   }
 
-  .statusSelect[data-status="permission-mode"] select {
-    max-width: 160px;
-  }
-
-  .statusSelect[data-status="model"] select {
-    max-width: 56px;
-  }
-
-  .statusSelect[data-status="variant"] select {
-    max-width: 50px;
-  }
-
-  .pathStatusButton {
-    flex: 0 1 76px;
-    max-width: 76px;
+  .composerEnvironmentControl.is-workspace .pathStatusButton {
+    flex: 0 1 min(160px, 40vw);
+    max-width: min(160px, 40vw);
   }
 }
 
@@ -226,45 +203,26 @@
   }
 
   .agentRuntimePopover {
-    width: min(260px, calc(100vw - 32px));
+    width: max-content;
+    min-width: min(220px, calc(100vw - 32px));
+    max-width: min(260px, calc(100vw - 32px));
   }
 
   .agentDefinitionPopover {
     right: auto;
     left: 0;
-    width: min(260px, calc(100vw - 72px));
+    width: max-content;
+    min-width: min(220px, calc(100vw - 72px));
+    max-width: min(260px, calc(100vw - 72px));
   }
 
   .composerSubmitControls {
     font-size: var(--pevo-font-size-xsmall);
   }
 
-  .composerSubmitControls .statusSelect[data-status="model"] select {
-    width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
-    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
-    max-width: 36vw;
-  }
-
-  .composerSubmitControls .statusSelect[data-status="variant"] select {
-    width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
-    min-width: calc(var(--pevo-status-select-value-width, 5ch) + 12px);
-  }
-
   .composerStatusLine {
     gap: 5px;
     font-size: var(--pevo-font-size-xsmall);
-  }
-
-  .statusSelect[data-status="permission-mode"] select {
-    max-width: 160px;
-  }
-
-  .statusSelect[data-status="model"] select {
-    max-width: 54px;
-  }
-
-  .statusSelect[data-status="variant"] select {
-    max-width: 48px;
   }
 
   .contextStatusButton {
@@ -282,7 +240,7 @@
     width: min(280px, calc(100vw - 18px));
   }
 
-  .pathStatusButton {
-    max-width: 54px;
+  .composerEnvironmentControl.is-workspace .pathStatusButton {
+    max-width: min(100px, 30vw);
   }
 }

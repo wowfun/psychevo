@@ -348,7 +348,7 @@ function RightWorkspaceTabs({
         summaryProps={{ "aria-label": "Open right workspace tab", title: "Open tab" }}
       >
         {({ close }) => (
-          <div role="menu" aria-label="Open right workspace tab">
+          <div className="pevo-controlPopover" role="menu" aria-label="Open right workspace tab">
             {menuItems.map((item) => (
               <button
                 key={item.kind}

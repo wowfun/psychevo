@@ -5,6 +5,7 @@ import type {
   SettingsReadResult,
   ThreadControlDescriptorView
 } from "@psychevo/protocol";
+import { usePopoverDismiss } from "./popover-dismiss";
 
 const DEFAULT_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -59,6 +60,7 @@ export function ModelReasoningSelector({
   const [modelFilter, setModelFilter] = useState("");
   const [optimisticRecentModels, setOptimisticRecentModels] = useState<string[]>(recentModels);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const selected = model ? options.find((option) => option.value === model) ?? fallbackModelOption(model) : null;
   const recentModelsKey = recentModels.join("\u0000");
@@ -109,19 +111,12 @@ export function ModelReasoningSelector({
       return;
     }
     const focusTimer = window.setTimeout(() => searchRef.current?.focus(), 0);
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && rootRef.current?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => {
       window.clearTimeout(focusTimer);
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
     };
   }, [open]);
+
+  usePopoverDismiss(open, rootRef, triggerRef, () => setOpen(false));
 
   useEffect(() => {
     if (reasoningPresentation !== "selectable") {
@@ -176,11 +171,6 @@ export function ModelReasoningSelector({
     <div
       ref={rootRef}
       className={`modelReasoningSelector is-${placement} ${className}`.trim()}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          setOpen(false);
-        }
-      }}
     >
       <button
         type="button"
@@ -191,13 +181,14 @@ export function ModelReasoningSelector({
         disabled={disabled}
         title={title ?? emptyLabel}
         onClick={() => setOpen((current) => !current)}
+        ref={triggerRef}
       >
         <span>{displayLabel}</span>
         {showChevron && <ChevronDown size={13} aria-hidden="true" />}
       </button>
       {open && (
         <div
-          className="modelReasoningPopover"
+          className="modelReasoningPopover pevo-controlPopover"
           role="dialog"
           aria-label={`${ariaLabel} and reasoning`}
           style={popoverStyle}
@@ -310,12 +301,13 @@ function ModelReasoningRow({
   return (
     <button
       type="button"
-      className={`modelReasoningRow ${checked ? "is-selected" : ""}`}
+      className={`modelReasoningRow pevo-controlPopoverRow ${checked ? "is-selected" : ""}`}
       aria-checked={checked}
       data-model-free={free ? "true" : undefined}
       data-model-value={value}
       onClick={onSelect}
       role="radio"
+      title={label}
     >
       <span>
         <strong>{label}</strong>

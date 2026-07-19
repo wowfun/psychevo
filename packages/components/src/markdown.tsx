@@ -53,9 +53,6 @@ type FrontmatterDisplayValue =
   | { kind: "chips"; items: string[] }
   | { kind: "code"; text: string };
 
-const STREAM_REVEAL_INITIAL_CHARS = 24;
-const STREAM_REVEAL_INTERVAL_MS = 24;
-const STREAM_REVEAL_MAX_STEP_CHARS = 16;
 const FRONTMATTER_BOUNDARY = "---";
 const FRONTMATTER_CODE_MAX_CHARS = 1200;
 
@@ -71,7 +68,7 @@ export function MarkdownText({
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
-  const visibleText = useStreamingReveal(text, streaming === true);
+  const visibleText = text;
   const frontmatter = useMemo(() => markdownFrontmatter(visibleText), [visibleText]);
   const completeMermaidOccurrences = useMemo(
     () => extractCompleteMermaidOccurrences(frontmatter.body),
@@ -813,93 +810,4 @@ function boundedJson(value: unknown): string {
     return text;
   }
   return `${text.slice(0, FRONTMATTER_CODE_MAX_CHARS - 3)}...`;
-}
-
-function useStreamingReveal(text: string, streaming: boolean): string {
-  const canReveal = canUseBrowserTextReveal();
-  const [visibleText, setVisibleText] = useState(() => initialVisibleText(text, streaming && canReveal));
-  const visibleRef = useRef(visibleText);
-  const targetRef = useRef(text);
-  const wasStreamingRef = useRef(streaming && canReveal);
-
-  function setVisible(next: string) {
-    visibleRef.current = next;
-    setVisibleText(next);
-  }
-
-  useEffect(() => {
-    if (!canReveal) {
-      if (visibleRef.current !== text) {
-        setVisible(text);
-      }
-      return;
-    }
-
-    targetRef.current = text;
-    if (streaming) {
-      wasStreamingRef.current = true;
-      if (!text.startsWith(visibleRef.current) || visibleRef.current.length > text.length) {
-        setVisible(initialVisibleText(text, true));
-      }
-      return;
-    }
-
-    if (
-      wasStreamingRef.current &&
-      text.startsWith(visibleRef.current) &&
-      visibleRef.current.length < text.length
-    ) {
-      return;
-    }
-
-    wasStreamingRef.current = false;
-    if (visibleRef.current !== text) {
-      setVisible(text);
-    }
-  }, [canReveal, streaming, text]);
-
-  useEffect(() => {
-    if (!canReveal || (!streaming && !wasStreamingRef.current)) {
-      return;
-    }
-
-    const timer = globalThis.setInterval(() => {
-      const target = targetRef.current;
-      const current = visibleRef.current;
-      if (current === target) {
-        if (!streaming) {
-          wasStreamingRef.current = false;
-          globalThis.clearInterval(timer);
-        }
-        return;
-      }
-
-      if (!target.startsWith(current) || current.length > target.length) {
-        setVisible(target);
-        return;
-      }
-
-      const remaining = target.length - current.length;
-      const step = Math.min(STREAM_REVEAL_MAX_STEP_CHARS, Math.max(1, Math.ceil(remaining / 5)));
-      setVisible(target.slice(0, current.length + step));
-    }, STREAM_REVEAL_INTERVAL_MS);
-
-    return () => globalThis.clearInterval(timer);
-  }, [canReveal, streaming, text]);
-
-  return visibleText;
-}
-
-function initialVisibleText(text: string, streaming: boolean): string {
-  if (!streaming || text.length <= STREAM_REVEAL_INITIAL_CHARS) {
-    return text;
-  }
-  return text.slice(0, STREAM_REVEAL_INITIAL_CHARS);
-}
-
-function canUseBrowserTextReveal(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return !window.navigator.userAgent.toLowerCase().includes("jsdom");
 }

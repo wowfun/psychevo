@@ -95,6 +95,11 @@ import {
   type PluginCatalogAddParams,
   type PluginCatalogListParams,
   type PluginCatalogRemoveParams,
+  type PluginCatalogUpgradeParams,
+  type PluginAuthorityRefreshParams,
+  type PluginAuthorityWriteParams,
+  type PluginConnectStartParams,
+  type PluginConnectStatusParams,
   type PluginDoctorParams,
   type PluginInspectParams,
   type PluginInstallParams,
@@ -106,6 +111,8 @@ import {
   type RpcNotification,
   type ThreadContextReadParams,
   type ThreadContextReadResult,
+  type ThreadDraftOpenParams,
+  type ThreadDraftOpenResult,
   type ThreadDraftPrepareParams,
   type ThreadDraftPrepareResult,
   type ThreadControlSetParams,
@@ -178,7 +185,6 @@ import {
   type ThreadRenameParams,
   type ThreadResumeParams,
   type ThreadSnapshot,
-  type ThreadStartParams,
   type ThreadTraceParams,
   type ThreadTraceResult,
   type TurnStartParams,
@@ -223,24 +229,19 @@ export {
 export {
   acceptThreadTurn,
   applyGatewayEventToThreadSnapshot,
-  applyTurnResultToThreadSnapshot,
   bindThreadSnapshot,
   emptyThreadSnapshot,
   latestAssistantTranscriptText,
   prepareThreadTurn,
   threadTurnStartParams,
-  ThreadController,
-  turnCompletedEventFromResult,
-  turnResultThreadId
+  ThreadController
 } from "./thread-controller";
 export type {
   ThreadGatewayEventApplication,
   ThreadTurnAdmission,
   ThreadTurnAcceptance,
   ThreadTurnControls,
-  ThreadTurnErrorApplication,
   ThreadTurnPreparation,
-  ThreadTurnResultApplication,
   ThreadTurnStartInput,
   ThreadTurnStartPlan
 } from "./thread-controller";
@@ -310,6 +311,11 @@ export interface GatewayRequestParams {
   "plugin/catalog/add": PluginCatalogAddParams;
   "plugin/catalog/list": PluginCatalogListParams;
   "plugin/catalog/remove": PluginCatalogRemoveParams;
+  "plugin/catalog/upgrade": PluginCatalogUpgradeParams;
+  "plugin/authority/refresh": PluginAuthorityRefreshParams;
+  "plugin/authority/write": PluginAuthorityWriteParams;
+  "plugin/connect/start": PluginConnectStartParams;
+  "plugin/connect/status": PluginConnectStatusParams;
   "plugin/doctor": PluginDoctorParams;
   "plugin/import/inspect": PluginInspectParams;
   "plugin/install": PluginInstallParams;
@@ -359,6 +365,7 @@ export interface GatewayRequestParams {
   "thread/archive": ThreadIdParams;
   "thread/browser": ThreadBrowserParams;
   "thread/context/read": ThreadContextReadParams;
+  "thread/draft/open": ThreadDraftOpenParams;
   "thread/draft/prepare": ThreadDraftPrepareParams;
   "thread/control/set": ThreadControlSetParams;
   "thread/action/run": ThreadActionRunParams;
@@ -372,7 +379,6 @@ export interface GatewayRequestParams {
   "thread/rename": ThreadRenameParams;
   "thread/restore": ThreadIdParams;
   "thread/resume": ThreadResumeParams;
-  "thread/start": ThreadStartParams;
   "thread/trace": ThreadTraceParams;
   "thread/realtime/appendAudio": ThreadRealtimeAppendAudioParams;
   "thread/realtime/appendSpeech": ThreadRealtimeAppendSpeechParams;
@@ -451,6 +457,11 @@ export interface GatewayRequestResults {
   "plugin/catalog/add": GatewayJsonResult;
   "plugin/catalog/list": GatewayJsonResult;
   "plugin/catalog/remove": GatewayJsonResult;
+  "plugin/catalog/upgrade": GatewayJsonResult;
+  "plugin/authority/refresh": GatewayJsonResult;
+  "plugin/authority/write": GatewayJsonResult;
+  "plugin/connect/start": GatewayJsonResult;
+  "plugin/connect/status": GatewayJsonResult;
   "plugin/doctor": GatewayJsonResult;
   "plugin/import/inspect": GatewayJsonResult;
   "plugin/install": GatewayJsonResult;
@@ -500,6 +511,7 @@ export interface GatewayRequestResults {
   "thread/archive": ThreadMutationResult;
   "thread/browser": ThreadBrowserResult;
   "thread/context/read": ThreadContextReadResult;
+  "thread/draft/open": ThreadDraftOpenResult;
   "thread/draft/prepare": ThreadDraftPrepareResult;
   "thread/control/set": ThreadControlSetResult;
   "thread/action/run": ThreadActionRunResult;
@@ -513,7 +525,6 @@ export interface GatewayRequestResults {
   "thread/rename": ThreadMutationResult;
   "thread/restore": ThreadMutationResult;
   "thread/resume": ThreadSnapshot;
-  "thread/start": ThreadSnapshot;
   "thread/trace": ThreadTraceResult;
   "thread/realtime/appendAudio": ThreadRealtimeMutationResult;
   "thread/realtime/appendSpeech": ThreadRealtimeMutationResult;

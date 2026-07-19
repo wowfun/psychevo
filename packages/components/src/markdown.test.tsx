@@ -73,6 +73,19 @@ describe("MarkdownText frontmatter", () => {
   });
 });
 
+describe("MarkdownText streaming", () => {
+  it("renders the complete received text immediately in a browser", () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Chrome");
+    const text = "The complete assistant update should not be hidden behind a second reveal timer.";
+    try {
+      const { container } = render(<MarkdownText streaming text={text} />);
+      expect(container.textContent).toContain(text);
+    } finally {
+      userAgent.mockRestore();
+    }
+  });
+});
+
 describe("MarkdownText Mermaid rendering", () => {
   it("lazy-renders complete fenced Mermaid blocks", async () => {
     const initialize = vi.fn();

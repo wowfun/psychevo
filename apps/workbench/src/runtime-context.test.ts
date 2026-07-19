@@ -8,7 +8,11 @@ import {
 } from "./runtime-context";
 
 function parseThreadContext(value: Record<string, unknown>) {
-  return parseRawThreadContext({ targetId: "target:test", ...value });
+  return parseRawThreadContext({
+    selectedTargetId: "target:test",
+    suggestedTargetId: null,
+    ...value
+  });
 }
 describe("runtime context projection", () => {
   it("parses the Thread Context interface without trusting raw payloads", () => {
@@ -210,10 +214,12 @@ describe("runtime context projection", () => {
     expect(context.controls[0]?.capabilityRevision).toBe("5db92a55f2f24d87");
   });
 
-  it("fails closed when the context omits its selected target ref", () => {
-    expect(() => parseRawThreadContext({
+  it("keeps discovery unselected when the context has no selected target", () => {
+    const context = parseRawThreadContext({
       profiles: [{ id: "opaque-profile", runtime: "acp", label: "Opaque" }]
-    })).toThrow("missing its canonical targetId");
+    });
+    expect(context.selectedTargetId).toBeNull();
+    expect(context.suggestedTargetId).toBeNull();
   });
 
   it("normalizes ACP suffixes and fails malformed enums to conservative defaults", () => {

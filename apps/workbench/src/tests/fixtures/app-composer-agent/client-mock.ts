@@ -254,7 +254,6 @@ function nativeThreadControls(): Array<Record<string, unknown>> {
 function canonicalMockThreadContext(value: unknown, params: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
-  if (typeof record.targetId === "string" && record.targetId.trim()) return value;
   const targets = Array.isArray(record.compatibleTargets)
     ? record.compatibleTargets.filter((target): target is Record<string, unknown> => (
         Boolean(target) && typeof target === "object" && !Array.isArray(target)
@@ -270,11 +269,28 @@ function canonicalMockThreadContext(value: unknown, params: unknown): unknown {
   const selected = targets.find((target) => (
     target.runtimeProfileRef === runtimeProfileRef && (target.agentRef ?? null) === agentRef
   )) ?? targets.find((target) => target.runtimeProfileRef === runtimeProfileRef);
+  const projectedTargetId = typeof selected?.targetId === "string"
+    ? selected.targetId
+    : typeof record.selectedTargetId === "string"
+      ? record.selectedTargetId
+      : typeof record.targetId === "string"
+        ? record.targetId
+        : `target:mock:${runtimeProfileRef}`;
+  const exactSelection = Boolean(targetInput)
+    || Boolean(record.binding)
+    || typeof (params as { threadId?: unknown } | null)?.threadId === "string";
   return {
     ...record,
-    targetId: typeof selected?.targetId === "string"
-      ? selected.targetId
-      : `target:mock:${runtimeProfileRef}`
+    selectedTargetId: exactSelection ? projectedTargetId : null,
+    suggestedTargetId: exactSelection ? null : projectedTargetId,
+    sendability: exactSelection
+      ? record.sendability
+      : {
+          allowed: false,
+          reason: "Select an Agent target before starting a turn.",
+          recoveryAction: null
+        },
+    targetId: undefined
   };
 }
 
@@ -529,7 +545,11 @@ function usageReadResult(): Record<string, unknown> {
       date: date.toISOString().slice(0, 10),
       sessionCount: tokens > 0 ? 1 : 0,
       messageCount: tokens > 0 ? 2 : 0,
+      effectiveTotalTokens: tokens,
       reportedTotalTokens: tokens,
+      totalStatus: tokens > 0 ? "reported" : "unavailable",
+      accountedProviderCallCount: tokens > 0 ? 1 : 0,
+      unaccountedProviderCallCount: 0,
       contextInputTokens: Math.round(tokens * 0.7),
       cacheReadTokens: Math.round(tokens * 0.25),
       cacheWriteTokens: Math.round(tokens * 0.05),
@@ -554,7 +574,11 @@ function usageReadResult(): Record<string, unknown> {
     reasoningTokens: Math.round(reportedTotalTokens * 0.04),
     cacheReadTokens: Math.round(reportedTotalTokens * 0.25),
     cacheWriteTokens: Math.round(reportedTotalTokens * 0.02),
+    effectiveTotalTokens: reportedTotalTokens,
     reportedTotalTokens,
+    totalStatus: "reported",
+    accountedProviderCallCount: 6,
+    unaccountedProviderCallCount: 0,
     estimatedCostNanodollars: reportedTotalTokens * 1000,
     costStatus: "estimated",
     estimatedPricingCount: 6,
@@ -594,7 +618,7 @@ vi.mock("@psychevo/client", async () => {
       return undefined;
     }
 
-    async request(method: string, params?: unknown) {
+    async request(method: string, params?: unknown): Promise<unknown> {
       gatewayMock.requestLog.push({ method, params });
       if (method === "initialize") {
         if (gatewayMock.initialize) {
@@ -604,6 +628,7 @@ vi.mock("@psychevo/client", async () => {
           server: "test",
           version: "0.0.0",
           cwd: gatewayMock.scope.cwd,
+          displayCwd: gatewayMock.scope.cwd,
           scope: gatewayMock.scope,
           source: gatewayMock.source,
           capabilities: {}
@@ -703,16 +728,47 @@ vi.mock("@psychevo/client", async () => {
           ]
         };
       }
-      if (method === "thread/start") {
-        if (gatewayMock.threadStart) {
-          return gatewayMock.threadStart(params);
+      if (method === "thread/draft/open") {
+        if (gatewayMock.draftOpen) {
+          return gatewayMock.draftOpen(params);
         }
-        return {
+        const record = params as {
+          origin?: unknown;
+          targetIntent?: { kind?: string; targetId?: string };
+        };
+        const targets = compatibleRuntimeTargets();
+        const selectedTarget = record.targetIntent?.kind === "exact"
+          ? targets.find((target) => target.targetId === record.targetIntent?.targetId)
+          : targets.find((target) => target.runtimeProfileRef === "native" && target.agentRef == null)
+            ?? targets.find((target) => target.ready)
+            ?? targets[0];
+        if (!selectedTarget) throw new Error("No default Agent target is available.");
+        const draftSnapshot = {
           ...gatewayMock.snapshot,
+          scope: record.origin ?? gatewayMock.snapshot.scope,
           thread: null,
           entries: [],
           activity: { ...gatewayMock.snapshot.activity }
         };
+        const contextParams = {
+          threadId: null,
+          target: {
+            agentRef: selectedTarget.agentRef ?? null,
+            runtimeProfileRef: selectedTarget.runtimeProfileRef
+          },
+          scope: record.origin
+        };
+        const contextLogIndex = gatewayMock.requestLog.length;
+        const contextRequest = this.request("thread/context/read", contextParams);
+        const contextLogEntry = gatewayMock.requestLog[contextLogIndex];
+        const context: unknown = await contextRequest;
+        if (contextLogEntry) {
+          const retainedContextLogIndex = gatewayMock.requestLog.indexOf(contextLogEntry);
+          if (retainedContextLogIndex >= 0) {
+            gatewayMock.requestLog.splice(retainedContextLogIndex, 1);
+          }
+        }
+        return { snapshot: draftSnapshot, context, problem: null };
       }
       if (method === "settings/read") {
         if (gatewayMock.settingsRead) {
@@ -1103,7 +1159,8 @@ vi.mock("@psychevo/client", async () => {
         const acp = profile?.runtime === "acp";
         const model = runtimeProfileRef === "codex" ? "gpt-fixture" : "openai/gpt-fixture";
         const context: Record<string, unknown> = {
-          targetId: target.targetId,
+          selectedTargetId: target.targetId,
+          suggestedTargetId: null,
           runtimeProfileRef,
           selectionState: "draft",
           profiles: gatewayMock.runtimeProfileRecords,
@@ -1200,8 +1257,11 @@ vi.mock("@psychevo/client", async () => {
           const effectiveModel = requestedRuntimeRef === "codex"
             ? "gpt-fixture"
             : "openai/gpt-fixture";
+          const exactSelection = Boolean(requestedTarget) || Boolean(requestedThreadId);
+          const projectedTargetId = selectedTarget?.targetId ?? `target:mock:${requestedRuntimeRef}`;
           return {
-            targetId: selectedTarget?.targetId ?? `target:mock:${requestedRuntimeRef}`,
+            selectedTargetId: exactSelection ? projectedTargetId : null,
+            suggestedTargetId: exactSelection ? null : projectedTargetId,
             runtimeProfileRef: requestedRuntimeRef,
             selectionState: "draft",
             profiles: gatewayMock.runtimeProfileRecords,
@@ -1247,8 +1307,10 @@ vi.mock("@psychevo/client", async () => {
               unavailableReason: running ? null : "No turn is currently running on this Thread."
             }] : [],
             sendability: {
-              allowed: selectedProfileReady,
-              reason: selectedProfileReady ? null : `${requestedRuntimeRef} has no compatible Agent Definition.`,
+              allowed: exactSelection && selectedProfileReady,
+              reason: !exactSelection
+                ? "Select an Agent target before starting a turn."
+                : selectedProfileReady ? null : `${requestedRuntimeRef} has no compatible Agent Definition.`,
               recoveryAction: selectedProfileReady ? null : "agent/select"
             },
             history: {
@@ -1264,8 +1326,11 @@ vi.mock("@psychevo/client", async () => {
         }
         const native = findMockRuntimeProfile("native") ?? gatewayMock.runtimeProfileRecords[0];
         const capabilityRevision = typeof native?.capabilityRevision === "string" ? native.capabilityRevision : "1";
+        const exactSelection = Boolean(requestedTarget) || Boolean(requestedThreadId);
+        const projectedTargetId = selectedTarget?.targetId ?? "target:default:native";
         return {
-          targetId: selectedTarget?.targetId ?? "target:default:native",
+          selectedTargetId: exactSelection ? projectedTargetId : null,
+          suggestedTargetId: exactSelection ? null : projectedTargetId,
           runtimeProfileRef: "native",
           selectionState: "default",
           profiles: gatewayMock.runtimeProfileRecords,
@@ -1344,7 +1409,7 @@ vi.mock("@psychevo/client", async () => {
               unavailableReason: null
             }
           ] : [],
-          sendability: gatewayMock.modelStatus === "resolved" && Boolean(gatewayMock.modelOverride ?? gatewayMock.model)
+          sendability: exactSelection && gatewayMock.modelStatus === "resolved" && Boolean(gatewayMock.modelOverride ?? gatewayMock.model)
             ? { allowed: true, reason: null, recoveryAction: null }
             : {
                 allowed: false,
@@ -1428,7 +1493,8 @@ vi.mock("@psychevo/client", async () => {
               controlRevision: record.expectedControlRevision ?? "controls-1"
             }
           : {
-              targetId: selectedTarget?.targetId ?? `target:mock:${runtimeProfileRef}`,
+              selectedTargetId: selectedTarget?.targetId ?? `target:mock:${runtimeProfileRef}`,
+              suggestedTargetId: null,
               runtimeProfileRef,
               selectionState: "default",
               profiles: gatewayMock.runtimeProfileRecords,
@@ -1921,6 +1987,24 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "plugin/list") {
         return {
+          codex_authority: {
+            kind: "codex",
+            enabled: false,
+            runtime: "disabled",
+            auth: "unavailable",
+            resolvedBinary: "codex",
+            version: null,
+            compatibilityProfile: "codex-plugin/8604689e",
+            privateHome: "/tmp/psychevo/codex",
+            platform: "linux",
+            generation: 1,
+            inventoryReady: false,
+            reason: null
+          },
+          authorities: [
+            { kind: "psychevo", enabled: true, runtime: "ready", auth: "available" },
+            { kind: "codex", enabled: false, runtime: "disabled", auth: "unavailable" }
+          ],
           plugins: [
             {
               name: "Browser",
@@ -2096,6 +2180,9 @@ vi.mock("@psychevo/client", async () => {
       }
       if (method === "plugin/setTrust") {
         return { success: true, trusted: true };
+      }
+      if (method === "plugin/install" && gatewayMock.pluginInstallResult) {
+        return gatewayMock.pluginInstallResult;
       }
       if (method === "mcp/list") {
         return {
@@ -2345,6 +2432,9 @@ vi.mock("@psychevo/client", async () => {
         return gatewayMock.workspaceFilesResult;
       }
       if (method === "workspace/git/branches") {
+        if (gatewayMock.workspaceGitBranches) {
+          return gatewayMock.workspaceGitBranches(params);
+        }
         return gatewayMock.workspaceGitBranchesResult;
       }
       if (method === "workspace/git/checkout") {
@@ -2442,7 +2532,9 @@ vi.mock("@psychevo/client", async () => {
           context: {
             available: hasThread,
             label: hasThread ? "200/1.0k (20.0%)" : "No active session",
-            status: hasThread ? "exact" : "unavailable",
+            status: hasThread ? "reported" : "unavailable",
+            basis: hasThread ? "latest_provider_turn" : "unavailable",
+            appliesToSessionSeq: hasThread ? 2 : null,
             usedTokens: hasThread ? 200 : 0,
             contextLimit: hasThread ? 1000 : null,
             percent: hasThread ? 20 : null,
@@ -2498,7 +2590,11 @@ vi.mock("@psychevo/client", async () => {
             reasoningTokens: hasThread ? 12 : 0,
             cacheReadTokens: hasThread ? 80 : 0,
             cacheWriteTokens: hasThread ? 10 : 0,
+            effectiveTotalTokens: hasThread ? 250 : null,
             reportedTotalTokens: hasThread ? 250 : 0,
+            totalStatus: hasThread ? "reported" : "unavailable",
+            accountedProviderCallCount: hasThread ? 1 : 0,
+            unaccountedProviderCallCount: 0,
             estimatedCostNanodollars: hasThread ? 10_000_000 : 0,
             costStatus: hasThread ? "estimated" : "unknown",
             estimatedPricingCount: hasThread ? 1 : 0,
@@ -2601,7 +2697,6 @@ vi.mock("@psychevo/client", async () => {
     },
     applyGatewayEventToThreadSnapshot: actual.applyGatewayEventToThreadSnapshot,
     applyLiveTranscriptEvent: actual.applyLiveTranscriptEvent,
-    applyTurnResultToThreadSnapshot: actual.applyTurnResultToThreadSnapshot,
     bindThreadSnapshot: actual.bindThreadSnapshot,
     emptyThreadSnapshot: actual.emptyThreadSnapshot,
     latestAssistantTranscriptText: actual.latestAssistantTranscriptText,
@@ -2616,9 +2711,7 @@ vi.mock("@psychevo/client", async () => {
     reconcileThreadSnapshot: (_current: unknown, next: unknown) => next,
     runThreadInterrupt: actual.runThreadInterrupt,
     scopeForCwd: (cwd: string) => ({ ...gatewayMock.scope, cwd }),
-    turnCompletedEventFromResult: actual.turnCompletedEventFromResult,
-    threadTurnStartParams: actual.threadTurnStartParams,
-    turnResultThreadId: actual.turnResultThreadId
+    threadTurnStartParams: actual.threadTurnStartParams
   };
 });
 

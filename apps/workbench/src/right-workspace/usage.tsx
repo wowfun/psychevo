@@ -130,7 +130,7 @@ export function SessionUsageGrid({
   usage: SessionUsageSummaryView;
 }) {
   const metrics = [
-    { label: "Session tokens", value: formatCompactNumber(usage.reportedTotalTokens) },
+    { label: "Session tokens", value: formatUsageTotal(usage.effectiveTotalTokens, usage.totalStatus) },
     { label: "Cache read", value: formatPercent(usage.cacheReadPercent) },
     { label: "Cost", value: formatNanodollars(usage.estimatedCostNanodollars) },
     { label: "Reasoning", value: formatCompactNumber(usage.reasoningTokens) },
@@ -229,6 +229,13 @@ function formatCompactNumber(value: number): string {
     return `${(value / 1_000).toFixed(1)}k`;
   }
   return `${Math.max(0, Math.round(value))}`;
+}
+
+function formatUsageTotal(value: number | null, status: string): string {
+  if (value === null) {
+    return "Unavailable";
+  }
+  return `${status === "partial" ? "≥" : ""}${formatCompactNumber(value)}`;
 }
 
 function formatPercent(value: number | null | undefined): string {

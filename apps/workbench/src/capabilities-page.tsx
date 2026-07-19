@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
 import type {
@@ -8,6 +8,7 @@ import type {
 } from "@psychevo/protocol";
 import { Edit3, LogIn, LogOut, Play, Plus, RefreshCw, Save, Search, Trash2, Wrench, X } from "lucide-react";
 import { AgentsConfigPanel, type ManagedBackendAction } from "./capabilities-agents-config";
+import { parseBackendList } from "./data";
 import { formatRuntimeCheckedAt } from "./runtime-context";
 import type { BackendConfigTarget, BackendDraft, CapabilityTab, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
@@ -266,7 +267,9 @@ export function CapabilitiesPage({
   });
   const [toolPolicyDraft, setToolPolicyDraft] = useState({ enabledTools: "", disabledTools: "" });
   const [oauthSession, setOauthSession] = useState<string | null>(null);
+  const [pluginConnectSession, setPluginConnectSession] = useState<string | null>(null);
   const [pluginDetail, setPluginDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
+  const [pluginOperation, setPluginOperation] = useState<JsonObject | null>(null);
 
   const requestScope = scope ?? (cwd ? { cwd, source: { kind: "web", rawId: null, lifetime: "persistent", rawIdentity: null, visibleName: null } } as GatewayRequestScope : null);
 
@@ -319,6 +322,31 @@ export function CapabilitiesPage({
     };
   }, [client, oauthSession, requestScope?.cwd]);
 
+  useEffect(() => {
+    if (!client || !requestScope || !pluginConnectSession) return;
+    let stopped = false;
+    const timer = window.setInterval(() => {
+      void client.request("plugin/connect/status", { sessionId: pluginConnectSession, scope: requestScope }).then((result) => {
+        const status = stringField(result, "status");
+        if (stopped || status === "pending") return;
+        window.clearInterval(timer);
+        setPluginConnectSession(null);
+        setNotice(status === "succeeded" ? "Plugin connection is ready." : stringField(result, "reason") || "Plugin connection failed.");
+        setRefreshToken((value) => value + 1);
+      }).catch((err) => {
+        if (!stopped) {
+          window.clearInterval(timer);
+          setPluginConnectSession(null);
+          setError(errorMessage(err));
+        }
+      });
+    }, 1200);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [client, pluginConnectSession, requestScope?.cwd]);
+
   const rows = useMemo(() => {
     const source = data[activeTab];
     const all = rowsForTab(activeTab, source);
@@ -329,6 +357,15 @@ export function CapabilitiesPage({
 
   const selectedId = selected[activeTab] ?? rows[0]?.id ?? null;
   const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
+  const listEntries = capabilityListEntries(activeTab, rows);
+  const visibleBackends = useMemo(
+    () => backends.length > 0
+      ? backends
+      : data.agents
+        ? parseBackendList(data.agents)
+        : [],
+    [backends, data.agents]
+  );
 
   useEffect(() => {
     if (!client || !requestScope || activeTab !== "plugins" || !selectedRow) {
@@ -351,9 +388,18 @@ export function CapabilitiesPage({
     if (!client || !requestScope) return false;
     setSaving(true);
     setError(null);
+    setPluginOperation(null);
     try {
-      await action();
-      setNotice(options.notice ?? "Saved. Changes apply to the next run/session; current sessions may differ.");
+      const result = await action();
+      const resultObject = objectValue(result);
+      const partial = resultObject.partial === true
+        || (resultObject.success === false && typeof resultObject.failedStep === "string");
+      if (partial) {
+        setPluginOperation(resultObject);
+        setNotice(null);
+      } else {
+        setNotice(options.notice ?? "Saved. Changes apply to the next run/session; current sessions may differ.");
+      }
       if (options.refresh !== false) setRefreshToken((value) => value + 1);
       return true;
     } catch (err) {
@@ -415,17 +461,19 @@ export function CapabilitiesPage({
         </div>
       )}
 
-      {(error || notice || oauthSession) && (
+      {(error || notice || oauthSession || pluginConnectSession) && (
         <div className={`capabilityBanner ${error ? "is-error" : ""}`}>
-          {error ?? (oauthSession ? "OAuth login pending" : notice)}
+          {error ?? (oauthSession ? "OAuth login pending" : pluginConnectSession ? "Plugin connection pending" : notice)}
         </div>
       )}
+
+      {pluginOperation && <PluginOperationResult value={pluginOperation} />}
 
       {activeTab === "agents" ? (
         <AgentsCapabilityPanel
           backendDraft={backendDraft}
           backendDoctor={backendDoctor}
-          backends={backends}
+          backends={visibleBackends}
           busy={busy}
           client={client}
           data={data.agents}
@@ -473,6 +521,16 @@ export function CapabilitiesPage({
         />
       ) : (
         <>
+          {activeTab === "plugins" && (
+            <CodexAuthorityCard
+              authority={objectField(data.plugins, "codex_authority")}
+              busy={busy}
+              client={client}
+              key={stringField(objectField(data.plugins, "codex_authority"), "resolvedBinary") || "codex"}
+              mutate={mutate}
+              scope={requestScope}
+            />
+          )}
           <CapabilityForms
             busy={busy}
             client={client}
@@ -493,7 +551,16 @@ export function CapabilitiesPage({
             <div className="capabilityList" role="list">
               {loading && <div className="capabilityEmpty">Loading</div>}
               {!loading && rows.length === 0 && <div className="capabilityEmpty">No matches</div>}
-              {rows.map((row) => {
+              {listEntries.map((entry) => {
+                if (entry.kind === "section") {
+                  return (
+                    <div className="capabilityRowMain" key={`section:${entry.label}`} role="heading" aria-level={3}>
+                      <strong>{entry.label}</strong>
+                      {entry.description && <span>{entry.description}</span>}
+                    </div>
+                  );
+                }
+                const row = entry.row;
                 const selectedClass = row.id === selectedRow?.id ? " is-selected" : "";
                 if (hasCapabilityRowSwitch(activeTab)) {
                   return (
@@ -562,6 +629,8 @@ export function CapabilitiesPage({
                     setToolPolicyDraft={setToolPolicyDraft}
                     mutate={mutate}
                     onOAuthSession={setOauthSession}
+                    onPluginConnectSession={setPluginConnectSession}
+                    pluginDetail={pluginDetail?.id === selectedRow.id ? pluginDetail.value : null}
                   />
                   {activeTab === "plugins" && (
                     <PluginComponentStatuses
@@ -2167,6 +2236,8 @@ function CapabilityActions({
   client,
   mutate,
   onOAuthSession,
+  onPluginConnectSession,
+  pluginDetail,
   row,
   scope,
   setToolPolicyDraft,
@@ -2177,6 +2248,8 @@ function CapabilityActions({
   client: GatewayClient | null;
   mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   onOAuthSession(sessionId: string | null): void;
+  onPluginConnectSession(sessionId: string | null): void;
+  pluginDetail: JsonObject | null;
   row: CapabilityRow;
   scope: GatewayRequestScope | null;
   setToolPolicyDraft(value: { enabledTools: string; disabledTools: string }): void;
@@ -2239,7 +2312,10 @@ function CapabilityActions({
     );
   }
   if (tab === "plugins") {
-    const trust = objectField(row.raw, "trust");
+    const detailPlugin = objectField(pluginDetail, "plugin");
+    const trust = Object.keys(detailPlugin).length > 0
+      ? objectField(detailPlugin, "trust")
+      : objectField(row.raw, "trust");
     const needsTrust = boolField(trust, "required") && stringField(trust, "status") !== "trusted";
     const selector = pluginSelector(row);
     const scopeName = pluginMutationScope(row);
@@ -2247,6 +2323,11 @@ function CapabilityActions({
     const removable = pluginRemovable(row);
     const codexAuthority = pluginAuthorityKind(row) === "codex";
     const installed = boolField(row.raw, "installed");
+    const policy = objectField(row.raw, "policy");
+    const profileEnabled = boolField(policy, "profileEnabled");
+    const projectOverride = objectValue(policy).projectOverride;
+    const connectTarget = codexConnectTarget(pluginDetail);
+    const marketplace = stringField(objectField(row.raw, "authority"), "marketplace");
     return (
       <div className="capabilityActionGrid">
         <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/doctor", { selector, scope }))} type="button">
@@ -2255,6 +2336,29 @@ function CapabilityActions({
         {needsTrust && packageMutable && (
           <button disabled={busy} onClick={() => confirmAction(`Trust plugin ${row.name} for its current package fingerprint?`) && void mutate(() => client.request("plugin/setTrust", { selector, scopeName, trusted: true, scope }))} type="button">
             <LogIn size={14} /> Trust
+          </button>
+        )}
+        {codexAuthority && installed && (
+          <>
+            <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "profile", enabled: !profileEnabled, scope }))} type="button">
+              {profileEnabled ? "Disable in profile" : "Enable in profile"}
+            </button>
+            <button disabled={busy || projectOverride === false} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "project", enabled: false, scope }))} type="button">
+              Disable in this project
+            </button>
+            <button disabled={busy || projectOverride == null} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "project", enabled: null, scope }))} type="button">
+              Reset project override
+            </button>
+          </>
+        )}
+        {codexAuthority && installed && connectTarget && (
+          <button disabled={busy} onClick={() => void startPluginConnect(client, scope, selector, connectTarget, onPluginConnectSession, mutate)} type="button">
+            <LogIn size={14} /> Connect
+          </button>
+        )}
+        {codexAuthority && installed && marketplace && (
+          <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/catalog/upgrade", { authority: "codex", name: marketplace, scope }))} type="button">
+            <RefreshCw size={14} /> Upgrade
           </button>
         )}
         {packageMutable && removable && (
@@ -2276,6 +2380,82 @@ function CapabilityActions({
         <Trash2 size={14} /> Uninstall
       </button>
     </div>
+  );
+}
+
+function CodexAuthorityCard({
+  authority,
+  busy,
+  client,
+  mutate,
+  scope
+}: {
+  authority: JsonObject;
+  busy: boolean;
+  client: GatewayClient | null;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
+  scope: GatewayRequestScope | null;
+}) {
+  const resolvedBinary = stringField(authority, "resolvedBinary");
+  const [binary, setBinary] = useState(resolvedBinary === "codex" ? "" : resolvedBinary);
+  const binaryRef = useRef(binary);
+  const binaryInputRef = useRef<HTMLInputElement | null>(null);
+  const enabled = boolField(authority, "enabled");
+  if (!client || !scope) return null;
+  const write = (nextEnabled: boolean) => client.request("plugin/authority/write", {
+    enabled: nextEnabled,
+    binary: (binaryInputRef.current?.value ?? binaryRef.current).trim() || null,
+    scope
+  });
+  return (
+    <section aria-label="Codex plugin compatibility" className="pluginInspection">
+      <div className="capabilityDetailHeader">
+        <div>
+          <h3>Codex compatibility</h3>
+          <span>{[stringField(authority, "runtime") || "disabled", stringField(authority, "auth") || "unavailable"].join(" · ")}</span>
+        </div>
+        <Switch
+          ariaLabel={enabled ? "Disable Codex plugins" : "Enable Codex plugins"}
+          checked={enabled}
+          disabled={busy}
+          label={enabled ? "Enabled" : "Disabled"}
+          onCheckedChange={(nextEnabled) => void mutate(() => write(nextEnabled), { notice: nextEnabled ? "Codex plugin compatibility enabled." : "Codex plugin compatibility disabled." })}
+          size="compact"
+        />
+      </div>
+      <div className="capabilityInlineFields">
+        <input aria-label="Codex binary path" ref={binaryInputRef} onChange={(event) => {
+          binaryRef.current = event.target.value;
+          setBinary(event.target.value);
+        }} placeholder="codex (from PATH)" value={binary} />
+        <button disabled={busy} onClick={() => void mutate(() => write(enabled), { notice: "Codex binary setting saved." })} type="button">
+          <Save size={14} /> Save
+        </button>
+        <button disabled={busy || !enabled} onClick={() => void mutate(() => client.request("plugin/authority/refresh", { scope }), { notice: "Codex compatibility refreshed." })} type="button">
+          <RefreshCw size={14} /> Refresh
+        </button>
+      </div>
+      <dl className="capabilityKeyValues pluginInspectionGrid">
+        <div><dt>Version</dt><dd>{stringField(authority, "version") || "Not resolved"}</dd></div>
+        <div><dt>Profile</dt><dd>{stringField(authority, "compatibilityProfile") || "codex-plugin/8604689e"}</dd></div>
+        <div><dt>Private home</dt><dd>{stringField(authority, "privateHome") || "Unavailable"}</dd></div>
+        <div><dt>Inventory</dt><dd>{boolField(authority, "inventoryReady") ? `Ready · generation ${String(objectValue(authority).generation ?? "-")}` : "Not ready"}</dd></div>
+      </dl>
+      {stringField(authority, "reason") && <div className="capabilityBanner is-error">{stringField(authority, "reason")}</div>}
+    </section>
+  );
+}
+
+function PluginOperationResult({ value }: { value: JsonObject }) {
+  const safeState = stringField(value, "safeState") || "Repair required";
+  const failedStep = stringField(value, "failedStep") || "unknown step";
+  const completedSteps = arrayStrings(value.completedSteps).map((step) => step.replaceAll("_", " "));
+  return (
+    <section aria-label="Plugin operation result" className="capabilityBanner is-error pluginOperationResult" role="status">
+      <strong>Partial install · {safeState}</strong>
+      <span>Failed at {failedStep.replaceAll("_", " ")}. The materialized plugin was not automatically removed.</span>
+      {completedSteps.length > 0 && <small>Completed: {completedSteps.join(" · ")}</small>}
+    </section>
   );
 }
 
@@ -2894,12 +3074,18 @@ function readinessStageLabel(id: string): string {
 
 async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
   if (tab === "agents") {
+    const backendList = await client.request("backend/list", { scope });
     const [agents, teams, runtimeProfiles] = await Promise.all([
       client.request("agent/list", { scope }),
       client.request("team/list", { scope }),
       client.request("runtime/profile/list", { scope })
     ]);
-    return { ...objectValue(agents), teams: objectValue(teams), runtimeProfiles: objectValue(runtimeProfiles) };
+    return {
+      ...objectValue(agents),
+      ...objectValue(backendList),
+      teams: objectValue(teams),
+      runtimeProfiles: objectValue(runtimeProfiles)
+    };
   }
   if (tab === "skills") return client.request("skill/list", { scope });
   if (tab === "plugins") return client.request("plugin/list", { scope });
@@ -2946,6 +3132,44 @@ async function startOAuth(
     if (sessionId) onOAuthSession(sessionId);
     return result;
   });
+}
+
+type CodexConnectTarget = { componentId: string; kind: "app" | "mcp" };
+
+function codexConnectTarget(detail: JsonObject | null): CodexConnectTarget | null {
+  if (!detail) return null;
+  const plugin = Object.keys(objectField(detail, "manifest")).length > 0
+    ? objectField(detail, "manifest")
+    : objectField(detail, "plugin");
+  const app = arrayObjects(plugin.apps)[0];
+  const appId = app ? stringField(app, "id") || stringField(app, "name") : "";
+  if (appId) return { componentId: appId, kind: "app" };
+  const mcp = arrayObjects(plugin.mcpServers)[0];
+  const mcpId = mcp ? stringField(mcp, "name") || stringField(mcp, "id") : "";
+  return mcpId ? { componentId: mcpId, kind: "mcp" } : null;
+}
+
+async function startPluginConnect(
+  client: GatewayClient,
+  scope: GatewayRequestScope,
+  selector: string,
+  target: CodexConnectTarget,
+  onSession: (sessionId: string | null) => void,
+  mutate: (action: () => Promise<unknown>, options?: MutationOptions) => Promise<boolean>
+) {
+  await mutate(async () => {
+    const result = await client.request("plugin/connect/start", {
+      selector,
+      componentId: target.componentId,
+      kind: target.kind,
+      scope
+    });
+    const url = stringField(result, "installUrl") || stringField(result, "authorizationUrl");
+    const sessionId = stringField(result, "sessionId");
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    if (sessionId) onSession(sessionId);
+    return result;
+  }, { notice: "Plugin connection started.", refresh: false });
 }
 
 function skillRowsFromData(data: JsonObject | null): SkillRow[] {
@@ -3117,6 +3341,24 @@ function rowsForTab(tab: CapabilityTab, data: JsonObject | null): CapabilityRow[
   }));
 }
 
+type CapabilityListEntry =
+  | { kind: "row"; row: CapabilityRow }
+  | { kind: "section"; label: string; description?: string };
+
+function capabilityListEntries(tab: CapabilityTab, rows: CapabilityRow[]): CapabilityListEntry[] {
+  if (tab !== "plugins") return rows.map((row) => ({ kind: "row", row }));
+  const installed = rows.filter((row) => boolField(row.raw, "installed") || pluginAuthorityKind(row) !== "codex");
+  const codexCatalog = rows.filter((row) => pluginAuthorityKind(row) === "codex" && !boolField(row.raw, "installed"));
+  return [
+    { kind: "section", label: "Installed" },
+    ...installed.map((row): CapabilityListEntry => ({ kind: "row", row })),
+    { kind: "section", label: "Codex Catalog" },
+    ...codexCatalog.map((row): CapabilityListEntry => ({ kind: "row", row })),
+    { kind: "section", label: "Psychevo Catalog", description: "Use Install plugin to inspect and add native packages." },
+    { kind: "section", label: "Marketplace Management", description: "Codex marketplace sources remain authority-qualified." }
+  ];
+}
+
 function modeEnabled(row: JsonObject, mode: "default" | "plan"): boolean {
   const modes = objectField(row, "modes");
   const modeConfig = objectField(modes, mode);
@@ -3160,8 +3402,18 @@ function PluginComponentStatuses({
   if (statuses.length === 0) {
     return <div className="capabilityEmpty">No declared plugin components</div>;
   }
+  const hasReadyComponent = statuses.some((status) => stringField(status, "readiness") === "ready");
+  const hasLimitedComponent = statuses.some((status) => [
+    "unavailable",
+    "unsupported",
+    "needs_trust",
+    "needs_setup"
+  ].includes(stringField(status, "readiness")));
   return (
     <section className="skillDiagnostics" aria-label="Plugin component compatibility">
+      {hasReadyComponent && hasLimitedComponent && (
+        <div className="capabilityBanner">Partially compatible · usable components remain available</div>
+      )}
       {statuses.map((status) => {
         const component = stringField(status, "component");
         const level = stringField(status, "highestLevel") || stringField(status, "highest_level");

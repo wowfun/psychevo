@@ -18,6 +18,37 @@ import {
 import { App } from "./App";
 
 describe("Workbench layout and workspace panels", () => {
+  it("uses the authoritative initialize display path for the cold Composer", async () => {
+    const canonicalCwd = "/home/tester/Projects/a-very-long-workspace";
+    gatewayMock.scope.cwd = canonicalCwd;
+    gatewayMock.threadBrowser = () => ({ workspaces: [] });
+    gatewayMock.initialize = () => ({
+      server: "test",
+      version: "0.0.0",
+      cwd: canonicalCwd,
+      displayCwd: "~/Projects/a-very-long-workspace",
+      scope: gatewayMock.scope,
+      source: gatewayMock.source,
+      profile: null,
+      capabilities: {}
+    });
+
+    render(<App />);
+
+    const workspace = await screen.findByRole("button", { name: "Workspace" });
+    expect(workspace.textContent).toBe("~/Projects/a-very-long-workspace");
+    expect(workspace.getAttribute("title")).toBe(canonicalCwd);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/draft/open",
+        params: expect.objectContaining({
+          origin: expect.objectContaining({ cwd: canonicalCwd })
+        })
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "settings/read")).toBe(false);
+  });
+
   it("runs Native full fork from the session row and opens the authoritative child", async () => {
     gatewayMock.sessionSummaries = [{
       ...sessionSummary("thread-1", "Full fork source"),
@@ -80,7 +111,7 @@ describe("Workbench layout and workspace panels", () => {
     await waitFor(() => {
       const methods = gatewayMock.requestLog.map((entry) => entry.method);
       const deleteIndex = methods.lastIndexOf("thread/delete");
-      const nextStartIndex = methods.findIndex((method, index) => index > deleteIndex && method === "thread/start");
+      const nextStartIndex = methods.findIndex((method, index) => index > deleteIndex && method === "thread/draft/open");
       expect(deleteIndex).toBeGreaterThan(-1);
       expect(nextStartIndex).toBeGreaterThan(deleteIndex);
     });
@@ -240,8 +271,8 @@ describe("Workbench layout and workspace panels", () => {
     expect((container.querySelector(".workbench") as HTMLElement | null)?.style.getPropertyValue("--right-column-width")).toBe("520px");
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
-        method: "thread/start",
-        params: expect.objectContaining({ scope: gatewayMock.scope })
+        method: "thread/draft/open",
+        params: expect.objectContaining({ origin: gatewayMock.scope })
       });
     });
     expect(container.querySelectorAll(".pevo-sessionRow.is-draft")).toHaveLength(0);
@@ -251,11 +282,68 @@ describe("Workbench layout and workspace panels", () => {
       expect(within(status).getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
     });
     const permission = within(status).getByRole("combobox", { name: "Permission mode" });
-    expect(within(status).getByRole("button", { name: "Workspace" })).toBeTruthy();
-    expect(permission.compareDocumentPosition(
-      within(status).getByRole("button", { name: "Workspace" })
+    const workspace = within(status).getByRole("button", { name: "Workspace" });
+    const branch = within(status).getByRole("button", { name: "Git branch" });
+    expect(permission.tagName).toBe("BUTTON");
+    expect(workspace.compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(branch.compareDocumentPosition(
+      permission
     ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(branch.textContent).toContain(gatewayMock.projectBranch);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "workspace/git/branches"))
+        .toHaveLength(1);
+    });
     expect(container.querySelector(".composerRuntimeControls")?.querySelector('[aria-label="Permission mode"]')).toBeNull();
+  });
+
+  it("retains the committed Composer environment while New Session opens", async () => {
+    Object.assign(gatewayMock.scope.source, {
+      rawId: "workspace-source",
+      rawIdentity: "workspace-source-identity",
+      visibleName: "Workspace source"
+    });
+    render(<App />);
+
+    const environment = await waitFor(() => {
+      const value = {
+        agent: screen.getByRole("button", { name: "Agent target" }).textContent,
+        branch: screen.getByRole("button", { name: "Git branch" }).textContent,
+        permission: screen.getByRole("combobox", { name: "Permission mode" }).textContent,
+        workspace: screen.getByRole("button", { name: "Workspace" }).textContent
+      };
+      expect(value.agent).toContain("Psychevo");
+      expect(value.branch).toContain(gatewayMock.projectBranch);
+      return value;
+    });
+    const draftOpen = deferred<Record<string, unknown>>();
+    const branches = deferred<Record<string, unknown>>();
+    gatewayMock.draftOpen = () => draftOpen.promise;
+    gatewayMock.workspaceGitBranches = () => branches.promise;
+
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open"))
+        .toHaveLength(2);
+    });
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/draft/open").at(-1))
+      .toEqual({
+        method: "thread/draft/open",
+        params: expect.objectContaining({ origin: gatewayMock.scope })
+      });
+    expect({
+      agent: screen.getByRole("button", { name: "Agent target" }).textContent,
+      branch: screen.getByRole("button", { name: "Git branch" }).textContent,
+      permission: screen.getByRole("combobox", { name: "Permission mode" }).textContent,
+      workspace: screen.getByRole("button", { name: "Workspace" }).textContent
+    }).toEqual(environment);
+    expect((screen.getByRole("combobox", { name: "Permission mode" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "Workspace" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: "Git branch" }) as HTMLButtonElement).disabled)
+      .toBe(true);
   });
 
   it("moves the same Composer from center stage to the bottom after the first accepted prompt", async () => {
@@ -304,6 +392,8 @@ describe("Workbench layout and workspace panels", () => {
   });
 
   it("switches draft workspaces and exposes the open workspace action last", async () => {
+    const otherCwd = "/home/tester/Projects/a-very-long-workspace";
+    const otherDisplayPath = "~/Projects/a-very-long-workspace";
     gatewayMock.browserWorkspaces = [
       {
         cwd: "/tmp/project",
@@ -313,8 +403,8 @@ describe("Workbench layout and workspace panels", () => {
         nextCursor: null
       },
       {
-        cwd: "/tmp/other-project",
-        project: { cwd: "/tmp/other-project", label: "other-project", displayPath: "/tmp/other-project" },
+        cwd: otherCwd,
+        project: { cwd: otherCwd, label: "a-very-long-workspace", displayPath: otherDisplayPath },
         sessions: [],
         hiddenCount: 0,
         nextCursor: null
@@ -327,13 +417,16 @@ describe("Workbench layout and workspace panels", () => {
     const menu = await screen.findByRole("menu", { name: "Workspace" });
     const items = within(menu).getAllByRole("menuitem");
     expect(items.at(-1)?.textContent).toContain("Open workspace...");
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "/tmp/other-project" }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: otherDisplayPath }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
-        method: "thread/start",
-        params: expect.objectContaining({ scope: expect.objectContaining({ cwd: "/tmp/other-project" }) })
+        method: "thread/draft/open",
+        params: expect.objectContaining({ origin: expect.objectContaining({ cwd: otherCwd }) })
       });
+      expect(screen.getByRole("button", { name: "Workspace" }).textContent)
+        .toBe(otherDisplayPath);
     });
+    expect(screen.getByRole("button", { name: "Workspace" }).getAttribute("title")).toBe(otherCwd);
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Open workspace..." }));
@@ -344,8 +437,8 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
-        method: "thread/start",
-        params: expect.objectContaining({ scope: expect.objectContaining({ cwd: "/tmp/manual-project" }) })
+        method: "thread/draft/open",
+        params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "/tmp/manual-project" }) })
       });
     });
   });
@@ -371,8 +464,8 @@ describe("Workbench layout and workspace panels", () => {
     expect(await within(dialog).findByText("/tmp/project/existing-workspace")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
     await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
-      method: "thread/start",
-      params: expect.objectContaining({ scope: expect.objectContaining({ cwd: "/tmp/project/existing-workspace" }) })
+      method: "thread/draft/open",
+      params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "/tmp/project/existing-workspace" }) })
     }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));

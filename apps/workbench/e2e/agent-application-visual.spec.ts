@@ -95,7 +95,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
       await runTurn(page, "Prove shared Codex ACP controls", /Codex ACP response.*model=fixture\/second.*effort=high/i);
 
       const codexContext = await threadContext(page, server.cwd, codexThreadId);
-      expect(codexContext.targetId).toBe(codexTarget.targetId);
+      expect(codexContext.selectedTargetId).toBe(codexTarget.targetId);
       expect(controlFact(codexContext, "model")).toMatchObject({
         effectiveSource: "threadPreference",
         effectiveValue: "fixture/second",
@@ -112,19 +112,19 @@ test.describe("Native and ACP Agent application visual contract", () => {
       await selectTarget(page, opencodeTarget);
       await expect(page.getByRole("button", { name: "Agent target" }))
         .toHaveAttribute("title", `${opencodeTarget.agentLabel} · ${opencodeTarget.profileLabel}`);
-      const mode = page.locator('select[aria-label="Mode"]:visible');
+      const mode = page.getByRole("combobox", { name: "Mode" });
       await expect(mode).toHaveCount(1);
-      await expect(mode).toHaveValue("0");
-      expect(await mode.locator("option").allTextContents()).toEqual(["Build", "Plan"]);
+      await expect(mode).toHaveText("Build");
+      await mode.click();
+      expect(await page.getByRole("listbox", { name: "Mode" }).getByRole("option").allTextContents())
+        .toEqual(["Build", "Plan"]);
+      await page.keyboard.press("Escape");
       await mode.hover();
-      const modeHover = await mode.evaluate((element) => {
-        const wrapper = element.closest<HTMLElement>(".statusSelect");
-        return {
-          background: wrapper ? getComputedStyle(wrapper).backgroundColor : "",
-          cursor: getComputedStyle(element).cursor,
-          shadow: wrapper ? getComputedStyle(wrapper).boxShadow : ""
-        };
-      });
+      const modeHover = await mode.evaluate((element) => ({
+        background: getComputedStyle(element).backgroundColor,
+        cursor: getComputedStyle(element).cursor,
+        shadow: getComputedStyle(element).boxShadow
+      }));
       const agentTrigger = page.getByRole("button", { name: "Agent target" });
       await agentTrigger.hover();
       const agentHover = await agentTrigger.evaluate((element) => ({
@@ -136,8 +136,10 @@ test.describe("Native and ACP Agent application visual contract", () => {
       expect(modeHover.cursor).toBe("pointer");
       expect(modeHover.shadow).toBe("none");
       await mode.focus();
-      expect(await mode.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
-      expect(await mode.locator("..").evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("none");
+      expect(await mode.evaluate((element) => ({
+        style: getComputedStyle(element).outlineStyle,
+        width: Number.parseFloat(getComputedStyle(element).outlineWidth)
+      }))).toEqual({ style: "solid", width: 2 });
       await expect(page.locator('select[aria-label="Agent"]:visible')).toHaveCount(0);
       const modelButton = page.getByRole("button", { name: "Model" });
       await expect(modelButton).toBeVisible();
@@ -150,7 +152,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
         /OpenCode ACP response.*model=fixture\/second.*mode=plan/i
       );
       const opencodeContext = await threadContext(page, server.cwd, await currentThreadId(page, server.cwd));
-      expect(opencodeContext.targetId).toBe(opencodeTarget.targetId);
+      expect(opencodeContext.selectedTargetId).toBe(opencodeTarget.targetId);
       const modelPicker = await openModelReasoningPicker(page);
       await expect(modelPicker.getByRole("radiogroup", { name: "Model" })).toBeVisible();
       await expect(modelPicker.getByRole("radiogroup", { name: "Reasoning" })).toBeVisible();
@@ -277,6 +279,11 @@ test.describe("Native and ACP Agent application visual contract", () => {
     const server = await startPevoWeb({ home, live: false, processEnv: fixture.installEnv ?? undefined });
     try {
       await page.goto(server.url);
+      await gatewayRequest(page, "backend/list", { scope: webScope(server.cwd) });
+      // The Composer is intentionally interactive before its draft context is ready.
+      // Reload after priming the backend catalog so this visual assertion observes
+      // the refreshed draft target set instead of the earlier gui_ready frame.
+      await page.reload();
       const missingTarget = targetByIdentity(await targetCatalog(page, server.cwd), "codex", "codex");
       const missingTargetId = missingTarget.targetId;
       expect(missingTarget.ready).toBe(false);
@@ -323,7 +330,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
         server.cwd,
         await currentThreadId(page, server.cwd)
       );
-      expect(recoveredContext.targetId).toBe(missingTargetId);
+      expect(recoveredContext.selectedTargetId).toBe(missingTargetId);
       expect(fixture.managedBinPath).toContain(path.join("codex-acp", "1.1.2", "node_modules", ".bin"));
       writeFileSync(
         path.join(screenshotDir, `managed-codex-target-proof-${testInfo.project.name}.json`),
@@ -333,7 +340,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
           managedCommand: fixture.managedBinPath,
           missingTargetId,
           recoveredTarget,
-          recoveredBoundTargetId: recoveredContext.targetId,
+          recoveredBoundTargetId: recoveredContext.selectedTargetId,
           seal: JSON.parse(readFileSync(fixture.managedSealPath as string, "utf8"))
         }, null, 2)
       );
@@ -383,7 +390,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
       await reopenOnlyPersistedSession(page, isMobile);
       const afterRestart = await threadContext(page, restartedServer.cwd, threadId);
       expect(afterRestart.history).toMatchObject({ owner: "process", fidelity: "partial" });
-      expect(afterRestart.sendability).toMatchObject({ allowed: false, recoveryAction: "thread/start" });
+      expect(afterRestart.sendability).toMatchObject({ allowed: false, recoveryAction: "thread/draft/open" });
       expect(afterRestart.contextRevision).not.toBe(beforeRestart?.contextRevision);
       expect(String((afterRestart.history as Record<string, unknown>).hint))
         .toMatch(/resident Agent session snapshot|process-ephemeral|cannot be resumed/i);
@@ -704,7 +711,8 @@ async function selectControl(page: Page, label: string, optionLabel: string) {
   }
   const control = page.getByRole("combobox", { name: label }).first();
   await expect(control).toBeVisible({ timeout: 30_000 });
-  await control.selectOption({ label: optionLabel });
+  await control.click();
+  await page.getByRole("listbox", { name: label }).getByRole("option", { name: optionLabel }).click();
 }
 
 async function openModelReasoningPicker(page: Page): Promise<Locator> {
@@ -760,10 +768,9 @@ type TargetCatalog = {
 };
 
 async function targetCatalog(page: Page, cwd: string): Promise<TargetCatalog> {
-  // Workbench loads backend administration before refreshing Thread Context.
-  // Wait on the same explicit materialization boundary so catalog assertions
-  // cannot race the managed Codex product shortcut into existence.
-  await gatewayRequest(page, "backend/list", { scope: webScope(cwd) });
+  // Match the Workbench hot path exactly. Backend administration is an
+  // explicit materialization boundary and must not mutate a draft catalog
+  // merely because the Composer opened.
   return gatewayRequest(page, "thread/context/read", {
     threadId: null,
     target: null,

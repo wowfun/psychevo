@@ -192,11 +192,11 @@ describe("Workbench session status observability", () => {
       });
     });
     fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "workspace/files")).toBe(true);
     });
-    const home = await screen.findByRole("region", { name: "Workspace status" });
-    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
     expect(within(files).queryByRole("treeitem", { name: /result\.html/u })).toBeNull();
 
@@ -265,6 +265,8 @@ describe("Workbench session status observability", () => {
         available: true,
         label: "Runtime context",
         status: "reported by runtime",
+        basis: "agent_reported_context",
+        appliesToSessionSeq: null,
         usedTokens: 12_345,
         contextLimit: null,
         percent: null,

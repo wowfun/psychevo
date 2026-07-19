@@ -20,6 +20,31 @@ function completionItem(item: Omit<CompletionItem, "group" | "groupLabel" | "sco
 }
 
 describe("Composer completion mentions", () => {
+  it("keeps ordinary prompt text local instead of requesting completion", async () => {
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      items: [],
+      replacement: null
+    }));
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+        running={false}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Ask Psychevo..."), {
+      target: { value: "ordinary prompt text", selectionStart: 20 }
+    });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    });
+
+    expect(completionProvider).not.toHaveBeenCalled();
+  });
+
   it("submits an accepted skill completion as a structured mention after more typing", async () => {
     const onSubmit = vi.fn();
     const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
@@ -454,6 +479,40 @@ describe("Composer completion mentions", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
+  it("dismisses completion when focus moves to another Composer control", async () => {
+    const completionProvider = vi.fn(async (): Promise<CompletionListResult> => ({
+      replacement: { start: 0, end: 1 },
+      items: [completionItem({
+        id: "skill:review",
+        sigil: "$",
+        label: "$review",
+        insertText: "$review",
+        kind: "skill",
+        detail: "Review skill",
+        sortText: "review",
+        target: null
+      })]
+    }));
+
+    render(
+      <Composer
+        completionProvider={completionProvider}
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "$", selectionStart: 1 } });
+    expect(await screen.findByRole("listbox")).toBeTruthy();
+
+    fireEvent.blur(textarea);
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
   it("scrolls the active completion option into view during keyboard navigation", async () => {
     const scrollIntoView = vi.fn();
     const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -612,7 +671,7 @@ describe("Composer completion mentions", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Add attachments and options" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add images and files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add images and files" }));
 
     expect(onAttach).toHaveBeenCalledTimes(1);
   });

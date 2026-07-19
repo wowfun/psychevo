@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { browser, expect } from "@wdio/globals";
 
@@ -7,10 +7,68 @@ const artifactRoot = path.resolve(
     ?? path.join(process.cwd(), "../../.local/.psychevo-dev/wdio/desktop-native-smoke")
 );
 const screenshotRoot = path.join(artifactRoot, "screenshots");
+const startupRustTracePath = path.join(artifactRoot, "desktop-startup-rust.jsonl");
+const startupManifestPath = path.join(artifactRoot, "desktop-startup-journey.json");
 const providerLive = process.env.PSYCHEVO_DESKTOP_PROVIDER_LIVE === "1";
 const providerToken = process.env.PSYCHEVO_FLOATING_PROVIDER_TOKEN ?? "PEVO_DESKTOP_FLOATING_PROVIDER_LIVE_OK";
 const compactFloatingHeightLimit = 220;
 const compositorFloatingHeightLimit = 280;
+const desktopStartupIds = [
+  "process_start",
+  "window_ready",
+  "managed_gateway_ready",
+  "bridge_connected",
+  "gui_ready",
+  "draft_context_ready"
+] as const;
+const rustStartupIds: DesktopStartupId[] = [
+  "process_start",
+  "window_ready",
+  "managed_gateway_ready",
+  "bridge_connected"
+];
+
+type DesktopStartupId = typeof desktopStartupIds[number];
+
+interface DesktopStartupMark {
+  epochMs: number;
+  id: DesktopStartupId;
+  monotonicOffsetMs: number;
+  sequence: number;
+  sourceClock: "desktop-rust-monotonic" | "workbench-browser-performance";
+}
+
+interface StartupScreenshot {
+  captureEndEpochMs: number;
+  captureLagMs: number;
+  captureStartEpochMs: number;
+  path: string;
+}
+
+interface DesktopStartupCheckpoint {
+  deltaFromPreviousSameClockMs: number | null;
+  epochMs: number | null;
+  id: DesktopStartupId;
+  monotonicOffsetMs: number | null;
+  sequence: number | null;
+  screenshot: StartupScreenshot | null;
+  sourceClock: DesktopStartupMark["sourceClock"] | null;
+  status: "complete" | "missing";
+}
+
+interface DesktopStartupManifest {
+  schemaVersion: 1;
+  run: {
+    outcome: "failed" | "passed";
+    platform: NodeJS.Platform;
+    surface: "desktop-native";
+  };
+  checkpoints: DesktopStartupCheckpoint[];
+  failure: string | null;
+  sourceArtifacts: {
+    rustJsonl: string;
+  };
+}
 
 interface PageVerticalMetrics {
   bodyClientHeight: number;
@@ -64,11 +122,7 @@ describe("Psychevo Desktop native smoke", () => {
 
     await browser.switchToWindow(workbench!.handle);
     await browser.setWindowSize(1280, 420);
-    await browser.waitUntil(async () => (await browser.$('textarea[placeholder="Ask Psychevo..."]')).isDisplayed(), {
-      timeoutMsg: "Workbench composer did not render in the native window"
-    });
-    await assertNoPageVerticalOverflow();
-    await browser.saveScreenshot(path.join(screenshotRoot, "01-workbench-short-window.png"));
+    await captureDesktopStartupJourney();
     await browser.$('button[title="Settings"]').click();
     await browser.waitUntil(async () => (await browser.$(".settingsPage")).isDisplayed(), {
       timeoutMsg: "Workbench Settings did not render in the native window"
@@ -107,6 +161,311 @@ describe("Psychevo Desktop native smoke", () => {
     await browser.saveScreenshot(path.join(screenshotRoot, "03-floating-visual-window.png"));
   });
 });
+
+async function captureDesktopStartupJourney(): Promise<void> {
+  const browserMarks: DesktopStartupMark[] = [];
+  const screenshots = new Map<DesktopStartupId, StartupScreenshot>();
+  try {
+    await browser.waitUntil(async () => {
+      const shell = await browser.$('.appShell[data-gateway-status="connected"]');
+      const composer = await browser.$('textarea[placeholder="Ask Psychevo..."]');
+      return (await shell.isDisplayed()) && (await composer.isDisplayed()) && (await composer.isEnabled());
+    }, {
+      timeoutMsg: "Workbench GUI did not become connected and editable in the native window"
+    });
+    browserMarks.push(await waitForRetainedBrowserTiming("psychevo:gui_ready", "gui_ready", 1));
+    screenshots.set(
+      "gui_ready",
+      await captureStartupScreenshot("00-workbench-gui-ready.png")
+    );
+
+    await browser.waitUntil(async () => (
+      await browser.$('.appShell[data-composer-state="ready"]')
+    ).isDisplayed(), {
+      timeoutMsg: "Workbench draft context did not become ready in the native window"
+    });
+    browserMarks.push(await waitForRetainedBrowserTiming(
+      "psychevo:draft_context_ready",
+      "draft_context_ready",
+      2
+    ));
+    await assertNoPageVerticalOverflow();
+    screenshots.set(
+      "draft_context_ready",
+      await captureStartupScreenshot("01-workbench-short-window.png")
+    );
+
+    const rustMarks = readRustStartupMarks(true);
+    const manifest = createDesktopStartupManifest(rustMarks, browserMarks, screenshots, null);
+    validateDesktopStartupManifest(manifest);
+    writeDesktopStartupManifest(manifest);
+  } catch (error) {
+    const failure = boundedFailure(error);
+    const retainedBrowserMarks = await readAvailableBrowserStartupMarks();
+    const rustMarks = readAvailableRustStartupMarks();
+    const manifest = createDesktopStartupManifest(
+      rustMarks,
+      mergeStartupMarks(browserMarks, retainedBrowserMarks),
+      screenshots,
+      failure
+    );
+    writeDesktopStartupManifest(manifest);
+    throw error;
+  }
+}
+
+async function waitForRetainedBrowserTiming(
+  name: string,
+  id: DesktopStartupId,
+  sequence: number
+): Promise<DesktopStartupMark> {
+  await browser.waitUntil(async () => (
+    await readBrowserPerformanceEntries(name)
+  ).offsets.length > 0, {
+    timeoutMsg: `Workbench did not retain the ${name} browser timing`
+  });
+  const observation = await readBrowserPerformanceEntries(name);
+  if (observation.offsets.length !== 1) {
+    throw new Error(`Workbench retained ${observation.offsets.length} ${name} performance marks; expected exactly one`);
+  }
+  const monotonicOffsetMs = observation.offsets[0]!;
+  return {
+    epochMs: observation.timeOrigin + monotonicOffsetMs,
+    id,
+    monotonicOffsetMs,
+    sequence,
+    sourceClock: "workbench-browser-performance"
+  };
+}
+
+async function readAvailableBrowserStartupMarks(): Promise<DesktopStartupMark[]> {
+  const specs = [
+    { id: "gui_ready" as const, name: "psychevo:gui_ready", sequence: 1 },
+    { id: "draft_context_ready" as const, name: "psychevo:draft_context_ready", sequence: 2 }
+  ];
+  const marks: DesktopStartupMark[] = [];
+  for (const spec of specs) {
+    try {
+      const observation = await readBrowserPerformanceEntries(spec.name);
+      if (observation.offsets.length !== 1) {
+        continue;
+      }
+      const monotonicOffsetMs = observation.offsets[0]!;
+      marks.push({
+        epochMs: observation.timeOrigin + monotonicOffsetMs,
+        id: spec.id,
+        monotonicOffsetMs,
+        sequence: spec.sequence,
+        sourceClock: "workbench-browser-performance"
+      });
+    } catch {
+      // The Workbench window may no longer be reachable. Preserve the other
+      // process evidence and let the manifest show these marks as missing.
+    }
+  }
+  return marks;
+}
+
+async function readBrowserPerformanceEntries(name: string): Promise<{
+  offsets: number[];
+  timeOrigin: number;
+}> {
+  return browser.execute((requestedName) => {
+    const retained = (window as Window & {
+      __psychevoJourneyTiming?: Record<string, { monotonicMs?: unknown }>;
+    }).__psychevoJourneyTiming?.[requestedName];
+    const retainedOffset = typeof retained?.monotonicMs === "number"
+      ? retained.monotonicMs
+      : null;
+    return {
+      offsets: retainedOffset === null
+        ? performance.getEntriesByName(requestedName, "mark").map((entry) => entry.startTime)
+        : [retainedOffset],
+      timeOrigin: performance.timeOrigin
+    };
+  }, name) as Promise<{ offsets: number[]; timeOrigin: number }>;
+}
+
+async function captureStartupScreenshot(filename: string): Promise<StartupScreenshot> {
+  const captureStartEpochMs = Date.now();
+  await browser.saveScreenshot(path.join(screenshotRoot, filename));
+  const captureEndEpochMs = Date.now();
+  return {
+    captureEndEpochMs,
+    captureLagMs: captureEndEpochMs - captureStartEpochMs,
+    captureStartEpochMs,
+    path: path.posix.join("screenshots", filename)
+  };
+}
+
+function readRustStartupMarks(required: boolean): DesktopStartupMark[] {
+  if (!existsSync(startupRustTracePath)) {
+    if (required) {
+      throw new Error(`Desktop Rust startup trace is missing: ${startupRustTracePath}`);
+    }
+    return [];
+  }
+  const raw = readFileSync(startupRustTracePath, "utf8");
+  if (/authorization|baseUrl|bearer|token|wsUrl/i.test(raw)) {
+    throw new Error("Desktop Rust startup trace contains a forbidden endpoint or credential field");
+  }
+  const marks: DesktopStartupMark[] = [];
+  for (const line of raw.split(/\r?\n/).filter((value) => value.trim())) {
+    const parsed = JSON.parse(line) as Partial<DesktopStartupMark> & { schemaVersion?: number };
+    if (
+      parsed.schemaVersion !== 1
+      || !isDesktopStartupId(parsed.id)
+      || !rustStartupIds.includes(parsed.id)
+    ) {
+      throw new Error("Desktop Rust startup trace contains an unsupported record");
+    }
+    if (
+      parsed.sourceClock !== "desktop-rust-monotonic"
+      || typeof parsed.epochMs !== "number"
+      || typeof parsed.monotonicOffsetMs !== "number"
+      || typeof parsed.sequence !== "number"
+    ) {
+      throw new Error(`Desktop Rust startup trace mark ${parsed.id} is incomplete`);
+    }
+    marks.push(parsed as DesktopStartupMark);
+  }
+  const duplicateIds = rustStartupIds.filter((id) => (
+    marks.filter((mark) => mark.id === id).length > 1
+  ));
+  if (duplicateIds.length > 0) {
+    throw new Error(`Desktop Rust startup trace contains duplicate marks: ${duplicateIds.join(", ")}`);
+  }
+  return marks;
+}
+
+function readAvailableRustStartupMarks(): DesktopStartupMark[] {
+  try {
+    return readRustStartupMarks(false);
+  } catch {
+    return [];
+  }
+}
+
+function createDesktopStartupManifest(
+  rustMarks: DesktopStartupMark[],
+  browserMarks: DesktopStartupMark[],
+  screenshots: Map<DesktopStartupId, StartupScreenshot>,
+  failure: string | null
+): DesktopStartupManifest {
+  const marks = mergeStartupMarks(rustMarks, browserMarks);
+  const checkpoints = desktopStartupIds.map((id, index): DesktopStartupCheckpoint => {
+    const mark = marks.find((candidate) => candidate.id === id);
+    if (!mark) {
+      return {
+        deltaFromPreviousSameClockMs: null,
+        epochMs: null,
+        id,
+        monotonicOffsetMs: null,
+        screenshot: screenshots.get(id) ?? null,
+        sequence: null,
+        sourceClock: null,
+        status: "missing"
+      };
+    }
+    const previous = index > 0
+      ? marks.find((candidate) => candidate.id === desktopStartupIds[index - 1])
+      : undefined;
+    return {
+      ...mark,
+      deltaFromPreviousSameClockMs: previous?.sourceClock === mark.sourceClock
+        ? mark.monotonicOffsetMs - previous.monotonicOffsetMs
+        : null,
+      screenshot: screenshots.get(id) ?? null,
+      status: "complete"
+    };
+  });
+  return {
+    schemaVersion: 1,
+    run: {
+      outcome: failure ? "failed" : "passed",
+      platform: process.platform,
+      surface: "desktop-native"
+    },
+    checkpoints,
+    failure,
+    sourceArtifacts: {
+      rustJsonl: path.basename(startupRustTracePath)
+    }
+  };
+}
+
+function validateDesktopStartupManifest(manifest: DesktopStartupManifest): void {
+  const missing = manifest.checkpoints.filter((checkpoint) => checkpoint.status !== "complete");
+  if (missing.length > 0) {
+    throw new Error(`Desktop startup evidence is missing: ${missing.map((checkpoint) => checkpoint.id).join(", ")}`);
+  }
+  const duplicateIds = desktopStartupIds.filter((id) => (
+    manifest.checkpoints.filter((checkpoint) => checkpoint.id === id).length !== 1
+  ));
+  if (duplicateIds.length > 0) {
+    throw new Error(`Desktop startup evidence contains duplicate checkpoints: ${duplicateIds.join(", ")}`);
+  }
+  const rustMarks = manifest.checkpoints.filter((checkpoint) => (
+    checkpoint.sourceClock === "desktop-rust-monotonic"
+  ));
+  const browserMarks = manifest.checkpoints.filter((checkpoint) => (
+    checkpoint.sourceClock === "workbench-browser-performance"
+  ));
+  validateClockOrder(rustMarks, rustStartupIds);
+  validateClockOrder(browserMarks, ["gui_ready", "draft_context_ready"]);
+  for (const id of ["gui_ready", "draft_context_ready"] as const) {
+    const screenshot = manifest.checkpoints.find((checkpoint) => checkpoint.id === id)?.screenshot;
+    if (!screenshot || !existsSync(path.join(artifactRoot, screenshot.path))) {
+      throw new Error(`Desktop startup screenshot is missing for ${id}`);
+    }
+  }
+}
+
+function validateClockOrder(
+  marks: DesktopStartupCheckpoint[],
+  expectedIds: DesktopStartupId[]
+): void {
+  if (marks.map((mark) => mark.id).join("|") !== expectedIds.join("|")) {
+    throw new Error(`Desktop startup clock order is invalid for ${expectedIds.join(", ")}`);
+  }
+  for (let index = 1; index < marks.length; index += 1) {
+    const previous = marks[index - 1]!;
+    const current = marks[index]!;
+    if (
+      previous.monotonicOffsetMs === null
+      || current.monotonicOffsetMs === null
+      || previous.sequence === null
+      || current.sequence === null
+      || current.sequence <= previous.sequence
+      || current.monotonicOffsetMs < previous.monotonicOffsetMs
+    ) {
+      throw new Error(`Desktop startup clock moved backwards at ${current.id}`);
+    }
+  }
+}
+
+function mergeStartupMarks(...groups: DesktopStartupMark[][]): DesktopStartupMark[] {
+  const merged = new Map<DesktopStartupId, DesktopStartupMark>();
+  for (const mark of groups.flat()) {
+    merged.set(mark.id, mark);
+  }
+  return [...merged.values()];
+}
+
+function writeDesktopStartupManifest(manifest: DesktopStartupManifest): void {
+  writeFileSync(startupManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function isDesktopStartupId(value: unknown): value is DesktopStartupId {
+  return typeof value === "string" && desktopStartupIds.includes(value as DesktopStartupId);
+}
+
+function boundedFailure(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/([?&](?:token|key|secret)=)[^&\s]+/gi, "$1[redacted]")
+    .slice(0, 500);
+}
 
 async function assertFloatingProviderLive(): Promise<void> {
   const timings: FloatingProviderLiveTimings = {
@@ -239,7 +598,10 @@ async function invokeDesktopPlatformCapabilities(): Promise<{
       return;
     }
     invoke("desktop_platform_capabilities")
-      .then((value) => done({ ok: true, value }))
+      .then((value) => done({
+        ok: true,
+        value: value as { capture?: unknown; os?: string }
+      }))
       .catch((error) => done({ error: String(error), ok: false, value: {} }));
   });
 }

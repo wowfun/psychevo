@@ -1,6 +1,13 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +21,7 @@ export type DeterministicAcpScenario =
   | "active_next_control"
   | "capability_pack"
   | "channel_controls"
+  | "critical_journey"
   | "filesystem_permission"
   | "history"
   | "interaction_once"
@@ -22,6 +30,52 @@ export type DeterministicAcpScenario =
   | "stream"
   | "terminal_lifecycle"
   | "unknown_delivery";
+
+export type DeterministicJourneyMode = "profile" | "visual";
+
+export type DeterministicJourneyEventName =
+  | "request_received"
+  | "first_output_emitted"
+  | "completion_emitted";
+
+export type DeterministicJourneyRequestPurpose = "async_title" | "main_turn";
+
+export type DeterministicJourneyRequestSelector = {
+  purpose: DeterministicJourneyRequestPurpose;
+  sequence: number;
+};
+
+/**
+ * A deliberately content-free observation emitted by a deterministic runtime
+ * fixture. Epoch and monotonic values describe the fixture's Node clock only;
+ * callers must not subtract them from browser or Rust monotonic clocks.
+ */
+export interface DeterministicJourneyEvent {
+  adapter: "acp" | "native";
+  clock: "node-fixture";
+  epochMs: number;
+  event: DeterministicJourneyEventName;
+  monotonicNs: string;
+  plannedDelayMs: number;
+  purpose: DeterministicJourneyRequestPurpose;
+  purposeSequence: number;
+  requestIndex: number;
+  schemaVersion: 1;
+  sequence: number;
+  sessionId?: string;
+}
+
+export interface DeterministicJourneyControl {
+  mode: DeterministicJourneyMode;
+  events(): DeterministicJourneyEvent[];
+  waitFor(
+    event: DeterministicJourneyEventName,
+    request?: number | DeterministicJourneyRequestSelector,
+    timeoutMs?: number
+  ): Promise<DeterministicJourneyEvent>;
+  releaseFirstOutput(request?: number | DeterministicJourneyRequestSelector): void;
+  releaseCompletion(request?: number | DeterministicJourneyRequestSelector): void;
+}
 
 export interface DeterministicAcpAgentFixture {
   agent: DeterministicAcpAgentKind;
@@ -34,6 +88,7 @@ export interface DeterministicAcpAgentFixture {
   fakeNpmLogPath: string | null;
   fakeNpmPath: string | null;
   installEnv: NodeJS.ProcessEnv | null;
+  journey: DeterministicJourneyControl | null;
   logPath: string;
   managedBinPath: string | null;
   managedRootPath: string | null;
@@ -59,6 +114,7 @@ export interface DeterministicTelegramFixture {
 export interface DeterministicNativeModelFixture {
   baseUrl: string;
   expectedAnswer: string;
+  journey: DeterministicJourneyControl | null;
   requests(): Array<Record<string, unknown>>;
   stop(): Promise<void>;
 }
@@ -81,6 +137,7 @@ export function prepareDeterministicAcpAgent(
     profileLabel?: string;
     runtimeRef?: string;
     agentInfo?: { name: string; title: string };
+    journeyMode?: DeterministicJourneyMode;
   } = {}
 ): DeterministicAcpAgentFixture {
   const fakeRoot = path.join(artifactRoot, "acp-agent-fakes");
@@ -89,6 +146,12 @@ export function prepareDeterministicAcpAgent(
   const scriptPath = path.join(root, "stable-v1-agent.mjs");
   const logPath = path.join(root, "agent.ndjson");
   const statePath = path.join(root, "state.json");
+  const journeyMode = options.journeyMode ?? "profile";
+  const journeyControlRoot = path.join(root, "journey-control");
+  const journeyEventPath = path.join(root, "journey.ndjson");
+  const journey = scenario === "critical_journey"
+    ? createFileJourneyControl(journeyMode, journeyControlRoot, journeyEventPath)
+    : null;
   copyFileSync(STABLE_V1_ACP_AGENT_PATH, scriptPath);
   chmodSync(scriptPath, 0o755);
 
@@ -110,7 +173,19 @@ export function prepareDeterministicAcpAgent(
     url: `http://127.0.0.1:9/${encodeURIComponent(name)}`,
     headers: [{ name: "X-Psychevo-Live", value: "deterministic" }]
   }));
-  const args = [scriptPath, agent, scenario, logPath, statePath, version, agentInfo.name, agentInfo.title];
+  const args = [
+    scriptPath,
+    agent,
+    scenario,
+    logPath,
+    statePath,
+    version,
+    agentInfo.name,
+    agentInfo.title,
+    ...(scenario === "critical_journey"
+      ? [journeyMode, journeyControlRoot, journeyEventPath]
+      : [])
+  ];
   let fakeNpmLogPath: string | null = null;
   let fakeNpmPath: string | null = null;
   let installEnv: NodeJS.ProcessEnv | null = null;
@@ -168,6 +243,7 @@ export function prepareDeterministicAcpAgent(
     fakeNpmLogPath,
     fakeNpmPath,
     installEnv,
+    journey,
     logPath,
     managedBinPath,
     managedRootPath,
@@ -254,9 +330,18 @@ writeFileSync(${JSON.stringify(npmLogPath)}, JSON.stringify({
   };
 }
 
-export async function startDeterministicNativeModel(): Promise<DeterministicNativeModelFixture> {
+export async function startDeterministicNativeModel(
+  options: { journeyMode?: DeterministicJourneyMode } = {}
+): Promise<DeterministicNativeModelFixture> {
   const expectedAnswer = "Native deterministic response";
   const requests: Array<Record<string, unknown>> = [];
+  const purposeCounts: Record<DeterministicJourneyRequestPurpose, number> = {
+    async_title: 0,
+    main_turn: 0
+  };
+  const journeyRuntime = options.journeyMode
+    ? createMemoryJourneyRuntime(options.journeyMode)
+    : null;
   const server = createServer(async (request, response) => {
     if (request.method === "GET" && request.url === "/v1/models") {
       response.writeHead(200, { "content-type": "application/json" });
@@ -268,18 +353,57 @@ export async function startDeterministicNativeModel(): Promise<DeterministicNati
       response.end();
       return;
     }
-    requests.push(await readJsonBody(request));
+    const requestBody = await readJsonBody(request);
+    requests.push(requestBody);
+    const requestIndex = requests.length;
+    const purpose = classifyDeterministicNativeRequestPurpose(requestBody);
+    const purposeSequence = ++purposeCounts[purpose];
+    const requestIdentity = { purpose, purposeSequence, requestIndex };
+    journeyRuntime?.record("request_received", requestIdentity, 0);
     response.writeHead(200, {
       "cache-control": "no-cache",
       "content-type": "text/event-stream",
       connection: "close"
     });
+    if (!journeyRuntime) {
+      response.write(`data: ${JSON.stringify({
+        id: `native-live-${requestIndex}`,
+        model: "default",
+        choices: [{ index: 0, delta: { content: expectedAnswer }, finish_reason: "stop" }]
+      })}\n\n`);
+      response.end("data: [DONE]\n\n");
+      return;
+    }
+
+    response.flushHeaders();
+    const responseText = purpose === "async_title"
+      ? "Deterministic session"
+      : expectedAnswer;
+    const firstOutputDelayMs = await journeyRuntime.waitForRelease("first-output", requestIndex);
+    const splitIndex = Math.ceil(responseText.length / 2);
     response.write(`data: ${JSON.stringify({
-      id: `native-live-${requests.length}`,
+      id: `native-live-${requestIndex}`,
       model: "default",
-      choices: [{ index: 0, delta: { content: expectedAnswer }, finish_reason: "stop" }]
+      choices: [{
+        index: 0,
+        delta: { content: responseText.slice(0, splitIndex) },
+        finish_reason: null
+      }]
+    })}\n\n`);
+    journeyRuntime.record("first_output_emitted", requestIdentity, firstOutputDelayMs);
+
+    const completionDelayMs = await journeyRuntime.waitForRelease("completion", requestIndex);
+    response.write(`data: ${JSON.stringify({
+      id: `native-live-${requestIndex}`,
+      model: "default",
+      choices: [{
+        index: 0,
+        delta: { content: responseText.slice(splitIndex) },
+        finish_reason: "stop"
+      }]
     })}\n\n`);
     response.end("data: [DONE]\n\n");
+    journeyRuntime.record("completion_emitted", requestIdentity, completionDelayMs);
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -289,8 +413,10 @@ export async function startDeterministicNativeModel(): Promise<DeterministicNati
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     expectedAnswer,
+    journey: journeyRuntime?.control ?? null,
     requests: () => [...requests],
     async stop() {
+      journeyRuntime?.releaseAll();
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -402,6 +528,228 @@ function acpBackendAndProfileConfig(
       ""
     ])
   ].join("\n");
+}
+
+type JourneyReleaseStage = "completion" | "first-output";
+
+const DETERMINISTIC_PROFILE_STAGE_DELAY_MS = 32;
+
+type JourneyRequestIdentity = {
+  purpose: DeterministicJourneyRequestPurpose;
+  purposeSequence: number;
+  requestIndex: number;
+};
+
+function createFileJourneyControl(
+  mode: DeterministicJourneyMode,
+  controlRoot: string,
+  eventPath: string
+): DeterministicJourneyControl {
+  mkdirSync(controlRoot, { recursive: true });
+  const events = () => readJourneyEvents(eventPath);
+  return {
+    mode,
+    events,
+    waitFor: (event, request = 1, timeoutMs = 30_000) => (
+      waitForJourneyEvent(events, event, request, timeoutMs)
+    ),
+    releaseFirstOutput(request = 1) {
+      releaseFileJourneyGate(controlRoot, "first-output", resolveRequestIndex(events(), request));
+    },
+    releaseCompletion(request = 1) {
+      releaseFileJourneyGate(controlRoot, "completion", resolveRequestIndex(events(), request));
+    }
+  };
+}
+
+function createMemoryJourneyRuntime(mode: DeterministicJourneyMode): {
+  control: DeterministicJourneyControl;
+  record(
+    event: DeterministicJourneyEventName,
+    request: JourneyRequestIdentity,
+    plannedDelayMs: number
+  ): void;
+  releaseAll(): void;
+  waitForRelease(stage: JourneyReleaseStage, requestIndex: number): Promise<number>;
+} {
+  const recorded: DeterministicJourneyEvent[] = [];
+  const released = new Set<string>();
+  const waiters = new Map<string, Set<() => void>>();
+  let sequence = 0;
+  let allReleased = false;
+  const release = (stage: JourneyReleaseStage, requestIndex: number) => {
+    const key = journeyGateKey(stage, requestIndex);
+    released.add(key);
+    const pending = waiters.get(key);
+    waiters.delete(key);
+    pending?.forEach((resolve) => resolve());
+  };
+  const events = () => recorded.map((event) => ({ ...event }));
+  const control: DeterministicJourneyControl = {
+    mode,
+    events,
+    waitFor: (event, request = 1, timeoutMs = 30_000) => (
+      waitForJourneyEvent(events, event, request, timeoutMs)
+    ),
+    releaseFirstOutput: (request = 1) => release(
+      "first-output",
+      resolveRequestIndex(events(), request)
+    ),
+    releaseCompletion: (request = 1) => release(
+      "completion",
+      resolveRequestIndex(events(), request)
+    )
+  };
+  return {
+    control,
+    record(event, request, plannedDelayMs) {
+      recorded.push({
+        adapter: "native",
+        clock: "node-fixture",
+        epochMs: Date.now(),
+        event,
+        monotonicNs: process.hrtime.bigint().toString(),
+        plannedDelayMs,
+        purpose: request.purpose,
+        purposeSequence: request.purposeSequence,
+        requestIndex: request.requestIndex,
+        schemaVersion: 1,
+        sequence: ++sequence
+      });
+    },
+    releaseAll() {
+      allReleased = true;
+      for (const pending of waiters.values()) pending.forEach((resolve) => resolve());
+      waiters.clear();
+    },
+    waitForRelease(stage, requestIndex) {
+      if (allReleased) return Promise.resolve(0);
+      if (mode === "profile") {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(DETERMINISTIC_PROFILE_STAGE_DELAY_MS), DETERMINISTIC_PROFILE_STAGE_DELAY_MS);
+        });
+      }
+      const key = journeyGateKey(stage, requestIndex);
+      if (released.has(key)) return Promise.resolve(0);
+      return new Promise<number>((resolve) => {
+        const pending = waiters.get(key) ?? new Set<() => void>();
+        pending.add(() => resolve(0));
+        waiters.set(key, pending);
+      });
+    }
+  };
+}
+
+function releaseFileJourneyGate(
+  controlRoot: string,
+  stage: JourneyReleaseStage,
+  requestIndex: number
+): void {
+  writeFileSync(path.join(controlRoot, journeyGateKey(stage, requestIndex)), "released\n");
+}
+
+function journeyGateKey(stage: JourneyReleaseStage, requestIndex: number): string {
+  return `${requestIndex}.${stage}.release`;
+}
+
+function readJourneyEvents(eventPath: string): DeterministicJourneyEvent[] {
+  try {
+    return readFileSync(eventPath, "utf8").split("\n").flatMap((line) => {
+      if (!line.trim()) return [];
+      try {
+        const event = JSON.parse(line) as Partial<DeterministicJourneyEvent>;
+        return isDeterministicJourneyEvent(event) ? [event] : [];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+function isDeterministicJourneyEvent(
+  value: Partial<DeterministicJourneyEvent>
+): value is DeterministicJourneyEvent {
+  return value.schemaVersion === 1
+    && (value.adapter === "acp" || value.adapter === "native")
+    && value.clock === "node-fixture"
+    && typeof value.epochMs === "number"
+    && ["request_received", "first_output_emitted", "completion_emitted"].includes(
+      String(value.event)
+    )
+    && typeof value.monotonicNs === "string"
+    && typeof value.plannedDelayMs === "number"
+    && (value.purpose === "async_title" || value.purpose === "main_turn")
+    && typeof value.purposeSequence === "number"
+    && typeof value.requestIndex === "number"
+    && typeof value.sequence === "number"
+    && (value.sessionId === undefined || typeof value.sessionId === "string");
+}
+
+async function waitForJourneyEvent(
+  readEvents: () => DeterministicJourneyEvent[],
+  eventName: DeterministicJourneyEventName,
+  request: number | DeterministicJourneyRequestSelector,
+  timeoutMs: number
+): Promise<DeterministicJourneyEvent> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const event = readEvents().find((candidate) => (
+      candidate.event === eventName && matchesJourneyRequest(candidate, request)
+    ));
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(
+    `timed out waiting for deterministic journey ${eventName} event for request ${JSON.stringify(request)}`
+  );
+}
+
+function matchesJourneyRequest(
+  event: DeterministicJourneyEvent,
+  request: number | DeterministicJourneyRequestSelector
+): boolean {
+  return typeof request === "number"
+    ? event.requestIndex === request
+    : event.purpose === request.purpose && event.purposeSequence === request.sequence;
+}
+
+function resolveRequestIndex(
+  events: DeterministicJourneyEvent[],
+  request: number | DeterministicJourneyRequestSelector
+): number {
+  if (typeof request === "number") return request;
+  const matched = events.find((event) => (
+    event.event === "request_received" && matchesJourneyRequest(event, request)
+  ));
+  if (!matched) {
+    throw new Error(`deterministic journey request is not yet observable: ${JSON.stringify(request)}`);
+  }
+  return matched.requestIndex;
+}
+
+export function classifyDeterministicNativeRequestPurpose(
+  request: Record<string, unknown>
+): DeterministicJourneyRequestPurpose {
+  const messages = Array.isArray(request.messages) ? request.messages : [];
+  const isTitle = messages.some((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const message = candidate as Record<string, unknown>;
+    return message.role === "system"
+      && messageText(message.content).includes("Generate a concise title for this coding-agent session.");
+  });
+  return isTitle ? "async_title" : "main_turn";
+}
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((part) => {
+    if (!part || typeof part !== "object" || Array.isArray(part)) return [];
+    const text = (part as Record<string, unknown>).text;
+    return typeof text === "string" ? [text] : [];
+  }).join("\n");
 }
 
 function tomlString(value: string): string {

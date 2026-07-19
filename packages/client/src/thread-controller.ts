@@ -11,8 +11,6 @@ import type {
   ThreadControlSetResult,
   ThreadSnapshot,
   TranscriptEntry,
-  TurnErrorPayload,
-  TurnResultPayload,
   TurnStartParams,
   TurnStartResult,
   RunnableTargetInput,
@@ -49,6 +47,7 @@ export interface ThreadTurnStartInput {
   mentions?: GatewayMention[];
   optimisticText: string;
   scope: GatewayRequestScope;
+  startedAtMs?: number;
   threadId?: string | null;
 }
 
@@ -70,17 +69,6 @@ export interface ThreadGatewayEventApplication {
   snapshot: ThreadSnapshot | null;
 }
 
-export interface ThreadTurnResultApplication {
-  applied: boolean;
-  snapshot: ThreadSnapshot | null;
-  threadId: string | null;
-}
-
-export interface ThreadTurnErrorApplication {
-  applied: boolean;
-  message: string;
-}
-
 export class ThreadController {
   private activeThreadId: string | null = null;
   private activeTurnId: string | null = null;
@@ -91,6 +79,8 @@ export class ThreadController {
   private currentSnapshot: ThreadSnapshot | null;
   private currentContext: ThreadContextReadResult | null = null;
   private readonly snapshotListeners = new Set<() => void>();
+  private snapshotBatchDepth = 0;
+  private snapshotNotificationPending = false;
 
   constructor(snapshot: ThreadSnapshot | null = null) {
     this.currentSnapshot = snapshot;
@@ -154,7 +144,7 @@ export class ThreadController {
   ): ThreadControlSetParams {
     const context = this.currentContext;
     const target = this.target(targetId);
-    if (!context || !target || context.targetId !== targetId) {
+    if (!context || !target || context.selectedTargetId !== targetId) {
       throw new Error("The selected Agent target does not match the current Thread Context.");
     }
     if (!control.enabled || control.mutability !== "selectable") {
@@ -276,7 +266,12 @@ export class ThreadController {
     }
     const snapshot = this.currentSnapshot ?? emptyThreadSnapshot(input.scope, input.threadId ?? null);
     const requestedThreadId = input.threadId ?? snapshot.thread?.id ?? null;
-    const prepared = prepareThreadTurn(snapshot, input.optimisticText, requestedThreadId);
+    const prepared = prepareThreadTurn(
+      snapshot,
+      input.optimisticText,
+      requestedThreadId,
+      input.startedAtMs ?? Date.now()
+    );
     this.activeThreadId = requestedThreadId;
     this.activeTurnId = prepared.snapshot.activity.activeTurnId;
     this.acceptingFirstTurn = !requestedThreadId;
@@ -396,69 +391,26 @@ export class ThreadController {
     return { applied: true, completed: false, running: null, snapshot: this.currentSnapshot };
   }
 
-  applyTurnResult(payload: TurnResultPayload): ThreadTurnResultApplication {
-    if (!this.currentSnapshot) {
-      return { applied: false, snapshot: this.currentSnapshot, threadId: null };
+  applyGatewayEvents(events: GatewayEvent[]): ThreadGatewayEventApplication[] {
+    this.snapshotBatchDepth += 1;
+    try {
+      return events.map((event) => this.applyGatewayEvent(event));
+    } finally {
+      this.snapshotBatchDepth -= 1;
+      if (this.snapshotBatchDepth === 0 && this.snapshotNotificationPending) {
+        this.snapshotNotificationPending = false;
+        for (const listener of this.snapshotListeners) listener();
+      }
     }
-    const adoptingFirstTurn = this.acceptingFirstTurn && this.activeThreadId === null;
-    const adoptingPendingThread = this.awaitingTurnStartAcceptance && this.activeThreadId === null;
-    const adoptingPendingTurn = this.awaitingTurnStartAcceptance && this.activeTurnId === null;
-    const threadMatches = adoptingFirstTurn || adoptingPendingThread || payload.thread.id === this.activeThreadId;
-    const turnMatches = this.activeTurnId
-      ? payload.turn.id === this.activeTurnId
-      : adoptingFirstTurn || adoptingPendingTurn;
-    if (!threadMatches || !turnMatches) {
-      return { applied: false, snapshot: this.currentSnapshot, threadId: null };
-    }
-    this.activeThreadId = payload.thread.id;
-    if (this.awaitingTurnStartAcceptance) {
-      this.settledBeforeAcceptanceTurnId = payload.turn.id;
-    }
-    this.settledTurnId = payload.turn.id;
-    this.activeTurnId = null;
-    this.acceptingFirstTurn = false;
-    this.replaceSnapshot(applyTurnResultToThreadSnapshot(this.currentSnapshot, payload));
-    return { applied: true, snapshot: this.currentSnapshot, threadId: payload.thread.id };
-  }
-
-  applyTurnError(payload: TurnErrorPayload): ThreadTurnErrorApplication {
-    const adoptingFirstTurn = this.acceptingFirstTurn && this.activeThreadId === null;
-    const adoptingPendingThread = this.awaitingTurnStartAcceptance && this.activeThreadId === null;
-    const adoptingPendingTurn = this.awaitingTurnStartAcceptance && this.activeTurnId === null;
-    const threadMatches = Boolean(payload.threadId) && (
-      adoptingFirstTurn || adoptingPendingThread || payload.threadId === this.activeThreadId
-    );
-    const turnMatches = Boolean(payload.turnId) && (
-      this.activeTurnId
-        ? payload.turnId === this.activeTurnId
-        : adoptingFirstTurn || adoptingPendingTurn
-    );
-    if (!threadMatches || !turnMatches) {
-      return { applied: false, message: payload.error.message || "Turn failed." };
-    }
-    this.activeThreadId = payload.threadId;
-    this.acceptingFirstTurn = false;
-    if (this.awaitingTurnStartAcceptance) {
-      this.settledBeforeAcceptanceTurnId = payload.turnId;
-    }
-    this.settledTurnId = payload.turnId;
-    this.activeTurnId = null;
-    if (this.currentSnapshot) {
-      this.replaceSnapshot({
-        ...this.currentSnapshot,
-        activity: {
-          ...this.currentSnapshot.activity,
-          activeTurnId: null,
-          running: false
-        }
-      });
-    }
-    return { applied: true, message: payload.error.message || "Turn failed." };
   }
 
   private replaceSnapshot(snapshot: ThreadSnapshot | null): void {
     if (this.currentSnapshot === snapshot) return;
     this.currentSnapshot = snapshot;
+    if (this.snapshotBatchDepth > 0) {
+      this.snapshotNotificationPending = true;
+      return;
+    }
     for (const listener of this.snapshotListeners) listener();
   }
 }
@@ -469,7 +421,7 @@ function admitTurnTarget(
 ): ThreadTurnAdmission {
   const targetId = controls?.targetId.trim() ?? "";
   if (context.binding) {
-    if (targetId && targetId !== context.targetId) {
+    if (targetId && targetId !== context.selectedTargetId) {
       return {
         allowed: false,
         reason: "The requested Agent target conflicts with this Thread binding."
@@ -483,7 +435,7 @@ function admitTurnTarget(
       reason: "Select an Agent target before starting a turn."
     };
   }
-  if (targetId !== context.targetId) {
+  if (targetId !== context.selectedTargetId) {
     return {
       allowed: false,
       reason: "The selected Agent target does not match the current Thread Context."
@@ -539,12 +491,22 @@ export function emptyThreadSnapshot(
 export function prepareThreadTurn(
   snapshot: ThreadSnapshot,
   prompt: string,
-  requestedThreadId: string | null = snapshot.thread?.id ?? null
+  requestedThreadId: string | null = snapshot.thread?.id ?? null,
+  now = Date.now()
 ): ThreadTurnPreparation {
+  const optimistic = appendOptimisticPrompt(snapshot, prompt, now);
   return {
     previousSnapshot: snapshot,
     requestedThreadId,
-    snapshot: appendOptimisticPrompt(snapshot, prompt)
+    snapshot: {
+      ...optimistic,
+      activity: {
+        ...optimistic.activity,
+        activeTurnId: null,
+        running: true,
+        startedAtMs: now
+      }
+    }
   };
 }
 
@@ -637,27 +599,6 @@ export function applyGatewayEventToThreadSnapshot(
   return applyLiveTranscriptEvent(snapshot, event);
 }
 
-export function applyTurnResultToThreadSnapshot(
-  snapshot: ThreadSnapshot,
-  payload: TurnResultPayload
-): ThreadSnapshot {
-  return applyGatewayEventToThreadSnapshot(snapshot, turnCompletedEventFromResult(payload));
-}
-
-export function turnCompletedEventFromResult(payload: TurnResultPayload): GatewayEvent {
-  return {
-    committedEntries: Array.isArray(payload.committedEntries) ? payload.committedEntries : [],
-    threadId: payload.thread.id,
-    turn: payload.turn,
-    turnId: payload.turn.id,
-    type: "turnCompleted"
-  };
-}
-
-export function turnResultThreadId(payload: TurnResultPayload): string {
-  return payload.thread.id;
-}
-
 export function latestAssistantTranscriptText(entries: TranscriptEntry[]): string | null {
   const latest = [...entries].reverse().find((entry) => entry.role === "assistant");
   const text = latest?.blocks
@@ -692,6 +633,9 @@ function belongsToActiveThreadTurn(
   }
   if (event.type === "turnStarted" || event.type === "turnQueued") {
     return threadId ? !eventThreadId || eventThreadId === threadId : acceptingDetachedTurn;
+  }
+  if (event.type === "turnCompleted" && eventTurnId && acceptingDetachedTurn && !threadId) {
+    return true;
   }
   if (isLiveTranscriptObservation(event) && eventTurnId && acceptingDetachedTurn && !threadId) {
     return true;

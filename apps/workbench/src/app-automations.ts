@@ -10,7 +10,6 @@ import {
   type AutomationWriteParams,
   type GatewayRequestScope
 } from "@psychevo/protocol";
-import { LIVE_EVENT_REFRESH_SETTLE_MS } from "./app-live-events";
 import type {
   MainView,
   WorkbenchAutomation
@@ -39,6 +38,8 @@ type UseAutomationsParams = {
   setMobilePanel(value: "history" | "transcript" | "status"): void;
   updateMainView(value: MainView): void;
 };
+
+const AUTOMATION_REFRESH_DELAY_MS = 650;
 
 function upsertAutomation(
   current: WorkbenchAutomation[],
@@ -128,7 +129,7 @@ export function useAutomations(params: UseAutomationsParams) {
     setAutomations((current) => upsertAutomation(current, result.automation));
     window.setTimeout(() => {
       void refreshAutomations(params.client);
-    }, LIVE_EVENT_REFRESH_SETTLE_MS);
+    }, AUTOMATION_REFRESH_DELAY_MS);
   }
 
   async function pauseAutomation(id: string) {

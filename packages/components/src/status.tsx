@@ -60,7 +60,7 @@ export function StatusPanel(props: StatusPanelProps) {
           <div className="pevo-sessionUsageGrid">
             <div>
               <span>Session tokens</span>
-              <strong>{formatCompactNumber(props.usage.reportedTotalTokens)}</strong>
+              <strong>{formatUsageTotal(props.usage.effectiveTotalTokens, props.usage.totalStatus)}</strong>
             </div>
             <div>
               <span>Cache read</span>
@@ -246,6 +246,13 @@ function formatCompactNumber(value: number): string {
     return `${(value / 1_000).toFixed(1)}k`;
   }
   return `${Math.max(0, Math.round(value))}`;
+}
+
+function formatUsageTotal(value: number | null, status: string): string {
+  if (value === null) {
+    return "Unavailable";
+  }
+  return `${status === "partial" ? "≥" : ""}${formatCompactNumber(value)}`;
 }
 
 function formatPercent(value: number | null | undefined): string {

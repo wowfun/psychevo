@@ -1,6 +1,6 @@
 .capabilitiesPage {
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   width: min(1120px, 100%);
   min-height: 0;
   margin: 0 auto;
@@ -270,6 +270,11 @@
   border-color: color-mix(in oklch, var(--pevo-danger), transparent 62%);
 }
 
+.pluginOperationResult {
+  display: grid;
+  gap: 3px;
+}
+
 .runtimeAuthBanner,
 .runtimeAuthActions {
   display: flex;
@@ -323,6 +328,7 @@
 
 .capabilitiesGrid {
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
   gap: 12px;
   min-width: 0;

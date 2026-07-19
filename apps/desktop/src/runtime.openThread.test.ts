@@ -63,7 +63,7 @@ describe("Desktop open-thread runtime wiring", () => {
       scope: expect.objectContaining({ cwd: "/repo" })
     });
     expect(controls).toMatchObject({
-      context: { targetId: "target:review:native" },
+      context: { selectedTargetId: "target:review:native", suggestedTargetId: null },
       controls: {
         targetId: "target:review:native",
         turnOverrides: {},
@@ -89,7 +89,8 @@ describe("Desktop open-thread runtime wiring", () => {
 
 function threadContext() {
   return {
-    targetId: "target:review:native",
+    selectedTargetId: "target:review:native",
+    suggestedTargetId: null,
     runtimeProfileRef: "native",
     selectionState: "bound",
     profiles: [],

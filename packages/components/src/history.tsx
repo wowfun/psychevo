@@ -292,7 +292,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
                             summaryProps={{ "aria-label": "Session actions", title: "Session actions" }}
                           >
                             {({ close }) => (
-                              <div className="pevo-sessionMenuPopover" role="menu" aria-label="Session actions">
+                              <div className="pevo-sessionMenuPopover pevo-controlPopover" role="menu" aria-label="Session actions">
                                 <button
                                   role="menuitem"
                                   title={pinned ? "Unpin" : "Pin"}

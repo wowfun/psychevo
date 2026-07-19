@@ -80,8 +80,11 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByLabel("Runtime control state")).toHaveCount(0);
       const mode = page.getByRole("combobox", { name: "Session Mode" });
       await expect(mode).toBeVisible({ timeout: 30_000 });
-      await expect(mode.locator("option")).toHaveText(["build", "plan"]);
-      await expect(mode).toHaveValue("0");
+      await expect(mode).toHaveText("build");
+      await mode.click();
+      await expect(page.getByRole("listbox", { name: "Session Mode" }).getByRole("option"))
+        .toHaveText(["build", "plan"]);
+      await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: "Model" })).toBeVisible();
       await capture(page, testInfo, "05-opencode-selected");
 
@@ -432,32 +435,6 @@ async function expectChildTextGrowthBeforeParentCompletion(
     intervals: [100, 150, 250, 500, 750, 1000],
     timeout
   }).toBe(true);
-}
-
-async function expectSelectTextFits(select: Locator) {
-  const result = await select.evaluate((element) => {
-    const control = element as HTMLSelectElement;
-    const style = getComputedStyle(control);
-    const selectedText = control.selectedOptions[0]?.textContent?.trim() ?? "";
-    const probe = document.createElement("span");
-    probe.style.font = style.font;
-    probe.style.letterSpacing = style.letterSpacing;
-    probe.style.position = "absolute";
-    probe.style.visibility = "hidden";
-    probe.style.whiteSpace = "nowrap";
-    probe.textContent = selectedText;
-    document.body.appendChild(probe);
-    const textWidth = probe.getBoundingClientRect().width;
-    probe.remove();
-    const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
-    const paddingRight = Number.parseFloat(style.paddingRight) || 0;
-    return {
-      contentWidth: control.clientWidth - paddingLeft - paddingRight,
-      selectedText,
-      textWidth
-    };
-  });
-  expect(result.textWidth).toBeLessThanOrEqual(result.contentWidth + 1);
 }
 
 async function expectElementInsideViewport(page: Page, locator: Locator) {

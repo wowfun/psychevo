@@ -346,6 +346,36 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     params.setWorkspaceFiles(WorkspaceFilesResultSchema.parse(files));
   }
 
+  async function refreshWorkspaceDiff(
+    nextClient = params.client,
+    scope = params.activeScope ?? params.initScope ?? undefined,
+    expectedEpoch: number | null = params.viewEpochRef.current
+  ) {
+    if (!nextClient || !scope) {
+      return;
+    }
+    const diff = await requestOnce(nextClient, "workspace/diff", { scope, path: null });
+    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
+      return;
+    }
+    params.setWorkspaceDiff(WorkspaceDiffResultSchema.parse(diff));
+  }
+
+  async function refreshWorkspaceChanges(
+    nextClient = params.client,
+    scope = params.activeScope ?? params.initScope ?? undefined,
+    expectedEpoch: number | null = params.viewEpochRef.current
+  ) {
+    if (!nextClient || !scope) {
+      return;
+    }
+    const changes = await requestOnce(nextClient, "workspace/changes", { scope });
+    if (!shouldApplyAsyncWorkspaceResult(scope, expectedEpoch)) {
+      return;
+    }
+    params.setWorkspaceChanges(WorkspaceChangesResultSchema.parse(changes));
+  }
+
   async function refreshObservability(
     nextClient = params.client,
     scope = params.activeScope ?? params.initScope ?? undefined,
@@ -443,12 +473,13 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     params.setRuntimeOptionsError(null);
   }
 
-  async function runAction(action: () => Promise<void>) {
+  async function runAction<T>(action: () => Promise<T>): Promise<T | undefined> {
     try {
       params.setError(null);
-      await action();
+      return await action();
     } catch (err) {
       params.setError(err instanceof Error ? err.message : String(err));
+      return undefined;
     }
   }
 
@@ -466,6 +497,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
     refreshSnapshot,
     refreshSettings,
     refreshTrace,
+    refreshWorkspaceChanges,
+    refreshWorkspaceDiff,
     refreshWorkspaceFiles,
     refreshWorkspaceSurface,
     runAction
@@ -490,6 +523,7 @@ export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionS
 export function workspacesFromThreadBrowser(result: ThreadBrowserResult): SessionBrowserWorkspaceState[] {
   return result.workspaces.map((workspace) => ({
     cwd: workspace.cwd,
+    displayPath: workspace.project.displayPath,
     hiddenCount: workspace.hiddenCount,
     nextCursor: workspace.nextCursor
   }));

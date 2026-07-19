@@ -42,7 +42,7 @@ export function createVisualFloatingRuntime(): FloatingRuntime {
       return {
         context,
         controls: {
-          targetId: context.targetId,
+          targetId: context.selectedTargetId ?? "target:visual-native",
           turnOverrides: {
             mode: "default",
             model: "visual/model",
@@ -57,7 +57,8 @@ export function createVisualFloatingRuntime(): FloatingRuntime {
 
 function visualThreadContext(): ThreadContextReadResult {
   return {
-    targetId: "target:visual-native",
+    selectedTargetId: "target:visual-native",
+    suggestedTargetId: null,
     runtimeProfileRef: "native",
     selectionState: "prospective",
     profiles: [],
@@ -143,14 +144,19 @@ class VisualGatewayTransport implements GatewayTransport {
       method: string;
       params?: Record<string, unknown>;
     };
-    if (message.method === "thread/start") {
+    if (message.method === "thread/draft/open") {
+      const origin = message.params?.origin;
       this.respond(message.id, {
-        activity: { activeTurnId: null, queuedTurns: 0, running: false },
-        entries: [],
-        pendingActions: [],
-        scope: message.params?.scope,
-        source: (message.params?.scope as { source?: unknown } | undefined)?.source ?? null,
-        thread: null
+        snapshot: {
+          activity: { activeTurnId: null, queuedTurns: 0, running: false },
+          entries: [],
+          pendingActions: [],
+          scope: origin,
+          source: (origin as { source?: unknown } | undefined)?.source ?? null,
+          thread: null
+        },
+        context: visualThreadContext(),
+        problem: null
       });
       return;
     }
@@ -203,8 +209,11 @@ class VisualGatewayTransport implements GatewayTransport {
       window.setTimeout(() => {
         this.emit({
           jsonrpc: "2.0",
-          method: "turn/result",
+          method: "gateway/event",
           params: {
+            type: "turnCompleted",
+            threadId: requestedThreadId,
+            turnId,
             committedEntries: [transcriptTextEntry({
               body: finalAnswer,
               id: `assistant:${turnId}`,
@@ -213,14 +222,6 @@ class VisualGatewayTransport implements GatewayTransport {
               turnId,
               updatedAtMs: completedAtMs
             })],
-            result: {
-              finalAnswer
-            },
-            thread: {
-              backend: { kind: "native", sessionHandle: requestedThreadId, runtimeRef: "native" },
-              id: requestedThreadId,
-              sourceKey: null
-            },
             turn: {
               completedAtMs,
               error: null,

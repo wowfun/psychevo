@@ -7,7 +7,7 @@ import {
 } from "@psychevo/client";
 import { TranscriptPanel } from "@psychevo/components";
 import type { HostCapabilityResult } from "@psychevo/host";
-import type { GatewayEvent, GatewayRequestScope, ThreadContextReadResult, ThreadSnapshot, TurnErrorPayload, TurnResultPayload } from "@psychevo/protocol";
+import type { GatewayEvent, GatewayRequestScope, ThreadContextReadResult, ThreadSnapshot } from "@psychevo/protocol";
 import { ArrowUp, Camera, FilePlus2, Languages, Maximize2, MessageCircle, Minus, RefreshCcw, Sparkles, Square, TextCursorInput, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -148,24 +148,6 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
       return;
     }
     return client.subscribe((notification) => {
-      if (notification.method === "turn/result") {
-        const payload = notification.params as TurnResultPayload;
-        const applied = threadControllerRef.current.applyTurnResult(payload);
-        if (!applied.applied) {
-          return;
-        }
-        setTranscript(applied.snapshot);
-        dispatch({ type: "completed" });
-        return;
-      }
-      if (notification.method === "turn/error") {
-        const payload = notification.params as TurnErrorPayload;
-        const applied = threadControllerRef.current.applyTurnError(payload);
-        if (applied.applied) {
-          dispatch({ type: "error", message: applied.message || "Floating turn failed." });
-        }
-        return;
-      }
       if (notification.method !== "gateway/event") {
         return;
       }
@@ -510,7 +492,10 @@ async function floatingTurnPreparation(
   if (!threadId) {
     const discoveryController = new ThreadController();
     discoveryController.setContext(discovery);
-    const target = discoveryController.contextReadTarget(discovery.targetId);
+    const discoveryTargetId = discovery.selectedTargetId ?? discovery.suggestedTargetId;
+    const target = discoveryTargetId
+      ? discoveryController.contextReadTarget(discoveryTargetId)
+      : null;
     if (!target) {
       throw new Error("Gateway did not provide a canonical Floating Agent target.");
     }
@@ -524,7 +509,7 @@ async function floatingTurnPreparation(
   controller.setContext(context);
   return {
     context,
-    controls: controller.turnControls(context.targetId, {})
+    controls: controller.turnControls(context.selectedTargetId ?? "", {})
   };
 }
 

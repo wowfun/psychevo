@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
 import {
   parseThreadSnapshot,
   type GatewayClient,
@@ -10,8 +10,6 @@ import {
   InitializeResultSchema,
   TerminalExitedPayloadSchema,
   TerminalOutputPayloadSchema,
-  TurnErrorNotificationSchema,
-  TurnResultNotificationSchema,
   type GatewayEvent,
   type GatewayRequestScope,
   type InitializeResult,
@@ -46,6 +44,11 @@ import {
   createHistoryDraftSession,
   type PendingDetachedShell
 } from "./viewGuard";
+import { parseThreadContext } from "./runtime-context";
+import {
+  type ComposerSessionCoordinator,
+  type DraftOpenToken
+} from "./composer-session-coordinator";
 
 const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
 
@@ -72,6 +75,12 @@ type RefreshWorkspaceSurface = (
   expectedEpoch?: number | null
 ) => Promise<void>;
 
+type RefreshWorkspaceFacet = (
+  runtimeClient?: GatewayClient | null,
+  scope?: GatewayRequestScope,
+  expectedEpoch?: number | null
+) => Promise<void>;
+
 type AppEffectsParams = {
   activeCommandOverlay: CommandOverlay | null;
   activeRightTabKind: RightWorkspaceTab["kind"] | null;
@@ -79,6 +88,7 @@ type AppEffectsParams = {
   activeScope: GatewayRequestScope | null;
   appearance: Appearance;
   client: GatewayClient | null;
+  composerSessionCoordinator: ComposerSessionCoordinator;
   createRuntime: WorkbenchRuntimeFactory;
   commandContextKey: string;
   commandContextKeyRef: MutableRefObject<string | null>;
@@ -95,6 +105,7 @@ type AppEffectsParams = {
   mobilePanel: "history" | "transcript" | "status";
   pinnedSessionIds: string[];
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
+  firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   rightTabs: RightWorkspaceTab[];
   rightWorkspaceOpen: boolean;
   rightWidthPx: number;
@@ -112,19 +123,22 @@ type AppEffectsParams = {
   viewEpochRef: MutableRefObject<number>;
   adoptSnapshotScope(runtimeClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   applyGatewayEvent(event: GatewayEvent): void;
+  patchSessionEvent(event: GatewayEvent): void;
   beginExplicitViewSwitch(): number;
   clearCommandTransientUi(): void;
   pushDebugEvent(method: string, payload: unknown): void;
-  refreshAgentCatalog(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
   refreshAgentSurface(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope): Promise<void>;
   refreshCommands(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope, threadId?: string | null): Promise<void>;
   refreshHistory(runtimeClient?: GatewayClient | null, includeArchived?: boolean, cwd?: string | null): Promise<SessionSummary[]>;
+  refreshObservability(runtimeClient?: GatewayClient | null, scope?: GatewayRequestScope, threadId?: string | null, expectedEpoch?: number | null): Promise<void>;
   refreshRuntimeContext(): void;
   refreshSettings(runtimeClient?: GatewayClient | null, cwd?: string, threadId?: string | null): Promise<void>;
   refreshSnapshot: RefreshSnapshot;
   refreshTrace(runtimeClient?: GatewayClient | null, threadId?: string | null): Promise<void>;
+  refreshWorkspaceChanges: RefreshWorkspaceFacet;
+  refreshWorkspaceDiff: RefreshWorkspaceFacet;
+  refreshWorkspaceFiles: RefreshWorkspaceFacet;
   refreshWorkspaceSurface: RefreshWorkspaceSurface;
-  scheduleSnapshotRefreshAfterLiveSettle(runtimeClient: GatewayClient, threadId: string | null, epoch?: number): void;
   setActiveRightTabId(value: string | null): void;
   setActiveScope(value: GatewayRequestScope | null): void;
   setClient(value: GatewayClient | null): void;
@@ -140,6 +154,12 @@ type AppEffectsParams = {
   setPinnedSessionIds(value: string[]): void;
   setRightCollapsed(value: boolean): void;
   setRightTabs(updater: (current: RightWorkspaceTab[]) => RightWorkspaceTab[]): void;
+  setRuntimeContext(value: import("@psychevo/protocol").ThreadContextReadResult | null): void;
+  setRuntimeContextTargetId(value: string): void;
+  setRuntimeOptionsError(value: string | null): void;
+  setRuntimeOptionsLoading(value: boolean): void;
+  setWorkspaceBranch(value: string | null): void;
+  setSelectedTargetId(value: string): void;
   setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)): void;
   setStatus(value: string): void;
   setStartupStable(value: boolean): void;
@@ -149,6 +169,38 @@ type AppEffectsParams = {
 };
 
 export function useWorkbenchEffects(params: AppEffectsParams) {
+  const latestParamsRef = useRef(params);
+  latestParamsRef.current = params;
+
+  function refreshVisibleWorkspace(
+    current: AppEffectsParams,
+    runtimeClient: GatewayClient,
+    scope: GatewayRequestScope,
+    threadId: string | null,
+    epoch = current.viewEpochRef.current
+  ): void {
+    if (!current.rightWorkspaceOpen) {
+      return;
+    }
+    if (current.activeRightTabKind === "files") {
+      void current.refreshWorkspaceFiles(runtimeClient, scope, epoch);
+      return;
+    }
+    if (current.activeRightTabKind === "review") {
+      void Promise.all([
+        current.refreshWorkspaceDiff(runtimeClient, scope, epoch),
+        current.refreshWorkspaceChanges(runtimeClient, scope, epoch)
+      ]);
+      return;
+    }
+    if (current.activeRightTabId === null) {
+      void current.refreshWorkspaceDiff(runtimeClient, scope, epoch);
+      if (threadId) {
+        void current.refreshObservability(runtimeClient, scope, threadId, epoch);
+      }
+    }
+  }
+
   useEffect(() => {
     if (params.debugEnabled) {
       return;
@@ -276,6 +328,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
 
     function attachRuntime(runtimeClient: GatewayClient) {
       runtimeClient.subscribe((notification) => {
+      const params = latestParamsRef.current;
       params.pushDebugEvent(notification.method, notification.params);
       if (notification.method === "terminal/output") {
         const parsed = TerminalOutputPayloadSchema.safeParse(notification.params);
@@ -300,36 +353,32 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         if (parsed.success) {
           const event = parsed.data;
           params.applyGatewayEvent(event);
-          if (event.type === "turnStarted" && event.threadId) {
-            void params.refreshHistory(runtimeClient);
-          }
-          if (event.type === "activityChanged" || event.type === "titleChanged") {
-            void params.refreshHistory(runtimeClient);
-          }
+          params.patchSessionEvent(event);
           if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
+            if (event.turn.error?.message) {
+              params.setError(event.turn.error.message);
+            }
             const threadId = event.threadId ?? event.turn.threadId;
             if (!threadId) {
               return;
             }
-            if (threadId === params.selectedThreadIdRef.current) {
+            const context = params.threadController.context();
+            const refreshFirstTurnContext = params.firstTurnContextRefreshPendingRef.current;
+            if (refreshFirstTurnContext) {
+              params.firstTurnContextRefreshPendingRef.current = false;
+            }
+            const refreshAcpContext = context?.binding?.backendKind === "acp"
+              || context?.history.owner === "agent";
+            if (
+              threadId === params.selectedThreadIdRef.current
+              && (refreshFirstTurnContext || refreshAcpContext)
+            ) {
               params.refreshRuntimeContext();
             }
-            const eventEpoch = params.viewEpochRef.current;
-            params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, eventEpoch);
-            void params.refreshHistory(runtimeClient);
             const scope = params.scopeRef.current;
             if (scope) {
-              void params.refreshWorkspaceSurface(runtimeClient, scope, threadId);
+              refreshVisibleWorkspace(params, runtimeClient, scope, threadId);
             }
-            for (const delay of [1_500, 3_000, 7_500, 15_000, 30_000, 60_000, 120_000]) {
-              window.setTimeout(() => {
-                void params.refreshSnapshot(runtimeClient, threadId, undefined, true, eventEpoch);
-                void params.refreshHistory(runtimeClient);
-              }, delay);
-            }
-            window.setTimeout(() => {
-              void params.refreshSnapshot(runtimeClient, threadId, undefined, true, eventEpoch);
-            }, 750);
           }
           if (["actionRequested", "actionUpdated", "actionResolved", "actionCancelled"].includes(event.type)) {
             const threadId = "action" in event && event.action.threadId
@@ -372,56 +421,11 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         }
         void params.refreshHistory(runtimeClient);
       }
-      if (notification.method === "turn/result") {
-        const parsed = TurnResultNotificationSchema.safeParse(notification.params);
-        const record = asRecord(notification.params);
-        const thread = asRecord(record.thread);
-        const threadId = parsed.success
-          ? parsed.data.thread.id
-          : optionalStringField(thread.id);
-        if (parsed.success) {
-          const application = params.threadController.applyTurnResult(parsed.data);
-          if (application.applied) {
-            params.selectedThreadIdRef.current = application.threadId;
-          }
-        }
-        if (threadId) {
-          params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, params.viewEpochRef.current);
-          const scope = params.scopeRef.current;
-          if (scope) {
-            void params.refreshWorkspaceSurface(runtimeClient, scope, threadId);
-          }
-        } else {
-          void params.refreshSnapshot(runtimeClient);
-        }
-        void params.refreshHistory(runtimeClient);
-      }
-      if (notification.method === "turn/error") {
-        const record = asRecord(notification.params);
-        const parsed = TurnErrorNotificationSchema.safeParse(notification.params);
-        const application = parsed.success
-          ? params.threadController.applyTurnError(parsed.data)
-          : null;
-        if (application?.applied) {
-          params.setError(application.message);
-        } else if (!parsed.success) {
-          const error = asRecord(record.error);
-          params.setError(optionalStringField(error.message) ?? optionalStringField(record.message) ?? "Turn failed");
-        }
-        const threadId = parsed.success
-          ? parsed.data.threadId
-          : optionalStringField(record.threadId);
-        if (threadId) {
-          params.scheduleSnapshotRefreshAfterLiveSettle(runtimeClient, threadId, params.viewEpochRef.current);
-        } else {
-          void params.refreshSnapshot(runtimeClient);
-        }
-        void params.refreshHistory(runtimeClient);
-      }
       });
     }
 
     async function boot() {
+      let startupDraftOpenToken: DraftOpenToken | null = null;
       try {
         const runtime = await params.createRuntime();
         if (!alive) {
@@ -463,13 +467,26 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         const startupEpoch = params.viewEpochRef.current;
         const initializeRequest = runtime.client.request("initialize")
           .then((value) => InitializeResultSchema.parse(value));
-        const sessionsRequest = params.refreshHistory(runtime.client).then((sessions) => {
-          if (alive) {
-            params.setHistoryLoading(false);
-          }
-          return sessions;
-        });
-        const [initialize, nextSessions] = await Promise.all([initializeRequest, sessionsRequest]);
+        const sessionsRequest = params.refreshHistory(runtime.client)
+          .then((sessions) => {
+            if (alive) {
+              params.setHistoryLoading(false);
+            }
+            return sessions;
+          })
+          .catch((error) => {
+            if (alive) {
+              params.setHistoryLoading(false);
+              params.pushDebugEvent("thread/browser/startup-error", {
+                message: error instanceof Error ? error.message : String(error)
+              });
+            }
+            return [];
+          });
+        const initialize = await initializeRequest;
+        const nextSessions = initialize.scope.cwd.trim()
+          ? []
+          : await sessionsRequest;
         if (!alive) {
           return;
         }
@@ -480,23 +497,74 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         params.setActiveScope(initialize.scope);
         params.scopeRef.current = initialize.scope;
         const startupScope = startupDraftScope(initialize.scope, nextSessions, runtime.fallbackCwd);
-        const nextSnapshot = parseThreadSnapshot(await runtime.client.request("thread/start", { scope: startupScope }));
+        startupDraftOpenToken = params.composerSessionCoordinator.beginDraftOpen(startupEpoch);
+        const draftOpenRequest = runtime.client.request("thread/draft/open", {
+          origin: startupScope,
+          targetIntent: { kind: "default" }
+        });
+        const branchRequest = runtime.client.request("workspace/git/branches", {
+          scope: startupScope
+        }).then((result) => result.current?.trim() || null).catch((error) => {
+          params.pushDebugEvent("workspace/git/branches/startup-error", {
+            message: error instanceof Error ? error.message : String(error)
+          });
+          return null;
+        });
+        params.selectedThreadIdRef.current = null;
+        params.setSnapshot(normalizeSnapshot({
+          source: initialize.source,
+          scope: startupScope,
+          thread: null,
+          history: params.snapshot.history,
+          entries: [],
+          activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+          pendingActions: []
+        }));
+        params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));
+        params.setRuntimeOptionsLoading(true);
+        params.setRuntimeOptionsError(null);
+        const [opened, workspaceBranch] = await Promise.all([draftOpenRequest, branchRequest]);
+        const nextSnapshot = parseThreadSnapshot(opened.snapshot);
+        const nextContext = parseThreadContext(opened.context);
         if (!alive) {
           return;
         }
         if (params.viewEpochRef.current === startupEpoch) {
           const normalized = normalizeSnapshot(nextSnapshot);
+          await params.adoptSnapshotScope(runtime.client, nextSnapshot);
+          if (!alive || params.viewEpochRef.current !== startupEpoch) {
+            return;
+          }
           params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
           params.setSnapshot(normalized);
           params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));
+          params.threadController.setContext(nextContext);
+          params.setRuntimeContext(nextContext);
+          params.setWorkspaceBranch(workspaceBranch);
+          params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
+          params.setSelectedTargetId(
+            nextContext.selectedTargetId
+            ?? nextContext.suggestedTargetId
+            ?? ""
+          );
+          params.setRuntimeOptionsError(opened.problem?.message ?? null);
           if (params.mainViewRef.current === "transcript") {
             params.updateMainView("transcript");
           }
-          await params.adoptSnapshotScope(runtime.client, nextSnapshot);
           params.setStartupStable(true);
+          if (opened.problem) {
+            params.composerSessionCoordinator.failDraftOpen(startupDraftOpenToken);
+          } else {
+            params.composerSessionCoordinator.completeDraftOpen(startupDraftOpenToken);
+          }
         }
+        params.setRuntimeOptionsLoading(false);
       } catch (err) {
+        if (startupDraftOpenToken) {
+          params.composerSessionCoordinator.failDraftOpen(startupDraftOpenToken);
+        }
         if (alive) {
+          params.setRuntimeOptionsLoading(false);
           params.setHistoryLoading(false);
           params.setStatus("error");
           params.setError(err instanceof Error ? err.message : String(err));
@@ -526,20 +594,26 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     : "";
 
   useEffect(() => {
-    if (params.startupStable && params.client && params.activeScope && !params.runtimeTargetTransitionRef.current) {
+    if (
+      params.startupStable
+      && params.client
+      && params.activeScope
+      && params.mainView === "settings"
+      && !params.runtimeTargetTransitionRef.current
+    ) {
       void params.refreshSettings(params.client, params.activeScope.cwd, params.currentThreadId ?? null);
     }
-  }, [params.startupStable, params.client, params.activeScope?.cwd, params.currentThreadId]);
+  }, [params.startupStable, params.client, params.activeScope?.cwd, params.currentThreadId, params.mainView]);
 
   useEffect(() => {
     if (
       params.startupStable
       && params.client
       && params.activeScope
-      && (params.rightWorkspaceOpen || params.activeRightTabKind)
+      && params.rightWorkspaceOpen
       && !params.runtimeTargetTransitionRef.current
     ) {
-      void params.refreshWorkspaceSurface(params.client, params.activeScope, params.currentThreadId ?? null);
+      refreshVisibleWorkspace(params, params.client, params.activeScope, params.currentThreadId ?? null);
     }
   }, [
     params.startupStable,
@@ -549,12 +623,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     params.activeRightTabKind,
     params.rightWorkspaceOpen
   ]);
-
-  useEffect(() => {
-    if (params.startupStable && params.client && params.activeScope && params.mainView === "capabilities" && !params.runtimeTargetTransitionRef.current) {
-      void params.refreshAgentCatalog(params.client, params.activeScope);
-    }
-  }, [params.startupStable, params.client, params.activeScope?.cwd, params.mainView]);
 
   useEffect(() => {
     if (params.startupStable && params.client && params.activeScope && params.activeCommandOverlay && !params.runtimeTargetTransitionRef.current) {

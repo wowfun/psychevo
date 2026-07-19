@@ -44,7 +44,7 @@ function UsageWindowCard({ window }: { window: WorkbenchUsageStats["windows"][nu
     <section className="usageWindowCard" aria-label={window.label}>
       <header>
         <span>{window.label}</span>
-        <strong>{formatCompactNumber(window.reportedTotalTokens)}</strong>
+        <strong>{formatUsageTotal(window.effectiveTotalTokens, window.totalStatus)}</strong>
       </header>
       <div className="usageWindowMetrics">
         <div>
@@ -115,14 +115,14 @@ function UsageActivityHeatmap({ activity }: { activity: WorkbenchUsageStats["act
             style={{ gridTemplateColumns: `repeat(${weekCount}, 11px)` }}
           >
             {cells.map((day, index) => {
-              const level = day ? heatmapLevel(day.reportedTotalTokens, positiveTokenScale) : 0;
+              const level = day ? heatmapLevel(day.effectiveTotalTokens, positiveTokenScale) : 0;
               return (
                 <span
-                  aria-label={day ? `${day.date}: ${day.reportedTotalTokens} tokens` : undefined}
+                  aria-label={day ? `${day.date}: ${formatUsageTotalWithUnit(day.effectiveTotalTokens, day.totalStatus)}` : undefined}
                   className={day ? "usageHeatmapCell" : "usageHeatmapCell is-empty"}
                   data-level={level}
                   key={day?.date ?? `pad-${index}`}
-                  title={day ? `${day.date}: ${formatCompactNumber(day.reportedTotalTokens)} tokens` : undefined}
+                  title={day ? `${day.date}: ${formatUsageTotalWithUnit(day.effectiveTotalTokens, day.totalStatus)}` : undefined}
                 />
               );
             })}
@@ -135,7 +135,7 @@ function UsageActivityHeatmap({ activity }: { activity: WorkbenchUsageStats["act
 
 function heatmapPositiveTokenScale(days: WorkbenchUsageStats["activity"]["days"]): number[] {
   return [...new Set(days
-    .map((day) => day.reportedTotalTokens)
+    .map((day) => day.effectiveTotalTokens)
     .filter((tokens) => tokens > 0))]
     .sort((left, right) => left - right);
 }
@@ -185,6 +185,18 @@ function formatUsageCost(window: WorkbenchUsageStats["windows"][number]): string
 
 function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, notation: "compact" }).format(value);
+}
+
+function formatUsageTotal(value: number, status: string): string {
+  if (status === "unavailable") {
+    return "Unavailable";
+  }
+  return `${status === "partial" ? "≥" : ""}${formatCompactNumber(value)}`;
+}
+
+function formatUsageTotalWithUnit(value: number, status: string): string {
+  const total = formatUsageTotal(value, status);
+  return status === "unavailable" ? total : `${total} tokens`;
 }
 
 function formatPercent(value: number | null): string {

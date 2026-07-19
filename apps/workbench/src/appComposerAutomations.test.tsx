@@ -30,7 +30,7 @@ describe("Workbench automations", () => {
     fireEvent.click(screen.getByRole("button", { name: "New Session" }));
 
     await waitFor(() => {
-      expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/start")).toBe(true);
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/draft/open")).toBe(true);
     });
     expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Automations" })).toBeNull();

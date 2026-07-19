@@ -103,7 +103,8 @@ function snapshot(entries: TranscriptEntry[]): ThreadSnapshot {
 
 function context(steerEnabled: boolean): ThreadContextReadResult {
   return {
-    targetId: "target:native",
+    selectedTargetId: "target:native",
+    suggestedTargetId: null,
     runtimeProfileRef: "native",
     selectionState: "bound",
     profiles: [],

@@ -67,16 +67,178 @@ describe("useGatewayLiveEvents", () => {
     expect(next.entries).toEqual([]);
     expect(next.thread?.id).toBe("thread-shared");
   });
+
+  it("records paced queue depth at enqueue and application boundaries", () => {
+    const diagnostics = captureJourneyDiagnostics();
+    const frames: FrameRequestCallback[] = [];
+    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    try {
+      const controller = new ThreadController(runningSnapshot());
+      const { result } = renderLiveEvents(controller);
+      act(() => result.current.applyGatewayEvent({
+        entry: entry({
+          body: "",
+          id: "message:partial",
+          threadId: "thread-shared",
+          turnId: "turn-floating"
+        }),
+        turnId: "turn-floating",
+        type: "entryUpdated"
+      }));
+
+      expect(diagnostics.values()).toContainEqual({
+        data: { eventType: "entryUpdated", queueDepth: 1, turnId: "turn-floating" },
+        id: "frontend_queue_enqueued"
+      });
+      act(() => frames.shift()?.(0));
+      expect(diagnostics.values()).toContainEqual({
+        data: { eventType: "entryUpdated", queueDepth: 0, turnId: "turn-floating" },
+        id: "frontend_queue_applied"
+      });
+    } finally {
+      requestAnimationFrame.mockRestore();
+      diagnostics.stop();
+    }
+  });
+
+  it("applies the first non-empty assistant text without waiting for a frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    try {
+      const controller = new ThreadController(runningSnapshot());
+      const { result } = renderLiveEvents(controller);
+      act(() => result.current.applyGatewayEvent({
+        entry: entry({
+          body: "visible now",
+          id: "message:first",
+          threadId: "thread-shared",
+          turnId: "turn-floating"
+        }),
+        turnId: "turn-floating",
+        type: "entryUpdated"
+      }));
+
+      expect(frames).toHaveLength(0);
+      expect(controller.snapshot()?.entries[0]?.blocks[0]?.body).toBe("visible now");
+    } finally {
+      requestAnimationFrame.mockRestore();
+    }
+  });
+
+  it("coalesces one hundred same-entry updates into one reducer batch per frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+    try {
+      const controller = new ThreadController(runningSnapshot());
+      const { result } = renderLiveEvents(controller);
+      act(() => result.current.applyGatewayEvent({
+        entry: entry({
+          body: "first",
+          id: "message:shared",
+          threadId: "thread-shared",
+          turnId: "turn-floating"
+        }),
+        turnId: "turn-floating",
+        type: "entryUpdated"
+      }));
+      const apply = vi.spyOn(controller, "applyGatewayEvent");
+      for (let index = 0; index < 100; index += 1) {
+        const body = `update-${index}`;
+        act(() => result.current.applyGatewayEvent({
+          entry: entry({
+            body,
+            id: "message:shared",
+            threadId: "thread-shared",
+            turnId: "turn-floating"
+          }),
+          turnId: "turn-floating",
+          type: "entryUpdated"
+        }));
+      }
+
+      expect(frames).toHaveLength(1);
+      act(() => frames.shift()?.(0));
+      expect(apply).toHaveBeenCalledOnce();
+      expect(controller.snapshot()?.entries[0]?.blocks[0]?.body).toBe("update-99");
+    } finally {
+      requestAnimationFrame.mockRestore();
+    }
+  });
+
+  it("records completion application without scheduling a snapshot repair", () => {
+    const diagnostics = captureJourneyDiagnostics();
+    const refreshSnapshot = vi.fn(async () => {});
+    try {
+      const controller = new ThreadController(runningSnapshot());
+      const { result } = renderLiveEvents(controller, refreshSnapshot);
+      const event: GatewayEvent = {
+        committedEntries: [],
+        threadId: "thread-shared",
+        turn: completedTurn("turn-floating", "thread-shared"),
+        turnId: "turn-floating",
+        type: "turnCompleted"
+      };
+      act(() => result.current.applyGatewayEvent(event));
+
+      expect(diagnostics.values()).toContainEqual({
+        data: { applied: true, queueDepth: 0, turnId: "turn-floating" },
+        id: "turn_completed_applied"
+      });
+      expect(diagnostics.values().some((value) => value.id.startsWith("settle_refresh_"))).toBe(false);
+      expect(refreshSnapshot).not.toHaveBeenCalled();
+    } finally {
+      diagnostics.stop();
+    }
+  });
 });
 
-function renderLiveEvents(controller: ThreadController) {
+function renderLiveEvents(
+  controller: ThreadController,
+  _refreshSnapshot: () => Promise<void> = async () => {}
+) {
   return renderHook(() => useGatewayLiveEvents({
-    refreshSnapshot: async () => {},
     selectedThreadIdRef: { current: controller.snapshot()?.thread?.id ?? null },
     setLatestGatewayEvent: vi.fn(),
-    threadController: controller,
-    viewEpochRef: { current: 0 }
+    threadController: controller
   }));
+}
+
+function captureJourneyDiagnostics(): {
+  stop(): void;
+  values(): Array<{ data: Record<string, unknown>; id: string }>;
+} {
+  const journeyWindow = window as Window & { __psychevoJourneyDiagnosticsEnabled?: boolean };
+  const wasEnabled = journeyWindow.__psychevoJourneyDiagnosticsEnabled;
+  journeyWindow.__psychevoJourneyDiagnosticsEnabled = true;
+  const captured: Array<{ data: Record<string, unknown>; id: string }> = [];
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent<{ data: Record<string, unknown>; id: string }>).detail;
+    captured.push(detail);
+  };
+  window.addEventListener("psychevo:journey-diagnostic", listener);
+  return {
+    stop: () => {
+      window.removeEventListener("psychevo:journey-diagnostic", listener);
+      if (wasEnabled === undefined) {
+        delete journeyWindow.__psychevoJourneyDiagnosticsEnabled;
+      } else {
+        journeyWindow.__psychevoJourneyDiagnosticsEnabled = wasEnabled;
+      }
+    },
+    values: () => [...captured]
+  };
 }
 
 function runningSnapshot(): ThreadSnapshot {

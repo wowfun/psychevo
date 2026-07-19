@@ -9,6 +9,7 @@ import type {
   ThreadControlDescriptorView
 } from "@psychevo/protocol";
 import { ModelReasoningSelector, modelOptionsForThreadControl } from "./model-picker";
+import { usePopoverDismiss } from "./popover-dismiss";
 import { SessionUsageGrid, normalizedPercent } from "./right-workspace/usage";
 
 export function ComposerRequests({
@@ -506,6 +507,7 @@ export function ComposerSubmitControls({
     : "—";
   const [contextOpen, setContextOpen] = useState(false);
   const contextPopoverRef = useRef<HTMLDivElement | null>(null);
+  const contextTriggerRef = useRef<HTMLButtonElement | null>(null);
   const model = controlStringValue(modelControl, controlValues);
   const explicitReasoning = controlStringValue(reasoningControl, controlValues);
   const reasoning = explicitReasoning;
@@ -524,28 +526,7 @@ export function ComposerSubmitControls({
     && modelControl.enabled
     && modelControl.choices.some((choice) => typeof choice.value === "string");
 
-  useEffect(() => {
-    if (!contextOpen) {
-      return;
-    }
-    function onPointerDown(event: MouseEvent) {
-      if (contextPopoverRef.current?.contains(event.target as Node)) {
-        return;
-      }
-      setContextOpen(false);
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setContextOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [contextOpen]);
+  usePopoverDismiss(contextOpen, contextPopoverRef, contextTriggerRef, () => setContextOpen(false));
 
   return (
     <div className="composerSubmitControls" aria-label="Composer submit controls">
@@ -590,6 +571,7 @@ export function ComposerSubmitControls({
         <button
           aria-label="Context usage"
           aria-expanded={contextOpen}
+          aria-haspopup="dialog"
           className="contextStatusButton"
           onClick={() => {
             setContextOpen((value) => {
@@ -597,6 +579,7 @@ export function ComposerSubmitControls({
               return !value;
             });
           }}
+          ref={contextTriggerRef}
           title={context?.label ?? "No active context"}
           type="button"
         >
@@ -606,7 +589,7 @@ export function ComposerSubmitControls({
           />
         </button>
         {contextOpen && (
-          <div className="composerContextPopover" role="dialog" aria-label="Context usage">
+          <div className="composerContextPopover pevo-controlPopover" role="dialog" aria-label="Context usage">
             <div className="composerContextSummary">
               <span
                 className={contextHasLimit ? undefined : "is-limitUnavailable"}
@@ -654,50 +637,6 @@ function compactTokenCount(value: number): string {
     maximumFractionDigits: 1
   }).format(value);
   return compact.toLowerCase();
-}
-
-export function StatusSelect({
-  disabled = false,
-  label,
-  optionLabels,
-  renderDisplayValue,
-  value,
-  values,
-  onChange
-}: {
-  disabled?: boolean;
-  label: string;
-  optionLabels?: Record<string, string>;
-  renderDisplayValue?(value: string): string;
-  value: string;
-  values: string[];
-  onChange(value: string): void;
-}) {
-  const displayValue = renderDisplayValue?.(value);
-  const valueWidth = displayValue ? `${Math.max(5, displayValue.length + 1)}ch` : undefined;
-  return (
-    <label
-      className={`statusSelect ${displayValue ? "has-displayValue" : ""}`}
-      data-disabled={disabled ? "true" : undefined}
-      data-status={label.toLowerCase().replace(/\s+/g, "-")}
-      style={valueWidth ? { "--pevo-status-select-value-width": valueWidth } as CSSProperties : undefined}
-      title={label}
-    >
-      {displayValue && <span aria-hidden="true" className="statusSelectDisplay">{displayValue}</span>}
-      <select disabled={disabled} aria-label={label} title={value || label} value={value} onChange={(event) => onChange(event.target.value)}>
-        {values.map((option) => (
-          <option key={option || "default"} value={option}>{optionLabels?.[option] ?? defaultStatusSelectValue(label, option)}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function defaultStatusSelectValue(label: string, value: string): string {
-  if (label === "Permission mode" && value === "default") {
-    return "Default Permission";
-  }
-  return value || label.toLowerCase();
 }
 
 function emptyModelOptionLabel(controls: SettingsReadResult["controls"]): string {

@@ -193,9 +193,7 @@ export async function listenOpenThreadInWorkbench(
 }
 
 const BROADCAST_GATEWAY_NOTIFICATIONS = new Set([
-  "gateway/event",
-  "turn/result",
-  "turn/error"
+  "gateway/event"
 ]);
 
 function isBroadcastGatewayNotification(message: string): boolean {

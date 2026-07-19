@@ -51,7 +51,7 @@ describe("FloatingApp Gateway flow", () => {
     const turnControls = vi.fn().mockResolvedValue({
       context,
       controls: {
-        targetId: context.targetId,
+        targetId: context.selectedTargetId,
         turnOverrides: {
           mode: "plan",
           model: "deepseek/deepseek-chat",
@@ -262,7 +262,8 @@ function floatingRuntime(
 function floatingThreadContext(agentRef: string | null): ThreadContextReadResult {
   const targetId = `target:${agentRef ?? "default"}:native`;
   return {
-    targetId,
+    selectedTargetId: targetId,
+    suggestedTargetId: null,
     runtimeProfileRef: "native",
     selectionState: "prospective",
     profiles: [],
@@ -345,17 +346,6 @@ class TestGatewayTransport implements GatewayTransport {
     }
     const request = JSON.parse(data) as { id: string; method: string; params?: Record<string, unknown> };
     this.requests.push(request);
-    if (request.method === "thread/start") {
-      this.respond(request.id, {
-        activity: { activeTurnId: null, queuedTurns: 0, running: false },
-        entries: [],
-        pendingActions: [],
-        scope: request.params?.scope,
-        source: (request.params?.scope as { source?: unknown } | undefined)?.source ?? null,
-        thread: null
-      });
-      return;
-    }
     if (request.method === "thread/context/read") {
       this.respond(request.id, floatingThreadContext(null));
       return;
@@ -376,15 +366,12 @@ class TestGatewayTransport implements GatewayTransport {
       window.setTimeout(() => {
         this.emit({
           jsonrpc: "2.0",
-          method: "turn/result",
+          method: "gateway/event",
           params: {
+            type: "turnCompleted",
+            threadId: "thread-floating",
+            turnId,
             committedEntries: [transcriptEntry("assistant", `assistant:${turnId}`, this.finalAnswer, turnId, completedAtMs)],
-            result: { finalAnswer: this.finalAnswer },
-            thread: {
-              backend: { kind: "native", sessionHandle: "thread-floating", runtimeRef: "native" },
-              id: "thread-floating",
-              sourceKey: null
-            },
             turn: {
               completedAtMs,
               error: null,

@@ -304,7 +304,7 @@ function ChannelSettingsDetail({
         },
         scope
       }));
-      if (context.targetId !== target.targetId || context.runtimeProfileRef !== target.runtimeProfileRef) {
+      if (context.selectedTargetId !== target.targetId || context.runtimeProfileRef !== target.runtimeProfileRef) {
         throw new Error("Gateway returned a different Agent target than the selected Runtime Profile.");
       }
       return context;
@@ -331,7 +331,7 @@ function ChannelSettingsDetail({
   const draftSignature = channelDraftSignature(draft);
   const dirty = draftSignature !== savedSignature;
   const targetContext = targetContextState.context;
-  const selectedTarget = targetContext?.compatibleTargets.find((target) => target.targetId === targetContext.targetId) ?? null;
+  const selectedTarget = targetContext?.compatibleTargets.find((target) => target.targetId === targetContext.selectedTargetId) ?? null;
   const targetReady = selectedTarget?.ready ?? false;
   const modelControl = channelControlDescriptor(targetContext, (control) => control.surfaceRole === "model");
   const modelControlExposed = channelControlIsExposed(modelControl);

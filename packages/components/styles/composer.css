@@ -11,12 +11,15 @@
 }
 
 .pevo-completionPopover {
+  box-sizing: border-box;
   position: absolute;
-  right: 12px;
   bottom: calc(100% + 8px);
-  left: 12px;
+  inset-inline: 0;
   z-index: 20;
   display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
   gap: 2px;
   max-height: min(320px, 44dvh);
   overflow: auto;
@@ -32,6 +35,8 @@
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
   min-height: 36px;
   padding: 6px 8px;
   color: var(--pevo-ink);
@@ -479,10 +484,10 @@
 
 .pevo-modeSwitchRow {
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
-  justify-content: start;
+  justify-content: stretch;
   gap: 10px;
   color: var(--pevo-muted);
   text-align: left;
@@ -491,12 +496,15 @@
 .pevo-modeSwitchRow .pevo-switchLabel {
   grid-column: 1;
   grid-row: 1;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pevo-modeSwitchRow .pevo-switchTrack {
   grid-column: 2;
   grid-row: 1;
+  justify-self: end;
 }
 
 @media (hover: hover) {

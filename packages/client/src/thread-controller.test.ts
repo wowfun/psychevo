@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type {
+  GatewayEvent,
   GatewayRequestScope,
   GatewayThread,
   GatewayTurn,
   ThreadContextReadResult,
   ThreadSnapshot,
   TranscriptBlock,
-  TranscriptEntry,
-  TurnResultPayload
+  TranscriptEntry
 } from "@psychevo/protocol";
 import {
   acceptThreadTurn,
-  applyTurnResultToThreadSnapshot,
   emptyThreadSnapshot,
   prepareThreadTurn,
   threadTurnStartParams,
@@ -55,71 +54,11 @@ describe("thread transcript controller helpers", () => {
     )).toThrow("conflicting thread identities");
   });
 
-  it("applies a turn/result completion through the shared transcript reducer", () => {
-    const running = {
-      ...emptyThreadSnapshot(floatingScope(), "thread-floating"),
-      activity: {
-        activeTurnId: "turn-1",
-        queuedTurns: 0,
-        running: true
-      }
-    };
-
-    const next = applyTurnResultToThreadSnapshot(running, turnResult({
-      answer: "Hi from the provider.",
-      threadId: "thread-floating",
-      turnId: "turn-1"
-    }));
-
-    expect(next.activity).toEqual({
-      activeTurnId: null,
-      queuedTurns: 0,
-      running: false
-    });
-    expect(next.entries).toHaveLength(1);
-    expect(next.entries[0]?.blocks[0]?.body).toBe("Hi from the provider.");
-  });
-
-  it("ignores another thread's completion for the current snapshot", () => {
-    const current = emptyThreadSnapshot(floatingScope(), "thread-current");
-    const next = applyTurnResultToThreadSnapshot(current, turnResult({
-      answer: "Wrong thread",
-      threadId: "thread-other",
-      turnId: "turn-other"
-    }));
-
-    expect(next).toBe(current);
-  });
-
-  it("does not synthesize a local assistant entry when Gateway omits committed entries", () => {
-    const running = {
-      ...emptyThreadSnapshot(floatingScope(), "thread-floating"),
-      activity: {
-        activeTurnId: "turn-1",
-        queuedTurns: 0,
-        running: true
-      }
-    };
-    const payload = turnResult({
-      answer: "Fallback text should not become a fake local message.",
-      threadId: "thread-floating",
-      turnId: "turn-1"
-    });
-
-    const next = applyTurnResultToThreadSnapshot(running, {
-      ...payload,
-      committedEntries: []
-    });
-
-    expect(next.activity.running).toBe(false);
-    expect(next.entries).toEqual([]);
-  });
-
   it("builds turn/start params with the shared Workbench turn controls", () => {
     const context = threadContext("native", "planner");
     const params = threadTurnStartParams({
       controls: {
-        targetId: context.targetId,
+        targetId: context.selectedTargetId!,
         turnOverrides: {
           mode: "plan",
           model: "deepseek/deepseek-chat",
@@ -148,6 +87,29 @@ describe("thread transcript controller helpers", () => {
       expectedControlRevision: "controls-1",
       threadId: "thread-current"
     });
+  });
+
+  it("starts provisional activity synchronously before Gateway acceptance", () => {
+    const controller = new ThreadController(emptyThreadSnapshot(floatingScope()));
+    controller.setContext(threadContext("native", null));
+
+    const plan = controller.beginTurn({
+      controls: {
+        targetId: "target:default:native",
+        turnOverrides: { model: "deepseek/deepseek-chat" }
+      },
+      input: [{ type: "text", text: "say hi" }],
+      optimisticText: "say hi",
+      scope: floatingScope()
+    });
+
+    expect(plan.snapshot.activity).toMatchObject({
+      activeTurnId: null,
+      queuedTurns: 0,
+      running: true,
+      startedAtMs: expect.any(Number)
+    });
+    expect(controller.snapshot()?.activity).toEqual(plan.snapshot.activity);
   });
 
   it("renders first-turn streaming events before turn/start resolves and preserves them after binding", () => {
@@ -272,13 +234,13 @@ describe("thread transcript controller helpers", () => {
     const effort = controller.context()?.controls.find((candidate) => candidate.id === "effort");
     expect(effort?.capabilityRevision).toBe("new-revision");
     expect(controller.controlSetParams(
-      context.targetId,
+      context.selectedTargetId!,
       effort!,
       "high",
       floatingScope(),
       "thread-acp"
     )).toMatchObject({
-      targetId: context.targetId,
+      targetId: context.selectedTargetId,
       expectedCapabilityRevision: "new-revision",
       expectedContextRevision: "context-new",
       expectedControlRevision: "controls-new"
@@ -302,9 +264,12 @@ describe("thread transcript controller helpers", () => {
     );
 
     expect(controller.turnId()).toBe("turn-config-failure");
-    expect(controller.applyTurnError(
-      turnError("thread-current", "turn-config-failure")
-    ).applied).toBe(true);
+    expect(controller.applyGatewayEvent(completedEvent({
+      answer: "Turn failed.",
+      status: "failed",
+      threadId: "thread-current",
+      turnId: "turn-config-failure"
+    })).applied).toBe(true);
     expect(controller.turnId()).toBeNull();
   });
 
@@ -352,6 +317,61 @@ describe("thread transcript controller helpers", () => {
     expect(controller.snapshot()?.entries).toHaveLength(1);
   });
 
+  it("uses the original submission time for optimistic activity", () => {
+    const controller = new ThreadController(emptyThreadSnapshot(floatingScope()));
+    controller.setContext(threadContext("native", null));
+
+    controller.beginTurn({
+      controls: { targetId: "target:default:native", turnOverrides: {} },
+      input: [{ type: "text", text: "waited for readiness" }],
+      optimisticText: "waited for readiness",
+      scope: floatingScope(),
+      startedAtMs: 12_345
+    });
+
+    expect(controller.snapshot()?.activity.startedAtMs).toBe(12_345);
+    expect(controller.snapshot()?.entries[0]?.createdAtMs).toBe(12_345);
+  });
+
+  it("applies a gateway event batch with one snapshot notification", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    initial.activity = { activeTurnId: "turn-current", queuedTurns: 0, running: true };
+    const controller = new ThreadController(initial);
+    const notifications: ThreadSnapshot[] = [];
+    controller.subscribe(() => notifications.push(controller.snapshot()!));
+
+    const applications = controller.applyGatewayEvents([
+      {
+        entry: entry({
+          body: "partial",
+          id: "assistant:batch",
+          status: "running",
+          threadId: "thread-current",
+          turnId: "turn-current",
+          updatedAtMs: 10
+        }),
+        turnId: "turn-current",
+        type: "entryUpdated"
+      },
+      {
+        entry: entry({
+          body: "latest",
+          id: "assistant:batch",
+          status: "running",
+          threadId: "thread-current",
+          turnId: "turn-current",
+          updatedAtMs: 20
+        }),
+        turnId: "turn-current",
+        type: "entryUpdated"
+      }
+    ]);
+
+    expect(applications.every((application) => application.applied)).toBe(true);
+    expect(notifications).toHaveLength(1);
+    expect(controller.snapshot()?.entries[0]?.blocks[0]?.body).toBe("latest");
+  });
+
   it("does not resurrect a turn settled before the turn/start response", () => {
     const controller = new ThreadController(emptyThreadSnapshot(floatingScope()));
     controller.setContext(threadContext("native", null));
@@ -362,9 +382,12 @@ describe("thread transcript controller helpers", () => {
       scope: floatingScope()
     });
 
-    expect(controller.applyTurnError(
-      turnError("thread-created", "turn-before-response")
-    ).applied).toBe(true);
+    expect(controller.applyGatewayEvent(completedEvent({
+      answer: "Turn failed.",
+      status: "failed",
+      threadId: "thread-created",
+      turnId: "turn-before-response"
+    })).applied).toBe(true);
     controller.acceptTurnStart(
       turnStartResult("thread-created", undefined, "turn-before-response"),
       plan.prepared
@@ -391,7 +414,7 @@ describe("thread transcript controller helpers", () => {
       type: "turnStarted"
     }).applied).toBe(true);
 
-    expect(controller.applyTurnResult(turnResult({
+    expect(controller.applyGatewayEvent(completedEvent({
       answer: "Already complete.",
       threadId: "thread-created",
       turnId: "turn-before-response"
@@ -460,22 +483,37 @@ describe("thread transcript controller helpers", () => {
       type: "turnStarted"
     });
 
-    expect(controller.applyTurnResult(turnResult({
+    expect(controller.applyGatewayEvent(completedEvent({
       answer: "stale",
       threadId: "thread-current",
       turnId: "turn-stale"
     })).applied).toBe(false);
-    expect(controller.applyTurnResult(turnResult({
+    expect(controller.applyGatewayEvent(completedEvent({
       answer: "foreign",
       threadId: "thread-foreign",
       turnId: "turn-active"
     })).applied).toBe(false);
-    expect(controller.applyTurnError(turnError("thread-current", "turn-stale")).applied).toBe(false);
-    expect(controller.applyTurnError(turnError("thread-foreign", "turn-active")).applied).toBe(false);
+    expect(controller.applyGatewayEvent(completedEvent({
+      answer: "stale error",
+      status: "failed",
+      threadId: "thread-current",
+      turnId: "turn-stale"
+    })).applied).toBe(false);
+    expect(controller.applyGatewayEvent(completedEvent({
+      answer: "foreign error",
+      status: "failed",
+      threadId: "thread-foreign",
+      turnId: "turn-active"
+    })).applied).toBe(false);
     expect(controller.turnId()).toBe("turn-active");
     expect(controller.snapshot()?.activity.running).toBe(true);
 
-    expect(controller.applyTurnError(turnError("thread-current", "turn-active")).applied).toBe(true);
+    expect(controller.applyGatewayEvent(completedEvent({
+      answer: "active error",
+      status: "failed",
+      threadId: "thread-current",
+      turnId: "turn-active"
+    })).applied).toBe(true);
     expect(controller.turnId()).toBeNull();
     expect(controller.snapshot()?.activity.running).toBe(false);
   });
@@ -496,7 +534,7 @@ describe("thread transcript controller helpers", () => {
       turnId: "turn-active",
       type: "turnStarted"
     });
-    expect(controller.applyTurnResult(turnResult({
+    expect(controller.applyGatewayEvent(completedEvent({
       answer: "complete",
       threadId: "thread-current",
       turnId: "turn-active"
@@ -565,12 +603,12 @@ describe("thread transcript controller helpers", () => {
       ready: true,
       unavailableReason: null
     });
-    context.targetId = "target:7f4a26e91d5c0bb4";
+    context.selectedTargetId = "target:7f4a26e91d5c0bb4";
     context.runtimeProfileRef = "acp:arbitrary";
     const controller = new ThreadController(emptyThreadSnapshot(floatingScope()));
     controller.setContext(context);
 
-    const controls = controller.turnControls(context.targetId, {});
+    const controls = controller.turnControls(context.selectedTargetId, {});
     expect(controls).toEqual(expect.objectContaining({
       targetId: "target:7f4a26e91d5c0bb4"
     }));
@@ -636,7 +674,8 @@ describe("thread transcript controller helpers", () => {
 function threadContext(runtimeProfileRef: string, agentRef: string | null): ThreadContextReadResult {
   const targetId = `target:${agentRef ?? "default"}:${runtimeProfileRef}`;
   return {
-    targetId,
+    selectedTargetId: targetId,
+    suggestedTargetId: null,
     runtimeProfileRef,
     selectionState: "draft",
     profiles: [],
@@ -681,22 +720,6 @@ function floatingScope(): GatewayRequestScope {
   };
 }
 
-function turnError(threadId: string, turnId: string) {
-  return {
-    error: {
-      message: "Turn failed.",
-      code: "test_failure",
-      stage: "delivery",
-      retryClass: "never",
-      delivery: "notDelivered" as const,
-      recoveryAction: null,
-      diagnosticRef: null
-    },
-    threadId,
-    turnId
-  };
-}
-
 function turnStartResult(
   threadId: string,
   backend: GatewayThread["backend"] = {
@@ -718,15 +741,17 @@ function turnStartResult(
   };
 }
 
-function turnResult({
+function completedEvent({
   answer,
+  status = "completed",
   threadId,
   turnId
 }: {
   answer: string;
+  status?: "completed" | "failed";
   threadId: string;
   turnId: string;
-}): TurnResultPayload {
+}): GatewayEvent {
   const completedAtMs = 1_000;
   return {
     committedEntries: [entry({
@@ -736,20 +761,23 @@ function turnResult({
       turnId,
       updatedAtMs: completedAtMs
     })],
-    result: {
-      finalAnswer: answer,
-      model: "mock-model",
-      outcome: "completed",
-      provider: "mock-provider",
-      sessionId: threadId,
-      toolFailures: 0
+    threadId,
+    turn: {
+      ...completedTurn(turnId, threadId, completedAtMs),
+      error: status === "failed" ? {
+        code: "fixture_failure",
+        delivery: "notDelivered",
+        diagnosticRef: null,
+        message: answer,
+        recoveryAction: null,
+        retryClass: "never",
+        stage: "runtime"
+      } : null,
+      outcome: status,
+      status
     },
-    thread: {
-      backend: { kind: "native", sessionHandle: threadId, runtimeRef: "native" },
-      id: threadId,
-      sourceKey: null
-    },
-    turn: completedTurn(turnId, threadId, completedAtMs)
+    turnId,
+    type: "turnCompleted"
   };
 }
 

@@ -1,5 +1,5 @@
 import { scopeForCwd } from "@psychevo/client";
-import type { GatewayRequestScope, SessionSummary, ThreadSnapshot } from "@psychevo/protocol";
+import type { GatewayEvent, GatewayRequestScope, SessionSummary, ThreadSnapshot } from "@psychevo/protocol";
 
 export function startupDraftScope(launchScope: GatewayRequestScope, sessions: SessionSummary[], fallbackCwd: string): GatewayRequestScope {
   if (launchScope.cwd.trim()) {
@@ -70,4 +70,51 @@ export function normalizeSessionSummary(session: SessionSummary): SessionSummary
     ...session,
     activity: normalizeActivity(session.activity)
   };
+}
+
+export function patchSessionSummariesFromGatewayEvent(
+  sessions: SessionSummary[],
+  event: GatewayEvent
+): SessionSummary[] {
+  const threadId = event.type === "turnCompleted" ? event.threadId ?? event.turn.threadId : "threadId" in event ? event.threadId : null;
+  if (!threadId || (event.type !== "activityChanged" && event.type !== "titleChanged" && event.type !== "turnCompleted")) {
+    return sessions;
+  }
+  const index = sessions.findIndex((session) => session.id === threadId);
+  if (index < 0) {
+    return sessions;
+  }
+  const current = sessions[index]!;
+  let next: SessionSummary;
+  if (event.type === "activityChanged") {
+    const activity = normalizeActivity(event.activity);
+    next = {
+      ...current,
+      activity,
+      updatedAtMs: activity.updatedAtMs ?? current.updatedAtMs
+    };
+  } else if (event.type === "titleChanged") {
+    next = {
+      ...current,
+      title: event.title,
+      displayTitle: event.displayTitle
+    };
+  } else {
+    const completedAtMs = event.turn.completedAtMs;
+    const activity = normalizeActivity({
+      ...current.activity,
+      running: false,
+      activeTurnId: null,
+      queuedTurns: 0,
+      ...(completedAtMs === undefined ? {} : { updatedAtMs: completedAtMs })
+    });
+    next = {
+      ...current,
+      activity,
+      updatedAtMs: completedAtMs ?? current.updatedAtMs
+    };
+  }
+  const patched = sessions.slice();
+  patched[index] = next;
+  return patched;
 }

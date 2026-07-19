@@ -669,6 +669,64 @@ describe("Workbench capabilities management", () => {
     });
   });
 
+  it("manages the isolated Codex plugin authority without exposing app-server RPC", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+
+    const card = await within(region).findByRole("region", { name: "Codex plugin compatibility" });
+    expect(within(card).getByText("disabled · unavailable")).toBeTruthy();
+    expect(within(card).getByText("/tmp/psychevo/codex")).toBeTruthy();
+    fireEvent.change(within(card).getByLabelText("Codex binary path"), {
+      target: { value: "/opt/codex/bin/codex" }
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/authority/write",
+        params: expect.objectContaining({
+          enabled: false,
+          binary: "/opt/codex/bin/codex"
+        })
+      });
+    });
+    fireEvent.click(within(card).getByRole("switch", { name: "Enable Codex plugins" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/authority/write",
+        params: expect.objectContaining({
+          enabled: true
+        })
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method.startsWith("codex/"))).toBe(false);
+  });
+
+  it("keeps a structured repair state visible after a partial Codex install", async () => {
+    gatewayMock.pluginInstallResult = {
+      success: false,
+      partial: true,
+      failedStep: "trust",
+      safeState: "Needs trust",
+      completedSteps: ["materialized", "detail_reread", "fingerprint", "profile_allow"]
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Plugin review" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Install" }));
+
+    const result = await within(region).findByRole("status", { name: "Plugin operation result" });
+    expect(within(result).getByText("Partial install · Needs trust")).toBeTruthy();
+    expect(within(result).getByText(/Failed at trust/)).toBeTruthy();
+    expect(within(result).getByText(/materialized.*profile allow/i)).toBeTruthy();
+  });
+
   it("keeps coding-core tools read-only while web remains mode-configurable", async () => {
     render(<App />);
 

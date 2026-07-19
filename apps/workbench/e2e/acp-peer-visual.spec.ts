@@ -91,9 +91,10 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
 
       await openPanel(page, isMobile, "Status");
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
-      await expect(statusRegion.getByRole("region", { name: "Session observability" })).toContainText("exact");
+      await expect(statusRegion.getByRole("region", { name: "Session observability" })).toContainText("partial");
       await expect(statusRegion).not.toContainText("reported by ACP peer");
       await expect(statusRegion).toContainText("Session tokens");
+      await expect(statusRegion).toContainText("Unavailable");
       await expect(statusRegion).toContainText("129");
       await assertNoWorkbenchRenderError(page);
       await assertNoHorizontalOverflow(page, statusRegion);

@@ -251,7 +251,7 @@ export function ThreadPanel({
       return;
     }
     const input = [{ type: "text" as const, text: text.trim() }];
-    const controls = controller.turnControls(context.targetId, {});
+    const controls = controller.turnControls(context.selectedTargetId ?? "", {});
     const admission = controller.admitTurn({ controls, input, mentions });
     if (!admission.allowed) {
       setError(admission.reason ?? "This Agent target cannot start a turn.");

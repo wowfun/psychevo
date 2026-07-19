@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "native-runtime"), allow(dead_code))]
 
 mod capture;
+#[cfg(feature = "wdio-test")]
+mod startup_trace;
 
 use std::env;
 #[cfg(feature = "native-runtime")]
@@ -224,6 +226,8 @@ async fn gateway_connect(
         .lock()
         .map_err(|_| "Gateway bridge lock poisoned".to_string())?
         .insert(connection_id.clone(), sender);
+    #[cfg(feature = "wdio-test")]
+    startup_trace::record_bridge_connected(&connection_id);
 
     tauri::async_runtime::spawn(async move {
         while let Some(message) = receiver.recv().await {
@@ -408,11 +412,21 @@ async fn floating_begin_region_picker() -> Result<CapabilityResult<Option<Rect>>
     any(target_os = "macos", target_os = "windows", target_os = "linux")
 ))]
 pub fn run() {
+    #[cfg(feature = "wdio-test")]
+    startup_trace::record_process_start();
     let builder = tauri::Builder::default();
     #[cfg(feature = "wdio-test")]
     let builder = builder
         .plugin(tauri_plugin_wdio_webdriver::init())
         .plugin(tauri_plugin_wdio::init());
+    #[cfg(feature = "wdio-test")]
+    let builder = builder.setup(|app| {
+        if app.get_webview_window("workbench").is_none() {
+            return Err("Workbench window was not created during Desktop setup".into());
+        }
+        startup_trace::record_window_ready();
+        Ok(())
+    });
 
     builder
         .manage(GatewayBridge::default())
@@ -662,7 +676,7 @@ fn should_broadcast_gateway_notification(message: &str) -> bool {
     }
     matches!(
         frame.get("method").and_then(Value::as_str),
-        Some("gateway/event" | "turn/result" | "turn/error")
+        Some("gateway/event")
     )
 }
 
@@ -673,11 +687,15 @@ async fn resolve_managed_gateway(
     let mut managed_guard = resolver.managed.lock().await;
     if let Some(managed) = managed_guard.as_ref() {
         if ensure_managed_gateway_healthy(managed).await.is_ok() {
+            #[cfg(feature = "wdio-test")]
+            startup_trace::record_managed_gateway_ready();
             return Ok(managed.clone());
         }
         *managed_guard = None;
     }
     let managed = resolve_managed_gateway_uncached().await?;
+    #[cfg(feature = "wdio-test")]
+    startup_trace::record_managed_gateway_ready();
     *managed_guard = Some(managed.clone());
     Ok(managed)
 }
@@ -1063,10 +1081,10 @@ mod tests {
         assert!(should_broadcast_gateway_notification(
             r#"{"jsonrpc":"2.0","method":"gateway/event","params":{"type":"activityChanged","threadId":"thread-1","activity":{"running":false,"activeTurnId":null,"queuedTurns":0}}}"#
         ));
-        assert!(should_broadcast_gateway_notification(
+        assert!(!should_broadcast_gateway_notification(
             r#"{"jsonrpc":"2.0","method":"turn/result","params":{"thread":{"id":"thread-1"},"turn":{"id":"turn-1"}}}"#
         ));
-        assert!(should_broadcast_gateway_notification(
+        assert!(!should_broadcast_gateway_notification(
             r#"{"jsonrpc":"2.0","method":"turn/error","params":{"message":"failed"}}"#
         ));
         assert!(!should_broadcast_gateway_notification(

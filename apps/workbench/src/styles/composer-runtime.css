@@ -292,26 +292,9 @@
   gap: 6px;
 }
 
-.agentRuntimeOptions .statusSelect,
 .agentRuntimeOptions .runtimeControlState {
   width: 100%;
   max-width: none;
-}
-
-.agentRuntimeOptions .statusSelect select {
-  width: 100%;
-  min-height: 30px;
-  padding: 0 26px 0 8px;
-  color: var(--pevo-ink);
-  background: var(--pevo-page);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.agentRuntimeOptions .statusSelectDisplay {
-  max-width: calc(100% - 30px);
-  padding-left: 8px;
-  color: var(--pevo-ink);
 }
 
 .runtimeProvenanceCapsule {
@@ -367,27 +350,6 @@
   color: var(--pevo-muted);
 }
 
-.pevo-composerInlineStatus > .statusSelect select {
-  width: calc(var(--pevo-status-select-value-width, 5ch) + 26px);
-  min-width: calc(var(--pevo-status-select-value-width, 5ch) + 26px);
-  max-width: min(210px, 34vw);
-  padding-right: 14px;
-}
-
-.pevo-composerInlineStatus > .statusSelect[data-status="model"] select {
-  max-width: min(220px, 48vw);
-}
-
-.pevo-composerInlineStatus > .statusSelect {
-  flex: 0 0 auto;
-  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
-  font-size: var(--pevo-font-size-small);
-}
-
-.pevo-composerInlineStatus > .statusSelect .statusSelectDisplay {
-  max-width: none;
-}
-
 @media (max-width: 420px) {
   .pevo-composerInlineStatus,
   .pevo-composerActions {
@@ -405,51 +367,6 @@
     flex-wrap: wrap;
     justify-content: flex-end;
   }
-
-  .pevo-composerInlineStatus > .statusSelect {
-    font-size: var(--pevo-font-size-xsmall);
-  }
-}
-
-.composerRuntimeControls .statusSelect select {
-  width: var(--pevo-status-select-value-width, auto);
-  min-width: var(--pevo-status-select-value-width, auto);
-  min-height: 26px;
-  max-width: min(210px, 34vw);
-  padding: 0;
-  color: var(--pevo-ink);
-  background: transparent;
-  border: 0;
-  border-radius: var(--pevo-radius-sm);
-}
-
-.composerRuntimeControls .statusSelect select:not(:disabled) {
-  cursor: pointer;
-}
-
-.composerRuntimeControls .statusSelect select:disabled {
-  cursor: not-allowed;
-}
-
-.composerRuntimeControls .statusSelectDisplay {
-  max-width: var(--pevo-status-select-value-width, 5ch);
-  padding: 0;
-  color: var(--pevo-ink);
-}
-
-.composerRuntimeControls .statusSelect.has-displayValue::after {
-  display: none;
-}
-
-.composerRuntimeControls .statusSelect:not([data-disabled="true"]):hover,
-.composerRuntimeControls .statusSelect:focus-within {
-  background: var(--pevo-panel-muted);
-  outline: 0;
-  border-radius: var(--pevo-radius-xs);
-}
-
-.composerRuntimeControls .statusSelect select:focus-visible {
-  outline: 0;
 }
 
 .runtimeModeHint {

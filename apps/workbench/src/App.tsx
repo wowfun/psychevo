@@ -13,6 +13,7 @@ import {
   ThreadBrowserResultSchema,
   UsageReadResultSchema,
   type ContextReadResult,
+  type GatewayEvent,
   type GatewayMention,
   type GatewayRequestScope,
   type InitializeResult,
@@ -32,6 +33,7 @@ import {
 import { createCommandActions } from "./command-actions";
 import { createAppActions } from "./app-actions";
 import { useWorkbenchEffects } from "./app-effects";
+import { ComposerSessionCoordinator } from "./composer-session-coordinator";
 import { useAutomations } from "./app-automations";
 import { EMPTY_SNAPSHOT } from "./app-constants";
 import { useGatewayLiveEvents } from "./app-live-events";
@@ -43,7 +45,11 @@ import {
   sessionsFromThreadBrowser,
   workspacesFromThreadBrowser
 } from "./surface-actions";
-import { normalizeSnapshot } from "./session-utils";
+import {
+  normalizeActivity,
+  normalizeSnapshot,
+  patchSessionSummariesFromGatewayEvent
+} from "./session-utils";
 import { transcriptMayContainWorkspaceFile } from "./search-model";
 import { WorkbenchLayout } from "./workbench-layout";
 import {
@@ -53,9 +59,6 @@ import { runtimeControlAsConfigOption } from "./runtime-controls";
 import {
   parseThreadContext
 } from "./runtime-context";
-import {
-  normalizeActivity,
-} from "./session-utils";
 import {
   readPinnedSessionIds,
   readWorkbenchPrefs
@@ -92,9 +95,19 @@ import type {
   WorkbenchCommand
 } from "./types";
 import {
+  createHistoryDraftSession,
   visibleHistoryDraftSession,
   type PendingDetachedShell
 } from "./viewGuard";
+
+declare global {
+  interface Window {
+    __psychevoJourneyTiming?: Record<string, {
+      epochMs: number;
+      monotonicMs: number;
+    }>;
+  }
+}
 
 function mergeSessionSummaries(current: SessionSummary[], incoming: SessionSummary[]): SessionSummary[] {
   const byId = new Map(current.map((session) => [session.id, session]));
@@ -121,6 +134,7 @@ function mergeBrowserWorkspaces(
 
 export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtimeFactory?: WorkbenchRuntimeFactory } = {}) {
   const threadController = useMemo(() => new ThreadController(EMPTY_SNAPSHOT), []);
+  const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
   const threadSnapshotStore = useMemo(() => ({
     getSnapshot: () => threadController.snapshot() ?? EMPTY_SNAPSHOT,
     subscribe: (listener: () => void) => threadController.subscribe(listener)
@@ -142,7 +156,9 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
   const [loadingOlderCwd, setLoadingOlderCwd] = useState<string | null>(null);
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(readPinnedSessionIds);
-  const [draftSession, setDraftSession] = useState<HistoryDraftSession | null>(null);
+  const [draftSession, setDraftSession] = useState<HistoryDraftSession | null>(() =>
+    createHistoryDraftSession(0, browserFallbackCwd())
+  );
   const [settings, setSettings] = useState<SettingsReadResult | undefined>();
   const [agents, setAgents] = useState<WorkbenchAgent[]>([]);
   const [backends, setBackends] = useState<WorkbenchBackend[]>([]);
@@ -166,6 +182,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const [runtimeControlDrafts, setRuntimeControlDrafts] = useState<Record<string, unknown>>({});
   const [runtimeOptionsLoading, setRuntimeOptionsLoading] = useState(false);
   const [runtimeOptionsError, setRuntimeOptionsError] = useState<string | null>(null);
+  const [workspaceBranch, setWorkspaceBranch] = useState<string | null | undefined>(undefined);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFilesResult | null>(null);
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceDiffResult | null>(null);
@@ -209,11 +226,13 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const commandContextKeyRef = useRef<string | null>(null);
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
+  const firstTurnContextRefreshPendingRef = useRef(false);
   const skipNextPinnedPersistRef = useRef(false);
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
   const voiceAutoSpeakKeyRef = useRef<string | null>(null);
   const pendingTargetSelectionRef = useRef<string | null>(null);
   const runtimeTargetTransitionRef = useRef(false);
+  const runtimeMutationSequenceRef = useRef(0);
 
   function setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) {
     const current = threadController.snapshot() ?? EMPTY_SNAPSHOT;
@@ -263,7 +282,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const runtimeContextDraftTargetKey = currentThreadId || runtimeBinding ? "" : selectedTargetId;
 
   useEffect(() => {
-    if (runtimeTargetTransitionRef.current) {
+    if (
+      runtimeTargetTransitionRef.current
+      || composerSessionCoordinator.isDraftOpenPending(viewEpochRef.current)
+    ) {
       return;
     }
     if (!client || !startupStable) {
@@ -299,14 +321,18 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       )) ?? null;
       const retainedTarget = context.compatibleTargets.find((target) => target.targetId === selectedTargetId) ?? null;
       const authoritativeTarget = context.compatibleTargets.find((target) => (
-        target.targetId === context.targetId
+        target.targetId === context.selectedTargetId
+      )) ?? null;
+      const suggestedTarget = context.compatibleTargets.find((target) => (
+        target.targetId === context.suggestedTargetId
       )) ?? null;
       const nextTarget = pendingTarget
         ?? (context.binding ? authoritativeTarget : retainedTarget)
         ?? authoritativeTarget
+        ?? suggestedTarget
         ?? context.compatibleTargets[0]
         ?? null;
-      setRuntimeContextTargetId(context.targetId);
+      setRuntimeContextTargetId(context.selectedTargetId ?? "");
       setSelectedTargetId(nextTarget?.targetId ?? "");
       if (context.binding) {
         pendingTargetSelectionRef.current = null;
@@ -326,6 +352,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     };
   }, [
     client,
+    composerSessionCoordinator,
     currentThreadId,
     runtimeContextDraftTargetKey,
     runtimeContextRefreshRevision,
@@ -340,13 +367,33 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const contextSendable = runtimeContextTargetId === selectedTargetId
     && Boolean(selectedTargetId)
     && (runtimeContext?.sendability.allowed ?? false);
-  const turnSendable = contextSendable && !runtimeOptionsLoading && !runtimeOptionsError;
+  const pendingDraftSendable = !currentThreadId
+    && runtimeOptionsLoading
+    && !runtimeOptionsError
+    && composerSessionCoordinator.isReadinessPending(viewEpochRef.current);
+  const turnSendable = pendingDraftSendable
+    || (contextSendable && !runtimeOptionsLoading && !runtimeOptionsError);
   const turnBlockReason = runtimeContext?.sendability.reason
     ?? (runtimeOptionsError
       ? `Thread context unavailable: ${runtimeOptionsError}`
       : runtimeOptionsLoading
         ? "Loading Agent and Runtime Profile context."
         : "This Agent and Runtime Profile cannot start a turn.");
+
+  useEffect(() => {
+    if (
+      status !== "connected"
+      || currentThreadId
+      || !startupStable
+      || runtimeOptionsLoading
+      || runtimeOptionsError
+      || !contextSendable
+    ) {
+      return;
+    }
+    retainJourneyStateMark("psychevo:gui_ready");
+    retainJourneyStateMark("psychevo:draft_context_ready");
+  }, [contextSendable, currentThreadId, runtimeOptionsError, runtimeOptionsLoading, startupStable, status]);
 
   function mergeModelCatalogOptions(options: ModelOptionView[]) {
     if (options.length === 0) {
@@ -377,7 +424,6 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const {
     adoptSnapshotScope,
     pushDebugEvent,
-    refreshAgentCatalog,
     refreshAgentSurface,
     refreshCommands,
     refreshHistory,
@@ -386,6 +432,8 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     refreshSettings,
     refreshSnapshot,
     refreshTrace,
+    refreshWorkspaceChanges,
+    refreshWorkspaceDiff,
     refreshWorkspaceFiles,
     refreshWorkspaceSurface,
     runAction
@@ -452,14 +500,11 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   const {
     applyGatewayEvent,
     gatewayEventQueueRef,
-    gatewayEventRafRef,
-    scheduleSnapshotRefreshAfterLiveSettle
+    gatewayEventRafRef
   } = useGatewayLiveEvents({
-    refreshSnapshot,
     selectedThreadIdRef,
     setLatestGatewayEvent,
-    threadController,
-    viewEpochRef
+    threadController
   });
 
   const {
@@ -548,6 +593,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     activeScope,
     appearance,
     client,
+    composerSessionCoordinator,
     createRuntime: runtimeFactory,
     commandContextKey,
     commandContextKeyRef,
@@ -564,6 +610,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     mainViewRef,
     mobilePanel,
     pendingDetachedShellRef,
+    firstTurnContextRefreshPendingRef,
     pinnedSessionIds,
     rightTabs,
     rightWorkspaceOpen: showSessionChrome && !rightCollapsed,
@@ -581,19 +628,24 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     viewEpochRef,
     adoptSnapshotScope,
     applyGatewayEvent,
+    patchSessionEvent: (event: GatewayEvent) => {
+      setSessions((current) => patchSessionSummariesFromGatewayEvent(current, event));
+    },
     beginExplicitViewSwitch,
     clearCommandTransientUi,
     pushDebugEvent,
-    refreshAgentCatalog,
     refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
     refreshCommands,
     refreshHistory,
+    refreshObservability,
     refreshRuntimeContext: () => setRuntimeContextRefreshRevision((current) => current + 1),
     refreshSettings,
     refreshSnapshot,
     refreshTrace,
+    refreshWorkspaceChanges,
+    refreshWorkspaceDiff,
+    refreshWorkspaceFiles,
     refreshWorkspaceSurface,
-    scheduleSnapshotRefreshAfterLiveSettle,
     setActiveRightTabId,
     setActiveScope,
     setClient,
@@ -609,6 +661,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setPinnedSessionIds,
     setRightCollapsed,
     setRightTabs,
+    setRuntimeContext,
+    setRuntimeContextTargetId,
+    setRuntimeOptionsError,
+    setRuntimeOptionsLoading,
+    setWorkspaceBranch,
+    setSelectedTargetId,
     setSnapshot,
     setStatus,
     setStartupStable,
@@ -618,6 +676,10 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   });
 
   function beginExplicitViewSwitch(): number {
+    composerSessionCoordinator.cancelPending();
+    runtimeMutationSequenceRef.current += 1;
+    runtimeTargetTransitionRef.current = false;
+    pendingTargetSelectionRef.current = null;
     viewEpochRef.current += 1;
     pendingDetachedShellRef.current = null;
     clearCommandTransientUi();
@@ -745,6 +807,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     activeScope,
     attachments,
     client,
+    composerSessionCoordinator,
     currentThreadId: currentThreadId ?? null,
     detachedShellTokenRef,
     fallbackCwd,
@@ -752,6 +815,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     initScope: init?.scope ?? null,
     isThreadArchived: (threadId: string) => archivedSessions.some((session) => session.id === threadId),
     pendingDetachedShellRef,
+    firstTurnContextRefreshPendingRef,
     runtimeControls,
     runtimeControlDrafts,
     selectedTargetId,
@@ -783,6 +847,9 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     setRightTabs,
     setRuntimeOptionsError,
     setRuntimeOptionsLoading,
+    setWorkspaceBranch,
+    setRuntimeContext,
+    setRuntimeContextTargetId,
     setSelectedTargetId,
     setSnapshot,
     setSettings,
@@ -804,6 +871,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       });
       return;
     }
+    const transitionEpoch = viewEpochRef.current;
+    const transitionId = runtimeMutationSequenceRef.current + 1;
+    runtimeMutationSequenceRef.current = transitionId;
+    const ownsTransition = () => runtimeMutationSequenceRef.current === transitionId;
+    const canApplyTransition = () => ownsTransition()
+      && viewEpochRef.current === transitionEpoch;
     pendingTargetSelectionRef.current = targetId;
     runtimeTargetTransitionRef.current = true;
     setSelectedTargetId(targetId);
@@ -815,41 +888,52 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       setRuntimeContextTargetId("");
       threadController.setContext(null);
     }
-    let scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
-    let startedNewThread = false;
+    const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
     try {
       if (runtimeBinding) {
-        const nextSnapshot = await startNewThread(undefined, {
-          preserveRuntimeSelection: true,
-          refreshHistory: false
+        await startNewThread(undefined, {
+          refreshHistory: false,
+          targetId
         });
-        scope = nextSnapshot?.scope ?? scope;
-        startedNewThread = true;
+        if (ownsTransition()) {
+          pendingTargetSelectionRef.current = null;
+        }
+        return;
       }
       if (!client) {
         return;
       }
+      const preparationToken = composerSessionCoordinator.beginDraftPrepare(viewEpochRef.current);
       const result = await client.request("thread/draft/prepare", { scope, targetId });
+      if (!canApplyTransition()) {
+        return;
+      }
       const context = parseThreadContext(result.context);
       setRuntimeContext(context);
       threadController.setContext(context);
-      setRuntimeContextTargetId(context.targetId);
+      setRuntimeContextTargetId(context.selectedTargetId ?? "");
       pendingTargetSelectionRef.current = null;
+      if (result.problem) {
+        composerSessionCoordinator.failDraftPrepare(preparationToken);
+        setRuntimeOptionsError(result.problem.message);
+      } else {
+        composerSessionCoordinator.completeDraftPrepare(preparationToken);
+      }
     } catch (cause) {
+      if (!canApplyTransition()) {
+        return;
+      }
+      composerSessionCoordinator.cancelPending();
+      pendingTargetSelectionRef.current = null;
       setRuntimeContextTargetId("");
       threadController.setContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      runtimeTargetTransitionRef.current = false;
-      setRuntimeOptionsLoading(false);
-      if (startedNewThread && client) {
-        void refreshHistory(client);
-        void refreshSettings(client, scope.cwd, null);
-        void refreshWorkspaceSurface(client, scope, null);
-        void Promise.all([
-          refreshAgentCatalog(client, scope),
-          refreshCommands(client, scope, null)
-        ]);
+      if (ownsTransition()) {
+        runtimeTargetTransitionRef.current = false;
+        if (viewEpochRef.current === transitionEpoch) {
+          setRuntimeOptionsLoading(false);
+        }
       }
     }
   }
@@ -862,6 +946,9 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       && client
       && runtimeContext
     ) {
+      const mutationEpoch = viewEpochRef.current;
+      const mutationId = runtimeMutationSequenceRef.current + 1;
+      runtimeMutationSequenceRef.current = mutationId;
       const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
       setRuntimeOptionsLoading(true);
       try {
@@ -876,16 +963,27 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
             currentThreadId ?? null
           )
         );
+        if (
+          runtimeMutationSequenceRef.current !== mutationId
+          || viewEpochRef.current !== mutationEpoch
+        ) {
+          return;
+        }
         threadController.applyControlReceipt(result);
         setRuntimeContext(result.context);
-        setRuntimeContextTargetId(result.context.targetId);
+        setRuntimeContextTargetId(result.context.selectedTargetId ?? "");
         setRuntimeControlDrafts((current) => {
           const next = { ...current };
           delete next[control.id];
           return next;
         });
       } finally {
-        setRuntimeOptionsLoading(false);
+        if (
+          runtimeMutationSequenceRef.current === mutationId
+          && viewEpochRef.current === mutationEpoch
+        ) {
+          setRuntimeOptionsLoading(false);
+        }
       }
       return;
     }
@@ -922,7 +1020,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
       : new ThreadController(targetSnapshot);
     targetController.setContext(targetContext);
     const binding = targetContext.binding;
-    const turnControls = targetController.turnControls(targetContext.targetId, {});
+    const turnControls = targetController.turnControls(targetContext.selectedTargetId ?? "", {});
     const admission = targetController.admitTurn({ controls: turnControls, input, mentions });
     if (!admission.allowed) {
       setCommandFeedback({
@@ -1181,6 +1279,23 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     voiceAutoSpeak, voiceListening, voiceRealtimeActive: Boolean(voiceRealtimeSessionId),
     onReadAloudText: readAloudText, onVoiceAutoSpeakToggle: toggleVoiceAutoSpeak,
     onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,
-    workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
+    composerPresentationReady: startupStable, workspaceBranch, workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
+}
+
+function retainJourneyStateMark(name: string): void {
+  if (typeof performance === "undefined") return;
+  window.__psychevoJourneyTiming ??= {};
+  if (window.__psychevoJourneyTiming[name]) return;
+  const monotonicMs = performance.now();
+  window.__psychevoJourneyTiming[name] = {
+    epochMs: performance.timeOrigin + monotonicMs,
+    monotonicMs
+  };
+  if (
+    typeof performance.mark === "function"
+    && performance.getEntriesByName(name, "mark").length === 0
+  ) {
+    performance.mark(name);
+  }
 }

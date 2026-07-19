@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 
 const agent = process.argv[2] || "codex";
@@ -9,6 +10,10 @@ const statePath = process.argv[5];
 const agentVersion = process.argv[6] || (agent === "codex" ? "1.1.2" : "1.17.18");
 const agentInfoName = process.argv[7] || (agent === "codex" ? "@agentclientprotocol/codex-acp" : "OpenCode");
 const title = process.argv[8] || (agent === "codex" ? "Codex" : "OpenCode");
+const journeyMode = process.argv[9] || "profile";
+const journeyControlRoot = process.argv[10];
+const journeyEventPath = process.argv[11];
+let journeySequence = 0;
 
 function defaultState() {
   return { nextSession: 1, promptCount: 0, sessions: {} };
@@ -32,6 +37,33 @@ function saveState() {
 function record(type, fields = {}) {
   if (!logPath) return;
   appendFileSync(logPath, JSON.stringify({ type, agent, scenario, pid: process.pid, ...fields }) + "\n");
+}
+
+function recordJourney(event, requestIndex, sessionId) {
+  if (scenario !== "critical_journey" || !journeyEventPath) return;
+  appendFileSync(journeyEventPath, JSON.stringify({
+    adapter: "acp",
+    clock: "node-fixture",
+    epochMs: Date.now(),
+    event,
+    monotonicNs: process.hrtime.bigint().toString(),
+    plannedDelayMs: 0,
+    purpose: "main_turn",
+    purposeSequence: requestIndex,
+    requestIndex,
+    schemaVersion: 1,
+    sequence: ++journeySequence,
+    sessionId
+  }) + "\n");
+}
+
+async function waitForJourneyRelease(stage, requestIndex) {
+  if (scenario !== "critical_journey" || journeyMode !== "visual") return;
+  if (!journeyControlRoot) throw new Error("critical journey visual mode requires a control root");
+  const releasePath = path.join(journeyControlRoot, requestIndex + "." + stage + ".release");
+  while (!existsSync(releasePath)) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function send(value) {
@@ -310,15 +342,45 @@ async function prompt(message, params) {
   const kinds = partKinds(promptValue);
   state.promptCount += 1;
   const turn = state.promptCount;
+  if (scenario === "critical_journey") {
+    recordJourney("request_received", turn, sessionId);
+  }
   const answer = title + " ACP response " + turn
     + "; model=" + session.config.model
     + "; effort=" + session.config.effort
     + "; mode=" + session.config.mode
     + "; parts=" + kinds.join(",");
-  session.messages.push({ id: "user-" + turn, role: "user", text: promptText });
-  session.messages.push({ id: "assistant-" + turn, role: "assistant", text: answer });
+  if (scenario !== "critical_journey") {
+    session.messages.push({ id: "user-" + turn, role: "user", text: promptText });
+    session.messages.push({ id: "assistant-" + turn, role: "assistant", text: answer });
+  }
   saveState();
-  record("prompt_accepted", { id: message.id, sessionId, turn, prompt: promptValue, config: session.config });
+  record(
+    "prompt_accepted",
+    scenario === "critical_journey"
+      ? { id: message.id, sessionId, turn, config: session.config }
+      : { id: message.id, sessionId, turn, prompt: promptValue, config: session.config }
+  );
+
+  if (scenario === "critical_journey") {
+    await waitForJourneyRelease("first-output", turn);
+    const splitIndex = Math.ceil(answer.length / 2);
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "assistant-" + turn,
+      content: { type: "text", text: answer.slice(0, splitIndex) }
+    });
+    recordJourney("first_output_emitted", turn, sessionId);
+    await waitForJourneyRelease("completion", turn);
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "assistant-" + turn,
+      content: { type: "text", text: answer.slice(splitIndex) }
+    });
+    result(message.id, { stopReason: "end_turn" });
+    recordJourney("completion_emitted", turn, sessionId);
+    return;
+  }
 
   if (scenario === "unknown_delivery" && turn === 1) {
     record("connection_lost_after_acceptance", { sessionId, turn });
@@ -417,7 +479,12 @@ async function handle(message) {
   }
   const method = message.method;
   const params = message.params || {};
-  record("request", { id: message.id ?? null, method, params });
+  record(
+    "request",
+    scenario === "critical_journey" && method === "session/prompt"
+      ? { id: message.id ?? null, method, sessionId: params.sessionId ?? null }
+      : { id: message.id ?? null, method, params }
+  );
   if (method === "initialize") {
     record("initialize", { requestedProtocolVersion: params.protocolVersion });
     const response = initializeResponse();

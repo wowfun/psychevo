@@ -104,7 +104,7 @@ type CommandActionsParams = {
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
   startNewThread(cwd?: string): Promise<void>;
   submitThreadTurn(threadId: string, text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
-  submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null): Promise<void>;
+  submitTurn(text: string, mentions: GatewayMention[], displayText?: string | null): Promise<unknown>;
   updateMainView(value: MainView): void;
 };
 
@@ -289,7 +289,7 @@ export function createCommandActions(params: CommandActionsParams) {
   async function runHostAction(action: unknown, trigger: CommandTrigger = "commandsPanel") {
     const record = asRecord(action);
     switch (record.type) {
-      case "threadStart": {
+      case "newSession": {
         await params.startNewThread();
         break;
       }

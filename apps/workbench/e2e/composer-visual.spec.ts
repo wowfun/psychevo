@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startPevoWeb } from "./harness";
@@ -132,18 +133,38 @@ test.describe("Workbench composer visual contract", () => {
   });
 
   test("renders descriptor-driven composer controls and interrupt state without overlap", async ({ page, isMobile }, testInfo) => {
-    const server = await startPevoWeb({ configAppend: MANY_MODEL_CONFIG, live: false, model: "opencode-zen/big-pickle" });
+    mkdirSync(screenshotDir, { recursive: true });
+    const visualRoot = mkdtempSync(path.join(screenshotDir, "composer-home-"));
+    const visualHome = path.join(visualRoot, "home");
+    const visualCwd = path.join(visualHome, "Projects", "a-very-long-workspace-name-for-visual-proof");
+    const agentDir = path.join(visualCwd, ".psychevo", "agents");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(path.join(agentDir, "translate.md"), "---\ndescription: Translate user messages.\n---\nTranslate the user's message.\n");
+    const server = await startPevoWeb({
+      configAppend: MANY_MODEL_CONFIG,
+      cwd: visualCwd,
+      home: visualHome,
+      live: false,
+      model: "opencode-zen/big-pickle",
+      processEnv: {
+        HOME: visualHome,
+        CARGO_HOME: process.env.CARGO_HOME ?? path.join(homedir(), ".cargo"),
+        RUSTUP_HOME: process.env.RUSTUP_HOME ?? path.join(homedir(), ".rustup")
+      }
+    });
     const websocketFrames = { received: [] as string[], sent: [] as string[] };
     page.on("websocket", (socket) => {
       socket.on("framesent", (event) => websocketFrames.sent.push(String(event.payload)));
       socket.on("framereceived", (event) => websocketFrames.received.push(String(event.payload)));
     });
-    mkdirSync(screenshotDir, { recursive: true });
     try {
       await page.goto(server.url);
       await expect(page).toHaveTitle("Psychevo");
       await expect(page.locator('link[rel="icon"][href="/favicon.svg"]')).toHaveCount(1);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const initialWorkspaceControl = page.getByRole("button", { name: "Workspace", exact: true });
+      await expect(initialWorkspaceControl).toHaveText("~/Projects/a-very-long-workspace-name-for-visual-proof");
+      await expect(initialWorkspaceControl).toHaveAttribute("title", visualCwd);
 
       await openPanel(page, isMobile, "History");
       await page.getByRole("button", { name: "New Session" }).click();
@@ -174,6 +195,8 @@ test.describe("Workbench composer visual contract", () => {
       await expect(agentPopover.getByText("Manage Agent targets", { exact: true })).toHaveCount(0);
       await expect(agentPopover.getByText("Runtime Options", { exact: true })).toHaveCount(0);
       await expect(agentPopover.getByRole("combobox", { name: "Permission mode" })).toHaveCount(0);
+      const controlPopoverSurface = await popoverSurfaceSignature(agentPopover);
+      await expect(page.locator(".pevo-controlPopover:visible")).toHaveCount(1);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-agent-runtime-${testInfo.project.name}.png`)
       });
@@ -183,16 +206,17 @@ test.describe("Workbench composer visual contract", () => {
       const modeSelect = page.getByRole("combobox", { name: "Mode", exact: true });
       const modelButton = page.getByRole("button", { name: "Model", exact: true });
       await expect(modeSelect).toBeVisible();
+      await expect(modeSelect).toHaveAttribute("aria-haspopup", "listbox");
+      expect(await modeSelect.evaluate((element) => element.tagName)).toBe("BUTTON");
       await expect(modelButton).toBeVisible();
       expect(await selectedOptionText(modeSelect)).toBe("default");
-      await expectSelectTextFits(modeSelect);
+      await expectTextFits(modeSelect.locator("span"));
       await expect(modelButton).toContainText("big-pickle Unavailable");
       await expect(modelButton).toHaveAttribute("title", "opencode-zen/big-pickle / Reasoning unavailable");
       await expectTextFits(modelButton.locator("span").first());
       for (const control of [agentControl, modeSelect, modelButton]) {
         expect(await control.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe("0px");
       }
-      expect(await modeSelect.locator("..").evaluate((element) => getComputedStyle(element, "::after").display)).toBe("none");
       await expect(agentControl.locator("svg")).toHaveCount(0);
       await expect(modelButton.locator("svg")).toHaveCount(0);
       await expect(page.getByRole("combobox", { name: "Model" })).toHaveCount(0);
@@ -201,9 +225,12 @@ test.describe("Workbench composer visual contract", () => {
       const modelPopover = page.getByRole("dialog", { name: "Model and reasoning" });
       await expect(modelPopover).toBeVisible();
       await expect(modelPopover.getByRole("searchbox", { name: "Model filter" })).toBeVisible();
-      await expect(modelPopover.getByRole("radiogroup", { name: "Model" }).getByRole("radio")).toHaveCount(7);
+      const modelRows = modelPopover.getByRole("radiogroup", { name: "Model" }).getByRole("radio");
+      await expect(modelRows).toHaveCount(7);
+      await expect(modelRows.first()).toHaveAttribute("title", await modelRows.first().locator("strong").textContent() ?? "");
       await expect(modelPopover.getByRole("radiogroup", { name: "Reasoning" }).getByRole("radio", { name: "Default" })).toHaveAttribute("aria-checked", "false");
       await expect(page.getByRole("option", { name: "Select model" })).toHaveCount(0);
+      expect(await popoverSurfaceSignature(modelPopover)).toEqual(controlPopoverSurface);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-model-reasoning-${testInfo.project.name}.png`)
       });
@@ -220,12 +247,42 @@ test.describe("Workbench composer visual contract", () => {
       });
 
       const workspaceControl = page.getByRole("button", { name: "Workspace", exact: true });
+      await expect(workspaceControl).toContainText("~/Projects/a-very-long-workspace-name-for-visual-proof");
+      await expect(workspaceControl).toHaveAttribute("title", visualCwd);
+      if (!isMobile) {
+        expect(await workspaceControl.evaluate((element) => Number.parseFloat(getComputedStyle(element).maxWidth)))
+          .toBeGreaterThan(180);
+      }
+      expect(await permissionMode.evaluate((element) => element.tagName)).toBe("BUTTON");
+      await permissionMode.click();
+      const permissionListbox = page.getByRole("listbox", { name: "Permission mode" });
+      await expect(permissionListbox.getByRole("option", { name: "Default Permission" })).toHaveAttribute("aria-selected", "true");
+      expect(await popoverSurfaceSignature(permissionListbox)).toEqual(controlPopoverSurface);
+      await expect(page.locator(".pevo-controlPopover:visible")).toHaveCount(1);
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-permission-${testInfo.project.name}.png`)
+      });
       await workspaceControl.click();
+      await expect(permissionListbox).toHaveCount(0);
       const workspaceMenu = page.getByRole("menu", { name: "Workspace" });
       await expect(workspaceMenu.getByRole("menuitem", { name: "Open workspace..." })).toBeVisible();
+      expect(await popoverSurfaceSignature(workspaceMenu)).toEqual(controlPopoverSurface);
+      await expect(page.locator(".pevo-controlPopover:visible")).toHaveCount(1);
+      const workspaceMenuBox = await workspaceMenu.boundingBox();
+      expect(workspaceMenuBox).not.toBeNull();
+      const viewport = page.viewportSize();
+      expect(viewport).not.toBeNull();
+      expect(workspaceMenuBox!.width).toBeLessThanOrEqual(viewport!.width - 24);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-workspace-menu-${testInfo.project.name}.png`)
       });
+      await permissionMode.click();
+      await expect(workspaceMenu).toHaveCount(0);
+      await expect(permissionListbox).toBeVisible();
+      await expect(page.locator(".pevo-controlPopover:visible")).toHaveCount(1);
+      await workspaceControl.click();
+      await expect(permissionListbox).toHaveCount(0);
+      await expect(workspaceMenu).toBeVisible();
       await workspaceMenu.getByRole("menuitem", { name: "Open workspace..." }).click();
       const folderPicker = page.getByRole("dialog", { name: "Choose workspace folder" });
       await expect(folderPicker.getByRole("button", { name: "Open folder" })).toBeEnabled();
@@ -239,13 +296,20 @@ test.describe("Workbench composer visual contract", () => {
       await branchControl.click();
       const branchMenu = page.getByRole("menu", { name: "Git branch" });
       await expect(branchMenu.getByRole("menuitem", { name: "New branch..." })).toBeVisible();
+      expect(await popoverSurfaceSignature(branchMenu)).toEqual(controlPopoverSurface);
+      const branchMenuBox = await branchMenu.boundingBox();
+      expect(branchMenuBox).not.toBeNull();
+      expect(branchMenuBox!.width).toBeLessThan(280);
+      expect(branchMenuBox!.width).toBeLessThan(workspaceMenuBox!.width);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-branch-menu-${testInfo.project.name}.png`)
       });
       await page.keyboard.press("Escape");
 
       if (!isMobile) {
-        await page.getByRole("button", { name: "Context usage" }).click();
+        const contextTrigger = page.getByRole("button", { name: "Context usage" });
+        await expect(contextTrigger).toHaveAttribute("aria-haspopup", "dialog");
+        await contextTrigger.click();
         const contextPopover = page.getByRole("dialog", { name: "Context usage" });
         await expect(contextPopover).toBeVisible();
         const contextSummary = page.locator(".composerContextSummary strong");
@@ -254,12 +318,37 @@ test.describe("Workbench composer visual contract", () => {
         });
         await expectElementInsideViewport(page, contextPopover);
         await expectTextNotClipped(contextSummary);
+        expect(await popoverSurfaceSignature(contextPopover)).toEqual(controlPopoverSurface);
+        await page.screenshot({
+          path: path.join(screenshotDir, `composer-context-${testInfo.project.name}.png`)
+        });
         await page.keyboard.press("Escape");
       }
 
-      await page.getByRole("button", { name: "Add attachments and options" }).click();
-      const addPopover = page.getByRole("menu");
-      const addFiles = page.getByRole("menuitem", { name: "Add images and files" });
+      await promptInput.fill("/");
+      const completionPopover = page.locator(".pevo-completionPopover");
+      const completionOption = completionPopover.getByRole("option").first();
+      await expect(completionOption).toBeVisible();
+      await expect(completionOption).toHaveAttribute("title", /\S+/);
+      expect(await popoverSurfaceSignature(completionPopover)).toEqual(controlPopoverSurface);
+      const [completionBox, inputBox] = await Promise.all([
+        completionPopover.boundingBox(),
+        page.locator(".pevo-composerInput").boundingBox()
+      ]);
+      expect(completionBox).not.toBeNull();
+      expect(inputBox).not.toBeNull();
+      expect(Math.abs(completionBox!.x - inputBox!.x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(completionBox!.width - inputBox!.width)).toBeLessThanOrEqual(0.5);
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-completion-${testInfo.project.name}.png`)
+      });
+
+      const addTrigger = page.getByRole("button", { name: "Add attachments and options" });
+      await expect(addTrigger).toHaveAttribute("aria-haspopup", "dialog");
+      await addTrigger.click();
+      await expect(completionPopover).toHaveCount(0);
+      const addPopover = page.getByRole("dialog", { name: "Add options" });
+      const addFiles = addPopover.getByRole("button", { name: "Add images and files" });
       const autoSpeak = page.getByRole("switch", { name: "Auto-speak" });
       const realtime = page.getByRole("switch", { name: "Realtime voice" });
       await expect(addFiles).toBeVisible();
@@ -268,29 +357,45 @@ test.describe("Workbench composer visual contract", () => {
       await expect(addFiles.locator(".lucide-paperclip")).toBeVisible();
       await expect(autoSpeak.locator(".lucide-volume-2")).toBeVisible();
       await expect(realtime.locator(".lucide-radio")).toBeVisible();
-      const [popoverBox, autoLabelBox, autoTrackBox] = await Promise.all([
+      const [popoverBox, autoTrackBox, realtimeTrackBox, popoverPaddingRight, rowPaddingRight] = await Promise.all([
         addPopover.boundingBox(),
-        autoSpeak.locator(".pevo-switchLabel").boundingBox(),
-        autoSpeak.locator(".pevo-switchTrack").boundingBox()
+        autoSpeak.locator(".pevo-switchTrack").boundingBox(),
+        realtime.locator(".pevo-switchTrack").boundingBox(),
+        addPopover.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingRight)),
+        autoSpeak.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingRight))
       ]);
       expect(popoverBox).not.toBeNull();
-      expect(autoLabelBox).not.toBeNull();
       expect(autoTrackBox).not.toBeNull();
+      expect(realtimeTrackBox).not.toBeNull();
       expect(popoverBox!.width).toBeLessThan(260);
-      expect(autoTrackBox!.x - (autoLabelBox!.x + autoLabelBox!.width)).toBeLessThanOrEqual(14);
+      expect(Math.abs(
+        autoTrackBox!.x + autoTrackBox!.width - realtimeTrackBox!.x - realtimeTrackBox!.width
+      )).toBeLessThanOrEqual(1);
+      expect(Math.abs(
+        autoTrackBox!.x + autoTrackBox!.width
+        - (popoverBox!.x + popoverBox!.width - popoverPaddingRight - rowPaddingRight)
+      )).toBeLessThanOrEqual(2);
+      expect(await popoverSurfaceSignature(addPopover)).toEqual(controlPopoverSurface);
       await expect(page.getByRole("switch", { name: "Plan mode" })).toHaveCount(0);
       await page.screenshot({
         path: path.join(screenshotDir, `composer-menu-${testInfo.project.name}.png`)
       });
       await page.keyboard.press("Escape");
-      const beforeControl = workbenchRpcResultsForMethod(websocketFrames, "thread/context/read").at(-1);
+      const beforeControl = workbenchRpcResultsForMethod(websocketFrames, "thread/draft/open").at(-1)?.context as Record<string, unknown> | undefined;
       expect(beforeControl).toBeDefined();
-      await modeSelect.selectOption({ label: "plan" });
+      await modeSelect.click();
+      const modeListbox = page.getByRole("listbox", { name: "Mode" });
+      await expect(modeListbox.getByRole("option", { name: "plan" })).toBeVisible();
+      expect(await popoverSurfaceSignature(modeListbox)).toEqual(controlPopoverSurface);
+      await page.screenshot({
+        path: path.join(screenshotDir, `composer-mode-${testInfo.project.name}.png`)
+      });
+      await modeListbox.getByRole("option", { name: "plan" }).click();
       await expect.poll(() => selectedOptionText(modeSelect)).toBe("plan");
       await expect.poll(() => workbenchRpcResultsForMethod(websocketFrames, "thread/control/set").length).toBe(1);
       const controlReceipt = workbenchRpcResultsForMethod(websocketFrames, "thread/control/set")[0]!;
       expect(controlReceipt.status).toBe("applied");
-      expect((controlReceipt.context as Record<string, unknown>).targetId).toBe(beforeControl!.targetId);
+      expect((controlReceipt.context as Record<string, unknown>).selectedTargetId).toBe(beforeControl!.selectedTargetId);
       expect(controlReceipt.contextRevision).toBe(beforeControl!.contextRevision);
       expect(controlReceipt.controlRevision).not.toBe(beforeControl!.controlRevision);
       await expect(page.getByRole("alert")).toHaveCount(0);
@@ -326,6 +431,7 @@ test.describe("Workbench composer visual contract", () => {
       });
     } finally {
       await server.stop();
+      rmSync(visualRoot, { force: true, recursive: true });
     }
   });
 
@@ -334,6 +440,7 @@ test.describe("Workbench composer visual contract", () => {
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Model", exact: true })).toBeVisible();
 
       await openPanel(page, isMobile, "History");
       await page.getByRole("button", { name: "New Session" }).click();
@@ -512,8 +619,30 @@ test.describe("Workbench composer visual contract", () => {
 
 async function selectedOptionText(select: Locator): Promise<string> {
   return select.evaluate((element) => {
-    const control = element as HTMLSelectElement;
-    return control.selectedOptions[0]?.textContent?.trim() ?? "";
+    if (element instanceof HTMLSelectElement) {
+      return element.selectedOptions[0]?.textContent?.trim() ?? "";
+    }
+    return element.textContent?.trim() ?? "";
+  });
+}
+
+async function popoverSurfaceSignature(popover: Locator) {
+  return popover.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderBottomColor: style.borderBottomColor,
+      borderBottomStyle: style.borderBottomStyle,
+      borderBottomWidth: style.borderBottomWidth,
+      borderRadius: style.borderRadius,
+      boxShadow: style.boxShadow,
+      color: style.color,
+      gap: style.gap,
+      paddingBottom: style.paddingBottom,
+      paddingLeft: style.paddingLeft,
+      paddingRight: style.paddingRight,
+      paddingTop: style.paddingTop
+    };
   });
 }
 
@@ -543,35 +672,6 @@ function workbenchRpcResultsForMethod(
       return [];
     }
   });
-}
-
-async function expectSelectTextFits(select: Locator) {
-  const result = await select.evaluate((element) => {
-    const control = element as HTMLSelectElement;
-    const display = control.closest(".statusSelect")?.querySelector<HTMLElement>(".statusSelectDisplay") ?? null;
-    const wrapper = control.closest<HTMLElement>(".statusSelect");
-    const selectedText = display?.textContent?.trim() ?? control.selectedOptions[0]?.textContent?.trim() ?? "";
-    const probe = document.createElement("span");
-    const measureStyle = getComputedStyle(display ?? control);
-    probe.style.font = measureStyle.font;
-    probe.style.letterSpacing = measureStyle.letterSpacing;
-    probe.style.position = "absolute";
-    probe.style.visibility = "hidden";
-    probe.style.whiteSpace = "nowrap";
-    probe.textContent = selectedText;
-    document.body.appendChild(probe);
-    const textWidth = probe.getBoundingClientRect().width;
-    probe.remove();
-    return {
-      displayWidth: display?.clientWidth ?? control.clientWidth,
-      selectedText,
-      textWidth,
-      wrapperWidth: wrapper?.clientWidth ?? control.clientWidth
-    };
-  });
-  expect(result.selectedText.length).toBeGreaterThan(0);
-  expect(result.textWidth).toBeLessThanOrEqual(result.displayWidth + 1);
-  expect(result.textWidth + 10).toBeLessThanOrEqual(result.wrapperWidth + 1);
 }
 
 async function expectTextNotClipped(locator: Locator) {
@@ -714,8 +814,8 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
     expect(await footer.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(footerBox!.y + 2);
     expect(addBox!.x).toBeLessThan(agentBox!.x);
-    expect(permissionBox!.x).toBeLessThan(workspaceBox!.x);
     expect(workspaceBox!.x).toBeLessThan(branchBox!.x);
+    expect(branchBox!.x).toBeLessThan(permissionBox!.x);
     expect(dictationBox!.x).toBeLessThan(actionBox!.x);
     return;
   }
@@ -731,8 +831,8 @@ async function assertComposerGeometry(page: Page, isMobile: boolean) {
     (permissionBox!.y + permissionBox!.height / 2)
     - (workspaceBox!.y + workspaceBox!.height / 2)
   )).toBeLessThanOrEqual(4);
-  expect(permissionBox!.x).toBeLessThan(workspaceBox!.x);
   expect(workspaceBox!.x).toBeLessThan(branchBox!.x);
+  expect(branchBox!.x).toBeLessThan(permissionBox!.x);
   expect(modeBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeGreaterThan(agentBox!.x);
   expect(modelBox!.x).toBeLessThan(dictationBox!.x);

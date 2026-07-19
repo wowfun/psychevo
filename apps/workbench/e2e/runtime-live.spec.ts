@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { startPevoWeb } from "./harness";
@@ -12,6 +12,78 @@ import {
 } from "./runtime-live.support";
 
 test.describe("Native and ACP Agent application-path validation", () => {
+  test("keeps first send live across a pending atomic draft open on the real Gateway", async ({ page }) => {
+    test.setTimeout(180_000);
+    const nativeModel = await startDeterministicNativeModel();
+    const fixtureParent = path.join(process.cwd(), ".local", "playwright");
+    mkdirSync(fixtureParent, { recursive: true });
+    const fixtureRoot = mkdtempSync(path.join(fixtureParent, "pending-draft-open-"));
+    const cwd = path.join(fixtureRoot, "cwd");
+    mkdirSync(cwd, { recursive: true });
+    for (let index = 0; index < 2_000; index += 1) {
+      writeAgentDefinition(
+        cwd,
+        `startup-catalog-${String(index).padStart(4, "0")}`,
+        "Exercise the atomic draft-open startup boundary."
+      );
+    }
+    const providerConfig = [
+      "[provider.native-live]",
+      `api = ${JSON.stringify(nativeModel.baseUrl)}`,
+      "no_auth = true",
+      "",
+      "[provider.native-live.models.default]",
+      ""
+    ].join("\n");
+    const server = await startPevoWeb({
+      configAppend: providerConfig,
+      cwd,
+      live: false,
+      model: "native-live/default"
+    });
+    const websocketFrames = captureWebSocketFrames(page);
+    const prompt = "submit exactly once while the draft is opening";
+    try {
+      await page.goto(server.url, { waitUntil: "domcontentloaded" });
+      const input = page.getByPlaceholder("Ask Psychevo...");
+      await expect(input).toBeVisible();
+      await expect.poll(() => rpcRequestsForMethod(websocketFrames, "thread/draft/open").length)
+        .toBe(1);
+      expect(rpcResultsForMethod(websocketFrames, "thread/draft/open")).toHaveLength(0);
+
+      await input.fill(prompt);
+      const send = page.getByRole("button", { name: "Send message" });
+      await expect(send).toBeEnabled();
+      await send.click();
+      await expect(input).toHaveValue(prompt);
+      expect(rpcRequestsForMethod(websocketFrames, "turn/start")).toHaveLength(0);
+      expect(rpcRequestsForMethod(websocketFrames, "thread/context/read")).toHaveLength(0);
+      expect(rpcRequestsForMethod(websocketFrames, "settings/read")).toHaveLength(0);
+      expect(rpcRequestsForMethod(websocketFrames, "completion/list")).toHaveLength(0);
+
+      await expect.poll(() => rpcResultsForMethod(websocketFrames, "thread/draft/open").length)
+        .toBe(1);
+      await expect.poll(() => rpcRequestsForMethod(websocketFrames, "turn/start").length)
+        .toBe(1);
+      await expect(input).toHaveValue("");
+      await expect(page.locator(".pevo-message.is-assistant").filter({
+        hasText: nativeModel.expectedAnswer
+      })).toHaveCount(1, { timeout: 60_000 });
+      expect(rpcRequestsForMethod(websocketFrames, "turn/start")).toHaveLength(1);
+      const boundContextReads = rpcRequestsForMethod(websocketFrames, "thread/context/read");
+      expect(boundContextReads.length).toBeGreaterThan(0);
+      expect(boundContextReads.every((request) => (
+          typeof request.params === "object"
+          && request.params !== null
+          && typeof (request.params as { threadId?: unknown }).threadId === "string"
+      ))).toBe(true);
+    } finally {
+      await server.stop();
+      await nativeModel.stop();
+      rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  });
+
   test("runs Codex ACP and OpenCode ACP through one GUI control path @live", async ({ page }, testInfo) => {
     const context = requiredContext("agent-acp-gui-parity");
     if (!context) return;
@@ -61,7 +133,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
       await runPrompt(page, "codex stable ACP v1 GUI baseline", /Codex ACP response/i);
       const firstThreadId = await currentThreadId(page, server.cwd);
       const codexBefore = await readThreadContext(page, server.cwd, firstThreadId);
-      expect(codexBefore.targetId).toBe(reviewerTarget.targetId);
+      expect(codexBefore.selectedTargetId).toBe(reviewerTarget.targetId);
       const codexAfterModel = await setThreadControl(
         page,
         server.cwd,
@@ -109,7 +181,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
           ?.unavailableReason
       ).toMatch(/ThreadApplication does not expose/i);
       expectCapability(opencodeContext, "direct.steer", false);
-      expect(opencodeContext.targetId).toBe(opencodeTarget.targetId);
+      expect(opencodeContext.selectedTargetId).toBe(opencodeTarget.targetId);
       await capture(page, testInfo, screenshots, "opencode-acp-common-controls");
 
       const opaqueChoices = await openTargetChoices(page);
@@ -122,9 +194,9 @@ test.describe("Native and ACP Agent application-path validation", () => {
       expect(opaqueThreadId).not.toBe(secondThreadId);
       const opaqueContext = await readThreadContext(page, server.cwd, opaqueThreadId);
       expect(opaqueContext.binding?.runtimeRef).toBe(opaque.runtimeRef);
-      expect(opaqueContext.targetId).toBe(opaqueTarget.targetId);
-      expect(opaqueContext.targetId).not.toContain(opaque.runtimeRef);
-      expect(new Set([codexContext.targetId, opencodeContext.targetId, opaqueContext.targetId]).size).toBe(3);
+      expect(opaqueContext.selectedTargetId).toBe(opaqueTarget.targetId);
+      expect(opaqueContext.selectedTargetId).not.toContain(opaque.runtimeRef);
+      expect(new Set([codexContext.selectedTargetId, opencodeContext.selectedTargetId, opaqueContext.selectedTargetId]).size).toBe(3);
       expectCapability(opaqueContext, "turn.start", true);
       expectCapability(opaqueContext, "history.read", true);
       expect(opaqueContext.capabilities.some((capability) => (
@@ -135,7 +207,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
         JSON.stringify({
           runtimeRef: opaque.runtimeRef,
           agentInfo: opaque.agentInfo,
-          targetId: opaqueContext.targetId,
+          targetId: opaqueContext.selectedTargetId,
           binding: opaqueContext.binding,
           enabledCapabilities: opaqueContext.capabilities
             .filter((capability) => capability.enabled)
@@ -234,7 +306,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
       const guiThreadId = await currentThreadId(page, server.cwd);
       const guiContext = await readThreadContext(page, server.cwd, guiThreadId);
       const guiHistory = await readThreadHistory(page, server.cwd, guiThreadId);
-      expect(guiContext.targetId).toBe(nativeTarget.targetId);
+      expect(guiContext.selectedTargetId).toBe(nativeTarget.targetId);
       expectCapability(guiContext, "turn.start", true);
       expectCapability(guiContext, "history.read", true);
 
@@ -251,7 +323,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
       const channelContext = await readThreadContext(page, server.cwd, channelThreadId as string);
       const channelHistory = await readThreadHistory(page, server.cwd, channelThreadId as string);
 
-      expect(channelContext.targetId).toBe(nativeTarget.targetId);
+      expect(channelContext.selectedTargetId).toBe(nativeTarget.targetId);
       expect(bindingTargetProof(channelContext)).toEqual(bindingTargetProof(guiContext));
       expect(channelHistory.history).toEqual(guiHistory.history);
       expect(historyEntrySemantics(channelHistory)).toEqual(historyEntrySemantics(guiHistory));
@@ -1319,13 +1391,13 @@ test.describe("Native and ACP Agent application-path validation", () => {
       await selectTarget(page, server.cwd, "codex", "codex");
       await runPrompt(page, "managed Codex ACP must stay offline", /Codex ACP response/i);
       const threadContext = await readThreadContext(page, server.cwd, await currentThreadId(page, server.cwd));
-      expect(threadContext.targetId).toBe(missingTarget.targetId);
+      expect(threadContext.selectedTargetId).toBe(missingTarget.targetId);
       const boot = traceEvents(fixture).find((event) => event.type === "boot");
       expect(boot).toBeTruthy();
       expect(fixture.managedBinPath).toContain("runtime-adapters/codex-acp/1.1.2/node_modules/.bin");
       writeFileSync(path.join(context.artifactRoot, "agent-managed-codex-install-proof.json"), JSON.stringify({
         backend: listed.backends.find((backend) => backend.id === "codex"),
-        boundTargetId: threadContext.targetId,
+        boundTargetId: threadContext.selectedTargetId,
         install: installed,
         installerRemoved: !existsSync(fixture.fakeNpmPath as string),
         missingTarget,
@@ -1562,7 +1634,7 @@ async function setThreadControl(
   }
   const receipt = await gatewayRequest(page, "thread/control/set", {
     threadId,
-    targetId: context.targetId,
+    targetId: context.selectedTargetId,
     controlId: control.id,
     value,
     expectedCapabilityRevision: control.capabilityRevision,
@@ -1582,9 +1654,9 @@ async function setThreadControl(
 function bindingTargetProof(context: ThreadContextProof) {
   const binding = context.binding;
   expect(binding, "bound ThreadContext").toBeTruthy();
-  expect(context.targetId, "bound targetId").toBeTruthy();
+  expect(context.selectedTargetId, "bound selectedTargetId").toBeTruthy();
   return {
-    targetId: context.targetId,
+    targetId: context.selectedTargetId,
     agentRef: binding?.agentRef ?? null,
     agentFingerprint: binding?.agentFingerprint,
     runtimeRef: binding?.runtimeRef,
@@ -1845,6 +1917,20 @@ function rpcResultsForMethod(capture: WebSocketFrameCapture, method: string): Ar
         && message.result !== null
         ? [message.result as Record<string, unknown>]
         : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function rpcRequestsForMethod(
+  capture: WebSocketFrameCapture,
+  method: string
+): Array<{ id?: unknown; method?: string; params?: unknown }> {
+  return capture.sent.flatMap((payload) => {
+    try {
+      const message = JSON.parse(payload) as { id?: unknown; method?: string; params?: unknown };
+      return message.method === method ? [message] : [];
     } catch {
       return [];
     }

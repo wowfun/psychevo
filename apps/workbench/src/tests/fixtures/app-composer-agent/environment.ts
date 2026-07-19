@@ -186,6 +186,13 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   gatewayMock.scope.cwd = "/tmp/project";
+  Object.assign(gatewayMock.scope.source, {
+    kind: "web",
+    rawId: null,
+    lifetime: "persistent",
+    rawIdentity: null,
+    visibleName: null
+  });
   gatewayMock.initialize = null;
   gatewayMock.commandExecute = (command: string) => ({
     accepted: false,
@@ -201,10 +208,11 @@ afterEach(() => {
   gatewayMock.threadRestore = null;
   gatewayMock.threadHistoryRead = null;
   gatewayMock.threadBrowser = null;
-  gatewayMock.threadStart = null;
+  gatewayMock.draftOpen = null;
   gatewayMock.turnStart = null;
   gatewayMock.settingsRead = null;
   gatewayMock.workspaceGitCheckout = null;
+  gatewayMock.workspaceGitBranches = null;
   gatewayMock.workspaceFolderList = null;
   gatewayMock.workspaceCreate = null;
   gatewayMock.workspaceGitBranchesResult = {
@@ -300,6 +308,7 @@ afterEach(() => {
   gatewayMock.optimisticLog.length = 0;
   gatewayMock.projectBranch = "main";
   gatewayMock.requestLog.length = 0;
+  gatewayMock.pluginInstallResult = null;
   gatewayMock.xtermTerminalOptions.length = 0;
   gatewayMock.subscribers = [];
   gatewayMock.archivedSessionSummaries = [];

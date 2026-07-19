@@ -43,14 +43,13 @@ export function parseThreadContext(value: unknown): ThreadContextReadResult {
   const profiles = arrayValue(record.profiles).map(parseRuntimeProfile).filter((profile) => profile.id);
   const runtimeProfileRef = stringValue(record.runtimeProfileRef)
     || "";
-  const targetId = stringValue(record.targetId).trim();
-  if (!targetId) {
-    throw new Error("Thread Context is missing its canonical targetId.");
-  }
+  const selectedTargetId = nullableString(record.selectedTargetId);
+  const suggestedTargetId = nullableString(record.suggestedTargetId);
   const sendability = objectValue(record.sendability);
   const history = objectValue(record.history);
   return {
-    targetId,
+    selectedTargetId,
+    suggestedTargetId,
     runtimeProfileRef,
     selectionState: stringValue(record.selectionState) || "default",
     profiles,

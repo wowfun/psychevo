@@ -79,8 +79,8 @@ describe("DesktopGatewayTransport", () => {
     transport.onMessage((message) => received.push(String(message)));
     const notification = JSON.stringify({
       jsonrpc: "2.0",
-      method: "turn/result",
-      params: { thread: { id: "thread-floating" } }
+      method: "gateway/event",
+      params: { type: "turnStarted", threadId: "thread-floating", turnId: "turn-1" }
     });
 
     listeners.get("gateway-broadcast")?.({
@@ -102,7 +102,7 @@ describe("DesktopGatewayTransport", () => {
 
     listeners.get("gateway-broadcast")?.({
       payload: {
-        message: JSON.stringify({ jsonrpc: "2.0", method: "turn/result", params: {} }),
+        message: JSON.stringify({ jsonrpc: "2.0", method: "gateway/event", params: {} }),
         originConnectionId: transport.connectionId
       }
     });

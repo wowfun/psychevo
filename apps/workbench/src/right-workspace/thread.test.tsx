@@ -885,7 +885,8 @@ function threadContext(
   fidelity: "full" | "summary" | "partial" | "unavailable"
 ): ThreadContextReadResult {
   return {
-    targetId: "target:opencode-bound",
+    selectedTargetId: "target:opencode-bound",
+    suggestedTargetId: null,
     runtimeProfileRef: "opencode",
     selectionState: "bound",
     profiles: [],
