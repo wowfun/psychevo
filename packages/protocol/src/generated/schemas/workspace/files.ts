@@ -616,6 +616,307 @@ export const workspaceFileSchemas = {
   "title": "WorkspaceFilesResult",
   "type": "object"
 },
+  WorkspaceExternalFileAction: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "systemDefault",
+    "vscode",
+    "reveal"
+  ],
+  "title": "WorkspaceExternalFileAction",
+  "type": "string"
+},
+  WorkspaceExternalFileCategory: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "webpage",
+    "image",
+    "media",
+    "pdf",
+    "office",
+    "text",
+    "other"
+  ],
+  "title": "WorkspaceExternalFileCategory",
+  "type": "string"
+},
+  WorkspaceExternalHostPlatform: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "macos",
+    "windows",
+    "linux"
+  ],
+  "title": "WorkspaceExternalHostPlatform",
+  "type": "string"
+},
+  WorkspaceFileExternalActionsParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    }
+  },
+  "required": [
+    "path",
+    "scope"
+  ],
+  "title": "WorkspaceFileExternalActionsParams",
+  "type": "object"
+},
+  WorkspaceFileExternalActionsResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceExternalFileAction": {
+      "enum": [
+        "systemDefault",
+        "vscode",
+        "reveal"
+      ],
+      "type": "string"
+    },
+    "WorkspaceExternalFileCategory": {
+      "enum": [
+        "webpage",
+        "image",
+        "media",
+        "pdf",
+        "office",
+        "text",
+        "other"
+      ],
+      "type": "string"
+    },
+    "WorkspaceExternalHostPlatform": {
+      "enum": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "availableActions": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceExternalFileAction"
+      },
+      "type": "array"
+    },
+    "category": {
+      "$ref": "#/definitions/WorkspaceExternalFileCategory"
+    },
+    "path": {
+      "type": "string"
+    },
+    "platform": {
+      "$ref": "#/definitions/WorkspaceExternalHostPlatform"
+    },
+    "preferredAction": {
+      "$ref": "#/definitions/WorkspaceExternalFileAction"
+    },
+    "textLike": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "availableActions",
+    "category",
+    "path",
+    "platform",
+    "preferredAction",
+    "textLike"
+  ],
+  "title": "WorkspaceFileExternalActionsResult",
+  "type": "object"
+},
+  WorkspaceFileOpenExternalParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "WorkspaceExternalFileAction": {
+      "enum": [
+        "systemDefault",
+        "vscode",
+        "reveal"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "action": {
+      "$ref": "#/definitions/WorkspaceExternalFileAction"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    }
+  },
+  "required": [
+    "action",
+    "path",
+    "scope"
+  ],
+  "title": "WorkspaceFileOpenExternalParams",
+  "type": "object"
+},
+  WorkspaceFileOpenExternalResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WorkspaceExternalFileAction": {
+      "enum": [
+        "systemDefault",
+        "vscode",
+        "reveal"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "action": {
+      "$ref": "#/definitions/WorkspaceExternalFileAction"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "path"
+  ],
+  "title": "WorkspaceFileOpenExternalResult",
+  "type": "object"
+},
   WorkspaceFileReadParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {

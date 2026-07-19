@@ -136,6 +136,8 @@ import { clientRequestWorkspaceGitBranchesSchema } from './rpc/client-request/wo
 import { clientRequestWorkspaceGitCheckoutSchema } from './rpc/client-request/workspace-git-checkout';
 import { clientRequestWorkspaceFileReadSchema } from './rpc/client-request/workspace-file-read';
 import { clientRequestWorkspaceFileWriteSchema } from './rpc/client-request/workspace-file-write';
+import { clientRequestWorkspaceFileExternalActionsSchema } from './rpc/client-request/workspace-file-external-actions';
+import { clientRequestWorkspaceFileOpenExternalSchema } from './rpc/client-request/workspace-file-open-external';
 import { clientRequestWorkspaceDiffSchema } from './rpc/client-request/workspace-diff';
 import { clientRequestWorkspaceChangesSchema } from './rpc/client-request/workspace-changes';
 import { clientRequestWorkspaceChangeAcceptSchema } from './rpc/client-request/workspace-change-accept';
@@ -758,6 +760,12 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/workspace-file-write.json"
     },
     {
+      "$ref": "ClientRequest/workspace-file-external-actions.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-file-open-external.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-diff.json"
     },
     {
@@ -965,6 +973,8 @@ export const rpcSchemaRefs = [
   clientRequestWorkspaceGitCheckoutSchema,
   clientRequestWorkspaceFileReadSchema,
   clientRequestWorkspaceFileWriteSchema,
+  clientRequestWorkspaceFileExternalActionsSchema,
+  clientRequestWorkspaceFileOpenExternalSchema,
   clientRequestWorkspaceDiffSchema,
   clientRequestWorkspaceChangesSchema,
   clientRequestWorkspaceChangeAcceptSchema,

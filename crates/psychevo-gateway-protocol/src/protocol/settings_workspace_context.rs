@@ -434,6 +434,67 @@ pub struct WorkspaceFilesResult {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceExternalFileAction {
+    SystemDefault,
+    Vscode,
+    Reveal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceExternalFileCategory {
+    Webpage,
+    Image,
+    Media,
+    Pdf,
+    Office,
+    Text,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceExternalHostPlatform {
+    Macos,
+    Windows,
+    Linux,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileExternalActionsParams {
+    pub scope: GatewayRequestScope,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileExternalActionsResult {
+    pub path: String,
+    pub category: WorkspaceExternalFileCategory,
+    pub text_like: bool,
+    pub platform: WorkspaceExternalHostPlatform,
+    pub preferred_action: WorkspaceExternalFileAction,
+    pub available_actions: Vec<WorkspaceExternalFileAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileOpenExternalParams {
+    pub scope: GatewayRequestScope,
+    pub path: String,
+    pub action: WorkspaceExternalFileAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileOpenExternalResult {
+    pub path: String,
+    pub action: WorkspaceExternalFileAction,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileReadParams {

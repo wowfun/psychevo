@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "webpage",
+    "image",
+    "media",
+    "pdf",
+    "office",
+    "text",
+    "other"
+  ],
+  "title": "WorkspaceExternalFileCategory",
+  "type": "string"
+}

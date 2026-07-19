@@ -259,6 +259,7 @@ fn schema_group_module(name: &str) -> &'static str {
         return "usage";
     }
     if name.starts_with("WorkspaceFile")
+        || name.starts_with("WorkspaceExternal")
         || name.starts_with("WorkspaceFolder")
         || name.starts_with("WorkspaceGit")
         || matches!(

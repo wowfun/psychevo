@@ -2032,6 +2032,10 @@ pub enum ClientRequest {
     WorkspaceFileRead(WorkspaceFileReadParams),
     #[serde(rename = "workspace/file/write")]
     WorkspaceFileWrite(WorkspaceFileWriteParams),
+    #[serde(rename = "workspace/file/externalActions")]
+    WorkspaceFileExternalActions(WorkspaceFileExternalActionsParams),
+    #[serde(rename = "workspace/file/openExternal")]
+    WorkspaceFileOpenExternal(WorkspaceFileOpenExternalParams),
     #[serde(rename = "workspace/diff")]
     WorkspaceDiff(WorkspaceDiffParams),
     #[serde(rename = "workspace/changes")]

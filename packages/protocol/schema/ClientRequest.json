@@ -410,6 +410,12 @@
       "$ref": "ClientRequest/workspace-file-write.json"
     },
     {
+      "$ref": "ClientRequest/workspace-file-external-actions.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-file-open-external.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-diff.json"
     },
     {

@@ -211,6 +211,10 @@ import {
   type WorkspaceGitBranchesParams,
   type WorkspaceGitBranchesResult,
   type WorkspaceGitCheckoutParams,
+  type WorkspaceFileExternalActionsParams,
+  type WorkspaceFileExternalActionsResult,
+  type WorkspaceFileOpenExternalParams,
+  type WorkspaceFileOpenExternalResult,
   type WorkspaceFileReadParams,
   type WorkspaceFileReadResult,
   type WorkspaceFileWriteParams,
@@ -396,6 +400,8 @@ export interface GatewayRequestParams {
   "workspace/changes": WorkspaceChangesParams;
   "workspace/create": WorkspaceCreateParams;
   "workspace/diff": WorkspaceDiffParams;
+  "workspace/file/externalActions": WorkspaceFileExternalActionsParams;
+  "workspace/file/openExternal": WorkspaceFileOpenExternalParams;
   "workspace/file/read": WorkspaceFileReadParams;
   "workspace/file/write": WorkspaceFileWriteParams;
   "workspace/files": WorkspaceFilesParams;
@@ -542,6 +548,8 @@ export interface GatewayRequestResults {
   "workspace/changes": WorkspaceChangesResult;
   "workspace/create": WorkspaceCreateResult;
   "workspace/diff": WorkspaceDiffResult;
+  "workspace/file/externalActions": WorkspaceFileExternalActionsResult;
+  "workspace/file/openExternal": WorkspaceFileOpenExternalResult;
   "workspace/file/read": WorkspaceFileReadResult;
   "workspace/file/write": WorkspaceFileWriteResult;
   "workspace/files": WorkspaceFilesResult;
