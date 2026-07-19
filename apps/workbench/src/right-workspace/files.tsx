@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   AlertTriangle,
   ChevronRight,
@@ -13,33 +13,53 @@ import {
   X
 } from "lucide-react";
 import { MarkdownText } from "@psychevo/components";
-import type { WorkspaceFileEntry, WorkspaceFileReadResult, WorkspaceFileWriteResult } from "@psychevo/protocol";
+import type { GatewayClient } from "@psychevo/client";
+import type {
+  GatewayRequestScope,
+  WorkspaceExternalFileAction,
+  WorkspaceFileEntry,
+  WorkspaceFileExternalActionsResult,
+  WorkspaceFileReadResult,
+  WorkspaceFileWriteResult
+} from "@psychevo/protocol";
 import { highlightToHtml, languageForPath } from "../highlight";
 import { isUnsupportedPreviewFile } from "../right-workspace-model";
 import type { WorkspaceFileTreeItem } from "../types";
+import { workspaceExternalActionMenuItems } from "./file-external-actions";
+import { WorkspaceFileContextMenu } from "./file-context-menu";
 import { HtmlStaticPreview } from "./preview";
-import { WorkspaceFileTree, absoluteWorkspacePath } from "./tree";
+import {
+  WorkspaceFileTree,
+  absoluteWorkspacePath,
+  type WorkspaceFileContextMenuRequest
+} from "./tree";
 
 export function FilesPanel({
+  client,
   files,
   preview,
   previewMessage,
   root,
+  scope,
   selectedPath,
   tabId,
   truncated,
   onCompare,
   onCopyText,
   onDirtyChange,
+  onFileTreeOpenChange,
   onOpen,
   onOpenHtmlPreview,
   htmlExecutionActive,
+  fileTreeOpen,
   onSave
 }: {
+  client: GatewayClient | null;
   files: WorkspaceFileEntry[];
   preview: WorkspaceFileReadResult | null;
   previewMessage: string | null;
   root: string;
+  scope: GatewayRequestScope | null;
   selectedPath: string | null;
   tabId: string;
   truncated: boolean;
@@ -49,6 +69,8 @@ export function FilesPanel({
   onOpen(path: string): void;
   onOpenHtmlPreview(path: string, content: string): void;
   htmlExecutionActive: boolean;
+  fileTreeOpen: boolean;
+  onFileTreeOpenChange(open: boolean): void;
   onSave(path: string, content: string, expectedRevision: string | null, force: boolean): Promise<WorkspaceFileWriteResult>;
 }) {
   const treeItems = useMemo(() => workspaceFileTreeItems(files), [files]);
@@ -60,7 +82,6 @@ export function FilesPanel({
   const [draft, setDraft] = useState("");
   const [baseRevision, setBaseRevision] = useState<string | null>(null);
   const [wrap, setWrap] = useState(true);
-  const [fileTreeOpen, setFileTreeOpen] = useState(true);
   const [findText, setFindText] = useState("");
   const [goLine, setGoLine] = useState("");
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
@@ -69,6 +90,10 @@ export function FilesPanel({
   const [conflict, setConflict] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lineNumbersRef = useRef<HTMLPreElement | null>(null);
+  const fileMenuRequestRef = useRef(0);
+  const [fileMenu, setFileMenu] = useState<WorkspaceFileMenuState | null>(null);
+  const fileMenuScopeKey = workspaceScopeIdentity(scope);
+  const fileMenuContextRef = useRef({ client, root, scopeKey: fileMenuScopeKey });
   const dirty = editing && draft !== (previewContent ?? "");
   const lineCount = Math.max(1, draft.split("\n").length);
 
@@ -85,6 +110,15 @@ export function FilesPanel({
     onDirtyChange(tabId, dirty);
   }, [dirty, onDirtyChange, tabId]);
 
+  useLayoutEffect(() => {
+    const previous = fileMenuContextRef.current;
+    fileMenuContextRef.current = { client, root, scopeKey: fileMenuScopeKey };
+    if (previous.client !== client || previous.root !== root || previous.scopeKey !== fileMenuScopeKey) {
+      fileMenuRequestRef.current += 1;
+      setFileMenu(null);
+    }
+  }, [client, fileMenuScopeKey, root]);
+
   function confirmDiscard(): boolean {
     return !dirty || window.confirm("Discard unsaved file edits?");
   }
@@ -95,6 +129,82 @@ export function FilesPanel({
     }
     setEditing(false);
     onOpen(path);
+  }
+
+  function closeFileMenu() {
+    fileMenuRequestRef.current += 1;
+    setFileMenu(null);
+  }
+
+  function openFileMenu(request: WorkspaceFileContextMenuRequest) {
+    const requestId = fileMenuRequestRef.current + 1;
+    fileMenuRequestRef.current = requestId;
+    const nextMenu: WorkspaceFileMenuState = {
+      actions: null,
+      anchor: request.anchor,
+      error: null,
+      loading: true,
+      path: request.path,
+      pendingAction: null,
+      requestId,
+      x: request.clientX,
+      y: request.clientY
+    };
+    setFileMenu(nextMenu);
+    if (!client || !scope) {
+      setFileMenu({
+        ...nextMenu,
+        error: "Connect to the workspace Gateway to use external file actions.",
+        loading: false
+      });
+      return;
+    }
+    void client.request("workspace/file/externalActions", { path: request.path, scope }).then(
+      (actions) => {
+        setFileMenu((current) => (
+          current?.requestId === requestId
+            ? { ...current, actions, loading: false }
+            : current
+        ));
+      },
+      (error) => {
+        setFileMenu((current) => (
+          current?.requestId === requestId
+            ? { ...current, error: fileActionErrorMessage(error), loading: false }
+            : current
+        ));
+      }
+    );
+  }
+
+  async function runFileMenuAction(action: WorkspaceExternalFileAction) {
+    const current = fileMenu;
+    if (
+      !current
+      || !current.actions?.availableActions.includes(action)
+      || !client
+      || !scope
+      || current.pendingAction
+    ) {
+      return;
+    }
+    setFileMenu({ ...current, error: null, pendingAction: action });
+    try {
+      await client.request("workspace/file/openExternal", {
+        action,
+        path: current.path,
+        scope
+      });
+      if (fileMenuRequestRef.current === current.requestId) {
+        closeFileMenu();
+      }
+    } catch (error) {
+      setFileMenu((latest) => (
+        latest?.requestId === current.requestId
+          ? { ...latest, error: fileActionErrorMessage(error), pendingAction: null }
+          : latest
+      ));
+    }
   }
 
   function exitEditMode() {
@@ -196,7 +306,7 @@ export function FilesPanel({
             aria-label={fileTreeOpen ? "Hide file tree" : "Show file tree"}
             aria-pressed={fileTreeOpen}
             className={`filesTreeToggle ${fileTreeOpen ? "is-pressed" : ""}`}
-            onClick={() => setFileTreeOpen((value) => !value)}
+            onClick={() => onFileTreeOpenChange(!fileTreeOpen)}
             title={fileTreeOpen ? "Hide file tree" : "Show file tree"}
             type="button"
           >
@@ -367,14 +477,50 @@ export function FilesPanel({
               filterPlaceholder="Filter files..."
               items={treeItems}
               selectedPath={selectedPath}
+              onFileContextMenu={openFileMenu}
               onOpen={openTreePath}
             />
             {truncated && <footer>File tree truncated.</footer>}
           </aside>
         )}
       </div>
+      {fileMenu && (
+        <WorkspaceFileContextMenu
+          anchor={{ element: fileMenu.anchor, x: fileMenu.x, y: fileMenu.y }}
+          ariaLabel={`Actions for ${fileMenu.path}`}
+          error={fileMenu.error}
+          items={fileMenu.actions
+            ? workspaceExternalActionMenuItems(fileMenu.actions, fileMenu.pendingAction !== null)
+            : []}
+          loading={fileMenu.loading}
+          onClose={closeFileMenu}
+          onSelect={(action) => void runFileMenuAction(action)}
+        />
+      )}
     </section>
   );
+}
+
+type WorkspaceFileMenuState = {
+  actions: WorkspaceFileExternalActionsResult | null;
+  anchor: HTMLButtonElement;
+  error: string | null;
+  loading: boolean;
+  path: string;
+  pendingAction: WorkspaceExternalFileAction | null;
+  requestId: number;
+  x: number;
+  y: number;
+};
+
+function fileActionErrorMessage(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).trim()
+    || "External file action failed.";
+  return message.length <= 240 ? message : `${message.slice(0, 239)}…`;
+}
+
+function workspaceScopeIdentity(scope: GatewayRequestScope | null): string {
+  return scope ? JSON.stringify(scope) : "";
 }
 
 function updateCursorFromText(
@@ -403,11 +549,11 @@ function HighlightedCodePreview({ content, path }: { content: string; path: stri
 
 function workspaceFileTreeItems(files: WorkspaceFileEntry[]): WorkspaceFileTreeItem[] {
   return files.map((file) => ({
-    disabled: file.kind === "file" && isUnsupportedPreviewFile(file.path),
     kind: file.kind,
     name: file.name,
     path: file.path,
-    depth: file.depth
+    depth: file.depth,
+    previewDisabled: file.kind === "file" && isUnsupportedPreviewFile(file.path)
   }));
 }
 

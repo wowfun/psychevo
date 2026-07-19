@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { TranscriptEntry } from "@psychevo/protocol";
 import {
@@ -833,7 +833,56 @@ describe("Workbench layout and workspace panels", () => {
     });
   });
 
-  it("opens relative and Windows assistant file links in the locked Files preview", async () => {
+  it("opens file-tree external actions and keeps non-previewable files context-menu accessible", async () => {
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [
+        { path: "README.md", name: "README.md", kind: "file", depth: 0 },
+        { path: "assets", name: "assets", kind: "directory", depth: 0 },
+        { path: "assets/photo.png", name: "photo.png", kind: "file", depth: 1 }
+      ],
+      truncated: false
+    };
+    render(<App />);
+
+    expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    const readme = within(files).getByRole("treeitem", { name: /README\.md/ });
+
+    fireEvent.contextMenu(readme, { clientX: 32, clientY: 48 });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/file/externalActions",
+        params: { path: "README.md", scope: gatewayMock.scope }
+      });
+    });
+    expect(await screen.findByRole("menuitem", { name: "Open in VS Code" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Open with Default Application" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Show in Finder" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in VS Code" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "workspace/file/openExternal",
+        params: { action: "vscode", path: "README.md", scope: gatewayMock.scope }
+      });
+    });
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "Actions for README.md" })).toBeNull());
+    expect(document.activeElement).toBe(readme);
+
+    const image = within(files).getByRole("treeitem", { name: /photo\.png/ });
+    expect((image as HTMLButtonElement).disabled).toBe(false);
+    expect(image.hasAttribute("aria-disabled")).toBe(false);
+    expect(image.getAttribute("aria-describedby")).toBeTruthy();
+    fireEvent.contextMenu(image, { clientX: 40, clientY: 56 });
+    expect(await screen.findByRole("menuitem", { name: "Open in Default Image Viewer" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Show in Finder" })).toBeTruthy();
+  });
+
+  it("opens assistant file links preview-focused and restores the tree from the Composer browser entry", async () => {
     gatewayMock.scope.cwd = "C:\\repo";
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Artifact links", gatewayMock.scope.cwd)];
     gatewayMock.workspaceFilesResult = {
@@ -886,6 +935,12 @@ describe("Workbench layout and workspace panels", () => {
     }
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("srcdoc")).toContain("Artifact preview");
+    expect(within(files).getByRole("button", { name: "Show file tree" })).toBeTruthy();
+    expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(within(files).getByRole("button", { name: "Hide file tree" })).toBeTruthy();
+    expect(within(files).getByRole("complementary", { name: "Workspace file tree" })).toBeTruthy();
 
     fireEvent.click(pathButton("C:\\repo\\site\\index.html"));
     fireEvent.click(pathButton("/c/repo/site/index.html"));
@@ -898,6 +953,214 @@ describe("Workbench layout and workspace panels", () => {
         "site/index.html",
         "site/index.html"
       ]);
+    });
+  });
+
+  it.each(["read", "edit", "write"] as const)(
+    "opens a completed %s path in the preview-focused Files layout",
+    async (toolName) => {
+      gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Tool file target")];
+      gatewayMock.workspaceFilesResult = {
+        root: gatewayMock.scope.cwd,
+        entries: [
+          { path: "docs", name: "docs", kind: "directory", depth: 0 },
+          { path: "docs/report.md", name: "report.md", kind: "file", depth: 1 }
+        ],
+        truncated: false
+      };
+      gatewayMock.workspaceFileReadResults.set("docs/report.md", {
+        path: "docs/report.md",
+        content: "# Tool report",
+        binary: false,
+        editable: true,
+        editableReason: null,
+        revision: "r1",
+        sizeBytes: 13,
+        lineEnding: "lf",
+        unreadable: null,
+        truncated: false
+      });
+      (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [assistantToolEntry(toolName, "docs/report.md")];
+
+      render(<App />);
+      fireEvent.click(await screen.findByText("Tool file target"));
+      const openFile = await screen.findByRole("button", { name: "Open file docs/report.md" });
+      fireEvent.click(openFile);
+
+      const files = await screen.findByRole("region", { name: "Workspace files" });
+      expect(await within(files).findByRole("heading", { name: "Tool report" })).toBeTruthy();
+      expect(within(files).getByRole("button", { name: "Show file tree" })).toBeTruthy();
+      expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
+      await waitFor(() => {
+        expect(gatewayMock.requestLog).toContainEqual({
+          method: "workspace/file/read",
+          params: expect.objectContaining({ path: "docs/report.md" })
+        });
+      });
+    }
+  );
+
+  it("refreshes a cached same-workspace inventory when a hidden Files tool entry completes", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Generated file")];
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [],
+      truncated: false
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Generated file"));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/resume",
+        params: expect.objectContaining({ threadId: "thread-1" })
+      });
+    });
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    await screen.findByRole("region", { name: "Workspace files" });
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "workspace/files")).toBe(true);
+    });
+    fireEvent.click(screen.getByLabelText("Collapse right inspector"));
+
+    const emitCompletedTurn = async (turnId: string, entries: TranscriptEntry[]) => {
+      await act(async () => {
+        for (const subscriber of gatewayMock.subscribers) {
+          subscriber({
+            method: "gateway/event",
+            params: {
+              type: "turnCompleted",
+              threadId: "thread-1",
+              turnId,
+              turn: {
+                id: turnId,
+                threadId: "thread-1",
+                status: "completed",
+                outcome: "normal",
+                error: null,
+                startedAtMs: 1,
+                completedAtMs: 2
+              },
+              committedEntries: entries
+            }
+          });
+        }
+        await Promise.resolve();
+      });
+    };
+
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [
+        { path: "generated", name: "generated", kind: "directory", depth: 0 },
+        { path: "generated/result.md", name: "result.md", kind: "file", depth: 1 }
+      ],
+      truncated: false
+    };
+    const createRequestCount = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "workspace/files"
+    )).length;
+    const writeEntry = {
+      ...assistantToolEntry("write", "generated/result.md"),
+      turnId: "turn-write"
+    };
+    await act(async () => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "turnStarted",
+            threadId: "thread-1",
+            turnId: "turn-write",
+            selectedSkills: []
+          }
+        });
+      }
+      await Promise.resolve();
+    });
+    const animationFrames: FrameRequestCallback[] = [];
+    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        animationFrames.push(callback);
+        return animationFrames.length;
+      });
+    try {
+      await act(async () => {
+        for (const subscriber of gatewayMock.subscribers) {
+          subscriber({
+            method: "gateway/event",
+            params: {
+              type: "entryCompleted",
+              turnId: "turn-write",
+              entry: writeEntry
+            }
+          });
+        }
+        for (const frame of animationFrames.splice(0)) {
+          frame(0);
+        }
+        await Promise.resolve();
+      });
+    } finally {
+      requestAnimationFrame.mockRestore();
+    }
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => (
+        entry.method === "workspace/files"
+      )).length).toBe(createRequestCount + 1);
+    });
+    expect(await screen.findByRole("button", { name: "Open file generated/result.md" })).toBeTruthy();
+
+    await emitCompletedTurn("turn-write", [writeEntry]);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => (
+        entry.method === "workspace/files"
+      )).length).toBe(createRequestCount + 2);
+    });
+
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [],
+      truncated: false
+    };
+    const deleteRequestCount = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "workspace/files"
+    )).length;
+    const removalEntry = {
+      ...assistantTextEntry("Removed generated/result.md."),
+      id: "remove-entry",
+      turnId: "turn-remove",
+      messageSeq: 2,
+      blocks: [{
+        ...assistantTextEntry("Removed generated/result.md.").blocks[0]!,
+        id: "remove-block",
+        body: "Removed generated/result.md."
+      }]
+    };
+    await act(async () => {
+      for (const subscriber of gatewayMock.subscribers) {
+        subscriber({
+          method: "gateway/event",
+          params: {
+            type: "turnStarted",
+            threadId: "thread-1",
+            turnId: "turn-remove",
+            selectedSkills: []
+          }
+        });
+      }
+      await Promise.resolve();
+    });
+    await emitCompletedTurn("turn-remove", [removalEntry]);
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.filter((entry) => (
+        entry.method === "workspace/files"
+      )).length).toBe(deleteRequestCount + 1);
+      expect(screen.queryByRole("button", { name: "Open file generated/result.md" })).toBeNull();
     });
   });
 
@@ -1186,6 +1449,36 @@ function assistantTextEntry(body: string): TranscriptEntry {
     accounting: null,
     createdAtMs: 1,
     updatedAtMs: 1
+  };
+}
+
+function assistantToolEntry(toolName: "read" | "edit" | "write", path: string): TranscriptEntry {
+  const entry = assistantTextEntry("");
+  return {
+    ...entry,
+    id: `${toolName}-entry`,
+    blocks: [{
+      ...entry.blocks[0]!,
+      id: `${toolName}-block`,
+      kind: "file",
+      title: toolName,
+      body: null,
+      metadata: {
+        projection: "tool",
+        tool_name: toolName,
+        tool_call_id: `call-${toolName}`,
+        args: { path }
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: "{}",
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    }]
   };
 }
 

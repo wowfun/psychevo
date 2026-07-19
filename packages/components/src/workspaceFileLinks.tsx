@@ -57,6 +57,16 @@ export function workspacePathFromLinkNode(node: unknown): string | null {
   return typeof path === "string" && path ? path : null;
 }
 
+export function resolveWorkspaceFilePath(
+  context: WorkspaceFileLinkContext,
+  value: string
+): string | null {
+  const candidate = value.trim();
+  return candidate
+    ? exactWorkspacePath(candidate, workspacePathIndex(context.root, context.entries))
+    : null;
+}
+
 function visitMarkdownNode(
   node: MarkdownAstNode,
   index: WorkspacePathIndex,

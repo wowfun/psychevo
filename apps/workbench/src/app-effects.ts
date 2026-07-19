@@ -22,6 +22,7 @@ import {
   normalizeSnapshot,
   startupDraftScope
 } from "./session-utils";
+import { transcriptMayContainWorkspaceFile } from "./search-model";
 import type { WorkbenchRuntimeFactory } from "./runtime";
 import {
   PINNED_SESSIONS_KEY,
@@ -354,6 +355,16 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           const event = parsed.data;
           params.applyGatewayEvent(event);
           params.patchSessionEvent(event);
+          if (
+            event.type === "entryCompleted"
+            && event.entry.role === "assistant"
+            && transcriptMayContainWorkspaceFile([event.entry])
+          ) {
+            const scope = params.scopeRef.current;
+            if (scope) {
+              void params.refreshWorkspaceFiles(runtimeClient, scope, params.viewEpochRef.current);
+            }
+          }
           if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
             if (event.turn.error?.message) {
               params.setError(event.turn.error.message);
@@ -377,7 +388,18 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             }
             const scope = params.scopeRef.current;
             if (scope) {
-              refreshVisibleWorkspace(params, runtimeClient, scope, threadId);
+              const epoch = params.viewEpochRef.current;
+              const filesVisible = params.rightWorkspaceOpen && params.activeRightTabKind === "files";
+              const transcriptNeedsFiles = transcriptMayContainWorkspaceFile([
+                ...params.snapshot.entries,
+                ...event.committedEntries
+              ]);
+              if (filesVisible || transcriptNeedsFiles) {
+                void params.refreshWorkspaceFiles(runtimeClient, scope, epoch);
+              }
+              if (!filesVisible) {
+                refreshVisibleWorkspace(params, runtimeClient, scope, threadId, epoch);
+              }
             }
           }
           if (["actionRequested", "actionUpdated", "actionResolved", "actionCancelled"].includes(event.type)) {

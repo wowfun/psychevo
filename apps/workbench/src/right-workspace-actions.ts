@@ -75,10 +75,18 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       preview: patch.preview ?? null,
       message: patch.message ?? null
     };
+    if (kind === "files" && patch.fileTreeOpen !== undefined) {
+      nextTab.fileTreeOpen = patch.fileTreeOpen;
+    }
     params.setRightTabs((current) => {
       const existing = current.find((tab) => tab.id === nextId);
       if (!existing) {
-        return [...current, nextTab];
+        return [
+          ...current,
+          kind === "files" && nextTab.fileTreeOpen === undefined
+            ? { ...nextTab, fileTreeOpen: true }
+            : nextTab
+        ];
       }
       return current.map((tab) => (
         tab.id === nextId

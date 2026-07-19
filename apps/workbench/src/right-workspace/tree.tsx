@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useId, useMemo, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronDown, ChevronRight, FileText, FolderTree, Search } from "lucide-react";
 import type { WorkspaceDiffResult } from "@psychevo/protocol";
 import { fileBasename } from "../right-workspace-model";
@@ -10,7 +10,8 @@ export function WorkspaceFileTree({
   filterPlaceholder,
   items,
   selectedPath,
-  onOpen
+  onOpen,
+  onFileContextMenu
 }: {
   emptyLabel: string;
   filterLabel: string;
@@ -18,7 +19,9 @@ export function WorkspaceFileTree({
   items: WorkspaceFileTreeItem[];
   selectedPath: string | null;
   onOpen(path: string): void;
+  onFileContextMenu?: ((request: WorkspaceFileContextMenuRequest) => void) | undefined;
 }) {
+  const previewUnavailableDescriptionId = useId();
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(() => new Set());
   const [filter, setFilter] = useState("");
   const directoryPaths = useMemo(
@@ -49,6 +52,49 @@ export function WorkspaceFileTree({
     });
   }
 
+  function openFileContextMenu(
+    item: WorkspaceFileTreeItem,
+    anchor: HTMLButtonElement,
+    clientX: number,
+    clientY: number
+  ) {
+    if (item.kind !== "file" || !onFileContextMenu) {
+      return;
+    }
+    onFileContextMenu({
+      anchor,
+      clientX,
+      clientY,
+      path: item.path
+    });
+  }
+
+  function handleContextMenu(event: MouseEvent<HTMLButtonElement>, item: WorkspaceFileTreeItem) {
+    if (item.kind !== "file" || !onFileContextMenu) {
+      return;
+    }
+    event.preventDefault();
+    openFileContextMenu(item, event.currentTarget, event.clientX, event.clientY);
+  }
+
+  function handleTreeItemKeyDown(event: KeyboardEvent<HTMLButtonElement>, item: WorkspaceFileTreeItem) {
+    if (
+      item.kind !== "file"
+      || !onFileContextMenu
+      || (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    openFileContextMenu(
+      item,
+      event.currentTarget,
+      Math.min(bounds.right, bounds.left + 24),
+      bounds.bottom
+    );
+  }
+
   return (
     <div className="workspaceFileTree">
       <label className="workspaceFileTreeFilter">
@@ -61,6 +107,9 @@ export function WorkspaceFileTree({
           value={filter}
         />
       </label>
+      <span className="pevo-srOnly" id={previewUnavailableDescriptionId}>
+        Only the built-in preview is unavailable. External file actions remain available from the context menu.
+      </span>
       <div className="fileTree" role="tree">
         {visibleItems.map((item) => {
           const directory = item.kind === "directory";
@@ -69,16 +118,25 @@ export function WorkspaceFileTree({
           const badge = item.badge ?? item.status ?? null;
           return (
             <button
+              aria-describedby={item.previewDisabled ? previewUnavailableDescriptionId : undefined}
               aria-expanded={directory ? !collapsed : undefined}
               aria-selected={selected || undefined}
               className={[
                 directory ? "is-directory" : "is-file",
                 selected ? "is-selected" : "",
+                item.previewDisabled ? "is-preview-disabled" : "",
                 item.status ? `is-${item.status}` : ""
               ].filter(Boolean).join(" ")}
-              disabled={item.disabled}
               key={`${item.kind}:${item.path}`}
-              onClick={() => directory ? toggleDirectory(item.path) : onOpen(item.path)}
+              onClick={() => {
+                if (directory) {
+                  toggleDirectory(item.path);
+                } else if (!item.previewDisabled) {
+                  onOpen(item.path);
+                }
+              }}
+              onContextMenu={(event) => handleContextMenu(event, item)}
+              onKeyDown={(event) => handleTreeItemKeyDown(event, item)}
               role="treeitem"
               style={{ "--depth": item.depth } as CSSProperties}
               title={item.path}
@@ -98,6 +156,13 @@ export function WorkspaceFileTree({
     </div>
   );
 }
+
+export type WorkspaceFileContextMenuRequest = {
+  anchor: HTMLButtonElement;
+  clientX: number;
+  clientY: number;
+  path: string;
+};
 
 function hasCollapsedDirectoryAncestor(path: string, collapsedDirs: Set<string>): boolean {
   for (const directory of collapsedDirs) {

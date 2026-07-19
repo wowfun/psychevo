@@ -8,7 +8,7 @@ import type {
   SettingsReadResult,
   ThreadControlDescriptorView
 } from "@psychevo/protocol";
-import { ModelReasoningSelector, modelOptionsForThreadControl } from "./model-picker";
+import { ModelReasoningSelector, modelLabelForThreadControl, modelOptionsForThreadControl } from "./model-picker";
 import { usePopoverDismiss } from "./popover-dismiss";
 import { SessionUsageGrid, normalizedPercent } from "./right-workspace/usage";
 
@@ -509,6 +509,9 @@ export function ComposerSubmitControls({
   const contextPopoverRef = useRef<HTMLDivElement | null>(null);
   const contextTriggerRef = useRef<HTMLButtonElement | null>(null);
   const model = controlStringValue(modelControl, controlValues);
+  const modelLabel = model && modelControl
+    ? modelLabelForThreadControl(modelControl, controls, model)
+    : null;
   const explicitReasoning = controlStringValue(reasoningControl, controlValues);
   const reasoning = explicitReasoning;
   const reasoningSelectable = reasoningControl?.enabled === true
@@ -560,11 +563,11 @@ export function ComposerSubmitControls({
       )}
       {modelControl && !richModelControl && (
         <span
-          aria-label={`Model: ${model ?? (modelControl.enabled ? "selection required" : "unavailable")} (${modelControl.enabled ? "read-only" : "unavailable"})`}
+          aria-label={`Model: ${modelLabel ?? (modelControl.enabled ? "selection required" : "unavailable")} (${modelControl.enabled ? "read-only" : "unavailable"})`}
           className={`runtimeControlState is-readonly ${model == null ? "is-unavailable" : ""}`}
           title={modelControl.unavailableReason ?? "Model is not selectable for this Agent target."}
         >
-          {model ?? (modelControl.enabled ? "Select model" : "Model unavailable")}
+          {modelLabel ?? (modelControl.enabled ? "Select model" : "Model unavailable")}
         </span>
       )}
       <div className="composerStatusContext" ref={contextPopoverRef}>

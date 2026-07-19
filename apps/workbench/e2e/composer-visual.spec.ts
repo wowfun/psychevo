@@ -41,6 +41,10 @@ test.describe("Workbench composer visual contract", () => {
         "</body></html>"
       ].join("")
     );
+    writeFileSync(
+      path.join(cwd, "wide-preview.md"),
+      "# Wide preview\n\n| One | Two | Three |\n| --- | --- | --- |\n| alpha | beta | gamma |\n"
+    );
     const server = await startPevoWeb({ cwd, live: false });
     try {
       await page.goto(server.url);
@@ -108,6 +112,31 @@ test.describe("Workbench composer visual contract", () => {
       });
       await files.getByRole("button", { name: "Show file tree" }).click();
       await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toBeVisible();
+
+      if (!isMobile) {
+        await page.setViewportSize({ width: 1800, height: 960 });
+        await page.locator(".workbench").evaluate((element) => {
+          (element as HTMLElement).style.setProperty("--right-column-width", "820px");
+        });
+        await files.getByRole("treeitem", { name: /wide-preview\.md/ }).click();
+        const markdown = files.locator(".fileMarkdownPreview .pevo-markdown");
+        const markdownPane = files.locator(".fileMarkdownPreview");
+        await expect(markdown).toBeVisible();
+        const withTree = await markdown.boundingBox();
+        await files.getByRole("button", { name: "Hide file tree" }).click();
+        await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toHaveCount(0);
+        const [withoutTree, paneWithoutTree] = await Promise.all([
+          markdown.boundingBox(),
+          markdownPane.boundingBox()
+        ]);
+        if (!withTree || !withoutTree || !paneWithoutTree) {
+          throw new Error("missing Markdown preview geometry");
+        }
+        expect(withoutTree.width).toBeGreaterThan(withTree.width * 1.3);
+        expect(Math.abs(withoutTree.width - paneWithoutTree.width)).toBeLessThanOrEqual(2);
+        await files.getByRole("button", { name: "Show file tree" }).click();
+        await files.getByRole("treeitem", { name: /dynamic-preview\.html/ }).click();
+      }
 
       await openPreviewAction.click();
       const preview = page.getByRole("region", { name: "Preview" });

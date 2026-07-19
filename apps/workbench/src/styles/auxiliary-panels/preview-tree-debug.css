@@ -137,7 +137,7 @@
   color: var(--pevo-ink);
 }
 
-.fileTree button:disabled {
+.fileTree button.is-preview-disabled {
   cursor: default;
   opacity: 0.58;
 }
@@ -146,8 +146,73 @@
   background: color-mix(in oklch, var(--pevo-panel-muted), transparent 62%);
 }
 
-.fileTree button:disabled:hover {
+.fileTree button.is-preview-disabled:hover {
   background: transparent;
+}
+
+.fileTree button.is-preview-disabled:focus-visible {
+  opacity: 0.82;
+}
+
+.workspaceFileContextMenu {
+  position: fixed;
+  z-index: 120;
+  display: grid;
+  min-width: 210px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 5px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius);
+  box-shadow: 0 12px 32px color-mix(in oklch, black, transparent 78%);
+}
+
+.workspaceFileContextMenu > div {
+  display: grid;
+}
+
+.workspaceFileContextMenu > div.has-separator {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in oklch, var(--pevo-border), transparent 35%);
+}
+
+.workspaceFileContextMenu button,
+.workspaceFileContextMenuStatus {
+  min-height: 30px;
+  padding: 5px 9px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
+}
+
+.workspaceFileContextMenu button {
+  cursor: pointer;
+}
+
+.workspaceFileContextMenu button:hover,
+.workspaceFileContextMenu button:focus-visible {
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+  outline: none;
+}
+
+.workspaceFileContextMenu button:disabled,
+.workspaceFileContextMenuStatus {
+  color: var(--pevo-muted);
+  cursor: default;
+}
+
+.workspaceFileContextMenuError {
+  max-width: 300px;
+  margin: 4px 4px 2px;
+  color: var(--pevo-danger, #b42318);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.35;
 }
 
 .fileTreeDisclosure {

@@ -143,6 +143,7 @@ export type RightWorkspaceTab = {
   historyFidelity?: ThreadHistoryFidelityView | null;
   pendingPrompt?: string | null;
   path?: string | null;
+  fileTreeOpen?: boolean;
   diff?: WorkspaceDiffResult | null;
   file?: WorkspaceFileReadResult | null;
   browser?: RightWorkspaceBrowserState;
@@ -231,10 +232,10 @@ export type GatewayEventFeed = {
 
 export type WorkspaceFileTreeItem = {
   badge?: string | null;
-  disabled?: boolean;
   kind: "directory" | "file";
   name: string;
   path: string;
   depth: number;
+  previewDisabled?: boolean;
   status?: string | null;
 };

@@ -196,7 +196,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
   const workspaceFileLinks: WorkspaceFileLinkContext | undefined = workspaceFiles
     ? {
         entries: workspaceFiles.entries,
-        onOpen: (path) => runAction(async () => openFilePreview(path)),
+        onOpen: (path) => runAction(async () => openFilePreview(path, { hideFileTree: true })),
         root: workspaceFiles.root
       }
     : undefined;
@@ -916,7 +916,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               profile={init?.profile ?? null}
               workspaces={sessionBrowserWorkspaces}
               onBranchChange={(nextBranch, create) => checkoutWorkspaceGitBranch(nextBranch, create)}
-              onOpenFiles={() => openRightWorkspaceTab("files")}
+              onOpenFiles={() => openRightWorkspaceTab("files", { fileTreeOpen: true })}
               onReadBranches={() => readWorkspaceGitBranches()}
               onReadFolders={(folderPath) => readWorkspaceFolders(folderPath)}
               onRuntimeControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
@@ -970,6 +970,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 onDirtyTabChange={(tabId, dirty) => {
                   setDirtyRightTabs((current: Record<string, boolean>) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
                 }}
+                onFileTreeOpenChange={(tabId, open) => {
+                  setRightTabs((current: RightWorkspaceTab[]) => current.map((tab) => (
+                    tab.id === tabId ? { ...tab, fileTreeOpen: open } : tab
+                  )));
+                }}
                 onOpenFile={(path) => void runAction(async () => openFilePreview(path))}
                 onOpenAgentSession={openAgentSessionTab}
                 onBrowserStateChange={(tabId, browser) => {
@@ -988,7 +993,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     void runAction(async () => executeCommand("/btw", "commandsPanel"));
                     return;
                   }
-                  openRightWorkspaceTab(kind, {}, kind !== "browser");
+                  openRightWorkspaceTab(
+                    kind,
+                    kind === "files" ? { fileTreeOpen: true } : {},
+                    kind !== "browser"
+                  );
                 }}
                 onOpenPreview={(preview) => openRightWorkspaceTab("preview", { preview, title: preview.title }, true)}
                 onRejectChange={(turnId, path) => void runAction(async () => rejectWorkspaceChange(turnId, path))}

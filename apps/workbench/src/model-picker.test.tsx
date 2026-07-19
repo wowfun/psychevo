@@ -2,7 +2,8 @@
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ModelOptionView } from "@psychevo/protocol";
+import type { ModelOptionView, ThreadControlDescriptorView } from "@psychevo/protocol";
+import { ComposerSubmitControls } from "./composer-controls";
 import { ModelReasoningSelector } from "./model-picker";
 
 afterEach(cleanup);
@@ -78,5 +79,108 @@ describe("ModelReasoningSelector capability presentation", () => {
     const popover = screen.getByRole("dialog", { name: "Model and reasoning" });
     expect(within(popover).queryByText("Reasoning")).toBeNull();
     expect(within(popover).queryByText("Default")).toBeNull();
+  });
+
+  it("uses configured model names for a read-only composer control", () => {
+    const modelControl: ThreadControlDescriptorView = {
+      id: "model",
+      label: "Model",
+      surfaceRole: "model",
+      mutability: "readOnly",
+      enabled: true,
+      required: true,
+      unavailableReason: null,
+      effectiveValue: "fixture/default",
+      effectiveSource: "runtimeObserved",
+      isDefault: false,
+      choices: [{ value: "fixture/default", label: "fixture/default", description: null }],
+      applyScope: "session",
+      stability: "stable",
+      channelSafe: false,
+      capabilityRevision: "1",
+      dependsOn: null
+    };
+
+    render(
+      <ComposerSubmitControls
+        context={null}
+        controls={{
+          permissionMode: "default",
+          mode: "default",
+          runtimeRef: "native",
+          agent: null,
+          model: "fixture/default",
+          modelStatus: "resolved",
+          modelError: null,
+          variant: null,
+          permissionModeOptions: [],
+          modeOptions: [],
+          modelOptions: ["fixture/default"],
+          modelDetails: options,
+          recentModels: [],
+          variantOptions: []
+        }}
+        controlValues={{}}
+        disabled={false}
+        modelControl={modelControl}
+        reasoningControl={null}
+        usage={null}
+        onControlChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("Model: Fixture default (read-only)").textContent).toBe("Fixture default");
+    expect(screen.queryByText("fixture/default")).toBeNull();
+  });
+
+  it("uses the authoritative control label while model metadata is unavailable", () => {
+    const modelControl: ThreadControlDescriptorView = {
+      id: "model",
+      label: "Model",
+      surfaceRole: "model",
+      mutability: "readOnly",
+      enabled: true,
+      required: true,
+      unavailableReason: null,
+      effectiveValue: "fixture/default",
+      effectiveSource: "runtimeObserved",
+      isDefault: false,
+      choices: [{ value: "fixture/default", label: "Fixture default", description: null }],
+      applyScope: "session",
+      stability: "stable",
+      channelSafe: false,
+      capabilityRevision: "1",
+      dependsOn: null
+    };
+
+    render(
+      <ComposerSubmitControls
+        context={null}
+        controls={{
+          permissionMode: "default",
+          mode: "default",
+          runtimeRef: "native",
+          agent: null,
+          model: "fixture/default",
+          modelStatus: "resolved",
+          modelError: null,
+          variant: null,
+          permissionModeOptions: [],
+          modeOptions: [],
+          modelOptions: ["fixture/default"],
+          modelDetails: [],
+          recentModels: [],
+          variantOptions: []
+        }}
+        controlValues={{}}
+        disabled={false}
+        modelControl={modelControl}
+        reasoningControl={null}
+        usage={null}
+        onControlChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByLabelText("Model: Fixture default (read-only)").textContent).toBe("Fixture default");
   });
 });

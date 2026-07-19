@@ -136,7 +136,7 @@ export function createCommandActions(params: CommandActionsParams) {
         params.openRightWorkspaceTab("review", { diff: params.workspaceDiff, title: "Review" });
         return;
       case "files":
-        params.openRightWorkspaceTab("files");
+        params.openRightWorkspaceTab("files", { fileTreeOpen: true });
         return;
       case "debug":
         params.openRightWorkspaceTab("debug");

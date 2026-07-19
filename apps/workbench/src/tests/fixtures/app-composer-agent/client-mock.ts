@@ -2431,6 +2431,34 @@ vi.mock("@psychevo/client", async () => {
       if (method === "workspace/files") {
         return gatewayMock.workspaceFilesResult;
       }
+      if (method === "workspace/file/externalActions") {
+        const record = params as { path?: string };
+        const path = record.path ?? "";
+        const extension = path.split(".").pop()?.toLowerCase() ?? "";
+        const category = ["html", "htm", "xhtml"].includes(extension)
+          ? "webpage"
+          : ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(extension)
+            ? "image"
+            : ["md", "markdown", "txt", "ts", "tsx", "js", "jsx", "rs", "json", "yaml", "yml"].includes(extension)
+              ? "text"
+              : "other";
+        const textLike = category === "text" || category === "webpage" || extension === "svg";
+        const preferredAction = category === "text" ? "vscode" : "systemDefault";
+        return {
+          path,
+          category,
+          textLike,
+          platform: "macos",
+          preferredAction,
+          availableActions: textLike
+            ? [preferredAction, preferredAction === "vscode" ? "systemDefault" : "vscode", "reveal"]
+            : ["systemDefault", "reveal"]
+        };
+      }
+      if (method === "workspace/file/openExternal") {
+        const record = params as { action?: string; path?: string };
+        return { action: record.action ?? "systemDefault", path: record.path ?? "" };
+      }
       if (method === "workspace/git/branches") {
         if (gatewayMock.workspaceGitBranches) {
           return gatewayMock.workspaceGitBranches(params);

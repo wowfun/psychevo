@@ -62,6 +62,11 @@
   max-width: 76ch;
 }
 
+.filesPanel:not(.has-fileTree) .fileMarkdownPreview .pevo-markdown {
+  width: 100%;
+  max-width: none;
+}
+
 .filePreviewPath {
   display: flex;
   align-items: center;

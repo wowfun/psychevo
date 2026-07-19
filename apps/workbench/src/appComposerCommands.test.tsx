@@ -92,6 +92,38 @@ describe("Workbench command routing", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(false);
   });
 
+  it("restores the file tree when a Files host command reuses its tab", async () => {
+    gatewayMock.commandExecute = (command: string) => ({
+      accepted: true,
+      command,
+      known: true,
+      presentationKind: "navigate",
+      feedbackAnchor: "composer",
+      action: { type: "showPanel", panel: "files" }
+    });
+    gatewayMock.workspaceFilesResult = {
+      root: gatewayMock.scope.cwd,
+      entries: [{ path: "README.md", name: "README.md", kind: "file", depth: 0 }],
+      truncated: false
+    };
+
+    render(<App />);
+    await resumeSession();
+    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    const home = await screen.findByRole("region", { name: "Workspace status" });
+    fireEvent.click(within(home).getByRole("button", { name: "Files" }));
+    const files = await screen.findByRole("region", { name: "Workspace files" });
+    fireEvent.click(within(files).getByRole("button", { name: "Hide file tree" }));
+    expect(within(files).getByRole("button", { name: "Show file tree" })).toBeTruthy();
+
+    const textarea = screen.getByPlaceholderText("Ask Psychevo...");
+    fireEvent.change(textarea, { target: { value: "/files" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await within(files).findByRole("button", { name: "Hide file tree" })).toBeTruthy();
+    expect(within(files).getByRole("complementary", { name: "Workspace file tree" })).toBeTruthy();
+  });
+
   it("shows custom slash alias rows in the commands overlay and executes them", async () => {
     gatewayMock.commandList = [
       {

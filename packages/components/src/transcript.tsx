@@ -13,7 +13,7 @@ import { MarkdownText } from "./markdown";
 import { asRecord, stringValue } from "./shared";
 import { evidenceDisplay, type EvidenceDisplay } from "./toolEvidence";
 import { ToolDetail } from "./transcript/tool-detail";
-import type { WorkspaceFileLinkContext } from "./workspaceFileLinks";
+import { resolveWorkspaceFilePath, type WorkspaceFileLinkContext } from "./workspaceFileLinks";
 
 export type TranscriptAgentSession = {
   agentName?: string | null;
@@ -655,13 +655,16 @@ function TranscriptBlockView({
   }
   const agentSession = agentSessionFromBlock(block, display);
   const canOpenAgentSession = Boolean(agentSession && onOpenAgentSession);
+  const workspaceFileTarget = workspaceFileLinks
+    ? completedToolWorkspaceFileTarget(block, workspaceFileLinks)
+    : null;
   const runningTool = isRunningToolActivityBlock(block);
   const elapsed = runningTool ? liveToolBlockElapsed(block) : transcriptToolBlockElapsed(block);
   const evidenceLineClass = [
     "pevo-evidenceLine",
     display.singleTitle ? "is-singleTitle" : "",
     runningTool ? "is-runningTool" : "",
-    canOpenAgentSession ? "is-openTarget" : ""
+    canOpenAgentSession || workspaceFileTarget ? "is-openTarget" : ""
   ].filter(Boolean).join(" ");
   const lineButton = (
     <button
@@ -700,6 +703,22 @@ function TranscriptBlockView({
             <span>Open</span>
           </button>
         </div>
+      ) : workspaceFileTarget && workspaceFileLinks ? (
+        <div className="pevo-evidenceActionRow">
+          {lineButton}
+          <button
+            aria-label={`Open file ${workspaceFileTarget.label}`}
+            className="pevo-evidenceOpenButton"
+            onClick={() => {
+              void workspaceFileLinks.onOpen(workspaceFileTarget.path);
+            }}
+            title="Open file preview"
+            type="button"
+          >
+            <ExternalLink size={13} aria-hidden />
+            <span>Open</span>
+          </button>
+        </div>
       ) : lineButton}
       {open && display.sections.length > 0 && <ToolDetail display={display} />}
       {artifactIds.length > 0 && (
@@ -709,6 +728,30 @@ function TranscriptBlockView({
       )}
     </article>
   );
+}
+
+function completedToolWorkspaceFileTarget(
+  block: TranscriptBlock,
+  context: WorkspaceFileLinkContext
+): { label: string; path: string } | null {
+  const metadata = asRecord(block.metadata);
+  const toolName = stringValue(metadata.tool_name ?? metadata.toolName);
+  const status = block.result?.status ?? block.status;
+  if (
+    metadata.projection !== "tool"
+    || (toolName !== "read" && toolName !== "edit" && toolName !== "write")
+    || status !== "completed"
+    || block.result?.isError === true
+  ) {
+    return null;
+  }
+  const args = asRecord(metadata.args ?? metadata.arguments);
+  const label = stringValue(args.path);
+  if (!label) {
+    return null;
+  }
+  const path = resolveWorkspaceFilePath(context, label);
+  return path ? { label, path } : null;
 }
 
 type WebCitation = { title: string; url: string };

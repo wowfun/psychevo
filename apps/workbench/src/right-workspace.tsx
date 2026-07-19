@@ -71,6 +71,7 @@ export function RightWorkspace({
   onClose,
   onCopyText,
   onDirtyTabChange,
+  onFileTreeOpenChange,
   onOpenFile,
   onOpenAgentSession,
   onOpenExternal,
@@ -113,6 +114,7 @@ export function RightWorkspace({
   onClose(tabId: string): void;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onDirtyTabChange(tabId: string, dirty: boolean): void;
+  onFileTreeOpenChange(tabId: string, open: boolean): void;
   onOpenFile(path: string): void;
   onOpenAgentSession(session: TranscriptAgentSession): void;
   onOpenExternal(url: string): void | Promise<void>;
@@ -175,17 +177,21 @@ export function RightWorkspace({
             )}
             {tab.kind === "files" && (
               <FilesPanel
+                client={client}
                 files={files}
                 preview={tab.file ?? null}
                 previewMessage={tab.message ?? null}
                 root={root}
+                scope={scope}
                 selectedPath={tab.path ?? null}
                 tabId={tab.id}
                 truncated={truncated}
                 onCompare={onChangedFile}
                 onCopyText={onCopyText}
                 onDirtyChange={onDirtyTabChange}
+                fileTreeOpen={tab.fileTreeOpen ?? true}
                 htmlExecutionActive={tab.id === activeTab?.id}
+                onFileTreeOpenChange={(open) => onFileTreeOpenChange(tab.id, open)}
                 onOpen={onOpenFile}
                 onOpenHtmlPreview={(path, content) => onOpenPreview({
                   content,

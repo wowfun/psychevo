@@ -362,4 +362,79 @@ describe("TranscriptPanel workspace file links", () => {
     fireEvent.click(buttons[0] as HTMLElement);
     expect(onOpen).toHaveBeenCalledWith("reports/result.html");
   });
+
+  it.each(["read", "edit", "write"])(
+    "opens a completed %s path argument in the workspace Files preview",
+    (toolName) => {
+      const onOpen = vi.fn();
+      const entry = transcriptEntry(`tool-${toolName}`, "assistant", "file");
+      const block = entry.blocks[0]!;
+      block.body = null;
+      block.title = toolName;
+      block.metadata = {
+        projection: "tool",
+        tool_name: toolName,
+        tool_call_id: `call-${toolName}`,
+        args: toolName === "read"
+          ? JSON.stringify({ path: "reports/result.html" })
+          : { path: "reports/result.html" }
+      };
+      block.result = {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: "{}",
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      };
+
+      render(
+        <TranscriptPanel
+          entries={[entry]}
+          workspaceFileLinks={workspaceFileLinks(onOpen)}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Open file reports/result.html" }));
+      expect(onOpen).toHaveBeenCalledWith("reports/result.html");
+    }
+  );
+
+  it.each([
+    { label: "pending read", toolName: "read", status: "pending", path: "reports/result.html", isError: false },
+    { label: "failed edit", toolName: "edit", status: "failed", path: "reports/result.html", isError: true },
+    { label: "missing write target", toolName: "write", status: "completed", path: "reports/missing.html", isError: false },
+    { label: "unrelated tool", toolName: "custom_publish", status: "completed", path: "reports/result.html", isError: false }
+  ])("does not link a $label", ({ toolName, status, path, isError }) => {
+    const entry = transcriptEntry(`excluded-${toolName}-${status}`, "assistant", "file");
+    const block = entry.blocks[0]!;
+    block.body = null;
+    block.status = status as TranscriptBlock["status"];
+    block.title = toolName;
+    block.metadata = {
+      projection: "tool",
+      tool_name: toolName,
+      tool_call_id: `call-${toolName}`,
+      args: { path }
+    };
+    block.result = status === "pending" ? null : {
+      resultMessageSeq: 2,
+      status: status as "completed" | "failed",
+      content: "{}",
+      isError,
+      metadata: null,
+      createdAtMs: 2,
+      updatedAtMs: 2
+    };
+
+    render(
+      <TranscriptPanel
+        entries={[entry]}
+        workspaceFileLinks={workspaceFileLinks()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: `Open file ${path}` })).toBeNull();
+  });
 });

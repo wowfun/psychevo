@@ -355,6 +355,25 @@ export function modelOptionsForThreadControl(
   });
 }
 
+export function modelLabelForThreadControl(
+  control: ThreadControlDescriptorView,
+  controls: SettingsReadResult["controls"],
+  model: string
+): string {
+  const metadata = modelOptionsForControls(controls, model)
+    .find((option) => option.value === model);
+  const metadataName = metadata?.name?.trim();
+  if (metadataName) {
+    return metadataName;
+  }
+  const choice = control.choices.find((option) => option.value === model);
+  const choiceLabel = choice?.label.trim();
+  if (choiceLabel && choiceLabel !== model) {
+    return choiceLabel;
+  }
+  return modelShortLabel(metadata ?? fallbackModelOption(model));
+}
+
 function filterAndOrderModelOptions(
   options: ModelOptionView[],
   selectedModel: string | null,

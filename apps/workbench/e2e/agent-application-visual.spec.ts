@@ -145,6 +145,10 @@ test.describe("Native and ACP Agent application visual contract", () => {
       await expect(modelButton).toBeVisible();
       await selectControl(page, "Model", "Fixture second");
       await expect(page.getByText("Thread Context changed; refresh it before changing this control.")).toHaveCount(0);
+      await expect(modelButton).toHaveAttribute("title", /fixture\/second/);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "Model and reasoning" })).toBeHidden();
+      await expect(mode).toBeEnabled();
       await selectControl(page, "Mode", "Plan");
       await runTurn(
         page,

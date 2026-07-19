@@ -477,9 +477,13 @@ export function createAppActions(params: AppActionsParams) {
     await params.refreshHistory();
   }
 
-  async function openFilePreview(path: string) {
+  async function openFilePreview(path: string, options: { hideFileTree?: boolean } = {}) {
+    const layoutPatch: Partial<RightWorkspaceTab> = options.hideFileTree
+      ? { fileTreeOpen: false }
+      : {};
     if (isUnsupportedPreviewFile(path)) {
       params.openRightWorkspaceTab("files", {
+        ...layoutPatch,
         path,
         title: fileBasename(path),
         file: null,
@@ -490,6 +494,7 @@ export function createAppActions(params: AppActionsParams) {
     const result = WorkspaceFileReadResultSchema.parse(await params.client?.request("workspace/file/read", { scope: scope(), path }));
     if (result.binary || result.content === null) {
       params.openRightWorkspaceTab("files", {
+        ...layoutPatch,
         path: result.path,
         title: fileBasename(result.path),
         file: result,
@@ -498,6 +503,7 @@ export function createAppActions(params: AppActionsParams) {
       return;
     }
     params.openRightWorkspaceTab("files", {
+      ...layoutPatch,
       path: result.path,
       title: fileBasename(result.path),
       file: result,

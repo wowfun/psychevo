@@ -20,6 +20,9 @@ export function transcriptSearchText(entries: ThreadSnapshot["entries"]): string
 }
 
 export function transcriptMayContainWorkspaceFile(entries: ThreadSnapshot["entries"]): boolean {
+  if (completedToolMayReferenceWorkspaceFile(entries)) {
+    return true;
+  }
   const text = transcriptSearchText(entries);
   for (const match of text.matchAll(/\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/gu)) {
     if (looksLikeWorkspaceFileReference(match[1] ?? match[2] ?? "")) {
@@ -37,6 +40,43 @@ export function transcriptMayContainWorkspaceFile(entries: ThreadSnapshot["entri
     }
   }
   return false;
+}
+
+function completedToolMayReferenceWorkspaceFile(entries: ThreadSnapshot["entries"]): boolean {
+  for (const entry of entries) {
+    for (const block of entry.blocks) {
+      const record = asRecord(block);
+      const metadata = asRecord(record.metadata);
+      const result = asRecord(record.result);
+      const toolName = stringField(metadata.tool_name ?? metadata.toolName);
+      const status = stringField(result.status) || stringField(record.status);
+      if (
+        metadata.projection !== "tool"
+        || (toolName !== "read" && toolName !== "edit" && toolName !== "write")
+        || status !== "completed"
+        || result.isError === true
+      ) {
+        continue;
+      }
+      const args = jsonLikeRecord(metadata.args ?? metadata.arguments);
+      if (stringField(args.path).trim()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function jsonLikeRecord(value: unknown): Record<string, unknown> {
+  const record = asRecord(value);
+  if (Object.keys(record).length > 0 || typeof value !== "string") {
+    return record;
+  }
+  try {
+    return asRecord(JSON.parse(value) as unknown);
+  } catch {
+    return {};
+  }
 }
 
 function looksLikeWorkspaceFileReference(rawValue: string): boolean {
