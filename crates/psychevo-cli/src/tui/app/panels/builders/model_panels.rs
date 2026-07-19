@@ -226,6 +226,7 @@ impl TuiApp {
         models: ModelPanel,
     ) -> BottomPanel {
         let model_spec = format_model_spec(&model);
+        let model_label = configured_model_display_label(&model);
         let current_model = self.model_display_value();
         let is_current_model = current_model == model_spec;
         let configured = model
@@ -271,7 +272,7 @@ impl TuiApp {
             },
         }));
         let mut panel = BottomSelectionPanel::new(
-            &format!("Select Variant for {model_spec}"),
+            &format!("Select Variant for {model_label}"),
             "Use config default or persist an explicit variant override.",
             "No variants",
             rows,
@@ -445,8 +446,9 @@ impl TuiApp {
             Some(format!("{}  {}", model.provider_label, details.join("  ")))
         };
         let search_text = format!(
-            "{} {} {} {} {} {} {}",
+            "{} {} {} {} {} {} {} {}",
             model_spec,
+            model.model_name.clone().unwrap_or_default(),
             model.provider_label,
             model.reasoning_effort.clone().unwrap_or_default(),
             model.context_limit.unwrap_or_default(),
@@ -459,7 +461,7 @@ impl TuiApp {
             }
         );
         BottomSelectionRow {
-            label: model_spec.clone(),
+            label: configured_model_display_label(&model),
             description,
             detail: None,
             group: None,

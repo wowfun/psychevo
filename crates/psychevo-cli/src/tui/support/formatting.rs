@@ -33,6 +33,18 @@ pub(crate) fn format_model_spec(model: &ConfiguredModel) -> String {
     format!("{}/{}", model.provider, model.model)
 }
 
+pub(crate) fn configured_model_display_label(model: &ConfiguredModel) -> String {
+    if let Some(name) = model
+        .model_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_string();
+    }
+    format_model_spec(model)
+}
+
 pub(crate) fn variant_description(variant: &str) -> &'static str {
     match variant {
         "none" => "suppress provider reasoning field",

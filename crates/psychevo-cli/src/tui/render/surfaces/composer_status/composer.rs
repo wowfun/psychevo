@@ -547,7 +547,7 @@ pub(crate) fn render_status(
     ui: &FullscreenUi<'_>,
 ) {
     let theme = tui_theme();
-    let model = app.model_display_value();
+    let model = app.model_display_label();
     let variant = app.variant_display_value();
     let mut spans = Vec::new();
     if app.current_mode != RunMode::Default {

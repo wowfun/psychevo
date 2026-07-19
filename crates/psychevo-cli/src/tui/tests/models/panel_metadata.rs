@@ -34,6 +34,47 @@ pub(crate) async fn model_command_opens_searchable_bottom_picker() {
     );
 }
 
+#[test]
+pub(crate) fn configured_model_name_labels_the_picker_and_composer_status() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app_with_models(&temp);
+    let config_path = app.config_path.clone().expect("config path");
+    for path in [config_path, app.cwd.join(".psychevo/config.toml")] {
+        let config = fs::read_to_string(&path).expect("read config");
+        fs::write(
+            &path,
+            config.replace(
+                "[provider.mock.models.\"mock-model\"]\n",
+                "[provider.mock.models.\"mock-model\"]\nname = \"Mock Model\"\n",
+            ),
+        )
+        .expect("write named model config");
+    }
+    app.refresh_selected_model();
+
+    let panel = app.model_selection_panel().expect("model panel");
+    let current = panel
+        .rows
+        .iter()
+        .find(|row| row.is_current)
+        .expect("current model row");
+    assert_eq!(current.label, "Mock Model");
+    assert!(current.search_text.contains("mock/mock-model"));
+    let BottomSelectionValue::Model { model, source } = current.value.clone() else {
+        panic!("expected current model row");
+    };
+    let variants = app.variant_panel(model.as_ref().clone(), source, ModelPanel::new(panel));
+    let BottomPanel::Variants { panel, .. } = variants else {
+        panic!("expected variant panel");
+    };
+    assert_eq!(panel.title, "Select Variant for Mock Model");
+
+    let mut ui = fixture_ui(&app, FixtureKind::Idle);
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Mock Model  default"), "{text}");
+}
+
 #[tokio::test]
 pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() {
     let temp = tempdir().expect("temp");

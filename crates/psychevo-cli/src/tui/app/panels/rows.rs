@@ -16,6 +16,13 @@ impl TuiApp {
             .unwrap_or_else(|| "config".to_string())
     }
 
+    pub(crate) fn model_display_label(&self) -> String {
+        self.selected_model
+            .as_ref()
+            .map(configured_model_display_label)
+            .unwrap_or_else(|| self.model_display_value())
+    }
+
     pub(crate) fn variant_display_value(&self) -> String {
         self.current_variant
             .clone()
