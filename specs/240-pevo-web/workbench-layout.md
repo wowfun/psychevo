@@ -146,6 +146,65 @@ available. Unsupported preview formats and Gateway binary/unreadable file
 responses stay in the Files tab as unavailable preview states instead of
 opening a center preview.
 
+Every real file row in the Files tree has an accessible context menu even when
+that file cannot be previewed inside Workbench. Directories retain their normal
+expand/collapse interaction and do not expose file actions. The menu opens at
+the pointer, or from the focused row through the keyboard context-menu gesture,
+stays inside the viewport, closes on Escape or outside interaction, and restores
+focus to its file row. It contains only the preferred external-open action, a
+useful alternate when one exists, and the OS-adapted reveal action: `Show in
+Finder` on macOS, `Show in File Explorer` on Windows, and `Show in File Manager`
+on Linux. The Review changed-files tree does not expose these actions because
+its entries may describe deleted or otherwise non-present files.
+
+`workspace/file/externalActions` lazily classifies the selected file and returns
+its available semantic actions. `workspace/file/openExternal` executes one
+returned action. Both requests carry the active scope and workspace-relative
+path; Gateway repeats canonical containment and regular-file checks at execution
+time. The action vocabulary is closed to `systemDefault`, `vscode`, and
+`reveal`, and responses do not expose host executable paths. Absolute paths,
+path traversal, symlink escapes, directories, missing files, and unauthenticated
+requests are rejected. Browser requests must both match the browser session's
+current workspace and belong to that session's trusted external-action grant
+set. Gateway seeds the monotonic set from the consumed launch entry and extends
+it only after an explicit successful workspace creation or adoption/resume of an
+existing stored session. A caller-supplied draft/start cwd may change the
+browser's navigation scope, but it cannot grant an OS side effect by itself.
+The action runs on the Gateway/workspace host, including when Workbench is
+viewed from another machine.
+
+System-default opening delegates category-specific application choice to the
+host OS. Classification precedence is webpage, image, audio/video, PDF, Office,
+text, then other. Webpages prefer the default browser; images the default image
+viewer; audio/video the default player; PDFs the default PDF reader; Office
+documents the default Office application; and other files their default OS
+association. A file may also be text-like independently of its preferred
+category, so HTML, SVG, and textual Office-adjacent formats can retain their
+category-specific system default while offering VS Code as the alternate.
+
+When Gateway detects VS Code, a text-category file prefers `Open in VS Code`
+and keeps `Open with Default Application` as the alternate; any other text-like
+file offers VS Code after its category-specific preferred action. Gateway
+detects the `code` launcher through the effective process environment plus
+well-known installation locations, caches the capability, and opens the
+canonical workspace root and selected absolute file in one launcher invocation.
+It does not force a new or reused window, leaving that choice to the user's VS
+Code settings. Without VS Code, text files fall back to the system default.
+Text-like detection combines known text names/extensions with a bounded content
+probe so UTF text, extensionless files, and dotfiles are not limited to a short
+extension allowlist. A content-probe read failure degrades an otherwise unknown
+regular file to `other` instead of removing its default-open and reveal actions.
+Explicit launch failures, including an opener process that exits non-zero during
+a bounded early-observation window, surface a bounded error and never silently
+execute a different application. Long-running opener processes are accepted
+after that window. Windows system-default opening and reveal execute in a
+blocking STA COM task rather than on an asynchronous runtime worker.
+
+A file row whose built-in preview is unavailable remains an enabled context-menu
+target. Its accessible description communicates that only preview is
+unavailable and that external actions remain available; the row must not expose
+`aria-disabled`, which would incorrectly disable the whole file interaction.
+
 Review exposes best-effort Gateway observation groups. It states once, compactly,
 that Review lists only edits observed through Psychevo-owned mutation paths and
 that shell, ACP, external-tool, or concurrent changes may be absent. Groups are

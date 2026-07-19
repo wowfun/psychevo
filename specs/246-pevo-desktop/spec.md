@@ -67,6 +67,16 @@ Shared feature and UI logic live in private workspace packages:
 The repo root is not a Tauri app root. It remains the Rust and JavaScript
 workspace root.
 
+The Desktop development server must not watch Rust build artifacts under
+`apps/desktop/src-tauri/target/`. Cargo writes and replaces native executables
+inside that directory while Vite is running, and Windows may reject a watcher
+that races a locked executable. Tauri source and configuration remain watched;
+only the generated Cargo target tree is excluded.
+
+The Desktop Cargo library and binary targets must retain distinct artifact
+names after Cargo normalizes hyphens to underscores. This prevents their MSVC
+debug-symbol outputs from resolving to the same `.pdb` path on Windows.
+
 ## Desktop Shell
 
 The first Desktop slice creates two native webview surfaces:
@@ -236,6 +246,16 @@ native Gateway transport, endpoint, and fallback cwd from the Desktop shell.
 
 Workbench code may depend on host interfaces for platform behavior. It must not
 import Tauri APIs directly.
+
+Files-tree external-open and reveal actions remain shared Workbench behavior.
+They execute through authenticated Gateway workspace RPCs on the machine that
+owns the canonical workspace, so Desktop must not fork the menu or add a second
+Tauri-only file-opener contract. The Gateway adapts launch behavior to macOS,
+Windows, and Linux while Workbench receives only the host platform plus semantic
+capabilities and actions and supplies the matching human-facing reveal label.
+On Windows, Gateway system-default and File Explorer operations run in a
+blocking STA COM task; the Desktop webview and asynchronous runtime workers
+never own those shell calls.
 
 Desktop export/share downloads must use a native authenticated bridge. The
 renderer may request a session artifact by thread id, kind, and export options,

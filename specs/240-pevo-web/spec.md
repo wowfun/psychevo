@@ -169,6 +169,13 @@ Workbench layout, navigation, inspector, file review, terminal, settings, and
 responsive shell behavior are specified in [Workbench Layout](workbench-layout.md).
 The split keeps this product surface maintainable without changing the managed
 Gateway lifecycle or transport contract.
+Files-tree external-open actions use authenticated Gateway workspace RPCs rather
+than browser `file://` URLs or a Workbench-native bridge. The Gateway owns the
+real workspace path, file classification, available opener detection, and OS
+launch, so the same Workbench behavior applies to Web and Desktop and executes
+on the machine that owns the Gateway workspace. The frontend sends only a
+workspace scope, a workspace-relative path, and a closed semantic action; it
+never sends an executable path or shell command.
 Capability management is specified in
 [247 Capability Management](../247-capability-management/spec.md). Workbench
 must compose skills, plugins, MCP, and toolset management through those domain
@@ -576,7 +583,13 @@ Resource reads follow visible demand. A closed right Workspace reads nothing
 unless the visible Transcript contains an unresolved file link. Workspace Home
 reads Diff plus Observability, Review reads Diff plus Changes, Files reads the
 file inventory, and other tabs read none of those resources. Reads remain
-single-flight, latest-wins, and view-epoch guarded. The always-visible Composer
+single-flight, latest-wins, and view-epoch guarded. Turn completion reevaluates
+the visible transcript together with committed entries; when either contains
+workspace-file demand, the same-workspace inventory refreshes once even while
+Files is closed, so created and deleted paths do not leave transcript actions
+stale. A completed supported file-tool entry triggers the same refresh
+immediately, before the enclosing turn completes. A completion without file
+demand does not add a hidden workspace read. The always-visible Composer
 environment owns one lightweight `workspace/git/branches` read for a new draft;
 this is not a right-Workspace demand or an omnibus Settings refresh.
 

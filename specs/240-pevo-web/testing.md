@@ -82,6 +82,23 @@ required. They must not print tokens or secrets.
   accepted, busy, and failed starts.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
   primary controls.
+- Files-tree context-menu tests cover pointer and keyboard opening, focus
+  restoration, Escape/outside dismissal, viewport clamping, directories without
+  file actions, and binary or unsupported-preview files that remain externally
+  actionable. Fake Gateway responses verify preferred/alternate ordering and
+  OS-specific Finder/File Explorer/File Manager labels without launching a real
+  application.
+- Gateway workspace tests use injected detector and launcher fakes to cover
+  category precedence, content-aware text detection, VS Code present/absent
+  behavior, exact workspace-root-plus-file arguments, system-default and reveal
+  platform commands, unreadable content-probe fallback, early non-zero opener
+  exits, bounded launch failures, and repeated containment checks.
+  Tests reject absolute paths, traversal, symlink escapes, directories, and
+  missing files. Browser-authenticated tests reject both a non-current cwd and a
+  two-step scope pivot in which an arbitrary draft/start cwd becomes current but
+  was never added through a trusted external-action grant flow. UI assertions
+  distinguish preview-unavailable semantics from a disabled file row. Tests
+  never invoke a real desktop application.
 - Short desktop viewport checks cover the main Workbench shell and Settings as
   a control case, and fail when `document.scrollingElement` can scroll past the
   visible app shell.

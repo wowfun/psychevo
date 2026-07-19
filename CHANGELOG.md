@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-19
+
+- Added authenticated cross-platform Files actions for opening files in VS Code
+  or the system default and revealing them in Finder, File Explorer, or File
+  Manager across Web and Desktop.
+- Made configured model names authoritative in GUI and TUI model controls and
+  status surfaces.
+- Improved Files previews and transcript/tool links with full-width hidden-tree
+  reading, preview-focused file opens, context-menu actions, and inventory
+  refreshes after file mutations.
+- Fixed Windows host-path lookup warnings and Desktop development startup by
+  excluding Cargo artifacts from Vite watching and separating debug-symbol
+  names.
+
 ## 2026-07-16
 
 - Added deterministic GUI and fullscreen TUI journey evidence, profiling

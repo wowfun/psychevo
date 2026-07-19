@@ -55,13 +55,28 @@ proves the whole path. Clicking a promoted path routes the canonical relative
 target through `workspace/file/read` and opens the existing Files preview; it
 must not navigate the browser, construct a raw `file://` URL, or create a second
 artifact-card surface. Completion of a main, side-conversation, or child-agent
-turn refreshes the workspace-scoped file inventory independently of which
-thread owns the visible primary transcript, so newly created files can be
-promoted when the transcript rerenders. When Workbench defers the initial
-`workspace/files` read, its cheap transcript demand check is a conservative
-superset of these supported Markdown forms, including root-level filenames,
-inline-code paths with line suffixes, and Markdown link destinations with line
-fragments. Exact inventory matching remains the authority for promotion.
+turn reevaluates workspace-file demand across the visible primary transcript
+and the turn's committed entries. When either contains demand, Workbench
+refreshes the workspace-scoped file inventory even if Files is hidden or the
+completion belongs to another thread, so created and deleted files do not leave
+actions stale. When Workbench defers the initial `workspace/files` read, its
+cheap transcript demand check is a conservative superset of these supported
+Markdown forms, including root-level filenames, inline-code paths with line
+suffixes, and Markdown link destinations with line fragments. A false-to-true
+demand from a completed supported file-tool entry immediately refreshes a
+same-workspace cached inventory rather than being suppressed by the matching
+root. Turn completion then performs the demand-driven final revalidation needed
+for later mutations such as deletion. Exact inventory matching remains the
+authority for promotion. If Files is visible, its ordinary completion refresh
+shares the same single-flight inventory request instead of issuing a duplicate
+read.
+
+Completed `read`, `edit`, and `write` transcript tool calls expose a clickable
+workspace-file target when their structured arguments contain a string `path`
+that resolves to a current file entry. The target reuses the same canonical
+workspace-path matching and Files-preview navigation as assistant-answer links;
+it does not make raw tool details generally linkable, and pending, running,
+failed, missing, directory, or outside-workspace targets remain non-actionable.
 
 Markdown preview uses the shared `@psychevo/components` Markdown renderer
 everywhere Workbench previews Markdown: transcript, Files, Review, capability
@@ -94,9 +109,20 @@ chat.
 
 The Files pane header exposes a persistent toggle for its right-hand file tree.
 Hiding the tree expands the selected-file preview to the full pane while keeping
-the header toggle available to restore it. In the selected-file action row,
+the header toggle available to restore it. The selected content renderer also
+uses that full width instead of retaining the tree-open reading-width cap or an
+equivalent empty gutter. In the selected-file action row,
 `Open HTML preview` sits immediately to the left of `Edit`; panel-level tree
 visibility remains visually separate from those file-level actions.
+
+Opening a file preview from an assistant workspace-file link or from the
+`Open` action on a completed `read`, `edit`, or `write` tool call starts in the
+preview-focused layout with the file tree hidden. Opening Files as a workspace
+browser, including the Composer Workspace entry and the Files host command,
+explicitly restores the tree even when reusing a preview-focused Files tab.
+Selecting another file from that tree preserves the current tree visibility.
+The persistent header toggle remains the explicit way to override either
+default.
 
 The Browser pane has compact toolbar controls for navigation, reload, address,
 annotation, and external open. Web and managed-Web hosts show ordinary
@@ -186,7 +212,9 @@ Default validation uses deterministic local harnesses and fake providers.
 - Shared Markdown and transcript tests cover exact current-inventory file-link
   promotion across relative, POSIX, Windows, Git Bash/MSYS, and UNC spellings;
   stable streaming boundaries; line suffixes; and the excluded message, block,
-  URL, image, directory, missing-file, and outside-workspace cases.
+  URL, image, directory, missing-file, and outside-workspace cases. Transcript
+  tests also cover completed `read`, `edit`, and `write` path targets plus their
+  pending, failed, missing, and unrelated-tool exclusions.
 - Workbench demand-detection tests cover plain root-level filenames, inline-code
   paths with line suffixes, and relative Markdown link destinations so lazy
   inventory loading cannot make supported promotion forms unreachable.
@@ -195,7 +223,11 @@ Default validation uses deterministic local harnesses and fake providers.
   host/port normalization, explicit scheme rejection, unsandboxed Browser
   fallback, immediate HTML script and pointer interaction, document/content
   reload, the retained HTML sandbox/CSP restrictions, single active HTML
-  execution, and right workspace navigation without text overlap.
+  execution, preview-focused hidden-tree defaults for workspace links and file
+  tool actions, completion-driven same-workspace inventory refresh while Files
+  is hidden, browser-entry restoration of a previously hidden file tree,
+  file-preview expansion after hiding the tree, and right workspace navigation
+  without text overlap.
 - Gateway/runtime tests cover the built-in Browser plugin list row, default
   enabled policy, explicit disable policy, and secret-free projection.
 - Desktop tests cover Browser host command routing once the native host lands.

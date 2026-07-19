@@ -216,6 +216,10 @@ backends, browser file-selection limits, or shell-host APIs. When a required
 platform capability is unavailable, the owning spec must define whether the
 operation degrades, becomes unsupported, or fails closed.
 
+Platform-specific compatibility helpers and their imports must use matching
+conditional compilation so every supported host builds without warnings from
+dependencies that are unreachable on that host.
+
 Platform differences should be reported as environment capability differences
 instead of being hidden behind generic runtime failures. Deterministic local
 validation may use fake or skipped capability checks, but live host capability
