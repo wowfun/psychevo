@@ -39,6 +39,21 @@
       ],
       "type": "object"
     },
+    "WorkspaceChangeInvalidationView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "source"
+      ],
+      "type": "object"
+    },
     "WorkspaceChangeReviewStatusView": {
       "enum": [
         "pending",
@@ -72,6 +87,13 @@
     "files": {
       "items": {
         "$ref": "#/definitions/WorkspaceChangeFileView"
+      },
+      "type": "array"
+    },
+    "invalidations": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/WorkspaceChangeInvalidationView"
       },
       "type": "array"
     },

@@ -5,7 +5,7 @@
       "$ref": "ClientRequest/initialize.json"
     },
     {
-      "$ref": "ClientRequest/thread-start.json"
+      "$ref": "ClientRequest/thread-draft-open.json"
     },
     {
       "$ref": "ClientRequest/thread-resume.json"
@@ -200,6 +200,12 @@
       "$ref": "ClientRequest/plugin-set-trust.json"
     },
     {
+      "$ref": "ClientRequest/plugin-authority-write.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-authority-refresh.json"
+    },
+    {
       "$ref": "ClientRequest/plugin-catalog-list.json"
     },
     {
@@ -207,6 +213,15 @@
     },
     {
       "$ref": "ClientRequest/plugin-catalog-remove.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-catalog-upgrade.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-connect-start.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-connect-status.json"
     },
     {
       "$ref": "ClientRequest/skill-list.json"

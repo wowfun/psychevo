@@ -73,6 +73,13 @@
             "null"
           ]
         },
+        "authority": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "gitRef": {
           "default": null,
           "type": [
@@ -121,6 +128,13 @@
         },
         "source": {
           "type": "string"
+        },
+        "sparsePaths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

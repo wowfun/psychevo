@@ -5,12 +5,6 @@
       "$ref": "ServerNotification/gateway-event.json"
     },
     {
-      "$ref": "ServerNotification/turn-result.json"
-    },
-    {
-      "$ref": "ServerNotification/turn-error.json"
-    },
-    {
       "$ref": "ServerNotification/shell-result.json"
     },
     {

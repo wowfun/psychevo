@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "accountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "cacheReadTokens": {
       "format": "uint64",
       "minimum": 0.0,
@@ -21,6 +26,11 @@
     },
     "date": {
       "type": "string"
+    },
+    "effectiveTotalTokens": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "estimatedCostNanodollars": {
       "format": "int64",
@@ -56,6 +66,14 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "totalStatus": {
+      "type": "string"
+    },
+    "unaccountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "unknownPricingCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -63,11 +81,13 @@
     }
   },
   "required": [
+    "accountedProviderCallCount",
     "cacheReadTokens",
     "cacheWriteTokens",
     "contextInputTokens",
     "costStatus",
     "date",
+    "effectiveTotalTokens",
     "estimatedCostNanodollars",
     "estimatedPricingCount",
     "freePricingCount",
@@ -75,6 +95,8 @@
     "messageCount",
     "reportedTotalTokens",
     "sessionCount",
+    "totalStatus",
+    "unaccountedProviderCallCount",
     "unknownPricingCount"
   ],
   "title": "UsageActivityDayView",

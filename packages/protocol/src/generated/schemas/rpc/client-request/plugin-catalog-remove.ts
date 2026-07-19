@@ -68,6 +68,13 @@ export const clientRequestPluginCatalogRemoveSchema = {
     },
     "PluginCatalogRemoveParams": {
       "properties": {
+        "authority": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         },

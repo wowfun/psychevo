@@ -441,6 +441,11 @@ export const threadSessionSchemas = {
   SessionUsageSummaryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "accountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "assistantMessageCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -484,6 +489,15 @@ export const threadSessionSchemas = {
     },
     "costStatus": {
       "type": "string"
+    },
+    "effectiveTotalTokens": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "estimatedCostNanodollars": {
       "format": "int64",
@@ -540,6 +554,14 @@ export const threadSessionSchemas = {
         "null"
       ]
     },
+    "totalStatus": {
+      "type": "string"
+    },
+    "unaccountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "unknownPricingCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -547,6 +569,7 @@ export const threadSessionSchemas = {
     }
   },
   "required": [
+    "accountedProviderCallCount",
     "assistantMessageCount",
     "available",
     "billableInputTokens",
@@ -562,6 +585,8 @@ export const threadSessionSchemas = {
     "messageCount",
     "reasoningTokens",
     "reportedTotalTokens",
+    "totalStatus",
+    "unaccountedProviderCallCount",
     "unknownPricingCount"
   ],
   "title": "SessionUsageSummaryView",

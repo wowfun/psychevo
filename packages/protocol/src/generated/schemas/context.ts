@@ -179,8 +179,19 @@ export const contextSchemas = {
       },
       "type": "array"
     },
+    "appliesToSessionSeq": {
+      "default": null,
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "available": {
       "type": "boolean"
+    },
+    "basis": {
+      "type": "string"
     },
     "categories": {
       "items": {
@@ -219,6 +230,7 @@ export const contextSchemas = {
   },
   "required": [
     "available",
+    "basis",
     "categories",
     "label",
     "status",

@@ -820,9 +820,27 @@ pub struct PluginUninstallParams {
 #[serde(rename_all = "camelCase")]
 pub struct PluginSetEnabledParams {
     pub selector: String,
-    pub enabled: bool,
+    #[serde(default)]
+    pub enabled: Option<bool>,
     #[serde(default)]
     pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAuthorityWriteParams {
+    pub enabled: bool,
+    #[serde(default)]
+    pub binary: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginAuthorityRefreshParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
@@ -843,6 +861,8 @@ pub struct PluginSetTrustParams {
 #[serde(rename_all = "camelCase")]
 pub struct PluginCatalogListParams {
     #[serde(default)]
+    pub authority: Option<String>,
+    #[serde(default)]
     pub scope_name: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -851,12 +871,16 @@ pub struct PluginCatalogListParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCatalogAddParams {
+    #[serde(default)]
+    pub authority: Option<String>,
     pub name: String,
     pub source: String,
     #[serde(default = "default_plugin_catalog_kind")]
     pub kind: String,
     #[serde(default)]
     pub git_ref: Option<String>,
+    #[serde(default)]
+    pub sparse_paths: Vec<String>,
     #[serde(default)]
     pub npm_version: Option<String>,
     #[serde(default)]
@@ -872,9 +896,46 @@ pub struct PluginCatalogAddParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCatalogRemoveParams {
+    #[serde(default)]
+    pub authority: Option<String>,
     pub name: String,
     #[serde(default)]
     pub scope_name: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCatalogUpgradeParams {
+    pub name: String,
+    #[serde(default)]
+    pub authority: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub sparse_paths: Vec<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginConnectStartParams {
+    pub selector: String,
+    pub component_id: String,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub scope: Option<GatewayRequestScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginConnectStatusParams {
+    pub session_id: String,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
@@ -1437,8 +1498,10 @@ pub struct ThreadSendabilityView {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadContextReadResult {
-    #[serde(rename = "targetId")]
-    pub target_id: String,
+    #[serde(default, rename = "selectedTargetId")]
+    pub selected_target_id: Option<String>,
+    #[serde(default, rename = "suggestedTargetId")]
+    pub suggested_target_id: Option<String>,
     #[serde(rename = "runtimeProfileRef")]
     pub runtime_profile_ref: String,
     #[serde(rename = "selectionState")]
@@ -1473,6 +1536,17 @@ pub struct ThreadContextReadResult {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadDraftPrepareResult {
     pub context: ThreadContextReadResult,
+    #[serde(default)]
+    pub problem: Option<RuntimeErrorView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadDraftOpenResult {
+    pub snapshot: ThreadSnapshot,
+    pub context: ThreadContextReadResult,
+    #[serde(default)]
+    pub problem: Option<RuntimeErrorView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -1688,8 +1762,8 @@ pub struct JsonRpcError {
 pub enum ClientRequest {
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
-    #[serde(rename = "thread/start")]
-    ThreadStart(ThreadStartParams),
+    #[serde(rename = "thread/draft/open")]
+    ThreadDraftOpen(ThreadDraftOpenParams),
     #[serde(rename = "thread/resume")]
     ThreadResume(ThreadResumeParams),
     #[serde(rename = "thread/read")]
@@ -1818,12 +1892,22 @@ pub enum ClientRequest {
     PluginSetEnabled(PluginSetEnabledParams),
     #[serde(rename = "plugin/setTrust")]
     PluginSetTrust(PluginSetTrustParams),
+    #[serde(rename = "plugin/authority/write")]
+    PluginAuthorityWrite(PluginAuthorityWriteParams),
+    #[serde(rename = "plugin/authority/refresh")]
+    PluginAuthorityRefresh(PluginAuthorityRefreshParams),
     #[serde(rename = "plugin/catalog/list")]
     PluginCatalogList(PluginCatalogListParams),
     #[serde(rename = "plugin/catalog/add")]
     PluginCatalogAdd(PluginCatalogAddParams),
     #[serde(rename = "plugin/catalog/remove")]
     PluginCatalogRemove(PluginCatalogRemoveParams),
+    #[serde(rename = "plugin/catalog/upgrade")]
+    PluginCatalogUpgrade(PluginCatalogUpgradeParams),
+    #[serde(rename = "plugin/connect/start")]
+    PluginConnectStart(PluginConnectStartParams),
+    #[serde(rename = "plugin/connect/status")]
+    PluginConnectStatus(PluginConnectStatusParams),
     #[serde(rename = "skill/list")]
     SkillList(SkillListParams),
     #[serde(rename = "skill/read")]
@@ -1969,10 +2053,6 @@ pub enum ClientRequest {
 pub enum ServerNotification {
     #[serde(rename = "gateway/event")]
     GatewayEvent(GatewayEvent),
-    #[serde(rename = "turn/result")]
-    TurnResult(TurnResultPayload),
-    #[serde(rename = "turn/error")]
-    TurnError(TurnErrorPayload),
     #[serde(rename = "shell/result")]
     ShellResult(ShellResultPayload),
     #[serde(rename = "shell/error")]

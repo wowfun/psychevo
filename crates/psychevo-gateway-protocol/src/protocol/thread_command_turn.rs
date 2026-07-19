@@ -7,6 +7,7 @@ pub struct InitializeResult {
     pub server: String,
     pub version: String,
     pub cwd: String,
+    pub display_cwd: String,
     pub scope: GatewayRequestScope,
     pub source: GatewaySource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -24,9 +25,21 @@ pub struct GatewayProfileView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ThreadDraftTargetIntent {
+    Default,
+    Exact {
+        #[serde(rename = "targetId")]
+        target_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadStartParams {
-    pub scope: GatewayRequestScope,
+pub struct ThreadDraftOpenParams {
+    pub origin: GatewayRequestScope,
+    #[serde(rename = "targetIntent")]
+    pub target_intent: ThreadDraftTargetIntent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -718,39 +731,6 @@ pub struct TurnStartResult {
     pub thread_id: String,
     pub turn_id: String,
     pub thread: GatewayThread,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnResultPayload {
-    pub thread: GatewayThread,
-    pub turn: GatewayTurn,
-    pub result: TurnRunResult,
-    #[serde(rename = "committedEntries", default)]
-    pub committed_entries: Vec<TranscriptEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnRunResult {
-    pub session_id: String,
-    pub outcome: String,
-    pub final_answer: String,
-    pub tool_failures: usize,
-    #[serde(default)]
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnErrorPayload {
-    pub error: AgentErrorView,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

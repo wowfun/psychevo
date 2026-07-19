@@ -821,6 +821,13 @@
     "runtimeProfileRef": {
       "type": "string"
     },
+    "selectedTargetId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "selectionState": {
       "type": "string"
     },
@@ -838,8 +845,12 @@
       ],
       "default": null
     },
-    "targetId": {
-      "type": "string"
+    "suggestedTargetId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -848,8 +859,7 @@
     "history",
     "runtimeProfileRef",
     "selectionState",
-    "sendability",
-    "targetId"
+    "sendability"
   ],
   "title": "ThreadContextReadResult",
   "type": "object"

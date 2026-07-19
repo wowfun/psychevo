@@ -75,6 +75,13 @@ export const clientRequestPluginCatalogAddSchema = {
             "null"
           ]
         },
+        "authority": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "gitRef": {
           "default": null,
           "type": [
@@ -123,6 +130,13 @@ export const clientRequestPluginCatalogAddSchema = {
         },
         "source": {
           "type": "string"
+        },
+        "sparsePaths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

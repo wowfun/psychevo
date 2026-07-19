@@ -20,6 +20,11 @@ export const usageSchemas = {
   UsageWindowSummaryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "accountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "assistantMessageCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -60,6 +65,11 @@ export const usageSchemas = {
     },
     "costStatus": {
       "type": "string"
+    },
+    "effectiveTotalTokens": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "estimatedCostNanodollars": {
       "format": "int64",
@@ -114,6 +124,14 @@ export const usageSchemas = {
         "null"
       ]
     },
+    "totalStatus": {
+      "type": "string"
+    },
+    "unaccountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "unknownPricingCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -121,6 +139,7 @@ export const usageSchemas = {
     }
   },
   "required": [
+    "accountedProviderCallCount",
     "assistantMessageCount",
     "billableInputTokens",
     "billableOutputTokens",
@@ -128,6 +147,7 @@ export const usageSchemas = {
     "cacheWriteTokens",
     "contextInputTokens",
     "costStatus",
+    "effectiveTotalTokens",
     "estimatedCostNanodollars",
     "estimatedPricingCount",
     "freePricingCount",
@@ -138,6 +158,8 @@ export const usageSchemas = {
     "reasoningTokens",
     "reportedTotalTokens",
     "sessionCount",
+    "totalStatus",
+    "unaccountedProviderCallCount",
     "unknownPricingCount"
   ],
   "title": "UsageWindowSummaryView",
@@ -146,6 +168,11 @@ export const usageSchemas = {
   UsageActivityDayView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "accountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "cacheReadTokens": {
       "format": "uint64",
       "minimum": 0.0,
@@ -166,6 +193,11 @@ export const usageSchemas = {
     },
     "date": {
       "type": "string"
+    },
+    "effectiveTotalTokens": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "estimatedCostNanodollars": {
       "format": "int64",
@@ -201,6 +233,14 @@ export const usageSchemas = {
       "minimum": 0.0,
       "type": "integer"
     },
+    "totalStatus": {
+      "type": "string"
+    },
+    "unaccountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "unknownPricingCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -208,11 +248,13 @@ export const usageSchemas = {
     }
   },
   "required": [
+    "accountedProviderCallCount",
     "cacheReadTokens",
     "cacheWriteTokens",
     "contextInputTokens",
     "costStatus",
     "date",
+    "effectiveTotalTokens",
     "estimatedCostNanodollars",
     "estimatedPricingCount",
     "freePricingCount",
@@ -220,6 +262,8 @@ export const usageSchemas = {
     "messageCount",
     "reportedTotalTokens",
     "sessionCount",
+    "totalStatus",
+    "unaccountedProviderCallCount",
     "unknownPricingCount"
   ],
   "title": "UsageActivityDayView",
@@ -230,6 +274,11 @@ export const usageSchemas = {
   "definitions": {
     "UsageActivityDayView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "cacheReadTokens": {
           "format": "uint64",
           "minimum": 0.0,
@@ -250,6 +299,11 @@ export const usageSchemas = {
         },
         "date": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -285,6 +339,14 @@ export const usageSchemas = {
           "minimum": 0.0,
           "type": "integer"
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -292,11 +354,13 @@ export const usageSchemas = {
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "cacheReadTokens",
         "cacheWriteTokens",
         "contextInputTokens",
         "costStatus",
         "date",
+        "effectiveTotalTokens",
         "estimatedCostNanodollars",
         "estimatedPricingCount",
         "freePricingCount",
@@ -304,6 +368,8 @@ export const usageSchemas = {
         "messageCount",
         "reportedTotalTokens",
         "sessionCount",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"
@@ -336,6 +402,11 @@ export const usageSchemas = {
   "definitions": {
     "UsageActivityDayView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "cacheReadTokens": {
           "format": "uint64",
           "minimum": 0.0,
@@ -356,6 +427,11 @@ export const usageSchemas = {
         },
         "date": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -391,6 +467,14 @@ export const usageSchemas = {
           "minimum": 0.0,
           "type": "integer"
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -398,11 +482,13 @@ export const usageSchemas = {
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "cacheReadTokens",
         "cacheWriteTokens",
         "contextInputTokens",
         "costStatus",
         "date",
+        "effectiveTotalTokens",
         "estimatedCostNanodollars",
         "estimatedPricingCount",
         "freePricingCount",
@@ -410,6 +496,8 @@ export const usageSchemas = {
         "messageCount",
         "reportedTotalTokens",
         "sessionCount",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"
@@ -438,6 +526,11 @@ export const usageSchemas = {
     },
     "UsageWindowSummaryView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "assistantMessageCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -478,6 +571,11 @@ export const usageSchemas = {
         },
         "costStatus": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -532,6 +630,14 @@ export const usageSchemas = {
             "null"
           ]
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -539,6 +645,7 @@ export const usageSchemas = {
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "assistantMessageCount",
         "billableInputTokens",
         "billableOutputTokens",
@@ -546,6 +653,7 @@ export const usageSchemas = {
         "cacheWriteTokens",
         "contextInputTokens",
         "costStatus",
+        "effectiveTotalTokens",
         "estimatedCostNanodollars",
         "estimatedPricingCount",
         "freePricingCount",
@@ -556,6 +664,8 @@ export const usageSchemas = {
         "reasoningTokens",
         "reportedTotalTokens",
         "sessionCount",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"

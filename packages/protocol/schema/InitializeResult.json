@@ -120,6 +120,9 @@
     "cwd": {
       "type": "string"
     },
+    "displayCwd": {
+      "type": "string"
+    },
     "profile": {
       "anyOf": [
         {
@@ -146,6 +149,7 @@
   "required": [
     "capabilities",
     "cwd",
+    "displayCwd",
     "scope",
     "server",
     "source",

@@ -23,6 +23,115 @@ mod thread_application_contract_tests {
     use super::*;
 
     #[test]
+    fn draft_open_requires_an_explicit_default_or_exact_target_intent() {
+        let default_request: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/draft/open",
+            "params": {
+                "origin": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "composer" }
+                },
+                "targetIntent": { "kind": "default" }
+            }
+        }))
+        .expect("default draft open request");
+        assert!(matches!(
+            default_request,
+            ClientRequest::ThreadDraftOpen(ThreadDraftOpenParams {
+                target_intent: ThreadDraftTargetIntent::Default,
+                ..
+            })
+        ));
+
+        let exact_request: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/draft/open",
+            "params": {
+                "origin": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "composer" }
+                },
+                "targetIntent": {
+                    "kind": "exact",
+                    "targetId": "target:opaque-reviewer"
+                }
+            }
+        }))
+        .expect("exact draft open request");
+        assert!(matches!(
+            exact_request,
+            ClientRequest::ThreadDraftOpen(ThreadDraftOpenParams {
+                target_intent: ThreadDraftTargetIntent::Exact { ref target_id },
+                ..
+            }) if target_id == "target:opaque-reviewer"
+        ));
+
+        for invalid in [
+            serde_json::json!({
+                "method": "thread/draft/open",
+                "params": {
+                    "origin": {
+                        "cwd": "/tmp/workspace",
+                        "source": { "kind": "web", "rawId": "composer" }
+                    },
+                    "targetIntent": null
+                }
+            }),
+            serde_json::json!({
+                "method": "thread/start",
+                "params": {
+                    "scope": {
+                        "cwd": "/tmp/workspace",
+                        "source": { "kind": "web", "rawId": "composer" }
+                    }
+                }
+            }),
+        ] {
+            assert!(
+                serde_json::from_value::<ClientRequest>(invalid).is_err(),
+                "legacy or null target intent must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn thread_context_separates_selected_and_suggested_targets() {
+        let context: ThreadContextReadResult = serde_json::from_value(serde_json::json!({
+            "selectedTargetId": null,
+            "suggestedTargetId": "target:default:native",
+            "runtimeProfileRef": "native",
+            "selectionState": "catalog_default",
+            "profiles": [],
+            "binding": null,
+            "controls": [],
+            "stability": null,
+            "capabilities": [],
+            "compatibleTargets": [],
+            "inputCapabilities": [],
+            "actions": [],
+            "sendability": {
+                "allowed": false,
+                "reason": "Select an Agent target before sending.",
+                "recoveryAction": "select_target"
+            },
+            "history": { "owner": "psychevo", "fidelity": "full" },
+            "pendingInteractions": [],
+            "contextRevision": "context-1",
+            "controlRevision": "control-1"
+        }))
+        .expect("discovery context");
+
+        assert_eq!(context.selected_target_id, None);
+        assert_eq!(
+            context.suggested_target_id.as_deref(),
+            Some("target:default:native")
+        );
+        let encoded = serde_json::to_value(context).expect("serialize context");
+        assert_eq!(encoded["selectedTargetId"], serde_json::Value::Null);
+        assert_eq!(encoded["suggestedTargetId"], "target:default:native");
+        assert!(encoded.get("targetId").is_none());
+    }
+
+    #[test]
     fn thread_context_and_control_requests_are_closed_typed_methods() {
         let context: ClientRequest = serde_json::from_value(serde_json::json!({
             "method": "thread/context/read",
@@ -212,39 +321,17 @@ mod thread_application_contract_tests {
     }
 
     #[test]
-    fn turn_errors_preserve_unknown_delivery_as_structured_data() {
-        let notification = ServerNotification::TurnError(TurnErrorPayload {
-            error: AgentErrorView {
-                message: "The ACP connection closed after dispatch.".to_string(),
-                code: Some("unknown_delivery".to_string()),
-                stage: Some("delivery".to_string()),
-                retry_class: Some("reconcile".to_string()),
-                delivery: AgentDeliveryStatusView::Unknown,
-                recovery_action: Some("thread/history/read".to_string()),
-                diagnostic_ref: Some("turn:7".to_string()),
-            },
-            thread_id: Some("thread-1".to_string()),
-            turn_id: Some("turn-7".to_string()),
-        });
-        let value = serde_json::to_value(notification).expect("turn/error notification");
-        assert_eq!(value["params"]["error"]["delivery"], "unknown");
-        assert_eq!(
-            value["params"]["error"]["recoveryAction"],
-            "thread/history/read"
-        );
-        assert!(value["params"]["error"].get("message").is_some());
-        let decoded = serde_json::from_value::<ServerNotification>(value)
-            .expect("structured turn/error remains decodable");
-        assert!(matches!(
-            decoded,
-            ServerNotification::TurnError(TurnErrorPayload {
-                error: AgentErrorView {
-                    delivery: AgentDeliveryStatusView::Unknown,
-                    ..
-                },
-                ..
-            })
-        ));
+    fn duplicate_public_turn_terminal_notifications_are_rejected() {
+        for method in ["turn/result", "turn/error"] {
+            let decoded = serde_json::from_value::<ServerNotification>(serde_json::json!({
+                "method": method,
+                "params": {}
+            }));
+            assert!(
+                decoded.is_err(),
+                "{method} must not remain a public notification"
+            );
+        }
     }
 
     #[test]

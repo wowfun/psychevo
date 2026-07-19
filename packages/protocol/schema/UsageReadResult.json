@@ -3,6 +3,11 @@
   "definitions": {
     "UsageActivityDayView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "cacheReadTokens": {
           "format": "uint64",
           "minimum": 0.0,
@@ -23,6 +28,11 @@
         },
         "date": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -58,6 +68,14 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -65,11 +83,13 @@
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "cacheReadTokens",
         "cacheWriteTokens",
         "contextInputTokens",
         "costStatus",
         "date",
+        "effectiveTotalTokens",
         "estimatedCostNanodollars",
         "estimatedPricingCount",
         "freePricingCount",
@@ -77,6 +97,8 @@
         "messageCount",
         "reportedTotalTokens",
         "sessionCount",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"
@@ -105,6 +127,11 @@
     },
     "UsageWindowSummaryView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "assistantMessageCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -145,6 +172,11 @@
         },
         "costStatus": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -199,6 +231,14 @@
             "null"
           ]
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -206,6 +246,7 @@
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "assistantMessageCount",
         "billableInputTokens",
         "billableOutputTokens",
@@ -213,6 +254,7 @@
         "cacheWriteTokens",
         "contextInputTokens",
         "costStatus",
+        "effectiveTotalTokens",
         "estimatedCostNanodollars",
         "estimatedPricingCount",
         "freePricingCount",
@@ -223,6 +265,8 @@
         "reasoningTokens",
         "reportedTotalTokens",
         "sessionCount",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"

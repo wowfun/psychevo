@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "default"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "exact"
+          ],
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "targetId"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ThreadDraftTargetIntent"
+}

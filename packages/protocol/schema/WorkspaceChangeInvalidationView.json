@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "message",
+    "source"
+  ],
+  "title": "WorkspaceChangeInvalidationView",
+  "type": "object"
+}

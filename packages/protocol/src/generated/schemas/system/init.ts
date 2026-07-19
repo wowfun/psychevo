@@ -128,6 +128,9 @@ export const systemInitSchemas = {
     "cwd": {
       "type": "string"
     },
+    "displayCwd": {
+      "type": "string"
+    },
     "profile": {
       "anyOf": [
         {
@@ -154,6 +157,7 @@ export const systemInitSchemas = {
   "required": [
     "capabilities",
     "cwd",
+    "displayCwd",
     "scope",
     "server",
     "source",

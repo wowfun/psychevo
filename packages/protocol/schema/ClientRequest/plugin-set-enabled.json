@@ -67,7 +67,11 @@
     "PluginSetEnabledParams": {
       "properties": {
         "enabled": {
-          "type": "boolean"
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "scope": {
           "anyOf": [
@@ -92,7 +96,6 @@
         }
       },
       "required": [
-        "enabled",
         "selector"
       ],
       "type": "object"

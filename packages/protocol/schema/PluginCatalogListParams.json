@@ -65,6 +65,13 @@
     }
   },
   "properties": {
+    "authority": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "scope": {
       "anyOf": [
         {

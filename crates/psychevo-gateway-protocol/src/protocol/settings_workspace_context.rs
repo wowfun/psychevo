@@ -567,6 +567,15 @@ pub struct WorkspaceChangeGroupView {
     pub created_at_ms: i64,
     pub completed_at_ms: i64,
     pub files: Vec<WorkspaceChangeFileView>,
+    #[serde(default)]
+    pub invalidations: Vec<WorkspaceChangeInvalidationView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeInvalidationView {
+    pub source: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -625,6 +634,9 @@ pub struct ContextReadResult {
     pub available: bool,
     pub label: String,
     pub status: String,
+    pub basis: String,
+    #[serde(default)]
+    pub applies_to_session_seq: Option<i64>,
     pub used_tokens: u64,
     #[serde(default)]
     pub context_limit: Option<u64>,
@@ -661,7 +673,12 @@ pub struct SessionUsageSummaryView {
     pub reasoning_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    #[serde(default)]
+    pub effective_total_tokens: Option<u64>,
     pub reported_total_tokens: u64,
+    pub total_status: String,
+    pub accounted_provider_call_count: u64,
+    pub unaccounted_provider_call_count: u64,
     pub estimated_cost_nanodollars: i64,
     pub cost_status: String,
     pub estimated_pricing_count: u64,
@@ -702,7 +719,11 @@ pub struct UsageWindowSummaryView {
     pub reasoning_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    pub effective_total_tokens: u64,
     pub reported_total_tokens: u64,
+    pub total_status: String,
+    pub accounted_provider_call_count: u64,
+    pub unaccounted_provider_call_count: u64,
     pub estimated_cost_nanodollars: i64,
     pub cost_status: String,
     pub estimated_pricing_count: u64,
@@ -719,7 +740,11 @@ pub struct UsageActivityDayView {
     pub date: String,
     pub session_count: u64,
     pub message_count: u64,
+    pub effective_total_tokens: u64,
     pub reported_total_tokens: u64,
+    pub total_status: String,
+    pub accounted_provider_call_count: u64,
+    pub unaccounted_provider_call_count: u64,
     pub context_input_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,

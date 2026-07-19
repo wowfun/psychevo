@@ -72,7 +72,45 @@ export const threadControlSchemas = {
   "title": "ThreadHistoryView",
   "type": "object"
 },
-  ThreadStartParams: {
+  ThreadDraftTargetIntent: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "default"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "exact"
+          ],
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "targetId"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ThreadDraftTargetIntent"
+},
+  ThreadDraftOpenParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -136,17 +174,57 @@ export const threadControlSchemas = {
         "persistent"
       ],
       "type": "string"
+    },
+    "ThreadDraftTargetIntent": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "default"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "exact"
+              ],
+              "type": "string"
+            },
+            "targetId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "targetId"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "properties": {
-    "scope": {
+    "origin": {
       "$ref": "#/definitions/GatewayRequestScope"
+    },
+    "targetIntent": {
+      "$ref": "#/definitions/ThreadDraftTargetIntent"
     }
   },
   "required": [
-    "scope"
+    "origin",
+    "targetIntent"
   ],
-  "title": "ThreadStartParams",
+  "title": "ThreadDraftOpenParams",
   "type": "object"
 },
   ThreadCompactionCheckpointView: {
@@ -6421,6 +6499,13 @@ export const threadControlSchemas = {
     "runtimeProfileRef": {
       "type": "string"
     },
+    "selectedTargetId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "selectionState": {
       "type": "string"
     },
@@ -6438,8 +6523,12 @@ export const threadControlSchemas = {
       ],
       "default": null
     },
-    "targetId": {
-      "type": "string"
+    "suggestedTargetId": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
@@ -6448,10 +6537,1589 @@ export const threadControlSchemas = {
     "history",
     "runtimeProfileRef",
     "selectionState",
-    "sendability",
-    "targetId"
+    "sendability"
   ],
   "title": "ThreadContextReadResult",
+  "type": "object"
+},
+  ThreadDraftOpenResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BackendConfigTarget": {
+      "enum": [
+        "project",
+        "profile"
+      ],
+      "type": "string"
+    },
+    "BackendDiagnosticView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "BackendKind": {
+      "enum": [
+        "native",
+        "acp"
+      ],
+      "type": "string"
+    },
+    "GatewayActionKind": {
+      "enum": [
+        "permission",
+        "clarify",
+        "customTool",
+        "userInput"
+      ],
+      "type": "string"
+    },
+    "GatewayActivityView": {
+      "properties": {
+        "activeTurnId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerSurface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "queuedTurns": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "takeoverState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "queuedTurns",
+        "running"
+      ],
+      "type": "object"
+    },
+    "GatewayBackendInfo": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/BackendKind"
+        },
+        "runtimeRef": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionHandle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewayImageInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "localPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySource": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "$ref": "#/definitions/GatewaySourceLifetime"
+        },
+        "rawId": {
+          "type": "string"
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "lifetime",
+        "rawId"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    },
+    "GatewayThread": {
+      "properties": {
+        "backend": {
+          "$ref": "#/definitions/GatewayBackendInfo"
+        },
+        "forkedFromThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "sourceKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "id"
+      ],
+      "type": "object"
+    },
+    "PendingActionView": {
+      "properties": {
+        "actionId": {
+          "type": "string"
+        },
+        "activityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/definitions/GatewayActionKind"
+        },
+        "leaseExpiresAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ownerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "default": null
+        },
+        "sourceKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "actionId",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RunnableTargetView": {
+      "properties": {
+        "agentLabel": {
+          "type": "string"
+        },
+        "agentRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "profileLabel": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "runtimeProfileRef": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentLabel",
+        "label",
+        "profileLabel",
+        "ready",
+        "runtimeProfileRef",
+        "targetId"
+      ],
+      "type": "object"
+    },
+    "RuntimeBindingOwnershipView": {
+      "enum": [
+        "readWrite",
+        "readOnly",
+        "active"
+      ],
+      "type": "string"
+    },
+    "RuntimeBindingView": {
+      "properties": {
+        "agentFingerprint": {
+          "type": "string"
+        },
+        "agentRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backendKind": {
+          "type": "string"
+        },
+        "bindingRevision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "nativeKind": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownership": {
+          "$ref": "#/definitions/RuntimeBindingOwnershipView"
+        },
+        "profileFingerprint": {
+          "type": "string"
+        },
+        "runtimeRef": {
+          "type": "string"
+        },
+        "sessionHandle": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentFingerprint",
+        "backendKind",
+        "bindingRevision",
+        "cwd",
+        "ownership",
+        "profileFingerprint",
+        "runtimeRef",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "RuntimeCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "stability"
+      ],
+      "type": "object"
+    },
+    "RuntimeErrorView": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "diagnosticRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryClass": {
+          "$ref": "#/definitions/RuntimeRetryClassView"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryClass",
+        "stage"
+      ],
+      "type": "object"
+    },
+    "RuntimeHealthView": {
+      "properties": {
+        "checkedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "commandPath": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeProfileView": {
+      "properties": {
+        "approvalMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "backendRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "capabilityRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "configured": {
+          "default": false,
+          "type": "boolean"
+        },
+        "defaultAgent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultMode": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "defaultModel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendDiagnosticView"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "generated": {
+          "type": "boolean"
+        },
+        "health": {
+          "$ref": "#/definitions/RuntimeHealthView"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "optionKeys": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "profileRevision": {
+          "default": "",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "",
+          "type": "string"
+        },
+        "readinessStages": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeReadinessStageView"
+          },
+          "type": "array"
+        },
+        "runtime": {
+          "type": "string"
+        },
+        "sandbox": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceTargets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BackendConfigTarget"
+          },
+          "type": "array"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspaceRoots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "generated",
+        "health",
+        "id",
+        "label",
+        "runtime"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStageView": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "observedAtMs": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/RuntimeReadinessStatusView"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "RuntimeReadinessStatusView": {
+      "enum": [
+        "unchecked",
+        "ready",
+        "missing",
+        "needsAuth",
+        "unsupported",
+        "error"
+      ],
+      "type": "string"
+    },
+    "RuntimeRetryClassView": {
+      "enum": [
+        "never",
+        "userAction",
+        "safeRetry",
+        "reconnect",
+        "unknownDelivery"
+      ],
+      "type": "string"
+    },
+    "RuntimeStabilityView": {
+      "enum": [
+        "stable",
+        "experimental",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadActionDescriptorView": {
+      "properties": {
+        "channelSafe": {
+          "default": false,
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "$ref": "#/definitions/ThreadActionKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "id",
+        "label",
+        "stability"
+      ],
+      "type": "object"
+    },
+    "ThreadActionKind": {
+      "enum": [
+        "interrupt",
+        "steer",
+        "compact",
+        "fork",
+        "forkBefore",
+        "revertConversation",
+        "unrevertConversation"
+      ],
+      "type": "string"
+    },
+    "ThreadContextReadResult": {
+      "properties": {
+        "actions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadActionDescriptorView"
+          },
+          "type": "array"
+        },
+        "binding": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeBindingView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeCapabilityView"
+          },
+          "type": "array"
+        },
+        "compatibleTargets": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RunnableTargetView"
+          },
+          "type": "array"
+        },
+        "contextRevision": {
+          "type": "string"
+        },
+        "controlRevision": {
+          "type": "string"
+        },
+        "controls": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadControlDescriptorView"
+          },
+          "type": "array"
+        },
+        "history": {
+          "$ref": "#/definitions/ThreadHistoryView"
+        },
+        "inputCapabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadInputCapabilityView"
+          },
+          "type": "array"
+        },
+        "pendingInteractions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/PendingActionView"
+          },
+          "type": "array"
+        },
+        "profiles": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/RuntimeProfileView"
+          },
+          "type": "array"
+        },
+        "runtimeProfileRef": {
+          "type": "string"
+        },
+        "selectedTargetId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectionState": {
+          "type": "string"
+        },
+        "sendability": {
+          "$ref": "#/definitions/ThreadSendabilityView"
+        },
+        "stability": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeStabilityView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "suggestedTargetId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "contextRevision",
+        "controlRevision",
+        "history",
+        "runtimeProfileRef",
+        "selectionState",
+        "sendability"
+      ],
+      "type": "object"
+    },
+    "ThreadControlApplyScopeView": {
+      "enum": [
+        "turnDraft",
+        "session"
+      ],
+      "type": "string"
+    },
+    "ThreadControlChoiceView": {
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ThreadControlDependencyView": {
+      "properties": {
+        "controlId": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "controlId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ThreadControlDescriptorView": {
+      "properties": {
+        "applyScope": {
+          "$ref": "#/definitions/ThreadControlApplyScopeView"
+        },
+        "capabilityRevision": {
+          "type": "string"
+        },
+        "channelSafe": {
+          "default": false,
+          "type": "boolean"
+        },
+        "choices": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadControlChoiceView"
+          },
+          "type": "array"
+        },
+        "dependsOn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadControlDependencyView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "effectiveSource": {
+          "$ref": "#/definitions/ThreadControlEffectiveSourceView"
+        },
+        "effectiveValue": {
+          "default": null
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "mutability": {
+          "$ref": "#/definitions/ThreadControlMutabilityView"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "stability": {
+          "$ref": "#/definitions/RuntimeStabilityView"
+        },
+        "surfaceRole": {
+          "$ref": "#/definitions/ThreadControlSurfaceRoleView"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "applyScope",
+        "capabilityRevision",
+        "effectiveSource",
+        "enabled",
+        "id",
+        "isDefault",
+        "label",
+        "mutability",
+        "required",
+        "stability",
+        "surfaceRole"
+      ],
+      "type": "object"
+    },
+    "ThreadControlEffectiveSourceView": {
+      "enum": [
+        "runtimeDefault",
+        "profileDefault",
+        "sourceDraft",
+        "threadPreference",
+        "turnOverride",
+        "runtimeObserved"
+      ],
+      "type": "string"
+    },
+    "ThreadControlMutabilityView": {
+      "enum": [
+        "readOnly",
+        "selectable"
+      ],
+      "type": "string"
+    },
+    "ThreadControlSurfaceRoleView": {
+      "enum": [
+        "mode",
+        "model",
+        "reasoning",
+        "advanced"
+      ],
+      "type": "string"
+    },
+    "ThreadEditableDraft": {
+      "properties": {
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadEditableInputPart"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ThreadEditableInputPart": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/GatewayImageInput"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ThreadHistoryEditingKind": {
+      "enum": [
+        "workspaceUndo",
+        "conversationEdit"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryEditingView": {
+      "properties": {
+        "availableActions": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadHistoryRecoveryActionKind"
+          },
+          "type": "array"
+        },
+        "boundaryMessageId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hiddenEntryCount": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/definitions/ThreadHistoryEditingKind"
+        },
+        "replacementDraft": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadEditableDraft"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ThreadHistoryFidelityView": {
+      "enum": [
+        "full",
+        "summary",
+        "partial",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryOwnerView": {
+      "enum": [
+        "psychevo",
+        "agent",
+        "process"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryRecoveryActionKind": {
+      "enum": [
+        "redoWorkspace",
+        "restoreHistory"
+      ],
+      "type": "string"
+    },
+    "ThreadHistoryView": {
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fidelity": {
+          "$ref": "#/definitions/ThreadHistoryFidelityView"
+        },
+        "hint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "$ref": "#/definitions/ThreadHistoryOwnerView"
+        }
+      },
+      "required": [
+        "fidelity",
+        "owner"
+      ],
+      "type": "object"
+    },
+    "ThreadInputCapabilityView": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "unavailableReason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ThreadSendabilityView": {
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recoveryAction": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "type": "object"
+    },
+    "ThreadSnapshot": {
+      "properties": {
+        "activity": {
+          "$ref": "#/definitions/GatewayActivityView"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/definitions/TranscriptEntry"
+          },
+          "type": "array"
+        },
+        "history": {
+          "$ref": "#/definitions/ThreadHistoryView"
+        },
+        "historyEditing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadHistoryEditingView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pendingActions": {
+          "items": {
+            "$ref": "#/definitions/PendingActionView"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySource"
+        },
+        "thread": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayThread"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "activity",
+        "entries",
+        "history",
+        "pendingActions",
+        "scope",
+        "source"
+      ],
+      "type": "object"
+    },
+    "TranscriptBlock": {
+      "properties": {
+        "artifactIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/TranscriptBlockKind"
+        },
+        "metadata": true,
+        "order": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "phaseOrdinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TranscriptToolResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "artifactIds",
+        "createdAtMs",
+        "id",
+        "kind",
+        "order",
+        "source",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptBlockKind": {
+      "enum": [
+        "text",
+        "reasoning",
+        "toolCall",
+        "toolResult",
+        "tool",
+        "shell",
+        "file",
+        "web",
+        "mcp",
+        "clarify",
+        "permission",
+        "skill",
+        "agent",
+        "mailbox",
+        "status",
+        "compaction",
+        "diff",
+        "artifact"
+      ],
+      "type": "string"
+    },
+    "TranscriptBlockStatus": {
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "needsInput",
+        "info"
+      ],
+      "type": "string"
+    },
+    "TranscriptEntry": {
+      "properties": {
+        "accounting": true,
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/TranscriptBlock"
+          },
+          "type": "array"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageSeq": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": true,
+        "role": {
+          "$ref": "#/definitions/TranscriptEntryRole"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "blocks",
+        "createdAtMs",
+        "id",
+        "role",
+        "source",
+        "status",
+        "threadId",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TranscriptEntryRole": {
+      "enum": [
+        "user",
+        "assistant",
+        "diagnostic"
+      ],
+      "type": "string"
+    },
+    "TranscriptToolResult": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "createdAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": null
+        },
+        "resultMessageSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TranscriptBlockStatus"
+        },
+        "updatedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content",
+        "createdAtMs",
+        "isError",
+        "resultMessageSeq",
+        "status",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "context": {
+      "$ref": "#/definitions/ThreadContextReadResult"
+    },
+    "problem": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeErrorView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "snapshot": {
+      "$ref": "#/definitions/ThreadSnapshot"
+    }
+  },
+  "required": [
+    "context",
+    "snapshot"
+  ],
+  "title": "ThreadDraftOpenResult",
   "type": "object"
 },
   ThreadDraftPrepareResult: {
@@ -6696,6 +8364,36 @@ export const threadControlSchemas = {
       ],
       "type": "object"
     },
+    "RuntimeErrorView": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "diagnosticRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryClass": {
+          "$ref": "#/definitions/RuntimeRetryClassView"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryClass",
+        "stage"
+      ],
+      "type": "object"
+    },
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
@@ -6906,6 +8604,16 @@ export const threadControlSchemas = {
       ],
       "type": "string"
     },
+    "RuntimeRetryClassView": {
+      "enum": [
+        "never",
+        "userAction",
+        "safeRetry",
+        "reconnect",
+        "unknownDelivery"
+      ],
+      "type": "string"
+    },
     "RuntimeStabilityView": {
       "enum": [
         "stable",
@@ -7034,6 +8742,13 @@ export const threadControlSchemas = {
         "runtimeProfileRef": {
           "type": "string"
         },
+        "selectedTargetId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selectionState": {
           "type": "string"
         },
@@ -7051,8 +8766,12 @@ export const threadControlSchemas = {
           ],
           "default": null
         },
-        "targetId": {
-          "type": "string"
+        "suggestedTargetId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -7061,8 +8780,7 @@ export const threadControlSchemas = {
         "history",
         "runtimeProfileRef",
         "selectionState",
-        "sendability",
-        "targetId"
+        "sendability"
       ],
       "type": "object"
     },
@@ -7313,6 +9031,17 @@ export const threadControlSchemas = {
   "properties": {
     "context": {
       "$ref": "#/definitions/ThreadContextReadResult"
+    },
+    "problem": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RuntimeErrorView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
@@ -7912,6 +9641,13 @@ export const threadControlSchemas = {
         "runtimeProfileRef": {
           "type": "string"
         },
+        "selectedTargetId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selectionState": {
           "type": "string"
         },
@@ -7929,8 +9665,12 @@ export const threadControlSchemas = {
           ],
           "default": null
         },
-        "targetId": {
-          "type": "string"
+        "suggestedTargetId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -7939,8 +9679,7 @@ export const threadControlSchemas = {
         "history",
         "runtimeProfileRef",
         "selectionState",
-        "sendability",
-        "targetId"
+        "sendability"
       ],
       "type": "object"
     },

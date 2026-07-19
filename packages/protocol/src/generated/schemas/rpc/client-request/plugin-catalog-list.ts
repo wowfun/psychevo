@@ -68,6 +68,13 @@ export const clientRequestPluginCatalogListSchema = {
     },
     "PluginCatalogListParams": {
       "properties": {
+        "authority": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "scope": {
           "anyOf": [
             {

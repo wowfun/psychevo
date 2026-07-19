@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
+    "accountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "assistantMessageCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -44,6 +49,15 @@
     },
     "costStatus": {
       "type": "string"
+    },
+    "effectiveTotalTokens": {
+      "default": null,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "estimatedCostNanodollars": {
       "format": "int64",
@@ -100,6 +114,14 @@
         "null"
       ]
     },
+    "totalStatus": {
+      "type": "string"
+    },
+    "unaccountedProviderCallCount": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "unknownPricingCount": {
       "format": "uint64",
       "minimum": 0.0,
@@ -107,6 +129,7 @@
     }
   },
   "required": [
+    "accountedProviderCallCount",
     "assistantMessageCount",
     "available",
     "billableInputTokens",
@@ -122,6 +145,8 @@
     "messageCount",
     "reasoningTokens",
     "reportedTotalTokens",
+    "totalStatus",
+    "unaccountedProviderCallCount",
     "unknownPricingCount"
   ],
   "title": "SessionUsageSummaryView",

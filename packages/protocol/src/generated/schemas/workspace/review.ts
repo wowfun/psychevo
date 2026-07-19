@@ -366,6 +366,23 @@ export const workspaceReviewSchemas = {
   "title": "WorkspaceChangeFileView",
   "type": "object"
 },
+  WorkspaceChangeInvalidationView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "message": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "message",
+    "source"
+  ],
+  "title": "WorkspaceChangeInvalidationView",
+  "type": "object"
+},
   WorkspaceChangeGroupView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -407,6 +424,21 @@ export const workspaceReviewSchemas = {
       ],
       "type": "object"
     },
+    "WorkspaceChangeInvalidationView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "source"
+      ],
+      "type": "object"
+    },
     "WorkspaceChangeReviewStatusView": {
       "enum": [
         "pending",
@@ -440,6 +472,13 @@ export const workspaceReviewSchemas = {
     "files": {
       "items": {
         "$ref": "#/definitions/WorkspaceChangeFileView"
+      },
+      "type": "array"
+    },
+    "invalidations": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/WorkspaceChangeInvalidationView"
       },
       "type": "array"
     },
@@ -597,6 +636,13 @@ export const workspaceReviewSchemas = {
           },
           "type": "array"
         },
+        "invalidations": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeInvalidationView"
+          },
+          "type": "array"
+        },
         "threadId": {
           "default": null,
           "type": [
@@ -613,6 +659,21 @@ export const workspaceReviewSchemas = {
         "createdAtMs",
         "files",
         "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeInvalidationView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "source"
       ],
       "type": "object"
     },
@@ -793,6 +854,13 @@ export const workspaceReviewSchemas = {
           },
           "type": "array"
         },
+        "invalidations": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeInvalidationView"
+          },
+          "type": "array"
+        },
         "threadId": {
           "default": null,
           "type": [
@@ -809,6 +877,21 @@ export const workspaceReviewSchemas = {
         "createdAtMs",
         "files",
         "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeInvalidationView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "source"
       ],
       "type": "object"
     },

@@ -10,8 +10,19 @@
           },
           "type": "array"
         },
+        "appliesToSessionSeq": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "available": {
           "type": "boolean"
+        },
+        "basis": {
+          "type": "string"
         },
         "categories": {
           "items": {
@@ -50,6 +61,7 @@
       },
       "required": [
         "available",
+        "basis",
         "categories",
         "label",
         "status",
@@ -99,6 +111,11 @@
     },
     "SessionUsageSummaryView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "assistantMessageCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -142,6 +159,15 @@
         },
         "costStatus": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -198,6 +224,14 @@
             "null"
           ]
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -205,6 +239,7 @@
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "assistantMessageCount",
         "available",
         "billableInputTokens",
@@ -220,6 +255,8 @@
         "messageCount",
         "reasoningTokens",
         "reportedTotalTokens",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"

@@ -55,6 +55,13 @@
           },
           "type": "array"
         },
+        "invalidations": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/WorkspaceChangeInvalidationView"
+          },
+          "type": "array"
+        },
         "threadId": {
           "default": null,
           "type": [
@@ -71,6 +78,21 @@
         "createdAtMs",
         "files",
         "turnId"
+      ],
+      "type": "object"
+    },
+    "WorkspaceChangeInvalidationView": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "source"
       ],
       "type": "object"
     },

@@ -680,7 +680,11 @@ export const gatewayPluginRequestSchemas = {
   },
   "properties": {
     "enabled": {
-      "type": "boolean"
+      "default": null,
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "scope": {
       "anyOf": [
@@ -705,7 +709,6 @@ export const gatewayPluginRequestSchemas = {
     }
   },
   "required": [
-    "enabled",
     "selector"
   ],
   "title": "PluginSetEnabledParams",
@@ -810,6 +813,183 @@ export const gatewayPluginRequestSchemas = {
   "title": "PluginSetTrustParams",
   "type": "object"
 },
+  PluginAuthorityWriteParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "binary": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "enabled"
+  ],
+  "title": "PluginAuthorityWriteParams",
+  "type": "object"
+},
+  PluginAuthorityRefreshParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "title": "PluginAuthorityRefreshParams",
+  "type": "object"
+},
   PluginCatalogListParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -877,6 +1057,13 @@ export const gatewayPluginRequestSchemas = {
     }
   },
   "properties": {
+    "authority": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "scope": {
       "anyOf": [
         {
@@ -973,6 +1160,13 @@ export const gatewayPluginRequestSchemas = {
         "null"
       ]
     },
+    "authority": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "gitRef": {
       "default": null,
       "type": [
@@ -1021,6 +1215,13 @@ export const gatewayPluginRequestSchemas = {
     },
     "source": {
       "type": "string"
+    },
+    "sparsePaths": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -1097,6 +1298,13 @@ export const gatewayPluginRequestSchemas = {
     }
   },
   "properties": {
+    "authority": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "name": {
       "type": "string"
     },
@@ -1123,6 +1331,309 @@ export const gatewayPluginRequestSchemas = {
     "name"
   ],
   "title": "PluginCatalogRemoveParams",
+  "type": "object"
+},
+  PluginCatalogUpgradeParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "authority": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gitRef": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sparsePaths": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "PluginCatalogUpgradeParams",
+  "type": "object"
+},
+  PluginConnectStartParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "componentId": {
+      "type": "string"
+    },
+    "kind": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "selector": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "componentId",
+    "selector"
+  ],
+  "title": "PluginConnectStartParams",
+  "type": "object"
+},
+  PluginConnectStatusParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "title": "PluginConnectStatusParams",
   "type": "object"
 },
 } as const;

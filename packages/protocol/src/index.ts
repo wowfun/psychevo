@@ -9,8 +9,7 @@ export type {
   GatewayActivityView as GatewayActivity,
   JsonRpcNotification as RpcNotification,
   PendingActionView as PendingAction,
-  SessionSummaryView as SessionSummary,
-  TurnResultPayload as TurnResultNotification
+  SessionSummaryView as SessionSummary
 } from "./generated";
 import type {
   GatewayEvent,
@@ -32,8 +31,6 @@ import type {
   ThreadListResult,
   ThreadTraceResult,
   ThreadSnapshot,
-  TurnErrorPayload,
-  TurnResultPayload,
   UsageReadResult,
   WorkspaceCreateResult,
   WorkspaceChangeMutationResult,
@@ -77,10 +74,6 @@ export const ThreadListResultSchema = schema<ThreadListResult>("ThreadListResult
 export const ThreadTraceResultSchema = schema<ThreadTraceResult>("ThreadTraceResult");
 export const CompletionListResultSchema =
   schema<CompletionListResult>("CompletionListResult");
-export const TurnResultNotificationSchema =
-  schema<TurnResultPayload>("TurnResultPayload");
-export const TurnErrorNotificationSchema =
-  schema<TurnErrorPayload>("TurnErrorPayload");
 export const TerminalOutputPayloadSchema =
   schema<TerminalOutputPayload>("TerminalOutputPayload");
 export const TerminalExitedPayloadSchema =

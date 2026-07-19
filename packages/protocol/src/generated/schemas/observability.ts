@@ -97,8 +97,19 @@ export const observabilitySchemas = {
           },
           "type": "array"
         },
+        "appliesToSessionSeq": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "available": {
           "type": "boolean"
+        },
+        "basis": {
+          "type": "string"
         },
         "categories": {
           "items": {
@@ -137,6 +148,7 @@ export const observabilitySchemas = {
       },
       "required": [
         "available",
+        "basis",
         "categories",
         "label",
         "status",
@@ -186,6 +198,11 @@ export const observabilitySchemas = {
     },
     "SessionUsageSummaryView": {
       "properties": {
+        "accountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "assistantMessageCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -229,6 +246,15 @@ export const observabilitySchemas = {
         },
         "costStatus": {
           "type": "string"
+        },
+        "effectiveTotalTokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "estimatedCostNanodollars": {
           "format": "int64",
@@ -285,6 +311,14 @@ export const observabilitySchemas = {
             "null"
           ]
         },
+        "totalStatus": {
+          "type": "string"
+        },
+        "unaccountedProviderCallCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "unknownPricingCount": {
           "format": "uint64",
           "minimum": 0.0,
@@ -292,6 +326,7 @@ export const observabilitySchemas = {
         }
       },
       "required": [
+        "accountedProviderCallCount",
         "assistantMessageCount",
         "available",
         "billableInputTokens",
@@ -307,6 +342,8 @@ export const observabilitySchemas = {
         "messageCount",
         "reasoningTokens",
         "reportedTotalTokens",
+        "totalStatus",
+        "unaccountedProviderCallCount",
         "unknownPricingCount"
       ],
       "type": "object"

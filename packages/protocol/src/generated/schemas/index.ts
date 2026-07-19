@@ -45,7 +45,6 @@ import { threadSnapshotSchemas } from './thread/snapshot';
 import { threadTraceSchemas } from './thread/trace';
 import { transcriptSchemas } from './transcript';
 import { turnControlSchemas } from './turn/control';
-import { turnResultSchemas } from './turn/result';
 import { turnRuntimeSchemas } from './turn/runtime';
 import { usageSchemas } from './usage';
 import { voiceSchemas } from './voice';
@@ -93,7 +92,8 @@ export const gatewaySchemas = {
   InitializeParams: systemInitSchemas.InitializeParams,
   InitializeResult: systemInitSchemas.InitializeResult,
   GatewayProfileView: systemInitSchemas.GatewayProfileView,
-  ThreadStartParams: threadControlSchemas.ThreadStartParams,
+  ThreadDraftTargetIntent: threadControlSchemas.ThreadDraftTargetIntent,
+  ThreadDraftOpenParams: threadControlSchemas.ThreadDraftOpenParams,
   ThreadCompactionCheckpointView: threadControlSchemas.ThreadCompactionCheckpointView,
   ThreadCompactionResult: threadControlSchemas.ThreadCompactionResult,
   ThreadResumeParams: threadControlSchemas.ThreadResumeParams,
@@ -199,9 +199,14 @@ export const gatewaySchemas = {
   PluginUninstallParams: gatewayPluginRequestSchemas.PluginUninstallParams,
   PluginSetEnabledParams: gatewayPluginRequestSchemas.PluginSetEnabledParams,
   PluginSetTrustParams: gatewayPluginRequestSchemas.PluginSetTrustParams,
+  PluginAuthorityWriteParams: gatewayPluginRequestSchemas.PluginAuthorityWriteParams,
+  PluginAuthorityRefreshParams: gatewayPluginRequestSchemas.PluginAuthorityRefreshParams,
   PluginCatalogListParams: gatewayPluginRequestSchemas.PluginCatalogListParams,
   PluginCatalogAddParams: gatewayPluginRequestSchemas.PluginCatalogAddParams,
   PluginCatalogRemoveParams: gatewayPluginRequestSchemas.PluginCatalogRemoveParams,
+  PluginCatalogUpgradeParams: gatewayPluginRequestSchemas.PluginCatalogUpgradeParams,
+  PluginConnectStartParams: gatewayPluginRequestSchemas.PluginConnectStartParams,
+  PluginConnectStatusParams: gatewayPluginRequestSchemas.PluginConnectStatusParams,
   ToolListParams: gatewayToolRequestSchemas.ToolListParams,
   ToolReadParams: gatewayToolRequestSchemas.ToolReadParams,
   ToolSetEnabledParams: gatewayToolRequestSchemas.ToolSetEnabledParams,
@@ -267,6 +272,7 @@ export const gatewaySchemas = {
   ThreadHistoryEditingView: threadControlSchemas.ThreadHistoryEditingView,
   ThreadSendabilityView: threadControlSchemas.ThreadSendabilityView,
   ThreadContextReadResult: threadControlSchemas.ThreadContextReadResult,
+  ThreadDraftOpenResult: threadControlSchemas.ThreadDraftOpenResult,
   ThreadDraftPrepareResult: threadControlSchemas.ThreadDraftPrepareResult,
   ThreadControlReceiptStatusView: threadControlSchemas.ThreadControlReceiptStatusView,
   ThreadControlSetResult: threadControlSchemas.ThreadControlSetResult,
@@ -352,9 +358,6 @@ export const gatewaySchemas = {
   AutomationDeleteResult: automationMutationResultSchemas.AutomationDeleteResult,
   AutomationRunResult: automationMutationResultSchemas.AutomationRunResult,
   TurnStartResult: turnControlSchemas.TurnStartResult,
-  TurnResultPayload: turnResultSchemas.TurnResultPayload,
-  TurnRunResult: turnResultSchemas.TurnRunResult,
-  TurnErrorPayload: turnResultSchemas.TurnErrorPayload,
   ShellResultPayload: shellSchemas.ShellResultPayload,
   ShellErrorPayload: shellSchemas.ShellErrorPayload,
   SourceResetParams: sourceSchemas.SourceResetParams,
@@ -408,6 +411,7 @@ export const gatewaySchemas = {
   WorkspaceDiffResult: workspaceReviewSchemas.WorkspaceDiffResult,
   WorkspaceChangeReviewStatusView: workspaceReviewSchemas.WorkspaceChangeReviewStatusView,
   WorkspaceChangeFileView: workspaceReviewSchemas.WorkspaceChangeFileView,
+  WorkspaceChangeInvalidationView: workspaceReviewSchemas.WorkspaceChangeInvalidationView,
   WorkspaceChangeGroupView: workspaceReviewSchemas.WorkspaceChangeGroupView,
   WorkspaceChangesParams: workspaceReviewSchemas.WorkspaceChangesParams,
   WorkspaceChangesResult: workspaceReviewSchemas.WorkspaceChangesResult,
