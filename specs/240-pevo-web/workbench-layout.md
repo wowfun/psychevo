@@ -146,15 +146,23 @@ available. Unsupported preview formats and Gateway binary/unreadable file
 responses stay in the Files tab as unavailable preview states instead of
 opening a center preview.
 
-Review also exposes Gateway review groups when available. `workspace/changes`
-returns groups ordered by turn with file-level pending, accepted, rejected, and
-conflict states. `workspace/change/accept` only marks a file accepted.
-`workspace/change/reject` restores that file to the turn-start baseline,
-removes files created by that turn, and restores files deleted by that turn.
-Reject must preserve file content that existed before the selected turn,
-including pre-existing dirty or untracked files. If the current file revision
-differs from the stored post-turn revision, Reject is blocked and the file row
-is reported as conflicted.
+Review exposes best-effort Gateway observation groups. It states once, compactly,
+that Review lists only edits observed through Psychevo-owned mutation paths and
+that shell, ACP, external-tool, or concurrent changes may be absent. Groups are
+ordered by Turn, may be running or completed, and declare exact or partial
+coverage. Partial coverage uses a compact marker rather than a repeated warning.
+
+`workspace/changes` returns the bounded in-memory observation ledger with
+file-level pending, accepted, rejected, and conflict states. `write`, `edit`,
+and Gateway-mediated text writes can contribute exact before/after deltas;
+opaque mutation paths only invalidate Files/Diff. `workspace/change/accept`
+marks an observed file accepted. After the group completes,
+`workspace/change/reject` restores the content immediately before the first
+exact observed mutation for that path, removes an observed creation, or restores
+an observed deletion. It does not claim to restore the whole Turn-start
+workspace. If the current revision differs from the last observed post-change
+revision, Reject is blocked and the row becomes conflicted. Native whole-Turn
+undo remains a separate snapshot-backed command.
 
 Files supports authenticated manual text editing for files inside the active
 project root. `workspace/file/read` returns text content plus editability
@@ -265,10 +273,10 @@ mode and via `/queue`.
 The composer panel uses a Copilot-style restrained input surface: the textarea
 and send control are inside the input frame, while the attachment button and
 current Agent selector sit in the lower-left action slot. Permission mode lives
-in the quieter environment line immediately before Workspace and is not
+in the quieter environment line after Workspace and Git branch and is not
 repeated in the Agent popover. The status line mirrors the TUI footer shape
-with clickable chat mode, model, variant, context usage ring, project path, and
-Git branch. A detached draft centers the Composer in the empty conversation
+with clickable chat mode, model, variant, context usage ring, project path, Git
+branch, and permission. A detached draft centers the Composer in the empty conversation
 surface; binding the first accepted prompt moves the same Composer to its
 ordinary bottom dock with a reduced-motion-aware positional transition.
 Context usage is graphical by

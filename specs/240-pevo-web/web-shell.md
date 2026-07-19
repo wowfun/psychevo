@@ -188,19 +188,21 @@ keeps active tool rows running and preserves output appended while Workbench was
 showing another session; the overlay must not create additional persisted
 messages.
 
-`thread/start` is a new-source operation, not a session-creation operation. It
-clears the current source binding and returns an empty source snapshot with
-`thread = null`, without archiving the previously selected thread or inserting a
-placeholder session. That empty source snapshot is a detached draft: delayed
-events or read-only snapshot refreshes for previously running threads must not
-bind it back to an older thread. Only the draft's own first accepted prompt or
-shell result may attach the Web view to the newly resolved runtime thread.
+`thread/draft/open` is a new-source operation, not a session-creation operation.
+It accepts a canonical `origin` and a non-null default or exact target intent,
+clears the current source binding, resolves and prepares one exact target, and
+returns an empty source snapshot plus coherent Thread Context without archiving
+the previously selected thread or inserting a placeholder session. That empty
+source snapshot is a detached draft: delayed events or read-only snapshot
+refreshes for previously running threads must not bind it back to an older
+thread. Only the draft's own first accepted prompt or shell result may attach
+the Web view to the newly resolved runtime thread.
 When that first accepted prompt is submitted through `turn/start`, Gateway must
 materialize and bind a durable thread id before model execution so runtime tools
 observe a real current thread. Failed request validation, empty input, and
-`thread/start` itself must still leave no placeholder session behind.
+`thread/draft/open` itself must still leave no placeholder session behind.
 When another turn for the same browser/project source is already running,
-`thread/start` creates an internal draft source lane for the returned snapshot.
+`thread/draft/open` creates an internal draft source lane for the returned snapshot.
 The draft lane lets the first prompt or shell command start immediately instead
 of queueing behind the previous turn. The lane may appear as
 `ThreadSnapshot.scope.source.rawId`, but it is internal routing state: it must
@@ -304,9 +306,11 @@ turn.
 ACP Agent `usage_update` events are retained as bounded typed Agent facts and
 projected into Status observability for the Agent session when they include a
 usable `used`/`size` context pair. The Status context total then reflects the
-Agent-reported context window rather than the local prompt estimate, and the
-session usage summary uses Agent-reported used tokens and cost when no durable
-provider accounting exists. The projection is scoped to the immutable binding;
+Agent-reported context window rather than the local prompt estimate. Its used
+token value is never substituted into the session usage total; cumulative peer
+cost may still fill otherwise unavailable cost. Durable normalized
+`PromptResponse.usage` deltas are the ACP provider-token source. The projection
+is scoped to the immutable binding;
 starting a new source draft or switching targets clears it from the visible
 observability panel so stale ACP-derived context is not shown for another
 thread.
@@ -352,10 +356,11 @@ provider payloads, or trace records. The result includes:
 - a generated timestamp
 - summaries for all history, the last 30 days, and the last 7 days
 - token totals for context input, billable input/output, reasoning, cache read,
-  cache write, and provider-reported total tokens
+  cache write, effective total tokens, and the raw provider-reported subtotal,
+  with accounted/unaccounted call counts and explicit total status
 - cost totals derived only from persisted accounting columns, with status
   counts and explicit unknown/free/estimated separation
-- a cache-read percent defined as `cache_read / (cache_read + billable_input)`
+- a cache-read percent defined as `cache_read / context_input`
   when the denominator is nonzero
 - a local-calendar daily activity series for the last 365 days, suitable for a
   token activity heatmap
@@ -388,7 +393,8 @@ sessions are visible by default.
 Workbench issues exactly one initial `thread/browser` request during boot and
 starts it concurrently with `initialize`, then awaits both before deriving the
 startup scope. The Sessions result is committed immediately when the browse
-completes and does not wait for `thread/start` or auxiliary surface requests.
+completes and does not wait for `thread/draft/open` or auxiliary surface
+requests.
 Until that request succeeds, the
 Sessions browser is busy and must not render the successful-empty `No sessions`
 state. A failed first request uses the existing error presentation; later

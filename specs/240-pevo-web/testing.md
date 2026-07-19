@@ -118,8 +118,8 @@ required. They must not print tokens or secrets.
   width adaptation, full-width popover rows without unused right gutters, and
   switching models without submitting an invalid `Select model` value.
 - Composer runtime-control tests cover the visible `Permission mode` control
-  immediately after `+`, its absence from the Agent target popover, and its
-  descriptor-backed effective value after a control receipt. They also cover
+  after Workspace and Git branch, its absence from the Agent target popover,
+  and its descriptor-backed effective value after a control receipt. They also cover
   the Native `Psychevo` target label and reasoning display: an explicit
   `high` value renders `High`, an explicit `none` value renders `Default`, and
   an unknown value does not fall back to `Default` or the first choice.
@@ -131,12 +131,12 @@ required. They must not print tokens or secrets.
 - Sessions-browser tests cover long title truncation without horizontal
   scrolling, while preserving recent-update time, running state, and row action
   visibility.
-- Startup tests delay `thread/start` and auxiliary RPCs to prove Sessions become
+- Startup tests delay `thread/draft/open` and auxiliary RPCs to prove Sessions become
   usable as soon as the single initial `thread/browser` completes. They also
   prove initialization and browsing overlap, context is not read before the
   startup Thread stabilizes, and scope-owned auxiliary reads are on-demand and
   coalesced. A delayed `initialize` fixture selects a visible Session before
-  initialization completes and proves no stale startup `thread/start` request
+  initialization completes and proves no stale startup `thread/draft/open` request
   is sent after the resulting `thread/resume`.
 - Production-build browser validation records the initial resource set and
   encoded JavaScript total, enforces the 1.8 MB startup budget, and proves
@@ -146,12 +146,131 @@ required. They must not print tokens or secrets.
   activity snapshot. Main Composer, command, child Thread, and floating entry
   points send `thread/action/run` for the exact target and surface Gateway's
   precise error if the live action is unavailable.
-- Paired GUI/TUI first-token tests use the same deterministic provider and
-  prompt. A delayed Codex `plugin/list` cannot delay Web provider dispatch;
-  after Gateway initialization the median Web pre-provider overhead stays
-  within 150 ms of TUI, while a separate new-session-to-first-token measure
-  prevents moving the same wait into Composer loading. Draft `thread/start`
-  must return while an inventory prewarm is still in flight.
+- The Gateway-side dispatch microbenchmark proves that a delayed Codex
+  `plugin/list` cannot delay Web runtime contribution assembly. It does not
+  stand in for a TUI/Workbench comparison because it bypasses the managed
+  Gateway transport, browser client, DOM, and terminal paint paths. Draft
+  `thread/draft/open` must return while an inventory prewarm is still in flight.
+- Composer real-Gateway tests preserve discovery as unselected, prove a default
+  draft open becomes exactly selected/sendable, and allow one pending first-turn
+  click during preparation. Editing or retargeting cancels auto-submit without
+  clearing input; accepted submission clears once and refreshes history once.
+  `cargo xtask live run --check web-composer-draft-open-first-send` exercises
+  that boundary against a real local Gateway and deterministic provider while a
+  deliberately large Agent catalog keeps the atomic draft open in flight.
+- Request-log tests prove New Session performs one draft open plus one
+  concurrent `workspace/git/branches` read and no history, Settings, old-scope
+  context, or ordinary-text completion request. Agent, Mode, Model, Reasoning,
+  Permission, Workspace, and current branch retain the last committed values
+  while either a same-workspace or cross-workspace request is pending, then
+  replace in one
+  Composer-environment commit only if the authoritative result differs. A cold
+  startup paints no placeholder Composer before that first complete commit.
+  The same-workspace request also preserves the complete source identity. A
+  cross-workspace request retains its default target intent rather than sending
+  the previously rendered Agent as an exact target, and the active scope remains
+  the visible workspace-path authority.
+- Composer presentation tests prove the environment line renders Workspace,
+  branch, then Permission; abbreviates only an exact host user-home path prefix to
+  `~`; retains the canonical path in the title and request; and allows a wider
+  bounded path label before ellipsis. Popover tests open Add, Agent, Mode,
+  Model/Reasoning, Context, Workspace, Permission, Branch, and completion
+  surfaces and prove a common rendered-popup contract, one-open-popup behavior,
+  Escape/outside-pointer dismissal, intrinsic bounded width for compact
+  selectors, exact message-input-width alignment for completion, truncated
+  labels with full titles, and right-aligned switches. Runtime Mode and
+  Permission tests explicitly reject native `select` elements.
+- Pending-send tests prove only an active Composer readiness token can expose
+  `Preparing`; a deferred context read or control mutation keeps Send disabled.
+- Transport tests use barriers rather than timing sleeps: a held `initialize`
+  cannot delay draft open or `thread/browser`; different sources overlap, same
+  source mutations remain ordered, and disconnect/error releases the fixed
+  per-connection in-flight permit. A saturated connection with 32 held requests
+  must still observe the following WebSocket Close/error without first releasing
+  a request permit.
+- Opt-in Windows Git Bash performance evidence records cached Native/default
+  draft-open p95 at or below 40 ms and click-to-controls/send-ready p95 at or
+  below 100 ms. Cold catalog bootstrap is tracked separately at or below 500 ms;
+  ACP provider handshake is a separate metric and never blocks input or pending
+  Send.
+- The deterministic critical first-turn journey covers Native and ACP across
+  ready-then-send and pending-draft-send scenarios. Each visual run produces a
+  versioned manifest and screenshots for `gui_ready`, `draft_context_ready`,
+  `send_clicked`, `runtime_request_dispatched`, `first_output_visible`, and
+  `turn_settled`; a missing, duplicate, or out-of-order checkpoint fails the
+  proof while preserving partial artifacts.
+- The corresponding profiling run uses one warmup and twenty measured turns
+  per scenario, a fresh draft/Thread per turn, and no screenshot or visual
+  barrier delay. Warm send-path samples report raw values plus p50 and p95.
+  Cold navigation and first draft readiness remain individual raw samples until
+  enough independent process starts exist for meaningful percentiles.
+- Journey diagnostics retain runner-observed transport, draft, turn-start,
+  runtime request, first runtime output, Gateway/client output, completion, and
+  UI-idle marks. Durations are computed only within one declared clock domain;
+  manifest validation rejects prompt, response, credential, and token fields.
+- Playwright owns the shared Workbench-to-runtime journey. Native Desktop WDIO
+  owns process, window, managed-Gateway, bridge, GUI, and draft readiness rather
+  than duplicating the full Native/ACP turn matrix.
+- A dedicated Native ready-send comparison runs fullscreen TUI and Workbench
+  sequentially against the same deterministic provider fixture. It retains a
+  raw cold first-turn observation, excludes warmup and trace samples, then
+  reports twenty measured warm continuation turns per surface by default.
+  Main-turn and title requests are classified separately and every measured
+  sample proves exactly one main request.
+- Both surfaces use the same Agent/Skill feature policy and an isolated
+  synthetic Git workspace outside the source checkout. The manifest records a
+  configurable deterministic tracked-dirty-file count so workspace-review
+  scaling is reproducible without inheriting the developer's worktree state.
+- Comparison manifest v2 reports send-to-feedback-commit, send-to-provider,
+  provider-to-first-surface-commit, first-commit-to-settled-commit, and
+  send-to-settled-commit. Diagnostic spans distinguish Workbench `turn/start`
+  admission, first non-empty assistant receipt, controller batch application,
+  DOM commit, and optional post-frame observation from TUI event drain and
+  terminal draw commit. It emits raw samples, p50/p95, GUI-minus-TUI deltas,
+  ratios, Long Task and cross-sample RPC-overlap diagnostics, a content-free TUI
+  JSONL trace, and a Playwright trace. Comparison v1 inputs are rejected.
+- Every sample associates the ordered main provider request with exactly one
+  Gateway Turn. The manifest and Markdown report recompute p50/p95 sub-
+  waterfalls for the shared Gateway/runtime stages and for surface
+  receipt/application/paint stages; a missing, negative, cross-clock, or
+  ambiguous stage fails validation.
+- The deterministic Native fixture leaves a fixed recorded interval between
+  first output and completion. A completion event must not discard queued
+  assistant output and force the UI to wait for the delayed snapshot refresh.
+  The browser probe resets for each sample and uses the DOM submit boundary,
+  not the runner timestamp before `locator.click()`.
+- Lifecycle tests prove each accepted Native and ACP Turn emits one public
+  `TurnStarted` and one `TurnCompleted`, regardless of duplicate or late raw
+  runtime stages, and that no `turn/result` or `turn/error` notification exists.
+- Submission tests prove a ready click commits provisional running and `0s`
+  before Gateway acceptance. A pending-readiness click commits `Preparing` on
+  the next DOM update, preserves input, sends no request before readiness, and
+  transfers the original timer into running. Accept, reject, delayed start, and
+  terminal-before-acceptance cannot duplicate or stick activity.
+- Pending-submission tests mutate attachment identity after the initial click
+  and before draft readiness, then prove no stale attachment set is submitted,
+  the current input is preserved, and a later explicit click submits once.
+- Review tests exercise exact write/edit add, update, delete, move, repeated and
+  net-zero deltas through the observation Interface. Shell and ACP-owned writes
+  produce partial invalidation without a workspace scan or a rejectable fake
+  file. Oversize, binary, memory eviction, and post-revision conflict fail
+  closed without affecting the Turn.
+- A hidden-surface bound Native Turn performs exactly one `turn/start` and zero
+  `thread/read`, `thread/browser`, `thread/context/read`, `workspace/*`, and
+  `observability/read` requests after acceptance. A first detached Turn browses
+  history once and refreshes context once; an ACP completion refreshes context
+  at most once. One hundred same-entry updates commit first non-empty assistant
+  text without waiting for RAF, converge through one snapshot publication per
+  frame, and cannot be overtaken by terminal application.
+- Workspace-demand tests prove closed, Home, Review, Files, and unresolved
+  Transcript-file-link states request only their specified resource facets.
+  Samples begin only after the preceding sample's allowed auxiliary reads have
+  settled, and the comparison reports any cross-sample overlap as a structural
+  failure.
+- Cross-surface validation hard-fails duplicate lifecycle, missing feedback,
+  any Web Review Git/status/diff/show work on admission/relay/completion, or
+  hidden-surface request amplification. Latency values remain report-only until
+  three stable canonical-runner baselines receive explicit budget approval.
 
 ## Validation Boundaries
 
@@ -160,6 +279,14 @@ required. They must not print tokens or secrets.
   Gateway state.
 - Browser tests should assert user-visible behavior and stable protocol
   invariants rather than private DOM structure when possible.
+- Cross-surface comparison failures preserve partial manifests and traces.
+  Validators reject prompt/response/token/credential fields, missing samples,
+  mixed clock arithmetic, ambiguous provider requests, and percentile inputs
+  contaminated by screenshots, visual gates, Playwright tracing, or warmup.
+- Visual scenarios that exercise post-startup Composer geometry or labels must
+  await the initial draft's Agent/Model controls before opening another draft;
+  they must not race catalog bootstrap or use timing sleeps. The dedicated
+  draft-open startup/live cases retain ownership of pre-ready interactions.
 - Screenshots, traces, and live samples are required evidence for visual/live
   changes, but live provider failures must be reported separately from code
   regressions when caused by credentials, provider state, or environment.

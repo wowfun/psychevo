@@ -56,6 +56,13 @@ normalized trust hashes, concurrent execution, and event-specific output
 folding. Psychevo-only hook events and handler types remain outside the Codex
 profile and must not change its conformance outcomes.
 
+Codex-authority install and reviewed upgrade may establish trust for the exact
+fingerprint returned by that mutation. A subsequent package-content change,
+external mutation, or unexpected authority version invalidates the trust fact
+before the hook source reaches this runtime. This runtime remains the sole owner
+of local Codex hook execution and never delegates the same handler back through
+the Codex broker.
+
 Runtime exposes a metadata/listing interface that reports every normalized
 handler, including handlers skipped for disabled state, untrusted hash, modified
 hash, unsupported handler type, unavailable adapter, malformed command, or

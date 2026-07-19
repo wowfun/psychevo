@@ -16,6 +16,7 @@ enablement, diagnostics, static declarations, and Psychevo worker execution.
 - static declaration loading
 - manifest-only and adapter-host foreign package inspection
 - package fingerprint trust state
+- default-off, profile-isolated Codex plugin authority
 - stdio JSON-RPC worker execution for tools
 - CLI- and Gateway-facing read, diagnostic, install, uninstall, enable,
   disable, inspect, trust, and catalog operations
@@ -64,6 +65,24 @@ future spec.
 
 `RunConfig` includes plugin package policy. Profile config and project config
 overlay produce the effective plugin policy for an invocation.
+
+The profile-only authority configuration is:
+
+```toml
+[codex_plugins]
+enabled = false
+binary = "/optional/path/to/codex"
+
+[plugins."codex:review@openai"]
+enabled = true
+```
+
+`codex_plugins.enabled` defaults to false. An empty binary resolves `codex`
+from `PATH`. Project configuration containing `[codex_plugins]` is invalid.
+Profile Codex plugin policy accepts `true` or `false`; project Codex plugin
+policy accepts only `false`, while deleting the entry restores inheritance.
+Install and explicit upgrade write profile allow and trust for the returned
+current package fingerprint.
 
 Plugin policy records package enabled state only. Enabling a package makes its
 accepted declarations available to the host-owned mapping step. The owning
@@ -133,43 +152,79 @@ only. `plugin doctor` may report inert descriptors as recognized and
 unsupported without implying runtime support.
 
 Portable Codex components are projected independently. For an installed,
-enabled Codex catalog package, the broker resolves the Codex-owned package root
-from `plugin/read` paths or plugin hook metadata without copying it into the
-Psychevo plugin store. That authority-qualified root feeds Psychevo-owned skill,
-ordinary MCP, and synchronous command-hook adapters under the pinned
-compatibility profile. If Codex retains an MCP declaration without exposing a
-materialized package root, only that effective named MCP server is delegated
-through the broker. Apps and app-backed MCP tools always use the broker. A
-component is projected through exactly one execution owner for a frozen thread
-selection.
+enabled Codex catalog package, the authority resolves an exposed Codex-owned
+package root without copying it into the Psychevo plugin store. A local skill is
+owned by the Psychevo skill runtime, a local hook by the Psychevo hook runtime,
+and an ordinary local MCP declaration by the Psychevo MCP runtime. Remote or
+app-backed MCP and Apps are owned by the Codex broker. App templates, scheduled
+tasks, interface/default-prompt metadata, browser extensions, and unknown
+manifest fields are metadata-only diagnostics: scheduled tasks and browser
+extensions are explicitly unsupported, and interface prompts are never injected
+into a turn. A remote skill or hook without a package root is not downloaded or
+reported as portable. Every component has exactly one owner.
 
-The broker is a managed `codex app-server --listen stdio://` child scoped to the
-current `CODEX_HOME`. It is an internal capability adapter, not an Agent Runtime
-Profile and not a dormant direct Codex Agent path. It owns Codex catalog
-mutation, Apps inventory, Apps authentication, server-initiated elicitation,
-and app-backed MCP tool calls. Each Psychevo thread that needs delegation uses
-one non-persistent Codex ephemeral thread and archives it during thread cleanup.
-Catalog management and runtime assembly are separate broker planes. Capabilities
-management may use Codex `plugin/list`, `plugin/read`, install, and uninstall,
-including remote marketplace data. Runtime assembly never calls `plugin/list`:
-it reads only `plugin/installed` plus the enabled installed package details and
-stores the result in a process-lifetime, canonical-cwd inventory. Concurrent
-inventory loads for one cwd are single-flight and a temporary broker failure is
-negative-cached for five seconds before one retry is admitted. Gateway
-`initialize` and `thread/start` may start or join that prewarm only in the
-background: draft creation never awaits `plugin/installed`, package detail
-reads, hook scanning, or their request timeout.
+`CodexPluginAuthority` is the deep module for this boundary. Its external
+interface exposes only authority state, management operations, a non-blocking
+turn snapshot, a turn lease, and shutdown. Internally it owns process/profile
+negotiation, broker multiplexing, auth-link setup, inventory generation, policy
+digests, redacted diagnostics, and draining mutations. No capability snapshot,
+generation, policy digest, or owner table is persisted; the transcript records
+only actual calls.
 
-The installed-package selectors, package-root locators, execution owners, and
-compatibility profile are copied from that inventory and frozen when a
-Psychevo thread first assembles Codex contributions. Later inventory refreshes
-affect only new threads. A delegated thread lists its effective MCP tools once,
-stores immutable tool descriptors in the frozen snapshot, and creates
-turn-local bindings from those descriptors without repeating discovery. Later
-turns reuse the snapshot; archive/delete clears it and archives the one
-non-persistent Codex ephemeral thread. Successful Codex install/uninstall,
-account changes, and broker replacement invalidate the shared inventory while
-preserving existing thread snapshots.
+The broker is one managed external child launched as
+`codex app-server --strict-config -c cli_auth_credentials_store="file" --listen
+stdio://`. It inherits the Psychevo subprocess environment, forcibly replaces
+`CODEX_HOME` with `$PSYCHEVO_HOME/codex/`, and removes binary-selection test
+variables. Profile configuration selects an optional binary path and otherwise
+uses `codex` from `PATH`. Psychevo never reads or imports inherited
+`CODEX_HOME`, and feature-off operation spawns no Codex process.
+
+The reviewed compatibility profile `codex-plugin/8604689e` initially accepts
+exactly `codex-cli 0.144.1`. Negotiation extracts a semantic version from any
+originator-shaped `userAgent`, verifies canonical `codexHome`, and uses requests
+that must fail during parameter validation to prove required methods exist
+without performing a normal `plugin/list` or network-backed catalog request.
+Fixed app-server fixtures validate every successful response shape. A binary
+missing required methods, returning an unknown version or shape, or reporting a
+different home remains diagnosable but cannot serve catalog, mutation, auth, or
+execution operations.
+
+The authority creates a Unix symlink from private `auth.json` to the user's
+`~/.codex/auth.json`; Windows uses a hardlink only when both files are on the
+same volume. It never reads auth contents, reads keyrings, copies tokens, or
+synchronizes credentials. Missing global auth, cross-volume Windows paths, or
+link failure leaves the feature enabled with `auth: unavailable`; local
+unauthenticated components remain usable.
+
+One app-server child has one stdout reader, one writer, and a request-id pending
+map. Server requests route elicitation by `threadId` and `turnId`, so a turn
+waiting for user input does not block catalog, auth, or another turn. Stderr is
+bounded, redacted, and structured. Install, uninstall, upgrade, and tool calls
+are never retried after delivery.
+
+Runtime inventory is keyed by profile plus canonical cwd and carries a
+generation. Initialize, draft creation, and management refresh may prewarm it in
+the background. The provider-dispatch hot path reads only a ready in-memory
+snapshot and never performs app-server RPC. Loading, stale, or failed inventory
+immediately contributes an empty Codex set, continues provider dispatch, and
+writes only a structured diagnostic—never a transcript item, toast, or visual
+delay.
+
+Each admitted turn snapshots the current inventory generation and policy digest
+and keeps that selection stable for that turn; the next turn observes the newest
+ready generation. Project disables filter a cached inventory without discovery.
+Install, account change, broker replacement, package mutation, and authority
+refresh publish a new generation.
+
+Turn admission obtains a lease for the generation it actually uses. A policy
+disable immediately prevents new leases while existing turns continue.
+Uninstall, upgrade, marketplace removal/upgrade, binary switch, and feature-off
+enter `draining`, reject new leases, wait for active leases, then perform the
+physical mutation. Destructive draining mutations are mutually exclusive; one
+mutation cannot clear the draining state while another physical mutation is
+still running. Install and marketplace add may finish concurrently but
+appear only in a new generation. Workbench exposes the draining reason and lets
+the user stop related turns.
 
 The broker advertises the pinned app-server elicitation capabilities that the
 Workbench can faithfully answer: MCP standard forms (including titled single-
@@ -180,8 +235,9 @@ schema fields.
 
 The broker retries only requests proven not delivered. Install, uninstall, and
 tool calls are not retried after delivery because they may have side effects.
-Missing or incompatible Codex processes make only Codex-owned components
-unavailable; native package components continue to work.
+Missing, disabled, auth-unavailable, or incompatible Codex processes make only
+the affected Codex-owned components unavailable; native package components and
+provider dispatch continue to work.
 
 Plugin hook sources are loaded only when the plugin package is enabled. Loading
 a plugin hook source does not trust or execute its handlers. Runtime passes
@@ -270,6 +326,8 @@ lanes, unsupported lanes, readiness, and diagnostics, and does not install,
 enable, trust, import foreign code, or mutate profile/project state.
 
 `plugin trust` records trust for the current installed package fingerprint.
+CLI commands never mutate the Codex authority, its packages, catalogs, binary,
+or connector sessions; Codex mutation and connection are GUI/Gateway operations.
 
 `plugin doctor` reports discovered packages, manifest path, supported and
 ignored fields, manifest resources, Psychevo extensions, install source, source
@@ -280,18 +338,36 @@ diagnostics, and data root.
 Gateway exposes plugin metadata and package-management methods for product
 surfaces: `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
 `plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
-`plugin/setTrust`, `plugin/catalog/list`, `plugin/catalog/add`, and
-`plugin/catalog/remove`. These methods use the same runtime helpers as the CLI,
+`plugin/setTrust`, `plugin/authority/write`, `plugin/authority/refresh`,
+`plugin/catalog/list`, `plugin/catalog/add`, `plugin/catalog/remove`,
+`plugin/catalog/upgrade`, `plugin/connect/start`, and `plugin/connect/status`.
+`plugin/setEnabled.enabled` is `boolean | null`, where null deletes the selected
+scope override. Catalog requests are authority-qualified; Codex sources support
+source, ref, and sparse paths. These methods use the same runtime helpers as the CLI,
 honor resolved scope/profile rules, return typed interface metadata, and keep
 responses secret-free. GUI install overwrite, trust writes, and other
 force-worthy actions require an explicit request supplied by the caller.
 
+`plugin/list` returns authority views plus partitioned installed and catalog
+rows. `CodexAuthorityView` separates runtime (`disabled`, `starting`, `ready`,
+`incompatible`, `unavailable`, `draining`) from auth (`available`,
+`unavailable`) and reports the resolved binary, Codex version, compatibility
+profile, canonical private home, platform, generation, inventory readiness, and
+security notes without exposing environment values or content.
+
 Requests and responses use authority-qualified records. Psychevo authority uses
 the existing profile/project canonical selector. Codex authority uses
-`<plugin>@<marketplace>`. Catalog lists may aggregate both authorities, but
+`codex:<plugin>@<marketplace>`. Catalog lists may aggregate both authorities, but
 must not merge by display name. Each component record reports compatibility
 profile, highest level, execution owner, readiness, and a short actionable
 reason.
+
+`plugin/connect/start|status` is a generic five-minute, process-local connection
+session. Apps open the validated Codex `installUrl` and complete when
+`app/list.isAccessible` becomes true. Ordinary MCP starts
+`mcpServer/oauth/login` and consumes its completion notification. Gateway restart
+expires outstanding sessions. Uninstall never logs out a separate connector,
+and v1 provides no Codex logout UI.
 
 ## Related Topics
 

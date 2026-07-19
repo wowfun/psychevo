@@ -110,6 +110,19 @@ After the detached auxiliary run task completes, fullscreen TUI refreshes the
 current session title and sidebar from SQLite without adding transcript rows or
 re-blocking the composer.
 
+Interactive fullscreen TUI also projects the current Session title to the
+terminal tab with OSC title text `Pevo | <title>`. Before a persisted title is
+available, an existing Session uses its compact id and a detached new-session
+draft uses `Pevo | New session`. Rename, Session switch, detached title
+generation, Gateway title events, side-conversation entry/return, and `/new`
+update the same projection without emitting duplicate OSC sequences.
+
+Terminal title output sanitizes control, OSC/BEL, bidi, and invisible
+characters at the terminal boundary and uses ANSI output on Windows terminals.
+It is best-effort, fullscreen-only, and cleared during terminal restoration;
+scripted/non-terminal TUI never emits it. The tab uses the base current title
+only and does not append fork metadata.
+
 `/rename <title>` updates the current session title. It is available in
 fullscreen and non-terminal scripted TUI. Empty titles and rename attempts
 without a current session fail with bounded user-visible errors.

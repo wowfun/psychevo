@@ -19,6 +19,9 @@ Define acceptance expectations and validation scenarios for the concrete
 - Session selection, resume, switching, archive/delete, title, history reload,
   running-session indicators, undo/redo-adjacent behavior, and cross-surface
   Gateway activity remain consistent with shared session/display contracts.
+- Interactive Session title changes emit sanitized, deduplicated `Pevo | ...`
+  terminal-tab OSC output and terminal restoration clears it; scripted mode
+  emits none.
 - Terminal rendering projects shared display-model entries through the TUI
   ledger without persisting viewport-wrapped terminal lines as durable display
   state.
@@ -56,6 +59,17 @@ Deterministic TUI/VHS visual diagnostics run through:
 This workflow uses a fake local provider and writes reviewable artifacts under
 the CI artifact root.
 
+Deterministic cross-surface profiling runs the real fullscreen TUI through a
+pseudo-terminal and the real Workbench through desktop Chromium. Both surfaces
+use the same local Native provider fixture, cwd, model configuration, fixed
+prompt class, response schedule, warmup policy, and measured sample count. A
+cold run also requires identical Agent and Skill enablement; disabling either
+only on the TUI side invalidates the comparison. The shared cwd is an isolated,
+synthetic Git workspace rather than a child of the source checkout. A
+cold first turn is retained as raw evidence; warm continuation turns use one
+excluded warmup, one separately excluded traced diagnostic sample, and twenty
+untraced measured samples by default.
+
 Manual real-provider validation is opt-in only.
 
 ## Scenario Matrix
@@ -70,6 +84,11 @@ Manual real-provider validation is opt-in only.
 - Fullscreen ledger projection for prompt blocks, Thinking, tool/evidence,
   Agent rows, assistant answers, compact metadata, context usage, status line,
   sidebars, terminal Markdown, raw display, and non-terminal plain rendering.
+- Resumed local Web Search results decode the persisted untrusted wrapper into
+  the existing foldable tool row and never expose wrapper text as the result.
+- Context status uses the latest completed provider turn while Session tokens
+  aggregate only the visible branch, preserve partial/unavailable state, and
+  compute cache read percentage against context input including cache writes.
 - Terminal palette fallback, adaptive prompt/composer surfaces, passive redraw
   cadence, active elapsed labels, deterministic reduced-motion behavior, and
   VHS capture of running/permission/clarify/tool states.
@@ -89,6 +108,12 @@ Manual real-provider validation is opt-in only.
   stale-response feedback.
 - `/agents`, `@agent`, `/fork`, Agent row open/toggle behavior, child-thread
   foreground entry, parent navigation, and selected-main-agent controls.
+- Cross-surface profiling proves that the TUI is interactive after a painted
+  Composer frame, captures Enter at the real key-handler boundary, paints
+  optimistic feedback before model output, dispatches exactly one main turn
+  request per sample, paints non-empty assistant output, and restores the
+  Composer after authoritative completion. Title-generation requests are
+  classified separately and cannot advance a main-turn sample.
 
 ## Validation Boundaries
 
@@ -98,6 +123,9 @@ Manual real-provider validation is opt-in only.
   brittle full-screen snapshots when structured row facts are available.
 - TUI tests must use fake or test providers and isolated `PSYCHEVO_HOME`,
   config, SQLite state, cwd, timers, sockets, and terminal fixtures.
+- Profiling must not use piped scripted mode as a substitute for fullscreen
+  paint. PTY output is drained but not stored in the manifest; only allowlisted
+  content-free marks may be retained.
 - TUI Add Provider tests should drive provider-preset, provider-wizard, and
   model-catalog fetch behavior with fake local `/models` endpoints and must
   assert that raw API keys are not rendered or written to TOML.

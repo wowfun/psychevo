@@ -25,10 +25,12 @@ Out of scope:
 
 A plugin package is a directory, materialized Git source, or materialized npm
 package with one recognized manifest or one recognized adapter descriptor.
-Installing a plugin makes a package available to policy. Installing does not
-enable the plugin, make any declaration model-visible, execute worker code,
-trust hooks or foreign adapters, grant permissions, create credentials, or
-mutate the runtime extension registry.
+Installing a Psychevo-owned plugin makes a package available to policy but does
+not enable or trust it. Installing a Codex-authority plugin is one explicit GUI
+operation whose successful result enables the authority-qualified package in
+the active profile and trusts that exact installed fingerprint. Neither path
+makes a declaration model-visible, bypasses an owning runtime policy, grants
+permission, or creates connector credentials.
 
 A plugin declaration is candidate material declared statically in a manifest or
 reported by a runtime helper such as a Psychevo worker. Candidate declarations
@@ -72,6 +74,13 @@ Profile and project configuration declare plugin policy. The effective policy
 for one invocation is the profile policy overlaid by project-local policy for
 the selected cwd.
 
+Codex-authority policy is intentionally asymmetric. A profile may enable or
+disable `codex:<plugin>@<marketplace>`. Project policy may only disable an
+inherited Codex plugin or remove its override; a project must never enable a
+plugin that its profile did not allow. The Codex authority itself is a
+profile-only, default-off feature and project configuration must not contain its
+feature or binary selection.
+
 Adapter policy has two levels. Framework defaults declare whether foreign
 packages use `adapter_host`, `manifest_only`, or `disabled`. Per-plugin policy
 may downgrade an adapter to manifest-only or disabled, but it must not silently
@@ -82,6 +91,11 @@ Plugin trust is package-content scoped. Trust binds a normalized plugin
 identity to a package fingerprint. A changed package fingerprint invalidates
 trust and returns the plugin to manifest-only inspection until the user trusts
 the new fingerprint.
+
+An explicit Codex install or upgrade trusts only the fingerprint returned by
+that operation. Background content changes, externally performed mutations, or
+an unexpected Codex version invalidate that trust rather than silently
+extending it.
 
 Policy can enable or disable a plugin package. Enabling a plugin makes its
 accepted declarations available to the owning runtime modules, but it does not
@@ -123,7 +137,7 @@ as mutable plugin state.
 ## Compatibility
 
 Psychevo preserves three immutable layers: the raw package document, the
-normalized `codex-plugin/8604689e` package, and the effective thread projection.
+normalized `codex-plugin/8604689e` package, and the effective turn projection.
 Unknown data remains attached to the raw document; it does not silently become
 runtime authority. A package is fully compatible only when every declared
 component reaches `execute` or `delegate`, or reports an explicit actionable
@@ -142,10 +156,16 @@ package into the Psychevo cache.
 
 Runtime may read a Codex-owned installed package in place when `plugin/read` or
 Codex hook metadata exposes its materialized root. The resulting selected root
-keeps Codex plugin and marketplace authority in its frozen identity. This is a
+keeps Codex plugin and marketplace authority in its turn identity. This is a
 read-only projection, not a second installation. When no root is exposed,
 component status must not claim native execution; effective MCP servers may be
 delegated to Codex, while path-backed skills or hooks report unavailable.
+
+Codex compatibility is an external capability authority, not an import of the
+user's active Codex environment. It uses an external reviewed binary with the
+private home `$PSYCHEVO_HOME/codex/`, ignores inherited `CODEX_HOME`, and never
+mutates the plugin, marketplace, or configuration state used by Codex CLI or
+third-party applications.
 
 Psychevo does not execute Codex, Claude Code, Hermes, Pi, or OpenCode in-process
 plugin interfaces directly.

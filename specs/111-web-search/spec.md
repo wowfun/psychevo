@@ -135,6 +135,17 @@ Workbench and render as compact links in TUI. Image results remain remote
 metadata, are not downloaded as artifacts, and show caption/source first;
 Workbench loads a thumbnail only after explicit expansion.
 
+Local runtime search keeps the exact model-visible
+`external_untrusted_web_search` framing in the persisted tool-result message.
+Committed transcript projection decodes that exact wrapper back into the
+structured result envelope for display without rewriting durable content. Raw
+JSON is decoded first; malformed wrappers or non-search text retain the generic
+raw-content fallback. TUI and Gateway use the same decoder so live and resumed
+tool rows see the same `payload` and error facts. Gateway writes the decoded
+envelope into both transcript result metadata and the public tool-result
+content consumed by evidence projection; the persisted untrusted wrapper must
+not win over that structured display value.
+
 The existing transcript `Web` kind owns both web tools. `web_search` uses
 `Searching the web` while active and `Searched the web` when terminal.
 Local live projection and committed history use the same query-bearing title
@@ -142,6 +153,11 @@ shape for one call. A running local search therefore renders as
 `Searching the web <query>` once the query is known, and the resolved backend
 or provider remains result/detail metadata rather than a secondary header that
 reduces the query title width.
+Completed local results reuse the ordinary Web Search tool row, body/preview,
+and existing expand/collapse controls; no search-only folding component or
+default-open rule is introduced. Hosted citations and provider source blocks
+remain independent because the hosted protocol does not provide a stable
+per-source owner id suitable for speculative grouping.
 Workbench Settings writes global-profile search configuration and profile
 environment variables. Project TOML may override non-secret fields.
 

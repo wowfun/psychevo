@@ -84,6 +84,12 @@ Initial profiles:
   visual specs directly in `xtask`. Permanent visual filenames, suite labels,
   request ids, and proof inventory describe behavior and contain no planning
   date or implementation-batch identifier.
+- `surface-profile`: deterministic artifact-producing TUI-versus-Workbench
+  profiling against one local Native provider fixture. It runs the real
+  fullscreen TUI through a pseudo-terminal and Workbench through desktop
+  Chromium, excludes warmup and traced diagnostic samples from percentiles,
+  and writes a validated comparison waterfall without screenshots or live
+  credentials.
 - `live`: opt-in live validation using explicit provider credentials.
 - `package`: artifact-only CD profile that builds local reviewable artifacts
   and checksums without publishing or creating hosted release objects.
@@ -197,9 +203,10 @@ caller selects an explicit artifact root. The runner creates separate output
 paths for plans, step logs, package artifacts, checksums, and live/visual
 diagnostics when those workflows run.
 
-A relative explicit `cargo xtask live run --artifact-root` value resolves once
-against the xtask caller's working directory before the runner creates any
-check paths. Plans, run results, and implementation-only context files must
+A relative explicit `cargo xtask ci run --artifact-root` or
+`cargo xtask live run --artifact-root` value resolves once against the xtask
+caller's working directory before any step changes its working directory or
+creates child paths. Plans, run results, and implementation-only context files must
 then carry absolute artifact, home, config, database, and isolated-workspace
 paths. Deterministic ACP fixture commands, including the managed Codex ACP
 offline launcher, must therefore remain valid when the Gateway launches them
@@ -209,6 +216,31 @@ Workbench deterministic visual screenshots belong under the CI artifact root,
 not only under `.local/playwright`. The runner must provide a screenshot root
 to Playwright visual specs so `cargo xtask ci run --profile visual` produces
 reviewable TUI and Workbench visual artifacts in one run directory.
+
+Cross-surface profiling artifacts belong under
+`profile/surface-comparison/`. The runner provides the comparison root, sample
+count, built `pevo` binary, and Chromium selection explicitly. A successful
+step requires the comparison manifest, Markdown report, TUI content-free JSONL
+trace, Workbench trace, raw samples, and recomputed p50/p95/delta data. Failed
+runs retain a partial manifest and logs. This profile uses only isolated local
+home/config/database paths and never resolves real provider credentials.
+
+The comparison manifest uses schema v2. Its shared presentation boundary is a
+surface commit: completed terminal draw for TUI and observed DOM commit for
+Workbench. Browser post-frame observations are diagnostic only. Validators
+reject comparison v1 data, missing first-non-empty-output marks, cross-clock
+subtraction, previous-sample RPC overlap, and screenshot or trace overhead in
+measured samples. Workbench startup reports Composer shell commit, transport
+connection, editable GUI commit, and draft-context readiness separately; it is
+not ratio-compared with TUI process startup.
+
+The initial comparison gate is structural. It requires one accepted request,
+one public start, one public completion, no legacy terminal notification, no Web
+Review workspace scan in the critical path, a committed optimistic feedback surface,
+bounded frame application, and zero hidden-surface auxiliary reads. Clean and
+deterministic dirty cohorts still report raw p50/p95 and both GUI-minus-TUI and
+dirty-minus-clean deltas, but latency does not fail CI until three stable
+canonical-runner baselines are separately reviewed and approved as a ratchet.
 
 After a default-artifact-root run finishes or fails after creating its run
 directory, the runner prunes `.local/.psychevo-dev/ci/` to the 10 most recent

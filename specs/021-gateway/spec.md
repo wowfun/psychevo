@@ -58,6 +58,27 @@ binding, queueing, delivery classification, interactions, and product
 projection. ACP is external at the Adapter seam and is not Gateway's internal
 application Interface.
 
+## Internal Journey Profiling
+
+Deterministic local profiling may enable a content-free internal Gateway probe
+to distinguish surface admission, the shared `Gateway::run_turn` boundary,
+Native Adapter dispatch, live assistant projection, and authoritative turn
+completion. The probe writes only to an explicit artifact path, uses a
+process-local monotonic clock and clock-domain id, and is inert otherwise.
+For Web-owned Turns it also records observed workspace-mutation delivery and
+asserts that no workspace-review scan runs in the admission, event-relay, or
+completion path. Runtime undo snapshots remain a shared Native stage and are
+reported separately from Web projection work.
+
+Profiling observations may include bounded request, Thread, Turn, source,
+Adapter, event-kind, sequence, and queue-depth correlations. They must not
+include prompt or response text, tokens, tool arguments/results, credentials,
+provider request bodies, or arbitrary event payloads. The probe is not a public
+Gateway event, does not alter transport schemas, and cannot become persisted
+transcript or runtime evidence. Comparisons never subtract its monotonic values
+from browser, TUI, fixture, or runner clocks; cross-process spans remain
+runner-observed.
+
 ## Threads, Turns, And Identity
 
 Gateway exposes one public Thread/Turn model for Native and ACP Agents.
@@ -66,6 +87,39 @@ captured Agent Definition, Runtime Profile, implementation kind, backend
 identity, and optional internal native-session identity in an immutable
 binding. Public projections expose only the public thread id and opaque Gateway
 handles; raw Adapter-native ids never cross the product contract.
+
+Each accepted Turn has one public lifecycle. Gateway emits exactly one
+`TurnStarted` after admission and exactly one authoritative `TurnCompleted`
+after terminal persistence and committed-entry projection. Runtime-native
+`run_start`, `agent_start`, `task_started`, and ACP start observations are
+internal Adapter/profiling stages and cannot create additional public starts.
+`TurnStarted` carries the Gateway admission time; selected Skill evidence stays
+in committed Transcript metadata rather than delaying or repeating lifecycle.
+
+`turn/start` success returns the accepted Thread and Turn identity. Validation,
+authorization, or binding failures before acceptance are JSON-RPC errors. Once
+accepted, success, failure, interruption, and cancellation all terminate
+through `TurnCompleted.turn`; the Web/Desktop protocol has no parallel
+`turn/result` or `turn/error` terminal notification. A local event-delivery
+lane preserves Turn order and may coalesce replaceable entry updates, but it
+never drops or reorders lifecycle, action, entry-completed, or terminal events.
+Runtime callbacks enqueue into this lane in bounded constant work and never run
+filesystem, Git, Review, or auxiliary projection reads before local delivery.
+This guarantee includes every error returned after the transport has accepted
+and detached Turn execution: the Turn shell persists and emits one failed
+`TurnCompleted`, unless a terminal for that Turn already exists, in which case
+it emits no duplicate terminal.
+
+Workspace Review is observation-based. A typed internal mutation sink accepts
+exact UTF-8 before/after deltas from owned write/edit paths and opaque
+invalidations from mutation-capable paths that cannot prove their file effects.
+It never scans the workspace at Turn start or completion. Gateway may publish a
+`workspaceChanged` event containing either a content-free observed Review group
+or an opaque invalidation. File contents remain private in the bounded in-memory
+Review ledger and cannot enter Gateway events, profiling, logs, or transcript.
+Exact deltas support Review and Reject for add, update, delete, and move
+operations. Opaque invalidations remain visibly attributable to their mutation
+boundary but never claim a reversible patch or offer a false Reject action.
 
 Gateway HTTP session artifact downloads require an authenticated caller. Browser
 surfaces may use the launch-created browser session cookie; Desktop and other
@@ -309,6 +363,20 @@ assets and download responses may use HTTP; thread, turn, permission, clarify,
 source, settings, and related commands use WebSocket requests and server
 notifications.
 
+The facade dispatches requests with bounded concurrency instead of awaiting one
+handler in the socket receive loop. Each connection permits at most 32 active
+requests and writes responses through one writer; responses may complete out of
+order and are correlated by JSON-RPC id. Ordering belongs to the owning
+Application Module: draft mutations serialize by canonical source generation,
+bound Thread mutations serialize through `ThreadApplication`, and unrelated
+reads or sources remain concurrent. The transport does not maintain a second
+global method-classification scheduler. Completed per-request tasks are reaped
+while the connection remains open; the task registry is bounded by active work,
+not by the lifetime request count of a long-lived socket. When all permits are
+occupied, waiting for the next permit remains concurrent with polling socket
+Close/error and completed request tasks; a saturated connection therefore
+disconnects promptly without waiting for one of its requests to finish.
+
 The unauthenticated HTTP readiness endpoint is `/readyz`. It returns only
 non-sensitive readiness and version information. WebSocket, download, and
 detailed status routes require authentication. Direct API clients authenticate
@@ -339,7 +407,7 @@ First-slice JSON-RPC methods include:
 - `completion/list`
 - `slash/settings/read`
 - `slash/settings/update`
-- `thread/start`
+- `thread/draft/open`
 - `thread/resume`
 - `thread/read`
 - `thread/context/read`
@@ -359,7 +427,13 @@ First-slice JSON-RPC methods include:
 - `turn/start`
 - `source/reset`
 
-`thread/start` creates an unbound public thread or rebinds a source lane.
+`thread/draft/open` atomically opens an unbound source draft, resolves either an
+explicit opaque target or the Gateway default into an exact selection, prepares
+that target when required, and returns one empty `ThreadSnapshot` plus its
+coherent `ThreadContext`. It does not publish a durable Thread. Expected target
+or preparation failures return the same snapshot and a blocked context with a
+typed `RuntimeErrorView`; malformed, unauthorized, or storage-failed requests
+remain RPC errors.
 `turn/start` against an unbound thread supplies one Gateway-validated
 `RunnableTarget`; Gateway captures the Agent Definition and Runtime Profile,
 persists the immutable binding, attaches the Native or ACP Agent, and only then
@@ -407,7 +481,7 @@ clients fail closed instead of selecting between conflicting identities.
 Source-started first turns may pass a null
 `threadId` request; Gateway creates or resolves the human-visible thread before
 returning the accepted result, so compact clients such as Floating can correlate
-subsequent events and follow-up turns without first calling `thread/start`.
+subsequent events and follow-up turns without first opening a separate draft.
 
 `thread/action/run` steering includes `expectedTurnId` and is rejected when the
 supplied id does not match the active turn. Durable activity takeover remains
@@ -446,7 +520,7 @@ Transport requests that introduce or select a source carry a request-scoped
 `scope` object inside `params`. The scope contains `cwd` plus source intent.
 `source.kind` is an open namespace string such as `web`, `floating`,
 `desktop`, `im.platform`, or `agent.peer`. `rawId` may be omitted; Gateway derives a stable
-raw id from source kind plus canonical cwd. `thread/start`,
+raw id from source kind plus canonical cwd. `thread/draft/open`,
 source-default `thread/resume`, `turn/start`, and completion requests require
 `params.scope`. Methods anchored by a thread id or active selector authorize
 through the stored thread/cwd binding.
@@ -507,7 +581,7 @@ context operations run in that resumed cwd. Browser-session authorization does
 not change because it is profile-global; only the default execution scope for
 that client changes. Clients must not append an old project's
 history while continuing to operate in the launch directory.
-Browser clients may also call `thread/start` for any canonicalizable cwd. Gateway
+Browser clients may also call `thread/draft/open` for any canonicalizable cwd. Gateway
 treats that explicit project-group action as default-scope adoption for the
 client, not as a security grant. Invalid or inaccessible cwd values fail during
 canonicalization or runtime safety checks rather than browser-session ACL.
@@ -637,6 +711,28 @@ descriptors, sendability, history state, interactions, and
 revisions. It cannot create a session or contact a provider; explicit refresh
 or Doctor owns probes.
 
+Thread Context distinguishes `selectedTargetId` from `suggestedTargetId`.
+Discovery may return a suggested default but must keep selection null and
+sendability false. `thread/draft/open`, `thread/draft/prepare`, and a bound
+Thread return the exact selected id. Callers never infer selection or
+sendability from a catalog row or Runtime Profile reference.
+
+Runtime catalog projection uses one immutable snapshot per canonical cwd and
+Gateway-owned configuration generation. A hot context/open/prepare operation
+loads or receives that snapshot once and passes it through target resolution
+and projection. Cache reads never materialize backend configuration, scan PATH,
+write config, run Git, recursively verify a managed installation, or start a
+provider. Gateway bootstrap and explicit backend management own discovery and
+invalidate the snapshot; external filesystem or PATH changes require restart
+or an explicit management action rather than a watcher or TTL.
+
+`thread/draft/open` accepts an `origin` scope plus `targetIntent` of either
+`default` or `exact { targetId }`; null is not a target intent. `origin` denotes
+the canonical app source. An internal draft lane records its canonical parent
+source explicitly and never derives a new parent by concatenating or parsing a
+returned draft `rawId`. Concurrent opens allocate source generations; only the
+current generation may commit preparation or later bind the canonical source.
+
 `thread/draft/prepare` is the explicit side-effecting preparation boundary for
 an unbound source and one opaque `targetId`. Native targets only replace the
 source draft. ACP targets create or reuse one unpublished resident Agent
@@ -645,9 +741,13 @@ Thread Context. Repeating the same source/target/cwd/fingerprint is idempotent;
 preparing a different target replaces and releases the prior draft. The native
 draft session id is process-local, is never persisted or exposed, and is
 promoted into the immutable binding by the first accepted `turn/start` without
-a second `session/new`.
+a second `session/new`. If ACP preparation fails after selecting the draft
+target, Gateway persists that blocking problem on the source lane. Subsequent
+cache-only context reads keep sendability false with the same problem until an
+explicit prepare retry or target replacement clears it.
 
-`thread/control/set` names the same opaque `targetId` returned by that context.
+`thread/control/set` names the same opaque selected target id returned by that
+context.
 For an unbound source, Gateway resolves and stores the complete prospective
 Agent/Profile pair before returning the authoritative receipt; a Runtime
 Profile id alone is not sufficient control identity. When that source owns a

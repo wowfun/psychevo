@@ -53,7 +53,7 @@ with isolated config and database state.
 - Unauthenticated WebSocket, download, or detailed status requests are rejected.
 - Invalid JSON, invalid `jsonrpc`, unknown methods, and malformed params return
   bounded structured errors.
-- `thread/start`, source-default `thread/resume`, `turn/start`, `thread/list`,
+- `thread/draft/open`, source-default `thread/resume`, `turn/start`, `thread/list`,
   and thread-id anchored operations enforce the documented scope rules.
 - Source keys in responses are stable while avoiding raw local path exposure.
 - A deterministic outbound ACP Agent is started under a real `pevo serve`

@@ -2,17 +2,25 @@
 
 ## 2026-07-16
 
-- Improved Workbench startup and turn latency with lazy feature loading,
-  concurrent boot, immutable static assets, on-demand workspace refreshes, and
-  reliable Interrupt dispatch.
-- Reworked session and workspace flows so late startup cannot replace an
-  explicit selection, idle current sessions can be archived or deleted safely,
-  and archived ACP imports remain transcript-first.
-- Decoupled Codex runtime assembly from marketplace catalogs with canonical-cwd
-  inventory prewarming, frozen per-Thread delegated tools, and native
-  plugin/App capability projection.
-- Fixed Windows Git Bash/Desktop startup and Cargo dependency fetches under
-  Schannel revocation-check failures.
+- Added deterministic GUI and fullscreen TUI journey evidence, profiling
+  waterfalls, lifecycle and review gates, visual checkpoints, raw traces, and
+  CI artifact contracts for Native and ACP flows.
+- Made new and cross-workspace drafts immediately interactive with atomic open
+  and queued first send; stabilized complete Agent, runtime, Permission,
+  Workspace, and branch controls while removing redundant startup reads and
+  Composer flicker.
+- Unified Composer control surfaces, environment presentation, completion
+  sizing, and runtime status feedback across Workbench, TUI, and Desktop.
+- Eliminated post-send blank states and request amplification with provisional
+  activity, one Gateway turn lifecycle, frame-coalesced updates, terminal
+  barriers, event-patched session rows, and visible-only resource reads.
+- Added bounded Gateway dispatch, cached Agent targeting, default-off
+  version-pinned Codex plugin authority, native Windows executable lookup, and
+  durable partial-install recovery.
+- Hardened Windows/Git Bash/Desktop startup, TUI tab titles, persisted Web
+  Search evidence, cross-runtime usage accounting, stale-send and target
+  preparation handling, WebSocket task cleanup, and Workspace Review
+  invalidations.
 
 ## 2026-07-15
 

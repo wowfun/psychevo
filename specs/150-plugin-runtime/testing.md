@@ -9,8 +9,9 @@ Define acceptance expectations and validation scenarios for plugin runtime.
 
 - Installing a plugin materializes a package into the selected profile or
   project cache without copying content outside the package root.
-- Installing does not enable a plugin; profile and project policy decide
-  package enablement for each invocation.
+- Installing a Psychevo-owned plugin does not enable it. A successful explicit
+  Codex-authority install or upgrade enables the package in profile policy and
+  trusts only the returned current fingerprint.
 - Project policy can override profile-installed plugin enablement without
   requiring a duplicate project install record.
 - Runtime loads enabled plugin declarations before agent and skill discovery,
@@ -26,6 +27,8 @@ Define acceptance expectations and validation scenarios for plugin runtime.
   local providers by default.
 - Codex catalog and Apps tests use a deterministic fake app-server process and
   never depend on the user's `CODEX_HOME`, credentials, or network.
+- Codex-authority tests always use an isolated private `$PSYCHEVO_HOME/codex/`
+  and prove that feature-off operation spawns no broker.
 
 ## Current Implementation Slice
 
@@ -92,28 +95,51 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - Codex authority preserves `<plugin>@<marketplace>` identity, does not create
   a Psychevo mirror record, and keeps same-name rows from different authorities
   distinct.
-- Runtime discovery uses `plugin/installed`, never `plugin/list`, and concurrent
-  first use by multiple threads in one canonical cwd performs one inventory
+- Runtime discovery uses `plugin/installed`, never a normal `plugin/list`, and
+  concurrent first use for one profile plus canonical cwd performs one inventory
   load. Different cwd values have independent inventories. A blocked fake
-  inventory proves both `initialize` and `thread/start` return without waiting
-  while the one background load remains in flight.
-- An enabled installed Codex package root is resolved in place, keeps Codex
-  authority in the selected-root record, and is frozen across later turns of
-  that Psychevo thread. Archive/delete clears both the snapshot and ephemeral
-  Codex thread.
+  inventory proves `initialize`, `thread/draft/open`, and provider dispatch all
+  proceed without waiting while the one background load remains in flight.
+- An enabled installed Codex package root is resolved in place and keeps Codex
+  authority in the selected-root record. A turn freezes its generation and
+  policy digest; a later turn uses the newest ready generation. No snapshot is
+  persisted with the thread.
 - A Codex MCP whose package root is not exposed is delegated by effective
   server name and is never projected both natively and through the broker.
 - A delegated Codex thread lists MCP tool descriptors once. Later turns reuse
   those descriptors with their own turn and event context, without another
   inventory or MCP-status request.
-- Successful Codex install/uninstall and account or broker changes refresh the
-  shared inventory for new threads without mutating existing frozen threads.
+- Successful Codex install/uninstall and account or broker changes publish a new
+  inventory generation for later turns without mutating active turn leases.
   Broker failure is retried only after the bounded negative-cache interval.
 - Apps inventory, OAuth, standard/openai/URL elicitation, app-backed MCP calls,
   ephemeral thread cleanup, profile mismatch, and post-delivery disconnects
   are exercised through the broker interface.
 - The pinned `openai/form` image-picker returns item ids, renders only safe
   HTTPS or image-data sources, and rejects unknown URL schemes in Workbench.
+- Profile config accepts default-off `[codex_plugins]` and optional binary;
+  project config rejects that section and rejects every project-local Codex
+  enable while supporting disable and reset.
+- Compatibility conformance accepts `0.144.1` for
+  `codex-plugin/8604689e`, extracts versions from varying originators, verifies
+  private `codexHome`, detects missing methods through invalid-parameter probes,
+  and rejects missing binaries, unknown versions, malformed responses, and home
+  mismatches without issuing a normal catalog request.
+- Auth tests cover Unix symlink, Windows same-volume hardlink, missing source,
+  and cross-volume degradation, and prove no auth bytes or keyring values are
+  read or logged.
+- Multiplexing tests block one elicitation while catalog and another turn finish;
+  process crash, timeout, pending responses, notifications, redaction, and
+  no-side-effect-retry behavior remain observable.
+- Component fixtures prove exact-one-owner projection for local skills, hooks,
+  ordinary MCP, remote/app-backed MCP, Apps, templates, scheduled tasks,
+  interface metadata, browser extensions, unknown fields, and missing roots.
+- Lease tests prove disable affects only new turns and destructive mutations wait
+  for active turns before publishing a replacement generation.
+- The Web journey fake can gate inventory forever while
+  `send_clicked -> runtime_request_dispatched` advances; profiling contains no
+  broker discovery, screenshot, or artificial-gate time, and degradation appears
+  only in structured diagnostics and authority status.
 
 ## CLI Coverage
 
@@ -137,8 +163,8 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
   and no host-global config access.
 - Timeout tests must use bounded local workers and must not rely on wall-clock
   sleeps longer than the runtime timeout under test.
-- The opt-in `codex-plugin-broker-live` check uses the current Codex executable
-  and `CODEX_HOME` only for initialize and read-only catalog or installed-plugin
-  projection.
+- The opt-in `codex-plugin-broker-live` check uses an explicitly selected Codex
+  executable and an isolated private home only for conformance and read-only
+  installed-plugin projection.
   It must not install, uninstall, enable, authenticate, or execute a plugin, and
   it does not require an LLM-provider credential.

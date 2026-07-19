@@ -115,8 +115,8 @@ semantics.
 
 ## Context Usage Projection
 
-Runtime may expose a context usage projection for the most recent provider
-generation request or for a persisted session estimate. This projection is an
+Runtime may expose a context usage projection for the most recent completed
+provider generation turn or for a persisted session estimate. This projection is an
 inspection aid; it must not redefine context assembly semantics, mutate session
 state, or persist full prompt/request text.
 
@@ -136,10 +136,22 @@ categories as input categories to distinguish them from interface-visible
 message counts. Structured snapshots retain the category keys defined by the
 [Prompt Assembly Attachment](prompt-assembly.md).
 
-Provider-reported input/context token usage, when available, is authoritative
-for the headline total. Category totals are tokenizer estimates. If provider
-usage is unavailable, the estimated category total may be used as the headline
-and must be marked estimated.
+The headline context total describes the latest completed provider turn and is
+not cumulative. Provider-reported total tokens are authoritative when present;
+otherwise a complete provider input/output pair is summed. Input already
+includes cache token subcategories and output already includes reasoning token
+subcategories, so those subcategories are not added again. Category totals
+remain tokenizer estimates of the request/input side and do not redefine the
+provider total.
+
+Structured context projections identify whether the headline is provider
+reported, derived from provider input/output, locally estimated, partial, or
+unavailable. They also identify whether the basis is the latest provider turn,
+an agent-reported context snapshot, or a persisted session projection, and
+retain the visible session sequence to which the value applies when known. An
+agent-reported current-window value such as ACP `usage_update.used` may be used
+as a partial context fallback but must not be treated as provider usage or a
+session token total.
 
 Runtime-owned context usage data must retain counts, labels, category names,
 tool counts, role counts, selected skill names, and per-skill index-entry
@@ -154,10 +166,13 @@ forbid the persistence layer from retaining model-visible runtime injections as
 durable context evidence when those injections are intentionally attached to an
 accepted user prompt for auditability.
 
-For live agent invocations, the latest provider generation request wins. For
-persisted session estimates, the projection uses current local runtime
-assembly rules and persisted session messages; historical selected skill
-bodies are not reconstructed unless explicitly available.
+For live agent invocations, the latest completed provider generation wins. For
+persisted sessions, a visible assistant usage record later than the latest
+valid compaction checkpoint wins. Otherwise runtime reconstructs from the
+prompt-prefix version and durable context evidence that belonged to the
+visible turn. Persisted tool-token counts are tied to the recorded tool
+declaration hash; missing or mismatched historical tool facts make the
+projection partial instead of silently substituting the current tool surface.
 
 ## Session Observability Projection
 
@@ -168,11 +183,25 @@ message history, context evidence, or model-visible input.
 The projection combines the current context usage projection with persisted
 visible message/accounting facts from the selected session. It may include
 session-level totals for context input, billable input, billable output,
-reasoning, cache read, cache write, provider-reported total tokens, estimated
-cost, unknown-pricing message count, provider/model identity, and a derived
-cache-read percentage. The cache-read percentage is computed from cached input
-tokens divided by context input tokens when a non-zero context input total is
-available.
+reasoning, cache read, cache write, effective total tokens, the raw
+provider-reported subtotal, estimated cost, unknown-pricing message count,
+provider/model identity, accounted/unaccounted provider-call counts, and a
+derived cache-read percentage. Per provider call, an explicit provider total
+wins; otherwise a complete input/output pair is summed. Incomplete usage makes
+the aggregate partial or unavailable and any known value is a lower bound, not
+a fabricated exact zero. The cache-read percentage is computed from cached
+input tokens divided by context input tokens when a non-zero context input
+total is available. Protocols that report cumulative session counters, such as
+ACP `PromptResponse.usage`, must retain the raw cumulative snapshot for audit
+and persist only its visible non-negative turn delta in the additive provider
+usage fields.
+
+Global usage windows and activity buckets apply the same provider-call rule as
+session observability when deriving token and pricing status. A complete
+input/output pair participates in estimated/free/included/unknown pricing
+counters even when the provider omitted an explicit total. UI surfaces render
+an `unavailable` total as an unavailable label or neutral placeholder, never as
+an exact numeric zero.
 
 Session observability must respect the current session boundary and any
 history/revert visibility boundary used by transcript reload. It must not sum

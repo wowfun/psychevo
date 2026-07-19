@@ -196,21 +196,30 @@ Sessions, Workspace, Automations, Settings, and Capabilities.
 
 ## Runtime Provenance And Attention
 
-Composer reads `thread/context/read` through the headless client
-`ThreadController` and presents one Agent Definition entry point before the
-first turn. The compact target control renders one visible Agent identity per
-compatible target: Native uses `agentLabel`, while ACP appends `(ACP)` to that
-same Agent label without repeating Runtime Profile provenance. The visible
-popover omits redundant target headings and management links; its accessible
-name remains `Agent target` and full provenance remains available as a title.
-After binding, the selector becomes immutable provenance. Its only identity
-switch action starts a new thread; it never mutates the current thread.
+Composer obtains one atomic draft snapshot/context and presents one Agent
+Definition entry point before the first turn. `ComposerSessionCoordinator`
+owns only the draft-open/prepare readiness epoch and the one pending first-turn
+waiter. `ThreadController` remains the sole owner of Thread context, transcript,
+activity, admission, and turn acceptance. The compact target control
+renders one visible Agent identity per compatible target: Native uses
+`agentLabel`, while ACP appends `(ACP)` to that same Agent label without
+repeating Runtime Profile provenance. After binding, the selector becomes
+immutable provenance. Its only identity switch action opens a new draft; it
+never mutates the current thread.
 
 Selecting an unbound ACP target explicitly calls `thread/draft/prepare` and
-adopts the returned complete context before enabling submit. Loading disables
-runtime controls. Failure keeps the requested Agent identity visible, blocks
-submit, and shows the bounded Gateway error. Reconnect may reuse a cached
-prepared projection, but ordinary context refresh remains side-effect free.
+adopts the returned complete context before delivering a turn. Loading disables
+runtime controls but an input-backed Send action may capture one pending intent.
+The same coordinator readiness boundary covers both atomic draft open and
+explicit target preparation: a captured intent waits for the matching receipt
+and can never fall through to the previously selected target context. An
+explicit Session or view switch cancels the pending readiness token and releases
+any waiting submit immediately; a stale open/prepare response cannot keep Send
+disabled in the newly selected view.
+Failure keeps the requested Agent identity visible, cancels automatic delivery,
+blocks subsequent submit, and shows the bounded Gateway error. Reconnect may
+reuse a cached prepared projection, but ordinary context refresh remains
+side-effect free.
 
 Opening a Session treats the `thread/resume` or `thread/read` snapshot as the
 authoritative first-render Transcript. Workbench must not synchronously repeat
@@ -226,24 +235,62 @@ the selected Transcript or Composer controls.
 Workbench boot treats initialization and the first global session browse as
 one bounded transaction. It starts `initialize` and the single initial
 `thread/browser` request as soon as transport is connected, commits the
-Sessions result without waiting for `thread/start`, and suppresses reactive
-context and auxiliary refreshes until the startup Thread snapshot is stable.
+Sessions result without waiting for `thread/draft/open`, and suppresses
+reactive context and auxiliary refreshes until the startup Thread snapshot is
+stable.
+Initialization carries both the canonical startup `cwd` used by requests and
+its authoritative home-relative display form. Composer uses that display value
+for the cold first frame; it does not wait for Settings or infer the process
+home in the browser.
 If the user explicitly selects a Session after browsing completes but before
 initialization does, the startup view epoch is stale and Workbench must omit
-the draft `thread/start` request itself, not merely ignore its response. The
+the draft `thread/draft/open` request itself, not merely ignore its response. The
 explicit `thread/resume` binding remains authoritative and cannot be cleared by
 late startup work.
 The stable target receives one context read. Workspace, Agent/backend, and
 command catalogs load on demand for the surface that consumes them and coalesce
-concurrent reads for the same scope.
+concurrent reads for the same scope. Capabilities owns its Agent administration
+load: it completes the explicit `backend/list` materialization boundary before
+reading Agent, Team, and Runtime Profile catalogs, and the parent shell does not
+start a duplicate catalog load when the page mounts.
 
-Changing immutable Agent provenance on a bound Session starts a new Thread and
-immediately prepares the requested draft target. The critical path is
-`thread/start` followed by `thread/draft/prepare`; Settings, Workspace,
-Observability, history, catalog, and command refreshes run after or alongside
-that path without being awaited between those two requests. The requested
-Agent identity appears in its loading state as soon as the user selects it and
-remains visible if preparation fails.
+Changing immutable Agent provenance on a bound Session opens a new draft with
+one exact target intent. The critical path is one `thread/draft/open` response;
+Settings, Workspace, Observability, history, catalog, and command refreshes do
+not run as part of New Session. The requested Agent identity appears in its
+loading state as soon as the user selects it and remains visible if preparation
+fails.
+
+New Session keeps the last committed Composer environment rendered while draft
+preparation is pending. This applies both within one workspace and when the user
+chooses New Session for another workspace: Agent, Mode, Model, Reasoning,
+Permission, Workspace, and branch must not reset to placeholders or defaults.
+The previous complete environment remains rendered and disabled until the new
+draft context and branch are ready, then all values are replaced in one commit
+if the authoritative result differs. The request for another workspace still
+uses that workspace's default target intent; retaining the previous rendering
+must not turn the old Agent into an exact target request. Input and an
+input-backed Send action remain usable while draft preparation is pending; the
+first click captures one local submission intent. If text, attachments, target,
+control, workspace, or draft epoch changes before readiness, Workbench cancels
+automatic submission and preserves the current draft. Otherwise it rechecks
+the authoritative context and calls `turn/start` once. Input clears only after
+Gateway accepts the turn, and uncertain delivery is never retried
+automatically. A newer draft supersedes any unaccepted local intent and stale
+open/prepare results cannot replace its state.
+Attachment identity and order are part of the captured input signature: adding,
+removing, or replacing an attachment while the click is pending invalidates the
+captured submission just like a text edit does.
+
+New Session does not refresh history or omnibus Settings. History refreshes
+after the first accepted turn; cwd renders from canonical origin immediately;
+the lightweight current Git branch read starts alongside `thread/draft/open`,
+while non-visible model/settings metadata loads only when its owning popover
+opens. Workbench applies the draft context and current branch in one Composer
+environment commit so Agent, Mode, Model, Reasoning, Permission, Workspace, and
+branch do not visibly pop in as separate startup generations.
+Completion performs a local active-token check and calls `completion/list`
+only for `/`, `$`, or `@` tokens.
 
 The capsule is the only new runtime visual signature. It uses existing
 Workbench type, spacing, and semantic status colours rather than runtime brand
@@ -261,8 +308,13 @@ is omitted when reduced motion is requested.
 
 Composer keeps Agent and Mode beside the `+` attachment control; the grouped
 Model/Reasoning selector plus Context remain on the right. Permission mode moves
-to the quieter environment line immediately before Workspace. It is not
-duplicated inside the Agent target popover. On an unbound draft, Workspace opens
+to the quieter environment line after Workspace and Git branch. The environment
+line orders these controls as Workspace, branch, then Permission. A displayed
+workspace path replaces an exact host user-home prefix with `~`, while its title
+and request value retain the canonical path. The visible path may use a wider
+bounded measure than the other status controls before applying a single-line
+ellipsis. Permission is not duplicated inside the Agent target popover. On an
+unbound draft, Workspace opens
 a switcher of known workspaces and ends with `Open workspace...`; choosing a
 workspace starts a detached draft in that cwd, while opening a new workspace
 opens a folder-selection panel at the active cwd. The panel supports traversing
@@ -293,6 +345,21 @@ is omitted when absent. The display priority is a local pending value, then the
 Thread Context `effectiveValue`, then an authoritative runtime readback; the
 client never invents a `Default` or first-choice reasoning value. `none` renders
 as `Default` only when the descriptor explicitly returns `none`.
+
+Compact Workbench popovers use one interaction and appearance contract across
+Add, Agent, Mode, Model/Reasoning, Context, Workspace, Permission, Branch, and
+completion surfaces. Selection controls use rendered popups instead of native
+`select` popups (including select-only combobox/listbox semantics where
+appropriate) so panel, row, selected, hover, and focus states are consistent
+and opening one popup dismisses another. Escape, outside pointer, selection,
+and loss of an owning surface dismiss the popup. Compact selection panels size
+intrinsically to their content up to a surface and viewport maximum. Completion
+is the input's suggestion surface rather than a compact selector, so its left and
+right edges align with the owning message-input frame at every viewport size.
+Row labels remain one line, truncate with an ellipsis at their available maximum,
+and expose the full value as a title when truncation is possible. Switch rows
+reserve the final column for the switch and align every switch to the panel's
+right edge.
 Model shows a proven effective value or an explicit unavailable reason. An ACP
 draft renders only Agent-provided config choices; Settings metadata may enrich
 labels and grouping but never synthesizes values. An unbound draft sends only
@@ -317,10 +384,11 @@ The leader-first panel visually separates controllable Psychevo-managed members
 from capability-gated Agent-native activity. A read-only Agent child tab omits
 composer and control affordances and loads history lazily.
 
-React is a composition root. Runtime target pairing, sendability, control
-resolution, revisions, turn serialization, and runtime-name decisions do not
-live in `App.tsx` or presentation Modules. Native and ACP use the same semantic
-control placement and disabled/unavailable treatment.
+React is a composition root. Runtime target pairing, sendability, draft open
+epochs, pending submission, control resolution, revisions, turn serialization,
+and runtime-name decisions do not live in `App.tsx` or presentation Modules.
+Native and ACP use the same semantic control placement and
+disabled/unavailable treatment.
 
 The Sessions header contains one `Imported and archived sessions` view toggle.
 The toggle is the user intent that permits Agent session discovery; ordinary
@@ -351,6 +419,166 @@ idle current Thread and become unavailable while that Thread is running.
 Archiving the current Thread keeps its Transcript visible as an archived visit;
 deleting it clears the selected Transcript and returns Workbench to an empty
 new-session draft after confirmation.
+
+## Critical First-Turn Journey Evidence
+
+Workbench maintains one deterministic critical-journey proof for the first
+turn. The proof records six user-facing checkpoints: `gui_ready`,
+`draft_context_ready`, `send_clicked`, `runtime_request_dispatched`,
+`first_output_visible`, and `turn_settled`. Draft readiness means the atomic
+`thread/draft/open` context has been applied; it does not imply that a durable
+Thread already exists. Runtime dispatch is proven at the receiving runtime
+boundary: a Native test provider receives the HTTP request or an ACP test Agent
+accepts `session/prompt`. `turnStarted` alone is not dispatch evidence.
+
+The visible first-output checkpoint is the first non-empty assistant text
+confirmed by the visual pass. The profiling pass measures the corresponding
+surface commit: DOM commit in Workbench and terminal draw commit in TUI. A RAF
+callback is only a presentation observation and must not be labelled as paint.
+Raw runtime chunks, Gateway events, client receipt, controller application,
+and an optional post-frame observation remain diagnostic marks. The settled
+checkpoint requires authoritative `turnCompleted` application, stable final
+content, an idle turn state, and a restored Composer.
+
+Workbench state-application milestones are retained in a content-free internal
+browser timing registry and mirrored to the User Timing API when the engine
+supports reliable mark retention. Profiling derives Composer and Transcript DOM
+commits from observed DOM conditions without adding a fixed frame delay. Native
+browser drivers may read the registry without depending on engine-specific
+`performance` entry buffering.
+
+The journey covers a ready-then-send path and an input-backed Send captured
+after New Session while its replacement draft is pending. Their required
+checkpoint orders are respectively
+`gui_ready -> draft_context_ready -> send_clicked ->
+runtime_request_dispatched -> first_output_visible -> turn_settled` and
+`gui_ready -> send_clicked -> draft_context_ready ->
+runtime_request_dispatched -> first_output_visible -> turn_settled`. The
+pending path must preserve input and deliver exactly one `turn/start` after the
+same draft becomes ready.
+
+Performance and visual evidence are separate passes over the same scenario
+contract. The profiling pass introduces no screenshots or staged runtime waits
+and retains raw samples, a latency waterfall, and an automation trace. The
+visual pass deterministically holds request, first-output, and completion
+boundaries long enough to capture all six checkpoints; screenshot capture time
+is recorded separately and never contributes to product latency. The first
+slice establishes a baseline without hard latency budgets.
+
+Journey artifacts use an internal versioned manifest. Each event records its
+clock source, epoch observation, and monotonic observation. Measurements never
+subtract timestamps from different clock domains. Artifacts may contain
+bounded request, Thread, Turn, runtime, provider, and model correlation ids,
+but never prompts, generated text, credentials, tokens, or secrets. This
+evidence contract does not add test timestamps to the public Gateway protocol.
+
+## TUI And Workbench Profiling Comparison
+
+The deterministic cross-surface profile compares the real fullscreen TUI and
+desktop-Chromium Workbench against one shared Native provider fixture. TUI uses
+the in-process Gateway API while Workbench uses managed Gateway,
+WebSocket/JSON-RPC, client reconciliation, React commit, and DOM commit. The
+report therefore treats the shared provider boundary as the control and
+attributes additional Workbench time to the Web admission, transport, and
+frontend stages rather than claiming the two surface call graphs are identical.
+
+The common warm-path checkpoints are `send_committed`,
+`runtime_request_dispatched`, `first_output_surface_committed`, and
+`turn_settled_surface_committed`. `send_feedback_surface_committed` measures the
+first optimistic running surface separately. Workbench-only diagnostics include
+`turn/start` frame and acceptance, Gateway event receipt, controller batch
+application, DOM commit, optional post-frame observation, and
+`draft_context_ready`. TUI-only diagnostics include terminal-event drain and
+terminal draw commit. Where
+available, both surfaces retain the shared `Gateway::run_turn` entry and
+Gateway-event emission boundaries.
+
+Every measured sample has an explicit correlation that distinguishes the main
+turn provider request from asynchronous title generation. Exactly one main
+request may satisfy a sample. Browser timing state is reset per sample, the
+interaction start is captured inside the browser submit handler rather than
+before Playwright actionability checks, and trace collection uses a separate
+diagnostic sample excluded from percentiles. A provider response schedule must
+leave an observable interval between first output and completion so completion
+cannot collapse queued streaming evidence before the first surface commit.
+
+Comparison manifest schema v2 contains raw TUI and Workbench samples,
+p50/p95 waterfalls, Workbench-minus-TUI deltas and ratios, environment and
+fixture fingerprints, content-free diagnostic marks, the TUI JSONL trace, and
+the Workbench Playwright trace. Durations are calculated only between marks in
+one clock domain; cross-process boundaries use observations made by the common
+runner and remain labelled as runner-observed. The initial baseline has no
+absolute latency gate. Missing artifacts, ambiguous request correlation,
+duplicate main requests, unsafe fields, or an incomplete waterfall fail the
+profile while preserving partial evidence. Comparison v1 and v2 samples must
+never be aggregated because v1 included browser frame waits in its visible
+metrics.
+
+Each raw sample also correlates one Gateway Turn and derives two diagnostic
+sub-waterfalls. The shared Gateway/runtime sub-waterfall covers Gateway entry,
+Native Adapter submission, runtime configuration, Agent start, prompt
+projection, first visible assistant event, and authoritative completion. The
+surface sub-waterfall covers first non-empty assistant receipt, controller
+application, surface commit, completion receipt/application, and settled
+surface commit. These
+sub-waterfalls use only their owning Gateway or surface clock and are summarized
+independently from runner-observed cross-process spans.
+The comparison hard-fails duplicate public lifecycle, legacy terminal
+notifications, Web review scans on admission/relay/completion, missing first
+feedback, or hidden-surface request amplification. Native runtime undo snapshot
+work remains a shared TUI/Workbench stage. Latency p50/p95 stays report-only
+until three stable canonical-runner baselines are explicitly approved for a
+separate ratchet.
+
+Workbench does not paint a cold-start Composer with placeholder Agent or empty
+runtime controls. Session history never gates Composer visibility, but the
+initial atomic draft context does: the first visible editable Composer is one
+committed environment containing Agent, Mode, Model, Reasoning, Permission,
+Workspace, and current branch. That commit defines both `gui_ready` and the
+initial `draft_context_ready`; the app shell may paint earlier without claiming
+Composer readiness. Initialization and the first session browse overlap, and
+draft open waits for history only when no usable launch scope exists.
+Same-workspace New Session retains the active source identity and the last
+committed Composer environment while replacement readiness is pending. The
+active scope, rather than a stale Settings snapshot, owns the visible workspace
+path. Runtime and environment controls are disabled during that interval, and
+the replacement context commits atomically when ready.
+
+Submitting a ready draft performs one local Thread transaction before network
+delivery: it appends the optimistic user entry and sets provisional activity to
+running with a local start time and no authoritative Turn id. The next DOM
+commit therefore shows running feedback and `0s`. If submission is captured
+while draft readiness is pending, Composer instead shows `Preparing` with an
+elapsed timer, preserves the input, and does not expose Interrupt or call
+`turn/start`. Readiness transfers the original click time into the single local
+Thread transaction so elapsed time never resets. Gateway acceptance or the
+single `TurnStarted` binds the real id; pre-acceptance failure restores the
+previous snapshot, and terminal-before-acceptance still settles without
+reviving provisional activity. Only a coordinator-owned draft open or target
+preparation may enable this pending submission path; unrelated context or
+control mutations keep Send disabled until their authoritative result applies.
+
+`ThreadController` is the only Thread reducer. Its batch application reduces
+replaceable observations and publishes one snapshot notification. The
+Workbench-local `useGatewayLiveEvents` hook owns the one scheduling queue: the
+first non-empty assistant text bypasses frame pacing, later replaceable updates
+coalesce per entry, and terminal observations flush same-Turn output before
+completion. The hook does not own session, resource, or selector state.
+
+Session rows patch only fields carried authoritatively by acceptance,
+`activityChanged`, `titleChanged`, or `turnCompleted`. A bound Native
+continuation performs no `thread/read`, `thread/browser`, or context read. The
+first detached Turn performs one history browse after acceptance and one
+context read after completion. ACP completion may perform one context read for
+Agent-session controls and capabilities. Fixed settle delays do not exist.
+
+Resource reads follow visible demand. A closed right Workspace reads nothing
+unless the visible Transcript contains an unresolved file link. Workspace Home
+reads Diff plus Observability, Review reads Diff plus Changes, Files reads the
+file inventory, and other tabs read none of those resources. Reads remain
+single-flight, latest-wins, and view-epoch guarded. The always-visible Composer
+environment owns one lightweight `workspace/git/branches` read for a new draft;
+this is not a right-Workspace demand or an omnibus Settings refresh.
 
 ## Visual Direction
 

@@ -64,7 +64,7 @@ The WebSocket transport is strict JSON-RPC 2.0:
 - notification: `{ "jsonrpc": "2.0", "method": ..., "params": ... }`
 
 Fields are camelCase. Methods use singular resource-oriented names such as
-`thread/start`, `turn/start`, `thread/action/run`, and
+`thread/draft/open`, `turn/start`, `thread/action/run`, and
 `thread/interaction/respond`.
 
 ## Request Scope
@@ -74,8 +74,8 @@ source intent. `source.kind` is an open namespace string. `rawId` may be
 omitted; the server derives it from kind plus canonical cwd. Derived source
 keys avoid exposing raw local paths.
 
-`thread/start`, source-default `thread/resume`, and `turn/start` require
-`params.scope`. Thread-id anchored read/write/control methods authorize through
+`thread/draft/open` requires `params.origin`; source-default `thread/resume` and
+`turn/start` require `params.scope`. Thread-id anchored read/write/control methods authorize through
 the stored thread/cwd binding. `thread/list` uses an explicit cwd
 filter.
 

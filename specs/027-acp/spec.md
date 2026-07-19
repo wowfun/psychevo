@@ -170,6 +170,22 @@ double-count reasoning or cache subcategories. If multiple runtime model turns
 drain under one ACP prompt response, numeric accounting fields are summed and
 inconsistent pricing source or tier strings become `mixed`.
 
+For outbound ACP peer runtimes, inbound `PromptResponse.usage` and
+`usage_update` remain separate facts even when both arrive for one turn.
+The ACP usage object is a cumulative peer-session counter, not a per-prompt
+delta. Psychevo retains the normalized cumulative snapshot in ACP message
+metadata and persists the non-negative delta from the preceding visible ACP
+snapshot as the corresponding assistant message's provider usage. The first
+visible snapshot is its own delta; a decreasing counter is treated as an
+explicit peer-counter reset rather than subtracted through zero. This keeps
+ordinary provider-call and visible-session aggregation additive without
+double-counting successive cumulative snapshots.
+`usage_update.used/size` remains an agent-reported context-window snapshot and
+its cost remains cumulative peer-session cost; its token value must never fill
+or replace a missing provider-call or session total. Historical peer turns
+without persisted prompt-response usage are reported as partial or unavailable
+rather than reconstructed from the latest context snapshot.
+
 Psychevo ACP servers expose standard ACP v2 session config options for current
 runtime, current runtime mode, model, and reasoning effort when local
 configuration can provide selectable values. The mode option always represents

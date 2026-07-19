@@ -145,6 +145,32 @@ map to typed Gateway/runtime APIs. TUI must not add a generic `slash/exec`
 Gateway method and must not shell out to `pevo run` for normal prompting or
 control.
 
+## Cross-Surface Journey Profiling
+
+Fullscreen TUI participates in the deterministic TUI-versus-Workbench journey
+profile through its real terminal event loop and its process-local `Gateway`.
+The comparable warm send path is `input_ready -> send_committed ->
+runtime_request_dispatched -> first_output_visible -> turn_settled`. TUI has no
+equivalent of Workbench `draft_context_ready`: an unbound TUI draft is local
+state and its durable Session is created lazily after submission.
+
+The profile records `send_feedback_surface_committed` independently from model
+output. That mark is the first completed terminal draw after the optimistic
+user row, running state, and elapsed timer have been installed. First output is
+the first completed draw containing non-empty assistant text. Settlement requires
+the authoritative completion event to be applied, the foreground task to be
+joined, running state to be cleared, Composer focus to be restored, and the
+resulting draw to complete. These surface-commit boundaries align with
+Workbench DOM commit; neither claims to observe physical pixels.
+
+An internal, opt-in TUI probe may write content-free JSONL observations for
+startup, input, Gateway-event application, queue depth, frame paint, and
+settlement. It must be inert unless an explicit test artifact path is supplied,
+must use a monotonic process clock, and must never write prompt text, response
+text, tokens, tool arguments, credentials, or provider request bodies. This
+probe is diagnostics only and does not extend the public Gateway protocol or
+the persisted transcript.
+
 ## Session Observability
 
 TUI status and usage surfaces consume the shared runtime session observability
@@ -154,15 +180,17 @@ history, prompt text, or model-visible context.
 
 When `load_current_session_history` rebuilds a resumed session, it restores the
 session-level usage/cache/cost summary from persisted visible message
-accounting and keeps the latest context-window estimate separate. The bottom
-status line renders a compact, width-aware sequence with context first, then
-cache-read percent, session tokens, and cost only when space permits.
+accounting and keeps latest-turn context pressure separate. The bottom status
+line renders a compact, width-aware sequence with context first, then
+cache-read percent, visible-branch session tokens, and cost only when space
+permits. Partial totals render as lower bounds and unavailable totals do not
+render as exact zero.
 
 `/usage` shows a current-session summary above the existing cwd/global
 stats. The session summary must respect the same session and revert visibility
-boundaries as history reload, treat missing accounting as unknown/zero display
-data, and avoid rendering raw prompt, message, tool argument, or provider
-request text.
+boundaries as history reload, distinguish reported, derived, partial, and
+unavailable token totals, and avoid rendering raw prompt, message, tool
+argument, or provider request text.
 
 ## Attachments
 

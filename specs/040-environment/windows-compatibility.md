@@ -167,11 +167,17 @@ Deterministic validation must cover:
   caller values
 - Windows legacy output decoding and bounded lossy fallback for invalid bytes
 - Windows process-tree termination command construction
+- executable discovery deduplicating `PATHEXT` case-insensitively without a
+  per-candidate directory scan
+- cached Runtime Catalog and draft-context reads performing no PATH scan,
+  backend materialization, config write, Git process, or recursive managed-tree
+  verification
 - session and automation state lookups by normalized native cwd string
 - Gateway protocol generation and Workbench typechecking after path boundary
   changes
 
 Real Windows Git Bash validation is opt-in. The live smoke entrypoint should be
 skippable on non-Windows hosts and cover shell command execution, `/tmp`,
-drive-prefix cwd, file tool path normalization, permission matching, and Web
-terminal startup.
+drive-prefix cwd, file tool path normalization, permission matching, Web
+terminal startup, and warm/cold Composer draft-open timing through a real local
+Gateway without a real provider.

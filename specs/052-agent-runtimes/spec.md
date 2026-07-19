@@ -126,6 +126,7 @@ steer addressed to the child cannot target the parent turn.
 Gateway owns one deep `ThreadApplication` Module. Its Interface is:
 
 ```text
+open_draft(origin, targetIntent) -> DraftOpenReceipt
 inspect(source, thread?, prospectiveTarget?) -> ThreadContext
 prepare(source, targetId) -> ThreadContext
 set_control(source, thread?, mutation) -> ControlReceipt
@@ -155,6 +156,7 @@ binding may Gateway lower those control values into Adapter-internal
 
 The public Gateway methods are:
 
+- `thread/draft/open`
 - `thread/context/read`
 - `thread/draft/prepare`
 - `thread/control/set`
@@ -183,6 +185,11 @@ Backend administration remains a sibling management Module and keeps
 - pending interactions
 - `contextRevision` and `controlRevision`
 
+Target identity is explicit: `selectedTargetId` is nullable and names only an
+exact caller/Gateway selection, while `suggestedTargetId` is nullable and names
+only a discovery recommendation. A suggested target is never sendable. The old
+ambiguous non-null `targetId` field is not retained.
+
 `contextRevision` is the opaque admission-freshness token for the selected
 target, readiness, immutable binding, Agent identity, and negotiated facts
 that can change input admission or sendability. It is not a hash of every
@@ -200,8 +207,19 @@ For an unbound source, `thread/context/read.target` is the prospective
 `RunnableTarget { agentRef, runtimeProfileRef }` the caller intends to use.
 Gateway computes controls, input admission, and `sendability` for that exact
 pair. A missing target may project the catalog default for discovery, but it is
-not sendable. For a bound Thread, Gateway derives the target from the immutable
-binding; a conflicting prospective target fails closed.
+not selected and not sendable. `thread/draft/open` instead accepts
+`targetIntent: default | exact { targetId }`; default resolution is atomically
+committed as an exact source-draft selection. For a bound Thread, Gateway
+derives the target from the immutable binding; a conflicting prospective target
+fails closed.
+
+Runtime catalog state is an immutable process snapshot keyed by canonical cwd
+and Gateway-owned configuration generation. One draft/context operation uses
+one snapshot for target lookup, Profile lookup, readiness, and projection.
+Catalog reads are side-effect-free: PATH/backend discovery and configuration
+materialization run at Gateway bootstrap, explicit backend management, or
+Doctor; managed installation verification runs at management time or before a
+launch when its verification stamp is absent or stale.
 
 `thread/draft/prepare` is the only ordinary product read-adjacent operation
 that may start an ACP process before a prompt. It resolves the opaque target
@@ -864,11 +882,11 @@ also invalidates the selected Thread Context so `compatibleTargets` reflects
 new or changed backend and Agent definitions.
 
 When immutable Agent provenance changes, Workbench exposes the requested target
-immediately in a disabled loading state. For a bound Thread, it then sends
-`thread/start` and `thread/draft/prepare` in sequence before awaiting Settings,
-Workspace, Observability, history, catalog, or command refreshes. Preparation
-failure preserves the requested identity and blocks submission with the
-authoritative error.
+immediately in one coherent loading state and sends one `thread/draft/open`
+with an exact target intent. Preparation failure preserves the requested
+identity and blocks submission with the authoritative context. Settings,
+Workspace, Observability, history, catalog, and command refreshes are not part
+of this critical path.
 
 Workbench renders all negotiated and certified descriptors. The Agent/Profile
 selector becomes immutable provenance after binding; changing either starts a

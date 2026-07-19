@@ -88,9 +88,8 @@ implicitly because they receive new activation raw ids and no persistent source
 binding is written. Raw source identity is not model-visible; if the model needs
 source context, Floating submits it as explicit context input parts.
 
-Floating does not call `thread/start` to force a first-submit thread id.
-`thread/start` is a draft-source operation and may return `thread: null`.
-Floating starts the first turn with `turn/start`, `threadId: null`, and its
+Floating does not open a Workbench draft to force a first-submit thread id.
+It starts the first turn with `turn/start`, `threadId: null`, and its
 floating scope, then records the `threadId` from the accepted result. Follow-up
 turns pass that recorded id.
 

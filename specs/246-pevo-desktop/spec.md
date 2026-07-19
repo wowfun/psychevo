@@ -113,11 +113,12 @@ window label, so a stale renderer cleanup cannot remove a newer connection that
 uses the same surface.
 Request/response frames remain scoped to the initiating bridge connection, but
 thread-affecting Gateway notifications are shared across Desktop surfaces.
-Desktop fans out notification-only frames such as `gateway/event`,
-`turn/result`, and `turn/error` to other bridge transports with an origin
-connection id so the sender can ignore its own copy. This keeps JSON-RPC
-pending requests isolated while allowing Workbench and Floating to reconcile
-the same thread through the shared client transcript pipeline.
+Desktop fans out thread-affecting `gateway/event` notification frames to other
+bridge transports with an origin connection id so the sender can ignore its own
+copy. Accepted Turns have no parallel `turn/result` or `turn/error` broadcast;
+all surfaces settle from the single authoritative `TurnCompleted`. This keeps
+JSON-RPC pending requests isolated while allowing Workbench and Floating to
+reconcile the same thread through the shared client transcript pipeline.
 
 Floating is a Desktop-specialized small window, not a second chat
 implementation. Desktop must wire Floating and Workbench to shared
@@ -292,6 +293,14 @@ Default validation is deterministic and local:
 - native Desktop Workbench smoke covers a non-fullscreen main window and
   asserts that the document-level shell cannot scroll vertically or reveal
   blank space below the Workbench; Settings is checked as a control surface
+- native Desktop startup evidence records ordered `process_start`,
+  `window_ready`, `managed_gateway_ready`, `bridge_connected`, `gui_ready`, and
+  `draft_context_ready` milestones in a versioned manifest with bounded logs
+  and screenshots. Rust-side milestones are emitted only under `wdio-test`;
+  production builds expose no test recorder or managed token. Each milestone
+  declares its own clock source, and cross-process timestamps are not directly
+  subtracted. Browser-side milestones use the Workbench content-free timing
+  registry so WebKit and Chromium retain the same readiness semantics
 - native Desktop Floating smoke covers content-fit sizing without exposed black
   transparent gutters and provider/live transcript output through the shared
   Transcript DOM

@@ -40,6 +40,14 @@ They must not discover or consume real user credentials.
   project override, and unlimited acknowledgement;
 - replay simultaneous positioned local searches with empty initial arguments and
   prove every live snapshot keeps both calls, query-bearing titles, and states;
+- replay a persisted local result with the exact untrusted wrapper and prove the
+  shared decoder restores the structured envelope for both TUI history and
+  Gateway committed transcript projection;
+- prove the existing completed tool row exposes the decoded payload through its
+  normal preview/full-body folding behavior, without rendering the wrapper or
+  the generic `web_search normal` fallback;
+- cover raw JSON, valid wrapped JSON, malformed wrappers, and unrelated raw text
+  at the shared decoder boundary;
 - render parallel live searches at desktop and mobile widths, keeping provider
   metadata out of the title summary while preserving title hover disclosure;
 - reconcile hosted lifecycle/sources and cover citations, TUI links, query

@@ -245,9 +245,15 @@ reported consistently as `Disabled` by plugin list, read, and doctor; enabled
 policy is reported as `Installed`.
 
 The Plugins tab aggregates Psychevo and Codex authorities without merging rows
-by display name. Every row carries an authority-qualified selector. Codex rows
-retain `<plugin>@<marketplace>` identity and delegate install/uninstall to
-Codex; they never create a mirror package in the Psychevo store.
+by display name. It uses one page with a Codex compatibility card followed by
+Installed, Codex Catalog, Psychevo Catalog, and Marketplace Management sections.
+The card exposes feature enablement, optional binary path, resolved binary and
+version/profile, private home, separate runtime/auth status, Refresh, and any
+security-fix note. Feature-off listing never starts Codex.
+
+Every row carries an authority-qualified selector. Codex rows retain
+`codex:<plugin>@<marketplace>` identity and delegate install/uninstall to Codex;
+they never create a mirror package in the Psychevo store.
 
 Plugin detail groups `Skills`, `MCP`, `Hooks`, `Apps`, `Interface`, and optional
 Psychevo overlay contributions. Each group shows the pinned compatibility
@@ -257,9 +263,35 @@ declared executable component is ready or delegated.
 
 Plugin row and detail states use `Ready`, `Disabled`, `Needs trust`, `Needs
 authentication`, `Needs setup`, `Runtime unavailable`, `Delegated to Codex`,
-`Unsupported by profile`, and `Failed`. Codex installation responses surface
-`appsNeedingAuth` immediately with one Connect action. Trust actions require
-explicit user intent and record trust only for the current package fingerprint.
+`Unsupported by profile`, `Waiting for active turns`, `Partial`, and `Failed`.
+Codex installation responses surface `appsNeedingAuth` immediately with one
+Connect action. Install and explicit upgrade automatically allow the package in
+the profile and trust only the operation's current fingerprint. Later content or
+version drift returns it to Needs trust.
+
+Codex detail separates profile enablement from the project override and offers
+only the applicable actions: Enable/Disable in profile, Disable in this project,
+Reset project override, Trust current fingerprint, Connect, Doctor, Upgrade,
+and Uninstall. A project cannot enable a Codex plugin. Destructive authority
+operations display Waiting for active turns while generation leases drain; the
+user can stop the related turns.
+
+Install succeeds only after Codex materialization, detail reread, fingerprint,
+profile allow/trust write, and publication of the new generation. A later-step
+failure returns a structured partial result and leaves the package safely
+Disabled or Needs trust for Repair/Doctor; it does not automatically uninstall.
+Marketplace management supports add, remove, and upgrade with source, ref,
+sparse paths, and localized errors.
+
+Connect is explicit. Apps open a validated Codex `installUrl` and poll until
+`app/list.isAccessible`; ordinary MCP uses Codex OAuth and its completion
+notification. Connection sessions expire after five minutes and after Gateway
+restart. Plugin uninstall does not disconnect independent connector auth, and
+the screen offers no Codex logout action. Gateway parses every Connect URL and
+validates its actual scheme, host, and port-bearing authority. HTTPS is allowed;
+plain HTTP is allowed only when the parsed host is `localhost` or an IP loopback
+address. String-prefix lookalikes, user-info tricks that resolve to an external
+host, missing authorities, and other schemes are rejected.
 
 ## MCP
 
@@ -339,8 +371,9 @@ Gateway exposes domain RPCs instead of a capability aggregate:
   `skill/setEnabled`, `skill/write`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
   `plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
-  `plugin/setTrust`, `plugin/catalog/list`, `plugin/catalog/add`,
-  `plugin/catalog/remove`
+  `plugin/setTrust`, `plugin/authority/write`, `plugin/authority/refresh`,
+  `plugin/catalog/list`, `plugin/catalog/add`, `plugin/catalog/remove`,
+  `plugin/catalog/upgrade`, `plugin/connect/start`, `plugin/connect/status`
 - `tool/list`, `tool/read`, `tool/setEnabled`, `tool/create`, `tool/remove`
 - `mcp/list`, `mcp/read`, `mcp/upsert`, `mcp/remove`, `mcp/setEnabled`,
   `mcp/setToolPolicy`, `mcp/test`, `mcp/oauth/start`,
@@ -383,6 +416,12 @@ actions, toolset and MCP write methods, force confirmation paths, secret-free
 responses, and MCP OAuth start/status/logout against a fake local OAuth server
 and fake keyring.
 
+Codex authority Gateway tests cover default-off zero-spawn behavior, profile-only
+configuration, private home and auth links, exact reviewed profile negotiation,
+multiplexed requests, generation snapshots, draining leases, asymmetric policy,
+trust invalidation, partial mutations, Connect sessions, and a permanently gated
+inventory that never delays provider dispatch.
+
 Workbench tests cover top-level navigation, tab search, detail panels, force
 confirmations, agent detail-panel create/edit, Markdown preview copy/edit
 actions, skill `SKILL.md` editing, delete/uninstall header placement, agent
@@ -392,6 +431,11 @@ per-tool policy, OAuth polling states, and next-run effect messaging. Visual
 validation must include desktop and mobile Capabilities screens without text
 overlap. ACP backend form captures assert that populated multi-line controls are
 at their initial scroll origin before the screenshot is written.
+
+Codex plugin visual coverage includes disabled, ready, needs authentication,
+needs trust, partial, incompatible, and draining states, plus the compatibility
+card, authority-partitioned lists, two-layer policy controls, Connect, and
+partial-failure recovery.
 
 ## Related Topics
 
