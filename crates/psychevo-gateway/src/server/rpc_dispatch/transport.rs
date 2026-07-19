@@ -162,10 +162,7 @@ async fn consume_launch(
         .expect("web browser sessions poisoned")
         .insert(
             session_id.clone(),
-            BrowserSession {
-                cwd: entry.cwd,
-                source: entry.source,
-            },
+            BrowserSession::with_external_action_grant(entry.cwd, entry.source),
         );
     let mut response = shell_redirect();
     let secure = headers

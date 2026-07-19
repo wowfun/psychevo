@@ -12,7 +12,7 @@ use psychevo_runtime::{
 use serde_json::Value;
 
 use super::{
-    AuthContext, ResolvedScope, WebState, cwd_source, now_ms, update_browser_session_scope,
+    AuthContext, ResolvedScope, WebState, cwd_source, grant_browser_session_scope, now_ms,
 };
 
 const MAX_WORKSPACE_FILE_DEPTH: usize = 8;
@@ -447,7 +447,7 @@ pub(super) fn workspace_create_value(
         source: cwd_source(&cwd),
         cwd,
     };
-    update_browser_session_scope(state, auth, &scope);
+    grant_browser_session_scope(state, auth, &scope);
     Ok(serde_json::to_value(wire::WorkspaceCreateResult {
         cwd: scope.cwd.display().to_string(),
         scope: scope.to_wire_scope(),
@@ -622,7 +622,10 @@ pub(super) fn workspace_file_write_value(
     })?)
 }
 
-fn resolve_workspace_relative_path(root: &Path, path: &str) -> psychevo_runtime::Result<PathBuf> {
+pub(super) fn resolve_workspace_relative_path(
+    root: &Path,
+    path: &str,
+) -> psychevo_runtime::Result<PathBuf> {
     let raw = Path::new(path);
     if raw.is_absolute() || path.contains('\0') {
         return Err(Error::Message(
@@ -696,7 +699,7 @@ fn normalize_workspace_path(path: &str) -> String {
         .join("/")
 }
 
-fn path_from_root(root: &Path, path: &Path) -> Option<String> {
+pub(super) fn path_from_root(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root)
         .ok()
         .map(|relative| relative.to_string_lossy().replace('\\', "/"))

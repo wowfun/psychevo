@@ -842,10 +842,10 @@ async fn static_shell_with_browser_session_serves_workbench_index() {
         .expect("sessions")
         .insert(
             session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -1100,10 +1100,10 @@ async fn consumed_launch_with_browser_session_redirects_to_clean_shell() {
         .expect("sessions")
         .insert(
             session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let mut headers = HeaderMap::new();
     headers.insert(

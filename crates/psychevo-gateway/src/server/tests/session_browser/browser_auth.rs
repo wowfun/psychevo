@@ -18,13 +18,13 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
         .expect("sessions")
         .insert(
             browser_session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let auth = AuthContext::Browser {
-        session_id: browser_session_id,
+        session_id: browser_session_id.clone(),
     };
     let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -41,6 +41,17 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
     )
     .await
     .expect("thread/resume");
+    assert!(
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .get(&browser_session_id)
+            .expect("browser session")
+            .external_action_grants
+            .contains(&normalized_native_path(&other_cwd))
+    );
     let settings = handle_rpc(
         state,
         auth,
@@ -75,10 +86,10 @@ async fn browser_session_profile_auth_allows_global_settings_for_other_cwd() {
         .expect("sessions")
         .insert(
             browser_session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -124,13 +135,13 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
         .expect("sessions")
         .insert(
             browser_session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let auth = AuthContext::Browser {
-        session_id: browser_session_id,
+        session_id: browser_session_id.clone(),
     };
     let scope = ResolvedScope {
         cwd: other_cwd.clone(),
@@ -157,6 +168,17 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     assert_eq!(
         snapshot["scope"]["cwd"].as_str(),
         Some(other_cwd.display().to_string().as_str())
+    );
+    assert!(
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .get(&browser_session_id)
+            .expect("browser session")
+            .external_action_grants
+            .contains(&normalized_native_path(&other_cwd))
     );
 
     let settings = handle_rpc(
@@ -199,13 +221,13 @@ root = "~/workspaces"
         .expect("sessions")
         .insert(
             browser_session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let auth = AuthContext::Browser {
-        session_id: browser_session_id,
+        session_id: browser_session_id.clone(),
     };
     let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -232,6 +254,17 @@ root = "~/workspaces"
 
     assert_eq!(created["cwd"], cwd_string);
     assert_eq!(created["scope"]["cwd"].as_str(), Some(cwd_string.as_str()));
+    assert!(
+        state
+            .inner
+            .browser_sessions
+            .lock()
+            .expect("sessions")
+            .get(&browser_session_id)
+            .expect("browser session")
+            .external_action_grants
+            .contains(&normalized_native_path(&cwd))
+    );
 
     let unrestricted_parent = temp.path().join("outside-configured-root");
     std::fs::create_dir_all(&unrestricted_parent).expect("unrestricted parent");

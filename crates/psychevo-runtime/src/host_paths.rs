@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::env;
+#[cfg(not(windows))]
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::{env, fs};
 
 use crate::error::{Error, Result};
 

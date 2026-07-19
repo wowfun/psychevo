@@ -407,10 +407,10 @@
             .expect("sessions")
             .insert(
                 browser_session_id.clone(),
-                BrowserSession {
-                    cwd: state.inner.cwd.clone(),
-                    source: state.inner.source.clone(),
-                },
+                BrowserSession::with_external_action_grant(
+                    state.inner.cwd.clone(),
+                    state.inner.source.clone(),
+                ),
             );
         let auth = AuthContext::Browser {
             session_id: browser_session_id,

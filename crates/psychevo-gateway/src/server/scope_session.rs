@@ -275,6 +275,33 @@ fn resolve_required_scope(
     })
 }
 
+fn resolve_external_file_scope(
+    state: &WebState,
+    auth: &AuthContext,
+    scope: wire::GatewayRequestScope,
+) -> psychevo_runtime::Result<ResolvedScope> {
+    let resolved = resolve_required_scope(state, auth, scope)?;
+    if matches!(auth, AuthContext::Browser { .. }) {
+        let session = current_browser_session(state, auth)?;
+        let authorized_cwd = canonicalize_cwd(&session.cwd)?;
+        if resolved.cwd != authorized_cwd {
+            return Err(Error::Message(
+                "browser session is not authorized for external actions in this workspace"
+                    .to_string(),
+            ));
+        }
+        if !session
+            .external_action_grants
+            .contains(&normalized_native_path(&authorized_cwd))
+        {
+            return Err(Error::Message(
+                "browser session has no external-action grant for this workspace".to_string(),
+            ));
+        }
+    }
+    Ok(resolved)
+}
+
 fn resolve_start_scope(
     _state: &WebState,
     _auth: &AuthContext,
@@ -336,16 +363,65 @@ fn update_browser_session_scope(state: &WebState, auth: &AuthContext, scope: &Re
     let AuthContext::Browser { session_id, .. } = auth else {
         return;
     };
-    state
+    let mut sessions = state
         .inner
         .browser_sessions
         .lock()
-        .expect("web browser sessions poisoned")
-        .insert(
+        .expect("web browser sessions poisoned");
+    if let Some(session) = sessions.get_mut(session_id) {
+        session.cwd = scope.cwd.clone();
+        session.source = scope.source.clone();
+    } else {
+        sessions.insert(
             session_id.clone(),
             BrowserSession {
                 cwd: scope.cwd.clone(),
                 source: scope.source.clone(),
+                external_action_grants: BTreeSet::new(),
             },
         );
+    }
+}
+
+fn grant_browser_session_scope(state: &WebState, auth: &AuthContext, scope: &ResolvedScope) {
+    let AuthContext::Browser { session_id, .. } = auth else {
+        return;
+    };
+    let mut sessions = state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("web browser sessions poisoned");
+    if let Some(session) = sessions.get_mut(session_id) {
+        session.cwd = scope.cwd.clone();
+        session.source = scope.source.clone();
+        session
+            .external_action_grants
+            .insert(normalized_native_path(&scope.cwd));
+    }
+}
+
+fn update_browser_session_for_draft_scope(
+    state: &WebState,
+    auth: &AuthContext,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<()> {
+    if !matches!(auth, AuthContext::Browser { .. }) {
+        return Ok(());
+    }
+    let session = current_browser_session(state, auth)?;
+    let cwd = normalized_native_path(&scope.cwd);
+    let already_granted = session.external_action_grants.contains(&cwd);
+    let adopts_stored_session = !state
+        .inner
+        .state
+        .store()
+        .list_sessions_for_cwd_with_sources(&scope.cwd, &[])?
+        .is_empty();
+    if already_granted || adopts_stored_session {
+        grant_browser_session_scope(state, auth, scope);
+    } else {
+        update_browser_session_scope(state, auth, scope);
+    }
+    Ok(())
 }

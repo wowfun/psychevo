@@ -60,7 +60,7 @@ async fn handle_rpc(
             state.inner.gateway.clear_source_binding(&scope.source)?;
             prewarm_codex_runtime_inventory(&state, scope.cwd.clone());
             let snapshot_scope = detached_draft_scope(&scope, &auth);
-            update_browser_session_scope(&state, &auth, &snapshot_scope);
+            update_browser_session_for_draft_scope(&state, &auth, &snapshot_scope)?;
             let snapshot = serde_json::from_value(thread_snapshot(
                 &state,
                 &snapshot_scope,
@@ -106,7 +106,7 @@ async fn handle_rpc(
                     authorize_thread(&state, &auth, &thread_id)?;
                     let scope = resolved_scope_for_thread(&state, &thread_id)?;
                     bind_source_to_thread(&state, &scope, &thread_id)?;
-                    update_browser_session_scope(&state, &auth, &scope);
+                    grant_browser_session_scope(&state, &auth, &scope);
                     (Some(thread_id), scope)
                 }
                 None => {
@@ -705,6 +705,21 @@ async fn handle_rpc(
             let params = request.required_params::<wire::WorkspaceFileWriteParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
             workspace_file_write_value(&scope, params)
+        }
+        "workspace/file/externalActions" => {
+            let params = request.required_params::<wire::WorkspaceFileExternalActionsParams>()?;
+            let scope = resolve_external_file_scope(&state, &auth, params.scope)?;
+            workspace_file_external_actions_value(
+                &state.inner.workspace_external,
+                &scope,
+                &params.path,
+            )
+        }
+        "workspace/file/openExternal" => {
+            let params = request.required_params::<wire::WorkspaceFileOpenExternalParams>()?;
+            let scope = resolve_external_file_scope(&state, &auth, params.scope.clone())?;
+            workspace_file_open_external_value(&state.inner.workspace_external, &scope, params)
+                .await
         }
         "workspace/diff" => {
             let params = request.required_params::<wire::WorkspaceDiffParams>()?;

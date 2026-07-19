@@ -15,6 +15,284 @@ fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
 }
 
 #[tokio::test]
+async fn workspace_external_actions_rpc_classifies_regular_files_without_launching_apps() {
+    let (_temp, state) = web_state();
+    std::fs::write(state.inner.cwd.join("index.html"), "<main>Hello</main>\n")
+        .expect("html fixture");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let result = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("external-actions")),
+            method: "workspace/file/externalActions".to_string(),
+            params: Some(json!({ "scope": scope, "path": "index.html" })),
+        },
+    )
+    .await
+    .expect("workspace/file/externalActions");
+
+    assert_eq!(result["path"], "index.html");
+    assert_eq!(result["category"], "webpage");
+    assert_eq!(result["textLike"], true);
+    assert_eq!(result["preferredAction"], "systemDefault");
+    assert_eq!(
+        result["availableActions"]
+            .as_array()
+            .and_then(|actions| actions.last()),
+        Some(&json!("reveal"))
+    );
+}
+
+#[tokio::test]
+async fn browser_external_file_rpcs_reject_a_scope_outside_the_current_session() {
+    let (temp, state) = web_state();
+    std::fs::write(state.inner.cwd.join("README.md"), "workspace\n").expect("workspace file");
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(&outside).expect("outside workspace");
+    std::fs::write(outside.join("README.md"), "outside\n").expect("outside file");
+    let session_id = "browser-external-scope".to_string();
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .insert(
+            session_id.clone(),
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
+        );
+    let outside_scope = wire::GatewayRequestScope {
+        cwd: outside.to_string_lossy().to_string(),
+        source: wire::GatewaySourceInput {
+            kind: "web".to_string(),
+            raw_id: Some("outside".to_string()),
+            lifetime: None,
+            raw_identity: None,
+            visible_name: None,
+        },
+    };
+    let auth = AuthContext::Browser { session_id };
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    for (method, params) in [
+        (
+            "workspace/file/externalActions",
+            json!({ "scope": outside_scope.clone(), "path": "README.md" }),
+        ),
+        (
+            "workspace/file/openExternal",
+            json!({
+                "scope": outside_scope.clone(),
+                "path": "README.md",
+                "action": "systemDefault"
+            }),
+        ),
+    ] {
+        let error = handle_rpc(
+            state.clone(),
+            auth.clone(),
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(method)),
+                method: method.to_string(),
+                params: Some(params),
+            },
+        )
+        .await
+        .expect_err("browser scope mismatch must be rejected before launch");
+        assert!(error.to_string().contains("not authorized"));
+    }
+}
+
+#[tokio::test]
+async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scope_pivot() {
+    let (temp, state) = web_state();
+    let arbitrary = temp.path().join("arbitrary-workspace");
+    std::fs::create_dir_all(&arbitrary).expect("arbitrary workspace");
+    std::fs::write(arbitrary.join("README.md"), "ungranted\n").expect("arbitrary file");
+    let arbitrary = canonicalize_cwd(&arbitrary).expect("canonical arbitrary workspace");
+    let browser_session_id = "browser-external-pivot".to_string();
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .insert(
+            browser_session_id.clone(),
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
+        );
+    let auth = AuthContext::Browser {
+        session_id: browser_session_id.clone(),
+    };
+    let scope = ResolvedScope {
+        cwd: arbitrary.clone(),
+        source: cwd_source(&arbitrary),
+    }
+    .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    handle_rpc(
+        state.clone(),
+        auth.clone(),
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("pivot")),
+            method: "thread/draft/open".to_string(),
+            params: Some(json!({
+                "origin": scope.clone(),
+                "targetIntent": { "kind": "default" }
+            })),
+        },
+    )
+    .await
+    .expect("draft scope pivot updates navigation");
+    let session = state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .get(&browser_session_id)
+        .cloned()
+        .expect("browser session");
+    assert_eq!(session.cwd, arbitrary);
+    assert!(!session.external_action_grants.contains(&arbitrary));
+
+    let error = handle_rpc(
+        state,
+        auth,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("external-after-pivot")),
+            method: "workspace/file/externalActions".to_string(),
+            params: Some(json!({ "scope": scope, "path": "README.md" })),
+        },
+    )
+    .await
+    .expect_err("navigation-only draft cwd must remain ungranted");
+    assert!(error.to_string().contains("no external-action grant"));
+}
+
+#[tokio::test]
+async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
+    let (temp, state) = web_state();
+    let thread_id = state
+        .inner
+        .state
+        .store()
+        .create_session_with_metadata(
+            &state.inner.cwd,
+            "web",
+            "fake-model",
+            "fake-provider",
+            None,
+        )
+        .expect("stored thread");
+    let trusted_scope = ResolvedScope {
+        cwd: state.inner.cwd.clone(),
+        source: state.inner.source.clone(),
+    };
+    bind_source_to_thread(&state, &trusted_scope, &thread_id).expect("source binding");
+    let arbitrary = temp.path().join("paired-cwd");
+    std::fs::create_dir_all(&arbitrary).expect("paired cwd");
+    let arbitrary = canonicalize_cwd(&arbitrary).expect("canonical paired cwd");
+    let mut caller_scope = trusted_scope.to_wire_scope();
+    caller_scope.cwd = arbitrary.display().to_string();
+    let browser_session_id = "browser-source-resume-grant".to_string();
+    state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .insert(
+            browser_session_id.clone(),
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
+        );
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    handle_rpc(
+        state.clone(),
+        AuthContext::Browser {
+            session_id: browser_session_id.clone(),
+        },
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("source-default-resume")),
+            method: "thread/resume".to_string(),
+            params: Some(json!({ "scope": caller_scope })),
+        },
+    )
+    .await
+    .expect("source-default resume");
+
+    let session = state
+        .inner
+        .browser_sessions
+        .lock()
+        .expect("browser sessions")
+        .get(&browser_session_id)
+        .cloned()
+        .expect("browser session");
+    assert_eq!(session.cwd, state.inner.cwd);
+    assert!(!session.external_action_grants.contains(&arbitrary));
+}
+
+#[tokio::test]
+async fn workspace_external_actions_reject_directories_and_symlink_escapes() {
+    let (temp, state) = web_state();
+    std::fs::create_dir_all(state.inner.cwd.join("folder")).expect("folder");
+    let outside = temp.path().join("outside.txt");
+    std::fs::write(&outside, "secret\n").expect("outside file");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, state.inner.cwd.join("escape.txt")).expect("symlink");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let mut paths = vec!["folder"];
+    #[cfg(unix)]
+    paths.push("escape.txt");
+    for path in paths {
+        let error = handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(path)),
+                method: "workspace/file/externalActions".to_string(),
+                params: Some(json!({ "scope": scope.clone(), "path": path })),
+            },
+        )
+        .await
+        .expect_err("non-regular or escaped path must be rejected");
+        assert!(
+            error.to_string().contains("regular file")
+                || error.to_string().contains("outside the workspace")
+        );
+    }
+}
+
+#[tokio::test]
 async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boundary() {
     let (temp, state) = web_state();
     let root = temp.path().join("workspaces");
@@ -593,8 +871,7 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
         &state.inner.cwd,
     );
 
-    let review_scope = default_resolved_scope(&state, &AuthContext::Bearer)
-        .expect("review scope");
+    let review_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("review scope");
     let changes = state.inner.review.changes_for_scope(&review_scope);
     assert_eq!(changes.groups.len(), 1);
     assert_eq!(changes.groups[0].files.len(), 1);
@@ -639,11 +916,10 @@ fn workspace_review_records_patch_paths_and_opaque_invalidations() {
     std::fs::write(cwd.join("update.txt"), "before update\n").expect("update baseline");
     std::fs::write(cwd.join("delete.txt"), "before delete\n").expect("delete baseline");
     std::fs::write(cwd.join("move-from.txt"), "before move\n").expect("move baseline");
-    state.inner.review.begin_turn(
-        "turn-patch",
-        Some("thread-patch".to_string()),
-        cwd,
-    );
+    state
+        .inner
+        .review
+        .begin_turn("turn-patch", Some("thread-patch".to_string()), cwd);
     for mutation in [
         psychevo_runtime::WorkspaceMutation::ExactUtf8 {
             path: "add.txt".to_string(),

@@ -62,8 +62,8 @@ use psychevo_runtime::{
     main_agent_from_session_metadata, main_agent_metadata, mcp_server_value, mcp_servers_value,
     mcp_test_server_value, model_catalog_entry_is_free, model_catalog_provider,
     model_catalog_providers, next_run_at_ms, normalize_provider_id, normalize_reasoning_effort,
-    parse_agent_definition_text, parse_agent_team_definition_text, plugin_doctor_value,
-    plugin_import_inspect_value, plugin_install_value, plugin_list_value,
+    normalized_native_path, parse_agent_definition_text, parse_agent_team_definition_text,
+    plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
     plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
     plugin_reset_enabled_value, plugin_set_enabled_value, plugin_set_trust_value,
     plugin_uninstall_value, plugin_view_value, read_cached_model_catalog, redo_session,
@@ -111,6 +111,7 @@ mod terminal;
 mod thread_application;
 mod voice;
 mod workspace;
+mod workspace_external;
 
 use agents::{
     active_profile_config_dir, agent_control_result, agent_list_result, agent_read_result,
@@ -184,6 +185,10 @@ use workspace::{
     WorkspaceReviewState, workspace_create_value, workspace_diff_result, workspace_diff_value,
     workspace_file_read_value, workspace_file_write_value, workspace_files_value,
     workspace_folder_list_value, workspace_git_branches_value, workspace_git_checkout_value,
+};
+use workspace_external::{
+    WorkspaceExternalState, workspace_file_external_actions_value,
+    workspace_file_open_external_value,
 };
 
 include!("server/binding.rs");

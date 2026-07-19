@@ -9,10 +9,10 @@ async fn default_draft_open_returns_one_exact_authoritative_context() {
         .expect("browser sessions")
         .insert(
             browser_session_id.clone(),
-            BrowserSession {
-                cwd: state.inner.cwd.clone(),
-                source: state.inner.source.clone(),
-            },
+            BrowserSession::with_external_action_grant(
+                state.inner.cwd.clone(),
+                state.inner.source.clone(),
+            ),
         );
     let origin = ResolvedScope {
         cwd: state.inner.cwd.clone(),
