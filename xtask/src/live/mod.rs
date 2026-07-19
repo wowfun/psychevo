@@ -722,8 +722,126 @@ fn run_desktop_native_smoke_check(
         Some(pevo_bin.as_path()),
         provider_token.as_deref(),
     );
-    let outcome = run_logged_process("desktop native WDIO smoke", &mut wdio, log)?;
+    let outcome = run_logged_process("desktop native WDIO smoke", &mut wdio, Arc::clone(&log))?;
+    if outcome.passed
+        && let Err(error) = validate_desktop_startup_artifacts(&wdio_artifact_root)
+    {
+        return failed_result(
+            log,
+            format!("Desktop native startup evidence is invalid: {error:#}"),
+            environment,
+        );
+    }
     check_result_from_outcome(outcome, "Desktop native WDIO smoke failed", environment)
+}
+
+fn validate_desktop_startup_artifacts(wdio_artifact_root: &Path) -> Result<()> {
+    const REQUIRED_CHECKPOINTS: &[&str] = &[
+        "process_start",
+        "window_ready",
+        "managed_gateway_ready",
+        "bridge_connected",
+        "gui_ready",
+        "draft_context_ready",
+    ];
+    const SCREENSHOT_CHECKPOINTS: &[&str] = &["gui_ready", "draft_context_ready"];
+
+    let manifest_path = wdio_artifact_root.join("desktop-startup-journey.json");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?,
+    )
+    .with_context(|| format!("parse {}", manifest_path.display()))?;
+    if manifest
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+    {
+        bail!(
+            "{} has an unsupported schemaVersion",
+            manifest_path.display()
+        );
+    }
+    if manifest
+        .pointer("/run/outcome")
+        .and_then(serde_json::Value::as_str)
+        != Some("passed")
+    {
+        bail!("{} does not describe a passed run", manifest_path.display());
+    }
+    let checkpoints = manifest
+        .get("checkpoints")
+        .and_then(serde_json::Value::as_array)
+        .with_context(|| format!("{} is missing checkpoints", manifest_path.display()))?;
+    for id in REQUIRED_CHECKPOINTS {
+        let matching = checkpoints
+            .iter()
+            .filter(|checkpoint| {
+                checkpoint.get("id").and_then(serde_json::Value::as_str) == Some(id)
+            })
+            .collect::<Vec<_>>();
+        if matching.len() != 1 {
+            bail!(
+                "{} contains {} '{}' checkpoints; expected exactly one",
+                manifest_path.display(),
+                matching.len(),
+                id
+            );
+        }
+        let checkpoint = matching[0];
+        if checkpoint.get("status").and_then(serde_json::Value::as_str) != Some("complete") {
+            bail!(
+                "{} checkpoint '{}' is incomplete",
+                manifest_path.display(),
+                id
+            );
+        }
+        if SCREENSHOT_CHECKPOINTS.contains(id) {
+            let screenshot_path = checkpoint
+                .pointer("/screenshot/path")
+                .and_then(serde_json::Value::as_str)
+                .with_context(|| {
+                    format!(
+                        "{} checkpoint '{}' has no screenshot path",
+                        manifest_path.display(),
+                        id
+                    )
+                })?;
+            let relative = Path::new(screenshot_path);
+            if relative.is_absolute()
+                || relative.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                bail!(
+                    "{} checkpoint '{}' has an unsafe screenshot path",
+                    manifest_path.display(),
+                    id
+                );
+            }
+            let screenshot = wdio_artifact_root.join(relative);
+            if !screenshot.is_file() {
+                bail!(
+                    "{} checkpoint '{}' screenshot is missing: {}",
+                    manifest_path.display(),
+                    id,
+                    screenshot.display()
+                );
+            }
+        }
+    }
+    let rust_trace = wdio_artifact_root.join("desktop-startup-rust.jsonl");
+    if !rust_trace.is_file() {
+        bail!(
+            "Desktop Rust startup trace is missing: {}",
+            rust_trace.display()
+        );
+    }
+    Ok(())
 }
 
 fn configure_desktop_wdio_command(
@@ -1497,6 +1615,7 @@ mod tests {
         assert_eq!(
             ids,
             vec![
+                "web-composer-draft-open-first-send",
                 "web-composer-live",
                 "web-automation-live",
                 "web-subagent-live",
@@ -1665,6 +1784,63 @@ mod tests {
         assert_eq!(command_env(&command, "DUMMY_ENV").as_deref(), Some("1"));
         assert!(command_env(&command, "PSYCHEVO_INFERENCE_PROVIDER").is_none());
         assert!(command_env(&command, "PSYCHEVO_DESKTOP_PROVIDER_LIVE").is_none());
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn desktop_startup_artifact_validation_requires_complete_screenshot_evidence() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-xtask-desktop-startup-artifacts-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let screenshots = root.join("screenshots");
+        fs::create_dir_all(&screenshots).expect("screenshots");
+        for filename in ["gui-ready.png", "draft-ready.png"] {
+            fs::write(screenshots.join(filename), "proof").expect("screenshot");
+        }
+        fs::write(root.join("desktop-startup-rust.jsonl"), "{}\n").expect("rust trace");
+        let checkpoints = [
+            "process_start",
+            "window_ready",
+            "managed_gateway_ready",
+            "bridge_connected",
+            "gui_ready",
+            "draft_context_ready",
+        ]
+        .into_iter()
+        .map(|id| {
+            let screenshot = match id {
+                "gui_ready" => serde_json::json!({ "path": "screenshots/gui-ready.png" }),
+                "draft_context_ready" => {
+                    serde_json::json!({ "path": "screenshots/draft-ready.png" })
+                }
+                _ => serde_json::Value::Null,
+            };
+            serde_json::json!({ "id": id, "screenshot": screenshot, "status": "complete" })
+        })
+        .collect::<Vec<_>>();
+        fs::write(
+            root.join("desktop-startup-journey.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 1,
+                "run": { "outcome": "passed" },
+                "checkpoints": checkpoints,
+            }))
+            .expect("manifest json"),
+        )
+        .expect("manifest");
+
+        validate_desktop_startup_artifacts(&root).expect("valid startup evidence");
+        fs::remove_file(screenshots.join("draft-ready.png")).expect("remove screenshot");
+        let error = validate_desktop_startup_artifacts(&root)
+            .expect_err("missing screenshot must fail")
+            .to_string();
+        assert!(error.contains("draft_context_ready"));
 
         fs::remove_dir_all(root).expect("cleanup");
     }

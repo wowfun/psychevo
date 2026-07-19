@@ -140,6 +140,15 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         },
     },
     LiveCheck {
+        id: "web-composer-draft-open-first-send",
+        description: "Queue exactly one first Composer turn while a real Gateway draft open is pending",
+        suites: &["web"],
+        action: LiveCheckAction::DeterministicPlaywright {
+            spec: "apps/workbench/e2e/runtime-live.spec.ts",
+            grep: "keeps first send live across a pending atomic draft open on the real Gateway",
+        },
+    },
+    LiveCheck {
         id: "web-composer-live",
         description: "Run Workbench live composer validation",
         suites: &["web"],
@@ -571,6 +580,7 @@ mod tests {
             vec![
                 "provider-smoke",
                 "gateway-automation-live",
+                "web-composer-draft-open-first-send",
                 "web-composer-live",
                 "web-automation-live",
                 "web-subagent-live",

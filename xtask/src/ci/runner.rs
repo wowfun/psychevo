@@ -13,6 +13,7 @@ use super::model::{
 use super::process::{create_step_log, run_logged_process};
 use super::profiles::{find_profile, plan_for_profile_with_env};
 use super::retention::warn_if_ci_retention_cleanup_fails;
+use super::surface_profile::run_surface_profile;
 use super::tui_capture::run_tui_vhs_demo;
 use super::workbench_visual::run_workbench_visual;
 use crate::live::{LiveEnvMode, run_ci_single_provider_live};
@@ -36,7 +37,8 @@ pub(crate) fn execute_profile(
     let live_env = live_env.unwrap_or_default();
 
     let use_default_artifact_root = artifact_root.is_none();
-    let artifact_root = artifact_root.unwrap_or_else(|| default_artifact_root(root));
+    let invocation_cwd = std::env::current_dir().context("read xtask invocation directory")?;
+    let artifact_root = resolve_ci_artifact_root(root, &invocation_cwd, artifact_root);
     fs::create_dir_all(artifact_root.join("logs"))
         .with_context(|| format!("create artifact root {}", artifact_root.display()))?;
 
@@ -106,6 +108,19 @@ pub(crate) fn execute_profile(
     Ok(run)
 }
 
+fn resolve_ci_artifact_root(
+    root: &Path,
+    invocation_cwd: &Path,
+    artifact_root: Option<PathBuf>,
+) -> PathBuf {
+    let path = artifact_root.unwrap_or_else(|| default_artifact_root(root));
+    if path.is_absolute() {
+        path
+    } else {
+        invocation_cwd.join(path)
+    }
+}
+
 fn run_step(
     root: &Path,
     artifact_root: &Path,
@@ -124,6 +139,9 @@ fn run_step(
         WorkflowStepAction::DesktopVisual => {
             run_desktop_visual_step(root, artifact_root, step, log_path)
         }
+        WorkflowStepAction::SurfaceProfile => {
+            run_surface_profile_step(root, artifact_root, step, log_path)
+        }
         WorkflowStepAction::TuiVhsDemo => {
             run_tui_vhs_demo_step(root, artifact_root, step, log_path)
         }
@@ -131,6 +149,29 @@ fn run_step(
             run_workbench_visual_step(root, artifact_root, step, log_path)
         }
     }
+}
+
+fn run_surface_profile_step(
+    root: &Path,
+    artifact_root: &Path,
+    step: &WorkflowStep,
+    log_path: &Path,
+) -> Result<StepExecution> {
+    let log = create_step_log(log_path)?;
+    let outcome = run_surface_profile(root, artifact_root, log)?;
+    println!(
+        "ci step {}: {}",
+        step.id,
+        if outcome.passed { "ok" } else { "failed" }
+    );
+    Ok(step_execution(
+        step,
+        log_path,
+        step.action.command_for_plan(),
+        outcome.passed,
+        outcome.exit_code,
+        outcome.mirrored_diagnostics,
+    ))
 }
 
 fn run_command_step(
@@ -356,5 +397,26 @@ mod tests {
             "CI/CD profile 'changed' failed at step 'demo'; log: /tmp/demo.log"
         );
         assert_eq!(tail_lines("one\ntwo\nthree\n", 2), "two\nthree\n");
+    }
+
+    #[test]
+    fn relative_artifact_root_is_resolved_before_steps_change_directory() {
+        let invocation_cwd = Path::new("/tmp/psychevo-caller");
+        assert_eq!(
+            resolve_ci_artifact_root(
+                Path::new("/tmp/psychevo-repo"),
+                invocation_cwd,
+                Some(PathBuf::from("artifacts/visual")),
+            ),
+            invocation_cwd.join("artifacts/visual")
+        );
+        assert_eq!(
+            resolve_ci_artifact_root(
+                Path::new("/tmp/psychevo-repo"),
+                invocation_cwd,
+                Some(PathBuf::from("/tmp/absolute-artifacts")),
+            ),
+            PathBuf::from("/tmp/absolute-artifacts")
+        );
     }
 }

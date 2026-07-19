@@ -107,6 +107,27 @@ const VISUAL_STEPS: &[WorkflowStep] = &[
     },
 ];
 
+const SURFACE_PROFILE_STEPS: &[WorkflowStep] = &[
+    WorkflowStep {
+        id: "workbench-build",
+        description: "Build Workbench for deterministic surface profiling",
+        action: WorkflowStepAction::Command(&["pnpm", "--filter", "@psychevo/workbench", "build"]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "pevo-debug-build",
+        description: "Build pevo with the fullscreen TUI profiling probe",
+        action: WorkflowStepAction::Command(&["cargo", "build", "-p", "psychevo-cli", "--quiet"]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "surface-comparison",
+        description: "Profile the same deterministic Native turn through TUI and Workbench",
+        action: WorkflowStepAction::SurfaceProfile,
+        live: false,
+    },
+];
+
 const LIVE_STEPS: &[WorkflowStep] = &[WorkflowStep {
     id: "single-provider-live",
     description: "Run explicit live provider smoke validation",
@@ -171,6 +192,14 @@ const PROFILES: &[WorkflowProfile] = &[
         live: false,
         artifact_only: false,
         steps: VISUAL_STEPS,
+    },
+    WorkflowProfile {
+        id: "surface-profile",
+        description: "Deterministic TUI versus Workbench journey profiling",
+        kind: ProfileKind::Ci,
+        live: false,
+        artifact_only: false,
+        steps: SURFACE_PROFILE_STEPS,
     },
     WorkflowProfile {
         id: "live",
@@ -250,7 +279,15 @@ mod tests {
             .collect();
         assert_eq!(
             ids,
-            vec!["changed", "rust-broad", "web", "visual", "live", "package"]
+            vec![
+                "changed",
+                "rust-broad",
+                "web",
+                "visual",
+                "surface-profile",
+                "live",
+                "package"
+            ]
         );
     }
 
@@ -282,6 +319,19 @@ mod tests {
         assert_eq!(
             plan.steps[2].command,
             vec!["xtask-internal", "desktop-visual"]
+        );
+    }
+
+    #[test]
+    fn surface_profile_plan_builds_both_surfaces_then_runs_owned_profiler() {
+        let plan = plan_profile("surface-profile", None).expect("surface profile");
+        assert_eq!(plan.steps.len(), 3);
+        assert_eq!(plan.steps[0].id, "workbench-build");
+        assert_eq!(plan.steps[1].id, "pevo-debug-build");
+        assert_eq!(plan.steps[2].id, "surface-comparison");
+        assert_eq!(
+            plan.steps[2].command,
+            vec!["xtask-internal", "surface-profile"]
         );
     }
 
