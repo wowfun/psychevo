@@ -55,12 +55,10 @@ fn context_read_result(
 fn context_read_result_from_snapshot(
     snapshot: &psychevo_runtime::ContextSnapshot,
 ) -> wire::ContextReadResult {
-    let status = if snapshot.status == "partial" {
-        "partial"
-    } else if snapshot.total.estimated {
-        "estimated"
-    } else {
-        "exact"
+    let status = match snapshot.status.as_str() {
+        "reported" | "derived" | "partial" | "unavailable" => snapshot.status.as_str(),
+        _ if snapshot.total.estimated => "estimated",
+        _ => "reported",
     };
     let categories = snapshot
         .categories
@@ -86,6 +84,8 @@ fn context_read_result_from_snapshot(
         available: true,
         label: format_context_total_value(snapshot),
         status: status.to_string(),
+        basis: snapshot.basis.clone(),
+        applies_to_session_seq: snapshot.applies_to_session_seq,
         used_tokens: snapshot.total.tokens,
         context_limit: snapshot.context_limit,
         percent: snapshot.total.percent,
@@ -135,7 +135,11 @@ fn observability_read_value(
                 reasoning_tokens: summary.reasoning_tokens,
                 cache_read_tokens: summary.cache_read_tokens,
                 cache_write_tokens: summary.cache_write_tokens,
+                effective_total_tokens: summary.effective_total_tokens,
                 reported_total_tokens: summary.reported_total_tokens,
+                total_status: summary.total_status,
+                accounted_provider_call_count: summary.accounted_provider_call_count,
+                unaccounted_provider_call_count: summary.unaccounted_provider_call_count,
                 estimated_cost_nanodollars: summary.estimated_cost_nanodollars,
                 cost_status: summary.cost_status,
                 estimated_pricing_count: summary.estimated_pricing_count,
@@ -166,7 +170,9 @@ fn acp_peer_context_read_result(usage: &Value) -> Option<wire::ContextReadResult
     Some(wire::ContextReadResult {
         available: true,
         label: format_context_total_value_parts(used, false, Some(size), percent),
-        status: "exact".to_string(),
+        status: "partial".to_string(),
+        basis: "agent_reported_context".to_string(),
+        applies_to_session_seq: None,
         used_tokens: used,
         context_limit: Some(size),
         percent,
@@ -182,14 +188,6 @@ fn apply_acp_peer_usage_to_summary(
     let Some(peer_usage) = peer_usage else {
         return;
     };
-    if let Some(used) = usage_u64_field(peer_usage, "used") {
-        if usage.reported_total_tokens == 0 {
-            usage.reported_total_tokens = used;
-        }
-        if usage.context_input_tokens == 0 {
-            usage.context_input_tokens = used;
-        }
-    }
     let has_persisted_pricing =
         usage.estimated_pricing_count + usage.free_pricing_count + usage.included_pricing_count > 0;
     if !has_persisted_pricing && let Some(cost) = acp_peer_usage_cost_nanodollars(peer_usage) {
@@ -233,6 +231,8 @@ fn context_unavailable(label: &str) -> wire::ContextReadResult {
         available: false,
         label: label.to_string(),
         status: "unavailable".to_string(),
+        basis: "unavailable".to_string(),
+        applies_to_session_seq: None,
         used_tokens: 0,
         context_limit: None,
         percent: None,
@@ -255,7 +255,11 @@ fn usage_unavailable() -> wire::SessionUsageSummaryView {
         reasoning_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        effective_total_tokens: None,
         reported_total_tokens: 0,
+        total_status: "unavailable".to_string(),
+        accounted_provider_call_count: 0,
+        unaccounted_provider_call_count: 0,
         estimated_cost_nanodollars: 0,
         cost_status: "unknown".to_string(),
         estimated_pricing_count: 0,
@@ -292,7 +296,11 @@ fn usage_read_value(
                 reasoning_tokens: window.reasoning_tokens,
                 cache_read_tokens: window.cache_read_tokens,
                 cache_write_tokens: window.cache_write_tokens,
+                effective_total_tokens: window.effective_total_tokens,
                 reported_total_tokens: window.reported_total_tokens,
+                total_status: window.total_status,
+                accounted_provider_call_count: window.accounted_provider_call_count,
+                unaccounted_provider_call_count: window.unaccounted_provider_call_count,
                 estimated_cost_nanodollars: window.estimated_cost_nanodollars,
                 cost_status: window.cost_status,
                 estimated_pricing_count: window.estimated_pricing_count,
@@ -313,7 +321,11 @@ fn usage_read_value(
                     date: day.date,
                     session_count: day.session_count,
                     message_count: day.message_count,
+                    effective_total_tokens: day.effective_total_tokens,
                     reported_total_tokens: day.reported_total_tokens,
+                    total_status: day.total_status,
+                    accounted_provider_call_count: day.accounted_provider_call_count,
+                    unaccounted_provider_call_count: day.unaccounted_provider_call_count,
                     context_input_tokens: day.context_input_tokens,
                     cache_read_tokens: day.cache_read_tokens,
                     cache_write_tokens: day.cache_write_tokens,

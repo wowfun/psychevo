@@ -848,6 +848,41 @@ fn session_event_id(kind: &str, sequence: u64) -> String {
 
 pub type RunStreamSink = Arc<dyn Fn(RunStreamEvent) + Send + Sync>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceMutation {
+    ExactUtf8 {
+        path: String,
+        before: Option<String>,
+        after: Option<String>,
+    },
+    Opaque {
+        source: String,
+    },
+}
+
+#[derive(Clone)]
+pub struct WorkspaceMutationSink {
+    inner: Arc<dyn Fn(WorkspaceMutation) + Send + Sync>,
+}
+
+impl WorkspaceMutationSink {
+    pub fn new(observe: impl Fn(WorkspaceMutation) + Send + Sync + 'static) -> Self {
+        Self {
+            inner: Arc::new(observe),
+        }
+    }
+
+    pub fn observe(&self, mutation: WorkspaceMutation) {
+        (self.inner)(mutation);
+    }
+}
+
+impl fmt::Debug for WorkspaceMutationSink {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("WorkspaceMutationSink(..)")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClarifyQuestionOption {
     pub label: String,

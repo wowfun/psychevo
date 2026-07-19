@@ -86,6 +86,7 @@ impl TuiApp {
             selected_capability_roots: Vec::new(),
             skill_inputs: self.skill_inputs.clone(),
             mcp_servers: Vec::new(),
+            workspace_mutations: None,
             runtime_tools: Vec::new(),
         }
     }

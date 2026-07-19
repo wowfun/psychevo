@@ -6,7 +6,7 @@ fn prewarm_codex_runtime_inventory(state: &WebState, cwd: PathBuf) {
         let _ = warm_state
             .inner
             .codex_capability_broker
-            .prepare_runtime_inventory(&cwd)
+            .refresh_runtime_inventory(&cwd)
             .await;
     });
 }
@@ -25,6 +25,7 @@ async fn handle_rpc(
             "server": "psychevo-gateway",
             "version": env!("CARGO_PKG_VERSION"),
             "cwd": scope.cwd,
+            "displayCwd": display_cwd(&scope.cwd),
             "scope": scope.to_wire_scope(),
             "source": scope.source,
             "profile": gateway_profile_value(&state),
@@ -43,9 +44,14 @@ async fn handle_rpc(
             }
             }))
         }
-        "thread/start" => {
-            let params = request.required_params::<wire::ThreadStartParams>()?;
-            let scope = resolve_start_scope(&state, &auth, params.scope.clone())?;
+        "thread/draft/open" => {
+            let params = request.required_params::<wire::ThreadDraftOpenParams>()?;
+            let scope = resolve_start_scope(&state, &auth, params.origin.clone())?;
+            let _source_mutation = state
+                .inner
+                .gateway
+                .lock_source_mutation(&canonical_source_mutation_key(&scope.source))
+                .await;
             state
                 .inner
                 .gateway
@@ -55,7 +61,43 @@ async fn handle_rpc(
             prewarm_codex_runtime_inventory(&state, scope.cwd.clone());
             let snapshot_scope = detached_draft_scope(&scope, &auth);
             update_browser_session_scope(&state, &auth, &snapshot_scope);
-            thread_snapshot(&state, &snapshot_scope, None)
+            let snapshot = serde_json::from_value(thread_snapshot(
+                &state,
+                &snapshot_scope,
+                None,
+            )?)?;
+            let target_id = match params.target_intent {
+                wire::ThreadDraftTargetIntent::Default => {
+                    let discovery = thread_context_read_result_live(
+                        &state,
+                        &snapshot_scope,
+                        wire::ThreadContextReadParams {
+                            thread_id: None,
+                            target: None,
+                            scope: Some(snapshot_scope.to_wire_scope()),
+                        },
+                    )
+                    .await?;
+                    discovery.suggested_target_id.ok_or_else(|| {
+                        Error::Message("No default Agent target is available.".to_string())
+                    })?
+                }
+                wire::ThreadDraftTargetIntent::Exact { target_id } => target_id,
+            };
+            let prepared = thread_draft_prepare_result(
+                &state,
+                &snapshot_scope,
+                wire::ThreadDraftPrepareParams {
+                    target_id,
+                    scope: snapshot_scope.to_wire_scope(),
+                },
+            )
+            .await?;
+            Ok(serde_json::to_value(wire::ThreadDraftOpenResult {
+                snapshot,
+                context: prepared.context,
+                problem: prepared.problem,
+            })?)
         }
         "thread/resume" => {
             let params = request.params::<wire::ThreadResumeParams>()?;
@@ -221,6 +263,11 @@ async fn handle_rpc(
         "thread/draft/prepare" => {
             let params = request.required_params::<wire::ThreadDraftPrepareParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
+            let _source_mutation = state
+                .inner
+                .gateway
+                .lock_source_mutation(&canonical_source_mutation_key(&scope.source))
+                .await;
             Ok(serde_json::to_value(
                 thread_draft_prepare_result(&state, &scope, params).await?,
             )?)
@@ -266,6 +313,7 @@ async fn handle_rpc(
         "runtime/profile/list" => {
             let params = request.params::<wire::RuntimeProfileListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            state.invalidate_runnable_target_catalog();
             Ok(serde_json::to_value(runtime_profile_list_result(
                 &state, &scope,
             )?)?)
@@ -278,17 +326,17 @@ async fn handle_rpc(
         "runtime/profile/write" => {
             let params = request.required_params::<wire::RuntimeProfileWriteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            write_runtime_profile(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(write_runtime_profile(&state, &scope, params))
         }
         "runtime/profile/delete" => {
             let params = request.required_params::<wire::RuntimeProfileDeleteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            delete_runtime_profile(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(delete_runtime_profile(&state, &scope, params))
         }
         "runtime/profile/setEnabled" => {
             let params = request.required_params::<wire::RuntimeProfileSetEnabledParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            set_runtime_profile_enabled(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(set_runtime_profile_enabled(&state, &scope, params))
         }
         "automation/list" => {
             let params = request.params::<wire::AutomationListParams>()?;
@@ -320,6 +368,16 @@ async fn handle_rpc(
         }
         "turn/start" => {
             let params = request.required_params::<wire::TurnStartParams>()?;
+            gateway_profile_mark(
+                "turn_start_received",
+                None,
+                params.thread_id.as_deref(),
+                GatewayProfileFields {
+                    request_method: Some("turn/start"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
             let input = params.input_parts()?;
             let requested_thread_id = match params.thread_id.clone() {
@@ -486,13 +544,28 @@ async fn handle_rpc(
             });
             let bind_source = (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
             let response_thread_id = thread_id.clone();
-            let notification_thread_id = thread_id.clone();
             let requested_turn_id = Uuid::now_v7().to_string();
             let response_turn_id = requested_turn_id.clone();
+            let mutation_turn_id = requested_turn_id.clone();
+            let mutation_cwd = scope.cwd.clone();
+            let review = state.inner.review.clone();
+            let workspace_mutations = WorkspaceMutationSink::new(move |mutation| {
+                review.observe_mutation(&mutation_turn_id, &mutation_cwd, mutation);
+            });
+            gateway_profile_mark(
+                "turn_start_admitted",
+                Some(&requested_turn_id),
+                response_thread_id.as_deref(),
+                GatewayProfileFields {
+                    request_method: Some("turn/start"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
             let turn_state = state.clone();
             let turn_scope = scope.clone();
             tokio::spawn(async move {
-                let result = run_routed_thread_turn(
+                let _ = run_routed_thread_turn(
                     &turn_state,
                     &turn_scope,
                     RoutedThreadTurn {
@@ -510,6 +583,7 @@ async fn handle_rpc(
                             "web".to_string(),
                         ],
                         event_sink: Some(event_sink),
+                        workspace_mutations: Some(workspace_mutations),
                         lineage: None,
                         source,
                         bind_source,
@@ -517,29 +591,6 @@ async fn handle_rpc(
                     },
                 )
                 .await;
-                let notification = match result {
-                    Ok(result) => {
-                        rpc_notification("turn/result", gateway_turn_result_value(result))
-                    }
-                    Err(err) => rpc_notification(
-                        "turn/error",
-                        serde_json::to_value(wire::TurnErrorPayload {
-                            error: agent_error_view(err.to_string(), err.structured_data()),
-                            thread_id: notification_thread_id,
-                            turn_id: Some(requested_turn_id),
-                        })
-                        .unwrap_or_else(|serialization_error| {
-                            json!({
-                                "error": {
-                                    "message": format!("Turn failed; error projection failed: {serialization_error}"),
-                                    "delivery": "unknown"
-                                },
-                                "threadId": Value::Null
-                            })
-                        }),
-                    ),
-                };
-                let _ = out_tx.send(notification);
             });
             let response_thread_id = response_thread_id.ok_or_else(|| {
                 agent_session_error(
@@ -551,6 +602,16 @@ async fn handle_rpc(
                     None,
                 )
             })?;
+            gateway_profile_mark(
+                "turn_start_accepted",
+                Some(&response_turn_id),
+                Some(&response_thread_id),
+                GatewayProfileFields {
+                    request_method: Some("turn/start"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
             Ok(serde_json::to_value(wire::TurnStartResult {
                 accepted: true,
                 thread_id: response_thread_id.clone(),
@@ -719,6 +780,7 @@ async fn handle_rpc(
         "agent/list" => {
             let params = request.params::<wire::AgentListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            state.invalidate_runnable_target_catalog();
             let catalog = discover_gateway_agents(&state, &scope)?;
             Ok(serde_json::to_value(agent_list_result(&catalog))?)
         }
@@ -740,17 +802,17 @@ async fn handle_rpc(
         "agent/write" => {
             let params = request.required_params::<wire::AgentWriteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            write_agent_definition(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(write_agent_definition(&state, &scope, params))
         }
         "agent/setEnabled" => {
             let params = request.required_params::<wire::AgentSetEnabledParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            set_agent_definition_enabled(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(set_agent_definition_enabled(&state, &scope, params))
         }
         "agent/delete" => {
             let params = request.required_params::<wire::AgentDeleteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            delete_agent_definition(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(delete_agent_definition(&state, &scope, params))
         }
         "agent/status" => {
             let params = request.params::<wire::AgentStatusParams>()?;
@@ -833,6 +895,7 @@ async fn handle_rpc(
             let params = request.params::<wire::BackendListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             materialize_local_acp_backends(&state, &scope)?;
+            state.invalidate_runnable_target_catalog();
             let backends = load_agent_backend_configs(
                 &state.inner.home,
                 &scope.cwd,
@@ -846,6 +909,7 @@ async fn handle_rpc(
             let params = request.required_params::<wire::BackendDoctorParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             materialize_local_acp_backends(&state, &scope)?;
+            state.invalidate_runnable_target_catalog();
             let backends = load_agent_backend_configs(
                 &state.inner.home,
                 &scope.cwd,
@@ -862,29 +926,42 @@ async fn handle_rpc(
             let params = request.required_params::<wire::BackendManageParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let operation = request.method.strip_prefix("backend/").unwrap_or("install");
-            manage_backend_value(&state, &scope, params, operation).await
+            let result = manage_backend_value(&state, &scope, params, operation).await;
+            state.invalidate_runnable_target_catalog_after(result)
         }
         "backend/write" => {
             let params = request.required_params::<wire::BackendWriteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            write_backend_config(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(write_backend_config(&state, &scope, params))
         }
         "backend/delete" => {
             let params = request.required_params::<wire::BackendDeleteParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            delete_backend_config(&state, &scope, params)
+            state.invalidate_runnable_target_catalog_after(delete_backend_config(&state, &scope, params))
         }
         "plugin/list" => {
             let params = request.params::<wire::PluginListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let options = plugin_runtime_options(&state, scope.cwd.clone());
             let native = plugin_list_value(&options)?;
-            let codex = state
-                .inner
-                .codex_capability_broker
-                .plugin_list(&scope.cwd)
-                .await;
-            Ok(codex_capability_broker::merge_plugin_list(native, codex))
+            let broker = &state.inner.codex_capability_broker;
+            let codex = if broker.is_enabled() {
+                broker.plugin_list(&scope.cwd).await
+            } else {
+                Err(psychevo_runtime::Error::Message(
+                    "Codex plugin authority is disabled in the active profile".to_string(),
+                ))
+            };
+            let merged = codex_capability_broker::merge_plugin_list(native, codex);
+            let merged = codex_capability_broker::apply_codex_policy_views(
+                merged,
+                &state.inner.home,
+                &scope.cwd,
+            )?;
+            Ok(codex_capability_broker::apply_authority_view(
+                merged,
+                broker.authority_view(),
+            ))
         }
         "plugin/read" => {
             let params = request.required_params::<wire::PluginReadParams>()?;
@@ -897,8 +974,19 @@ async fn handle_rpc(
                     .codex_capability_broker
                     .plugin_read(&scope.cwd, &identity)
                     .await?;
-                return Ok(codex_capability_broker::codex_plugin_read_value(
-                    &identity, detail,
+                let policy = psychevo_runtime::codex_plugin_policy_value(
+                    &state.inner.home,
+                    &scope.cwd,
+                    &identity.selector(),
+                )?;
+                let trust = state
+                    .inner
+                    .codex_capability_broker
+                    .trust_value(&identity, &detail)?;
+                return Ok(codex_capability_broker::apply_codex_plugin_runtime_state(
+                    codex_capability_broker::codex_plugin_read_value(&identity, detail),
+                    policy,
+                    trust,
                 ));
             }
             let options = plugin_runtime_options(&state, scope.cwd);
@@ -959,17 +1047,19 @@ async fn handle_rpc(
                     .codex_capability_broker
                     .plugin_install(&scope.cwd, &identity)
                     .await?;
-                return Ok(json!({
-                    "success": true,
-                    "authority": {
+                state.invalidate_runnable_target_catalog();
+                let mut response = result.as_object().cloned().unwrap_or_default();
+                response.insert(
+                    "authority".to_string(),
+                    json!({
                         "kind": "codex",
                         "plugin": identity.plugin,
                         "marketplace": identity.marketplace,
-                    },
-                    "result": result,
-                }));
+                    }),
+                );
+                return Ok(Value::Object(response));
             }
-            plugin_install_value(
+            let result = plugin_install_value(
                 &state.inner.home,
                 &scope.cwd,
                 PluginInstallOptions {
@@ -982,7 +1072,8 @@ async fn handle_rpc(
                     adapter_mode: parse_plugin_adapter_mode(params.adapter_mode.as_deref())?,
                     force: params.force,
                 },
-            )
+            );
+            state.invalidate_runnable_target_catalog_after(result)
         }
         "plugin/uninstall" => {
             let params = request.required_params::<wire::PluginUninstallParams>()?;
@@ -995,6 +1086,7 @@ async fn handle_rpc(
                     .codex_capability_broker
                     .plugin_uninstall(&scope.cwd, &identity)
                     .await?;
+                state.invalidate_runnable_target_catalog();
                 return Ok(json!({
                     "success": true,
                     "authority": {
@@ -1005,38 +1097,120 @@ async fn handle_rpc(
                     "result": result,
                 }));
             }
-            plugin_uninstall_value(
+            let result = plugin_uninstall_value(
                 &state.inner.home,
                 &scope.cwd,
                 parse_plugin_scope(params.scope_name.as_deref())?,
                 &params.selector,
-            )
+            );
+            state.invalidate_runnable_target_catalog_after(result)
         }
         "plugin/setEnabled" => {
             let params = request.required_params::<wire::PluginSetEnabledParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            plugin_set_enabled_value(
-                &state.inner.home,
-                &scope.cwd,
-                parse_plugin_scope(params.scope_name.as_deref())?,
-                &params.selector,
-                params.enabled,
-            )
+            if codex_capability_broker::CodexPluginIdentity::parse_selector(&params.selector)?
+                .is_some()
+            {
+                let result = codex_plugin_set_enabled_value(
+                    &state.inner.home,
+                    &scope.cwd,
+                    parse_plugin_scope(params.scope_name.as_deref())?,
+                    &params.selector,
+                    params.enabled,
+                );
+                if result.is_ok() {
+                    state
+                        .inner
+                        .codex_capability_broker
+                        .invalidate_runtime_inventories()
+                        .await;
+                }
+                return state.invalidate_runnable_target_catalog_after(result);
+            }
+            let plugin_scope = parse_plugin_scope(params.scope_name.as_deref())?;
+            let result = match params.enabled {
+                Some(enabled) => plugin_set_enabled_value(
+                    &state.inner.home,
+                    &scope.cwd,
+                    plugin_scope,
+                    &params.selector,
+                    enabled,
+                ),
+                None => plugin_reset_enabled_value(
+                    &state.inner.home,
+                    &scope.cwd,
+                    plugin_scope,
+                    &params.selector,
+                ),
+            };
+            state.invalidate_runnable_target_catalog_after(result)
         }
         "plugin/setTrust" => {
             let params = request.required_params::<wire::PluginSetTrustParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
-            plugin_set_trust_value(
+            if let Some(identity) =
+                codex_capability_broker::CodexPluginIdentity::parse_selector(&params.selector)?
+            {
+                if parse_plugin_scope(params.scope_name.as_deref())? != PluginScope::Global {
+                    return Err(Error::Message(
+                        "Codex plugin trust is profile-scoped".to_string(),
+                    ));
+                }
+                let detail = state
+                    .inner
+                    .codex_capability_broker
+                    .plugin_read(&scope.cwd, &identity)
+                    .await?;
+                let result = state
+                    .inner
+                    .codex_capability_broker
+                    .set_trust(&identity, &detail, params.trusted);
+                if result.is_ok() {
+                    state
+                        .inner
+                        .codex_capability_broker
+                        .invalidate_runtime_inventories()
+                        .await;
+                }
+                return result;
+            }
+            let result = plugin_set_trust_value(
                 &state.inner.home,
                 &scope.cwd,
                 parse_plugin_scope(params.scope_name.as_deref())?,
                 &params.selector,
                 params.trusted,
-            )
+            );
+            state.invalidate_runnable_target_catalog_after(result)
+        }
+        "plugin/authority/write" => {
+            let params = request.required_params::<wire::PluginAuthorityWriteParams>()?;
+            let _scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            state
+                .inner
+                .codex_capability_broker
+                .write_authority(params.enabled, params.binary.as_deref())
+                .await
+        }
+        "plugin/authority/refresh" => {
+            let params = request.params::<wire::PluginAuthorityRefreshParams>()?;
+            let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            state
+                .inner
+                .codex_capability_broker
+                .refresh_authority(&scope.cwd)
+                .await
         }
         "plugin/catalog/list" => {
             let params = request.params::<wire::PluginCatalogListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.authority.as_deref() == Some("codex") {
+                return state
+                    .inner
+                    .codex_capability_broker
+                    .plugin_list(&scope.cwd)
+                    .await;
+            }
             plugin_marketplace_list_value(
                 &state.inner.home,
                 &scope.cwd,
@@ -1046,6 +1220,13 @@ async fn handle_rpc(
         "plugin/catalog/add" => {
             let params = request.required_params::<wire::PluginCatalogAddParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.authority.as_deref() == Some("codex") {
+                return state
+                    .inner
+                    .codex_capability_broker
+                    .catalog_add(&params.source, params.git_ref.as_deref(), &params.sparse_paths)
+                    .await;
+            }
             plugin_marketplace_add_value(
                 &state.inner.home,
                 &scope.cwd,
@@ -1064,12 +1245,61 @@ async fn handle_rpc(
         "plugin/catalog/remove" => {
             let params = request.required_params::<wire::PluginCatalogRemoveParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.authority.as_deref() == Some("codex") {
+                return state
+                    .inner
+                    .codex_capability_broker
+                    .catalog_remove(&params.name)
+                    .await;
+            }
             plugin_marketplace_remove_value(
                 &state.inner.home,
                 &scope.cwd,
                 parse_plugin_scope(params.scope_name.as_deref())?,
                 &params.name,
             )
+        }
+        "plugin/catalog/upgrade" => {
+            let params = request.required_params::<wire::PluginCatalogUpgradeParams>()?;
+            let _scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            if params.authority.as_deref() != Some("codex") {
+                return Err(Error::Message(
+                    "catalog upgrade is currently supported only for the Codex authority"
+                        .to_string(),
+                ));
+            }
+            state
+                .inner
+                .codex_capability_broker
+                .catalog_upgrade(
+                    Some(&params.name),
+                    params.source.as_deref(),
+                    params.git_ref.as_deref(),
+                    &params.sparse_paths,
+                )
+                .await
+        }
+        "plugin/connect/start" => {
+            let params = request.required_params::<wire::PluginConnectStartParams>()?;
+            let _scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            state
+                .inner
+                .codex_capability_broker
+                .connect_start(
+                    &params.selector,
+                    &params.component_id,
+                    params.kind.as_deref(),
+                )
+                .await
+        }
+        "plugin/connect/status" => {
+            let params = request.required_params::<wire::PluginConnectStatusParams>()?;
+            let _scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
+            state
+                .inner
+                .codex_capability_broker
+                .connect_status(&params.session_id)
+                .await
         }
         "skill/list" => {
             let params = request.params::<wire::SkillListParams>()?;

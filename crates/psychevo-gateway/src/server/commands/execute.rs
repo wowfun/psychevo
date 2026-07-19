@@ -154,7 +154,7 @@ async fn command_result_from_effect(
             json!({"type": "turnInterrupt", "threadId": thread_id}),
         )),
         SlashCommandEffect::NewSession => {
-            Ok(command_action(raw, action, json!({"type": "threadStart"})))
+            Ok(command_action(raw, action, json!({"type": "newSession"})))
         }
         SlashCommandEffect::SessionsList => Ok(command_action(
             raw,

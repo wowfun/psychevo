@@ -24,7 +24,7 @@ impl TuiApp {
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
         let result = self
-            .run_fullscreen_loop_inner(&mut terminal, initial_prompt)
+            .run_fullscreen_loop_inner(&mut terminal, &mut terminal_guard, initial_prompt)
             .await;
         let restore_result = terminal_guard.restore();
         match (result, restore_result) {
@@ -37,10 +37,14 @@ impl TuiApp {
     pub(crate) async fn run_fullscreen_loop_inner(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        terminal_guard: &mut FullscreenTerminalGuard,
         initial_prompt: String,
     ) -> Result<()> {
         let mut ui = FullscreenUi::new(self);
+        self.journey_profile.mark_ui_constructed();
         self.load_current_session_history(&mut ui)?;
+        self.journey_profile.mark_history_loaded();
+        terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
         let mut needs_draw = true;
         let mut next_passive_redraw = schedule_next_passive_redraw(Instant::now());
         if !initial_prompt.trim().is_empty()
@@ -52,12 +56,27 @@ impl TuiApp {
         }
         loop {
             needs_draw |= self.drain_fullscreen_events(&mut ui).await?;
+            terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
             if ui.take_terminal_clear_request() {
                 terminal.clear()?;
                 needs_draw = true;
             }
             if needs_draw {
                 terminal.draw(|frame| self.render_fullscreen(frame, &mut ui))?;
+                let send_feedback_ready = ui.running.is_some()
+                    && ui.visible_turn_started.is_some()
+                    && ui
+                        .transcript
+                        .iter()
+                        .any(|row| row.transcript_source.as_deref() == Some("tui.optimistic"));
+                self.journey_profile
+                    .observe_frame(TuiProfileFrameObservation {
+                        input_ready: ui.last_composer_input_area.is_some(),
+                        send_feedback_ready,
+                        turn_running: ui.running.is_some(),
+                        composer_focused: ui.focus == FocusMode::Composer,
+                        compaction_running: self.compaction_task.is_some(),
+                    });
                 needs_draw = false;
                 next_passive_redraw = schedule_next_passive_redraw(Instant::now());
             }
@@ -147,8 +166,7 @@ impl TuiApp {
                 let source = pasted.trim();
                 if !source.is_empty()
                     && !pasted.contains('\n')
-                    && let Ok(ImageInput::LocalPath(path)) =
-                        resolve_image_source(source, &self.cwd)
+                    && let Ok(ImageInput::LocalPath(path)) = resolve_image_source(source, &self.cwd)
                 {
                     let placeholder = ui.add_pending_image(ImageInput::LocalPath(path));
                     ui.textarea.insert_str(&placeholder);
@@ -196,5 +214,4 @@ impl TuiApp {
         }
         Ok(())
     }
-
 }

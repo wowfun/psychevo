@@ -19,6 +19,7 @@ pub struct ThreadApplication {
     active_aliases: Arc<Mutex<HashMap<String, String>>>,
     process_bindings: Arc<Mutex<HashMap<String, String>>>,
     source_generations: Arc<Mutex<HashMap<String, u64>>>,
+    source_mutations: Arc<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
     live_snapshots: Arc<Mutex<HashMap<String, PendingGatewayLiveSnapshot>>>,
     pending_permissions: PendingPermissionMap,
     owner_id: Arc<String>,

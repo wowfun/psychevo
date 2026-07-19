@@ -12,8 +12,9 @@ mod util;
 mod worker;
 
 pub use api::{
-    plugin_doctor_value, plugin_list_value, plugin_set_enabled_value, plugin_set_trust_value,
-    plugin_uninstall_value, plugin_view_value,
+    codex_plugin_policy_value, codex_plugin_set_enabled_value, plugin_doctor_value,
+    plugin_list_value, plugin_reset_enabled_value, plugin_set_enabled_value,
+    plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
 };
 pub use compatibility::{
     CODEX_PLUGIN_COMPATIBILITY_PROFILE, PluginAuthority, PluginCompatibilityLevel,
@@ -33,6 +34,7 @@ pub use types::{
     PluginInstallOptions, PluginInstallRecord, PluginInterfaceMetadata, PluginManifestKind,
     PluginMarketplaceEntry, PluginScope, PluginSourceKind, PluginWorkerSpec,
 };
+pub use util::external_plugin_fingerprint;
 
 #[cfg(test)]
 pub(crate) use store::PluginStore;

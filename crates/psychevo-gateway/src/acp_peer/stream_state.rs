@@ -6,6 +6,7 @@ struct AcpTurnOutput {
     latest_plan: Option<AcpPeerPlanProjection>,
     session_title: Option<String>,
     tools: BTreeMap<String, Value>,
+    prompt_usage: Option<Value>,
     usage_update: Option<Value>,
     events: Vec<Value>,
     session_snapshot: AcpSessionSnapshot,
@@ -121,6 +122,7 @@ fn persisted_tool_result_messages(
 struct AcpPeerToolState {
     value: Value,
     started: bool,
+    mutation_observed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -462,6 +464,7 @@ fn append_bounded_replay_slot(
 
 struct AcpPeerStreamState {
     stream: Option<RunStreamSink>,
+    workspace_mutations: Option<WorkspaceMutationSink>,
     local_session_id: String,
     final_answer: String,
     reasoning_text: String,
@@ -471,6 +474,7 @@ struct AcpPeerStreamState {
     tool_slots: BTreeMap<String, usize>,
     session_title: Option<String>,
     tools: BTreeMap<String, AcpPeerToolState>,
+    prompt_usage: Option<Value>,
     usage_update: Option<Value>,
     events: Vec<Value>,
     history_replay: AcpHistoryReplayProjection,
@@ -478,9 +482,14 @@ struct AcpPeerStreamState {
 }
 
 impl AcpPeerStreamState {
-    fn new(stream: Option<RunStreamSink>, local_session_id: String) -> Self {
+    fn new(
+        stream: Option<RunStreamSink>,
+        workspace_mutations: Option<WorkspaceMutationSink>,
+        local_session_id: String,
+    ) -> Self {
         Self {
             stream,
+            workspace_mutations,
             local_session_id,
             final_answer: String::new(),
             reasoning_text: String::new(),
@@ -490,6 +499,7 @@ impl AcpPeerStreamState {
             tool_slots: BTreeMap::new(),
             session_title: None,
             tools: BTreeMap::new(),
+            prompt_usage: None,
             usage_update: None,
             events: Vec::new(),
             history_replay: AcpHistoryReplayProjection::default(),
@@ -681,11 +691,13 @@ impl AcpPeerStreamState {
         self.ensure_tool_slot(&tool_call_id);
         let runtime_event = acp_tool_runtime_event(&self.local_session_id, &update_value, false);
         let started = acp_tool_started_after_event(&runtime_event);
+        let mutation_observed = self.observe_tool_mutation(&runtime_event, started, false);
         self.tools.insert(
             tool_call_id,
             AcpPeerToolState {
                 value: update_value,
                 started,
+                mutation_observed,
             },
         );
         emit_runtime_event(&self.stream, runtime_event);
@@ -700,16 +712,49 @@ impl AcpPeerStreamState {
             None => update_value,
         };
         let was_started = previous.as_ref().is_some_and(|state| state.started);
+        let mutation_was_observed = previous
+            .as_ref()
+            .is_some_and(|state| state.mutation_observed);
         let runtime_event = acp_tool_runtime_event(&self.local_session_id, &merged, was_started);
         let started = was_started || acp_tool_started_after_event(&runtime_event);
+        let mutation_observed = self.observe_tool_mutation(
+            &runtime_event,
+            started,
+            mutation_was_observed,
+        );
         self.tools.insert(
             tool_call_id,
             AcpPeerToolState {
                 value: merged,
                 started,
+                mutation_observed,
             },
         );
         emit_runtime_event(&self.stream, runtime_event);
+    }
+
+    fn observe_tool_mutation(
+        &self,
+        runtime_event: &Value,
+        started: bool,
+        already_observed: bool,
+    ) -> bool {
+        if already_observed || !started {
+            return already_observed;
+        }
+        let tool_name = runtime_event
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !matches!(tool_name, "edit" | "exec_command") {
+            return false;
+        }
+        if let Some(sink) = &self.workspace_mutations {
+            sink.observe(WorkspaceMutation::Opaque {
+                source: format!("acp.{tool_name}"),
+            });
+        }
+        true
     }
 
     fn append_text_slot(&mut self, text: String, message_id: Option<String>) {
@@ -790,7 +835,7 @@ impl AcpPeerStreamState {
     fn handle_prompt_usage(&mut self, usage: Value) {
         let mut usage = usage;
         strip_acp_reserved_meta(&mut usage);
-        self.handle_usage_update(json!({ "usage": usage, "source": "prompt_response" }));
+        self.prompt_usage = normalize_acp_prompt_usage(&usage);
     }
 
     fn handle_codex_prompt_quota(&mut self, quota: CodexPromptQuotaProjection) {
@@ -862,6 +907,51 @@ impl AcpPeerStreamState {
     }
 }
 
+fn normalize_acp_prompt_usage(usage: &Value) -> Option<Value> {
+    let mut normalized = serde_json::Map::new();
+    for (target, aliases) in [
+        ("total_tokens", &["total_tokens", "totalTokens", "total"][..]),
+        ("input_tokens", &["input_tokens", "inputTokens", "input"][..]),
+        ("output_tokens", &["output_tokens", "outputTokens", "output"][..]),
+        (
+            "reasoning_tokens",
+            &["reasoning_tokens", "reasoningTokens", "thoughtTokens"][..],
+        ),
+        (
+            "cached_tokens",
+            &[
+                "cached_tokens",
+                "cachedTokens",
+                "cachedInputTokens",
+                "cachedReadTokens",
+            ][..],
+        ),
+        (
+            "cache_write_tokens",
+            &[
+                "cache_write_tokens",
+                "cacheWriteTokens",
+                "cachedWriteTokens",
+            ][..],
+        ),
+    ] {
+        if let Some(value) = aliases
+            .iter()
+            .find_map(|key| usage.get(*key).and_then(normalized_usage_u64))
+        {
+            normalized.insert(target.to_string(), Value::from(value));
+        }
+    }
+    (!normalized.is_empty()).then_some(Value::Object(normalized))
+}
+
+fn normalized_usage_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_i64().and_then(|value| u64::try_from(value).ok()))
+        .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+}
+
 fn acp_product_json(value: &impl serde::Serialize) -> Result<Value, serde_json::Error> {
     let mut value = serde_json::to_value(value)?;
     strip_acp_reserved_meta(&mut value);
@@ -882,5 +972,48 @@ fn strip_acp_reserved_meta(value: &mut Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod workspace_mutation_tests {
+    use super::*;
+
+    #[test]
+    fn acp_mutation_tool_emits_one_opaque_invalidation_when_execution_starts() {
+        let mutations = Arc::new(Mutex::new(Vec::new()));
+        let observed = mutations.clone();
+        let mut state = AcpPeerStreamState::new(
+            None,
+            Some(WorkspaceMutationSink::new(move |mutation| {
+                observed.lock().expect("mutations poisoned").push(mutation);
+            })),
+            "local-review".to_string(),
+        );
+
+        state.handle_tool_call(json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "edit-1",
+            "kind": "edit",
+            "status": "pending"
+        }));
+        assert!(mutations.lock().expect("mutations poisoned").is_empty());
+        state.handle_tool_call_update(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "edit-1",
+            "status": "in_progress"
+        }));
+        state.handle_tool_call_update(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "edit-1",
+            "status": "completed"
+        }));
+
+        assert_eq!(
+            *mutations.lock().expect("mutations poisoned"),
+            vec![WorkspaceMutation::Opaque {
+                source: "acp.edit".to_string(),
+            }]
+        );
     }
 }

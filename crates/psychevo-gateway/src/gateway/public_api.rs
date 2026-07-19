@@ -180,6 +180,20 @@ impl Gateway {
             .and_then(AgentSessionResponse::into_deleted)
     }
 
+    pub(crate) async fn lock_source_mutation(
+        &self,
+        source_key: &SourceKey,
+    ) -> OwnedMutexGuard<()> {
+        let lock = self
+            .source_mutations
+            .lock()
+            .expect("gateway source mutation map poisoned")
+            .entry(source_key.0.clone())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone();
+        lock.lock_owned().await
+    }
+
     pub fn new(state: StateRuntime) -> Self {
         Self::with_backend(state, Arc::new(PsychevoRuntimeBackend))
     }
@@ -192,6 +206,7 @@ impl Gateway {
             active_aliases: Arc::new(Mutex::new(HashMap::new())),
             process_bindings: Arc::new(Mutex::new(HashMap::new())),
             source_generations: Arc::new(Mutex::new(HashMap::new())),
+            source_mutations: Arc::new(Mutex::new(HashMap::new())),
             live_snapshots: Arc::new(Mutex::new(HashMap::new())),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             owner_id: Arc::new(format!("gateway:{}:{}", std::process::id(), Uuid::now_v7())),
@@ -537,6 +552,15 @@ impl Gateway {
             .turn_id
             .take()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
+        gateway_profile_mark(
+            "gateway_run_turn_entered",
+            Some(&turn_id),
+            request.thread_id.as_deref(),
+            GatewayProfileFields {
+                runtime_source: request.runtime_source.as_deref(),
+                ..GatewayProfileFields::default()
+            },
+        );
         let request = request.into_queue_request(self.state.clone());
         self.send_turn_with_id(request, turn_id).await
     }
@@ -586,6 +610,24 @@ impl Gateway {
                 None
             }
         };
+
+        gateway_profile_mark(
+            if queued.is_some() {
+                "gateway_turn_queued"
+            } else {
+                "gateway_turn_admitted"
+            },
+            Some(&turn_id),
+            request
+                .as_ref()
+                .and_then(|request| request.thread_id.as_deref()),
+            GatewayProfileFields {
+                queue_depth: queued
+                    .as_ref()
+                    .map(|(_, _, _, queue_position, _)| *queue_position),
+                ..GatewayProfileFields::default()
+            },
+        );
 
         if let Some((receiver, event_sink, thread_id, queue_position, active_activity_id)) = queued
         {

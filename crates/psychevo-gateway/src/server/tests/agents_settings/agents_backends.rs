@@ -342,6 +342,7 @@ entrypoints = ["peer", "subagent"]
     std::fs::create_dir_all(paths.executable.parent().expect("launcher parent"))
         .expect("managed launcher parent");
     std::fs::write(&paths.executable, "surviving launcher only").expect("stale launcher");
+    state.invalidate_runnable_target_catalog();
     let invalid = read_context("managed-codex-invalid")
         .await
         .expect("invalid context");
@@ -605,9 +606,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
 
     let terminal = tokio::time::timeout(Duration::from_secs(3), async {
         while let Some(message) = rx.recv().await {
-            if message.contains("\"method\":\"turn/result\"")
-                || message.contains("\"method\":\"turn/error\"")
-            {
+            if message.contains("\"type\":\"turnCompleted\"") {
                 return message;
             }
         }
@@ -615,7 +614,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     })
     .await
     .expect("follow-up terminal");
-    assert!(terminal.contains("\"method\":\"turn/result\""), "{terminal}");
+    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
     assert!(!terminal.contains("unknown runtime profile"), "{terminal}");
 
     let context = handle_rpc(
@@ -656,7 +655,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             params: Some(json!({
                 "scope": wire_scope,
                 "threadId": thread_id,
-                "targetId": context["targetId"],
+                "targetId": context["selectedTargetId"],
                 "controlId": "mode",
                 "value": "plan",
                 "expectedCapabilityRevision": mode["capabilityRevision"],
@@ -918,7 +917,7 @@ reasoning_effort = "high"
             method: "thread/control/set".to_string(),
             params: Some(json!({
                 "scope": scope.to_wire_scope(),
-                "targetId": context["targetId"],
+                "targetId": context["selectedTargetId"],
                 "controlId": "permissionMode",
                 "value": "dontAsk",
                 "expectedCapabilityRevision": permission["capabilityRevision"],
@@ -1037,7 +1036,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
             params: Some(json!({
                 "scope": wire_scope,
                 "threadId": null,
-                "targetId": context["targetId"],
+                "targetId": context["selectedTargetId"],
                 "controlId": "mode",
                 "value": "plan",
                 "expectedCapabilityRevision": mode["capabilityRevision"],
@@ -1051,7 +1050,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
     .expect("the first control mutation uses the prospective target revisions");
 
     assert_eq!(receipt["status"], "applied");
-    assert_eq!(receipt["context"]["targetId"], context["targetId"]);
+    assert_eq!(receipt["context"]["selectedTargetId"], context["selectedTargetId"]);
     assert_eq!(receipt["context"]["selectionState"], "prospective");
     assert_eq!(receipt["control"]["effectiveValue"], "plan");
     assert_eq!(receipt["contextRevision"], context["contextRevision"]);
@@ -1109,7 +1108,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
             params: Some(json!({
                 "scope": wire_scope.clone(),
                 "threadId": null,
-                "targetId": context["targetId"],
+                "targetId": context["selectedTargetId"],
                 "controlId": "mode",
                 "value": "plan",
                 "expectedCapabilityRevision": mode["capabilityRevision"],
@@ -1148,9 +1147,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
 
     let terminal = tokio::time::timeout(Duration::from_secs(2), async {
         while let Some(message) = rx.recv().await {
-            if message.contains("\"method\":\"turn/result\"")
-                || message.contains("\"method\":\"turn/error\"")
-            {
+            if message.contains("\"type\":\"turnCompleted\"") {
                 return message;
             }
         }
@@ -1158,7 +1155,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
     })
     .await
     .expect("turn terminal");
-    assert!(terminal.contains("\"method\":\"turn/result\""), "{terminal}");
+    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
 
     let runs = backend.runs.lock().expect("runs").clone();
     assert_eq!(runs.len(), 1);
@@ -1399,7 +1396,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
             params: Some(json!({
                 "scope": scope,
                 "threadId": thread_id,
-                "targetId": context["targetId"],
+                "targetId": context["selectedTargetId"],
                 "controlId": "mode",
                 "value": "plan",
                 "expectedCapabilityRevision": mode["capabilityRevision"],
@@ -2818,6 +2815,126 @@ async fn thread_draft_prepare_projects_opencode_controls_before_first_prompt() {
         line.contains("\"method\":\"session/prompt\"")
             && line.contains("\"sessionId\":\"draft-native\"")
     }));
+}
+
+#[tokio::test]
+async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
+    let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
+    let host_cwd = std::env::current_dir().expect("host cwd");
+    let python = ["python3", "python"]
+        .into_iter()
+        .find_map(|command| {
+            resolve_executable_path(
+                command,
+                &host_cwd,
+                &ExecutableResolveOptions {
+                    platform: HostPlatform::current(),
+                    env: &host_env,
+                },
+            )
+        })
+        .expect("Python is required by the ACP fixture");
+    let (_temp, state) = web_state();
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
+    let log = state.inner.cwd.join("draft-prepare-failure.jsonl");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("write-failing-draft-fixture")),
+            method: "backend/write".to_string(),
+            params: Some(json!({
+                "id": "opencode",
+                "target": "project",
+                "command": python,
+                "args": [fixture],
+                "env": {
+                    "ACP_LIFECYCLE_LOG": log,
+                    "ACP_LIFECYCLE_MODE": "session-new-error"
+                },
+                "entrypoints": ["peer", "subagent"]
+            })),
+        },
+    )
+    .await
+    .expect("backend/write");
+
+    let before = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("context-before-failing-prepare")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({"threadId": null, "scope": scope})),
+        },
+    )
+    .await
+    .expect("context before failing prepare");
+    let targets = before["compatibleTargets"].as_array().expect("targets");
+    let failing_target_id = targets
+        .iter()
+        .find(|target| {
+            target["agentRef"] == "opencode"
+                && target["runtimeProfileRef"] == "opencode"
+        })
+        .and_then(|target| target["targetId"].as_str())
+        .expect("failing ACP target")
+        .to_string();
+
+    let prepared = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("prepare-failing-acp")),
+            method: "thread/draft/prepare".to_string(),
+            params: Some(json!({"targetId": failing_target_id, "scope": scope})),
+        },
+    )
+    .await
+    .expect("bounded prepare failure");
+    assert_eq!(prepared["context"]["sendability"]["allowed"], false);
+    assert!(prepared["problem"]["message"]
+        .as_str()
+        .is_some_and(|message| message.contains("fixture session preparation failed")));
+
+    let refreshed = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("context-after-failing-prepare")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({"threadId": null, "scope": scope})),
+        },
+    )
+    .await
+    .expect("context after failing prepare");
+    assert_eq!(refreshed["selectedTargetId"], failing_target_id);
+    assert_eq!(refreshed["sendability"]["allowed"], false);
+    assert_eq!(
+        refreshed["sendability"]["reason"],
+        prepared["context"]["sendability"]["reason"]
+    );
+
+    state
+        .inner
+        .gateway
+        .shutdown_runtimes(false)
+        .await
+        .expect("shutdown fixture");
 }
 
 #[tokio::test]

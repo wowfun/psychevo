@@ -135,6 +135,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) catalog: AgentCatalog,
     pub(crate) control_handle: Option<ControlHandle>,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) workspace_mutations: Option<crate::types::WorkspaceMutationSink>,
     pub(crate) model_metadata: ModelMetadata,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,

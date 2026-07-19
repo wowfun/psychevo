@@ -6,10 +6,15 @@ pub(crate) fn bottom_status_session_usage_segments(ui: &FullscreenUi<'_>) -> Vec
     if let Some(percent) = summary.cache_read_percent {
         segments.push(format!("cache {:.0}%", percent));
     }
-    if summary.reported_total_tokens > 0 {
+    if let Some(tokens) = summary.effective_total_tokens {
+        let qualifier = if summary.total_status == "partial" {
+            "≥"
+        } else {
+            ""
+        };
         segments.push(format!(
-            "tok {}",
-            format_status_compact_count(summary.reported_total_tokens)
+            "tok {qualifier}{}",
+            format_status_compact_count(tokens)
         ));
     }
     if summary.estimated_cost_nanodollars > 0 {

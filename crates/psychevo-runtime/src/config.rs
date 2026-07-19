@@ -44,6 +44,7 @@ pub(crate) struct RunConfig {
     pub(crate) channels: ChannelsConfig,
     pub(crate) voice: VoiceConfig,
     pub(crate) image_generation: ImageGenerationConfig,
+    pub(crate) codex_plugins: CodexPluginsConfig,
     pub(crate) plugins: PluginPolicyConfig,
     pub(crate) builtin_plugins: BuiltinPluginPolicyConfig,
 }
@@ -66,11 +67,12 @@ pub(crate) use config_types::{
     load_plugin_policy_config_lenient, load_project_context_instruction_mode, load_run_config,
 };
 pub use config_types::{
-    DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
+    CodexPluginsConfig, DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
     ResolvedImageGenerationConfig, ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig,
     ResolvedVoiceTtsConfig, RuntimeProfileConfig, RuntimeProfileKind, load_agent_backend_configs,
-    load_runtime_profile_configs, resolve_default_workspace_cwd, resolve_workspace_root,
-    validate_runtime_profile_backend_ref,
+    load_codex_plugins_profile_config, load_runtime_profile_configs, resolve_default_workspace_cwd,
+    resolve_workspace_root, validate_runtime_profile_backend_ref,
+    write_codex_plugins_profile_config,
 };
 #[path = "config/file_env.rs"]
 pub(crate) mod config_file_env;
@@ -91,14 +93,14 @@ pub(crate) use config_parse::{
     parse_agent_backend_configs, parse_agent_backend_entrypoints, parse_approval_config,
     parse_auto_review_config, parse_auxiliary_config, parse_auxiliary_task_config,
     parse_builtin_plugin_policy_config, parse_channel_connection, parse_channels_config,
-    parse_compression_config, parse_config_model_entry, parse_config_model_metadata,
-    parse_config_provider_entry, parse_custom_toolsets, parse_exec_policy_config,
-    parse_host_executables, parse_lsp_config, parse_mcp_server_policy, parse_model_cost,
-    parse_model_cost_tier, parse_model_limits, parse_model_selection, parse_network_domains,
-    parse_permission_config, parse_permission_profile, parse_plugin_policy_config,
-    parse_profile_mcp_servers, parse_project_context_config, parse_run_config,
-    parse_runtime_profile_config, parse_runtime_profile_configs, parse_sandbox_config,
-    parse_string_array_value, parse_tool_grants, parse_tool_mode_config,
+    parse_codex_plugins_config, parse_compression_config, parse_config_model_entry,
+    parse_config_model_metadata, parse_config_provider_entry, parse_custom_toolsets,
+    parse_exec_policy_config, parse_host_executables, parse_lsp_config, parse_mcp_server_policy,
+    parse_model_cost, parse_model_cost_tier, parse_model_limits, parse_model_selection,
+    parse_network_domains, parse_permission_config, parse_permission_profile,
+    parse_plugin_policy_config, parse_profile_mcp_servers, parse_project_context_config,
+    parse_run_config, parse_runtime_profile_config, parse_runtime_profile_configs,
+    parse_sandbox_config, parse_string_array_value, parse_tool_grants, parse_tool_mode_config,
     parse_tool_selection_config, parse_web_search_queries, parse_workspaces_config,
     reject_legacy_permission_keys, required_bool_field, string_array_field, string_map_field,
     validate_channel_id, validate_exec_policy_rule_examples, validate_permission_profile_name,

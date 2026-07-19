@@ -27,13 +27,14 @@ impl TuiApp {
             buffer_session_live_event(ui, &session_id, event);
             return false;
         }
+        let profile_event = self.journey_profile.observe_gateway_event_received(&event);
         if let Some(session_id) = event_session
             && self.current_session.as_deref() == Some(session_id)
         {
             let session_id = session_id.to_string();
             buffer_session_live_event(ui, &session_id, event.clone());
         }
-        match event {
+        let changed = match event {
             GatewayEvent::TurnStarted {
                 thread_id,
                 turn_id,
@@ -160,7 +161,9 @@ impl TuiApp {
                 });
                 ui.open_next_permission_approval()
             }
-            GatewayEvent::ActionRequested { action } if action.kind == GatewayActionKind::Clarify => {
+            GatewayEvent::ActionRequested { action }
+                if action.kind == GatewayActionKind::Clarify =>
+            {
                 let raw = action
                     .payload
                     .get("raw")
@@ -216,7 +219,10 @@ impl TuiApp {
                 }
                 false
             }
-        }
+        };
+        self.journey_profile
+            .observe_gateway_event_applied(profile_event);
+        changed
     }
 
     pub(crate) fn observe_gateway_thread_started(
@@ -581,7 +587,10 @@ impl TuiApp {
     }
 }
 
-fn clarify_reason_from_action(outcome: GatewayActionOutcome, payload: &Value) -> ClarifyResolvedReason {
+fn clarify_reason_from_action(
+    outcome: GatewayActionOutcome,
+    payload: &Value,
+) -> ClarifyResolvedReason {
     if let Some(reason) = payload.get("reason").and_then(Value::as_str) {
         return match reason {
             "Answered" | "answered" => ClarifyResolvedReason::Answered,

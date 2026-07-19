@@ -47,6 +47,21 @@ pub(crate) fn directory_fingerprint(root: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+pub fn external_plugin_fingerprint(
+    package_root: Option<&Path>,
+    identity: &str,
+    version: Option<&str>,
+) -> Result<String> {
+    if let Some(root) = package_root {
+        return directory_fingerprint(root);
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(identity.as_bytes());
+    hasher.update([0]);
+    hasher.update(version.unwrap_or("unknown").as_bytes());
+    Ok(format!("metadata:{:x}", hasher.finalize()))
+}
+
 pub(crate) fn directory_size(root: &Path) -> Result<u64> {
     let mut total = 0;
     let mut stack = vec![root.to_path_buf()];

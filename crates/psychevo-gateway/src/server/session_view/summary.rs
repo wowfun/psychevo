@@ -185,22 +185,6 @@ fn short_thread_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-fn gateway_turn_result_value(result: GatewayTurnResult) -> Value {
-    json!({
-        "thread": result.thread,
-        "turn": result.turn,
-        "result": {
-            "sessionId": result.result.session_id,
-            "outcome": result.result.outcome.as_str(),
-            "finalAnswer": result.result.final_answer,
-            "toolFailures": result.result.tool_failures,
-            "provider": result.result.provider,
-            "model": result.result.model,
-        },
-        "committedEntries": result.committed_entries,
-    })
-}
-
 fn gateway_shell_result_value(result: GatewayShellResult) -> Value {
     json!({
         "thread": result.thread,

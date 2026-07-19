@@ -4,6 +4,7 @@ pub mod protocol;
 pub mod server;
 
 mod acp_peer;
+mod journey_profile;
 mod managed_acp;
 mod projection;
 mod transcript;
@@ -26,17 +27,19 @@ use psychevo_runtime::{
     PermissionMode, PromptDisplayMetadata, RunControl, RunControlHandle, RunMode, RunOptions,
     RunResult, RunStreamEvent, RunStreamSink, RuntimeProfileConfig, RuntimeProfileKind,
     StateRuntime, StoredEditableInputEnvelope, StoredEditableInputPart, UserShellContextOptions,
-    UserShellOptions, UserShellResult, discover_agents, load_agent_backend_configs,
-    resolve_agent_definition, resolve_skills_home, run_control, run_live, run_live_streaming,
-    run_live_streaming_controlled, run_user_shell_command_streaming_controlled,
+    UserShellOptions, UserShellResult, WorkspaceMutationSink, discover_agents,
+    load_agent_backend_configs, resolve_agent_definition, resolve_skills_home, run_control,
+    run_live, run_live_streaming, run_live_streaming_controlled,
+    run_user_shell_command_streaming_controlled,
 };
 #[cfg(test)]
 use psychevo_runtime::{GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership};
 use serde_json::{Value, json};
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
 use tokio::time::timeout;
 use uuid::Uuid;
 
+use journey_profile::{GatewayProfileFields, gateway_profile_mark};
 use projection::GatewayLiveProjector;
 pub use projection::gateway_event_from_run_stream;
 pub use protocol::{
@@ -79,6 +82,7 @@ include!("gateway/state.rs");
 include!("gateway/agent_session.rs");
 include!("gateway/public_api.rs");
 include!("gateway/source_bindings.rs");
+include!("gateway/turn_lifecycle.rs");
 include!("gateway/turn_shell.rs");
 include!("gateway/active_queue.rs");
 include!("gateway/durable_activity.rs");

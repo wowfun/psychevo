@@ -116,6 +116,7 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         side_cleanup_task: None,
         compaction_task: None,
         diff_task: None,
+        journey_profile: TuiJourneyProfileProbe::disabled(),
     }
 }
 

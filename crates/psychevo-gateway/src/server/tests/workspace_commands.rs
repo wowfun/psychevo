@@ -555,16 +555,52 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
     git(&state.inner.cwd, ["commit", "-m", "initial"]);
     std::fs::write(&path, "user dirty\n").expect("dirty");
 
-    state
-        .inner
-        .review
-        .begin_turn("turn-1", Some("thread-1".to_string()), &state.inner.cwd);
+    state.record_review_event(
+        &GatewayEvent::TurnStarted {
+            thread_id: Some("thread-1".to_string()),
+            turn_id: "turn-1".to_string(),
+            selected_skills: Vec::new(),
+        },
+        &state.inner.cwd,
+    );
+    state.inner.review.observe_mutation(
+        "turn-1",
+        &state.inner.cwd,
+        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+            path: "notes.txt".to_string(),
+            before: Some("user dirty\n".to_string()),
+            after: Some("agent changed\n".to_string()),
+        },
+    );
     std::fs::write(&path, "agent changed\n").expect("agent");
-    state.inner.review.complete_turn("turn-1");
+    std::fs::write(state.inner.cwd.join("unobserved.txt"), "outside observer\n")
+        .expect("unobserved");
+    state.record_review_event(
+        &GatewayEvent::TurnCompleted {
+            thread_id: Some("thread-1".to_string()),
+            turn_id: "turn-1".to_string(),
+            turn: GatewayTurn {
+                id: "turn-1".to_string(),
+                thread_id: Some("thread-1".to_string()),
+                status: GatewayTurnStatus::Completed,
+                outcome: Some("normal".to_string()),
+                error: None,
+                started_at_ms: Some(1),
+                completed_at_ms: Some(2),
+            },
+            committed_entries: Vec::new(),
+        },
+        &state.inner.cwd,
+    );
 
-    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
-        .expect("scope")
-        .to_wire_scope();
+    let review_scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("review scope");
+    let changes = state.inner.review.changes_for_scope(&review_scope);
+    assert_eq!(changes.groups.len(), 1);
+    assert_eq!(changes.groups[0].files.len(), 1);
+    assert_eq!(changes.groups[0].files[0].path, "notes.txt");
+
+    let scope = review_scope.to_wire_scope();
     let (tx, _rx) = mpsc::unbounded_channel();
     let rejected = handle_rpc(
         state.clone(),
@@ -593,6 +629,90 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
         rejected["changes"]["groups"][0]["files"][0]["reviewStatus"].as_str(),
         Some("rejected"),
         "{rejected:#}"
+    );
+}
+
+#[test]
+fn workspace_review_records_patch_paths_and_opaque_invalidations() {
+    let (_temp, state) = web_state();
+    let cwd = &state.inner.cwd;
+    std::fs::write(cwd.join("update.txt"), "before update\n").expect("update baseline");
+    std::fs::write(cwd.join("delete.txt"), "before delete\n").expect("delete baseline");
+    std::fs::write(cwd.join("move-from.txt"), "before move\n").expect("move baseline");
+    state.inner.review.begin_turn(
+        "turn-patch",
+        Some("thread-patch".to_string()),
+        cwd,
+    );
+    for mutation in [
+        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+            path: "add.txt".to_string(),
+            before: None,
+            after: Some("added\n".to_string()),
+        },
+        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+            path: "update.txt".to_string(),
+            before: Some("before update\n".to_string()),
+            after: Some("after update\n".to_string()),
+        },
+        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+            path: "delete.txt".to_string(),
+            before: Some("before delete\n".to_string()),
+            after: None,
+        },
+        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+            path: "move-from.txt".to_string(),
+            before: Some("before move\n".to_string()),
+            after: None,
+        },
+        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+            path: "move-to.txt".to_string(),
+            before: None,
+            after: Some("before move\n".to_string()),
+        },
+        psychevo_runtime::WorkspaceMutation::Opaque {
+            source: "exec_command".to_string(),
+        },
+        psychevo_runtime::WorkspaceMutation::Opaque {
+            source: "acp.edit".to_string(),
+        },
+    ] {
+        state
+            .inner
+            .review
+            .observe_mutation("turn-patch", cwd, mutation);
+    }
+
+    std::fs::write(cwd.join("add.txt"), "added\n").expect("add");
+    std::fs::write(cwd.join("update.txt"), "after update\n").expect("update");
+    std::fs::remove_file(cwd.join("delete.txt")).expect("delete");
+    std::fs::rename(cwd.join("move-from.txt"), cwd.join("move-to.txt")).expect("move");
+    state.inner.review.complete_turn("turn-patch");
+
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let changes = state.inner.review.changes_for_scope(&scope);
+    assert_eq!(changes.groups.len(), 1);
+    assert_eq!(
+        changes.groups[0]
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "add.txt",
+            "delete.txt",
+            "move-from.txt",
+            "move-to.txt",
+            "update.txt"
+        ]
+    );
+    assert_eq!(
+        changes.groups[0]
+            .invalidations
+            .iter()
+            .map(|invalidation| invalidation.source.as_str())
+            .collect::<Vec<_>>(),
+        vec!["exec_command", "acp.edit"]
     );
 }
 
@@ -1438,17 +1558,17 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     .expect("turn/start");
     assert_eq!(accepted["accepted"], true);
 
-    let turn_result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    let turn_terminal = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while let Some(message) = rx.recv().await {
-            if message.contains("\"method\":\"turn/result\"") {
+            if message.contains("\"type\":\"turnCompleted\"") {
                 return message;
             }
         }
-        panic!("turn/result notification channel closed");
+        panic!("turnCompleted notification channel closed");
     })
     .await
-    .expect("turn/result notification");
-    assert!(turn_result.contains(&side_thread_id), "{turn_result}");
+    .expect("turnCompleted notification");
+    assert!(turn_terminal.contains(&side_thread_id), "{turn_terminal}");
     assert_eq!(
         state
             .inner

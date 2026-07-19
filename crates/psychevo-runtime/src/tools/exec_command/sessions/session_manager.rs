@@ -233,6 +233,7 @@ pub(crate) async fn exec_command_tool_impl_with_context(
         EXEC_MAX_YIELD_TIME_MS,
     );
     let max_output_tokens = output_token_limit(optional_i64(&args, "max_output_tokens")?)?;
+    let workspace_mutations = context.workspace_mutations.clone();
     let invocation = ExecInvocation {
         cmd,
         cwd,
@@ -251,6 +252,11 @@ pub(crate) async fn exec_command_tool_impl_with_context(
             stream_events: context.stream_events,
         },
     )?;
+    if let Some(sink) = workspace_mutations {
+        sink.observe(WorkspaceMutation::Opaque {
+            source: "exec_command".to_string(),
+        });
+    }
     await_session_result(
         session,
         Duration::from_millis(yield_ms),

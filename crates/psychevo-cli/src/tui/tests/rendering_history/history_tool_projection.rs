@@ -110,6 +110,80 @@ pub(crate) fn web_fetch_result_defaults_to_summary_with_content_as_detail() {
 }
 
 #[test]
+pub(crate) fn wrapped_web_search_history_restores_existing_foldable_tool_result_row() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let envelope = serde_json::json!({
+        "query": "Rust async cancellation",
+        "provider": "exa",
+        "execution_owner": "runtime",
+        "payload": {
+            "type": "results",
+            "items": [{
+                "title": "Async cancellation in Rust",
+                "url": "https://example.test/rust-async",
+                "text": "Cancellation requires an explicit ownership boundary."
+            }]
+        },
+        "truncated": false,
+        "error": null
+    });
+
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_call",
+                "id": "call_search",
+                "name": "web_search",
+                "arguments": {"query": "Rust async cancellation"},
+                "arguments_json": "{\"query\":\"Rust async cancellation\"}",
+                "arguments_error": null,
+                "content_index": 0,
+                "call_index": 0
+            }],
+            "timestamp_ms": 1,
+            "finish_reason": "tool_calls",
+            "outcome": "normal",
+            "model": "mock-model",
+            "provider": "mock"
+        }),
+        None,
+        None,
+    );
+    ui.push_history_message(
+        &serde_json::json!({
+            "role": "tool_result",
+            "tool_call_id": "call_search",
+            "tool_name": "web_search",
+            "content": format!(
+                "<external_untrusted_web_search>\n{}\n</external_untrusted_web_search>",
+                envelope
+            ),
+            "is_error": false,
+            "timestamp_ms": 2
+        }),
+        None,
+        None,
+    );
+
+    let row = ui
+        .transcript
+        .iter()
+        .find(|row| row.tool_name.as_deref() == Some("web_search"))
+        .expect("web search row");
+    let full = row.full_text.as_deref().unwrap_or(&row.text);
+    assert_eq!(row.kind, TranscriptKind::Explored);
+    assert_eq!(row.title, "Searched the web Rust async cancellation");
+    assert!(row.is_expandable(), "{row:?}");
+    assert!(full.contains("Async cancellation in Rust"), "{full}");
+    assert!(full.contains("https://example.test/rust-async"), "{full}");
+    assert!(!full.contains("external_untrusted_web_search"), "{full}");
+    assert_ne!(row.text, "web_search normal");
+}
+
+#[test]
 pub(crate) fn tool_display_snapshot_controls_extension_tool_projection() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);

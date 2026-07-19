@@ -27,7 +27,9 @@ pub(crate) use crate::skills::{
     discover_skills, install_skill, list_skills_value_with_options, patch_skill, remove_skill,
     set_skill_config_value, set_skill_enabled, view_skill_value,
 };
-pub(crate) use crate::types::{RunMode, RunStreamEvent, RunStreamSink};
+pub(crate) use crate::types::{
+    RunMode, RunStreamEvent, RunStreamSink, WorkspaceMutation, WorkspaceMutationSink,
+};
 
 pub(crate) const READ_MAX_BYTES: usize = 50 * 1024;
 pub(crate) const READ_MAX_LINES: usize = 2000;
@@ -56,6 +58,7 @@ pub(crate) struct ToolRuntimeContext {
     pub(crate) lsp_manager: Arc<crate::tools::write_support::LspManager>,
     pub(crate) allow_login_shell: bool,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: SandboxPolicy,
@@ -74,6 +77,7 @@ impl Default for ToolRuntimeContext {
             lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: false,
             stream_events: None,
+            workspace_mutations: None,
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
             sandbox_policy: SandboxPolicy::disabled(),

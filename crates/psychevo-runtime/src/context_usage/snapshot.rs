@@ -1,16 +1,16 @@
 use super::presentation::{
-    context_advice, context_bar, format_compact_count, format_token_count, percent,
-    provider_input_tokens, scope_label,
+    context_advice, context_bar, format_compact_count, format_token_count, percent, scope_label,
 };
 use super::{
-    AbortSignal, Arc, BTreeMap, BoxFuture, Deserialize, Error, GenerationProvider,
-    GenerationRequest, GenerationStream, Message, ModelTarget, Mutex, OpenAiChatTokenCount,
-    PathBuf, PromptInstruction, Result, RunMode, RunOptions, Serialize, SkillDiscoveryOptions,
-    StateRuntime, Value, canonical_cwd, coding_core_tools_for_mode, count_openai_chat_request,
-    discover_skills, format_skills_for_prompt, json, load_project_context_instruction_mode,
-    load_project_instructions, load_projected_messages, mode_instruction, resolve_skills_home,
-    runtime_environment_prompt, selected_configured_model, skill_tools_for_mode,
-    skills_visible_for_prompt_with_tools, tool_declarations,
+    AbortSignal, Arc, BTreeMap, BoxFuture, Deserialize, EffectiveUsageTotal, Error,
+    GenerationProvider, GenerationRequest, GenerationStream, Message, ModelTarget, Mutex,
+    OpenAiChatTokenCount, PathBuf, PromptInstruction, Result, RunMode, RunOptions, Serialize,
+    SkillDiscoveryOptions, StateRuntime, Value, canonical_cwd, coding_core_tools_for_mode,
+    count_openai_chat_request, discover_skills, effective_usage_total, format_skills_for_prompt,
+    json, load_project_context_instruction_mode, load_project_instructions,
+    load_projected_messages, mode_instruction, resolve_skills_home, runtime_environment_prompt,
+    selected_configured_model, skill_tools_for_mode, skills_visible_for_prompt_with_tools,
+    tool_declarations,
 };
 use crate::prompt_templates;
 
@@ -43,6 +43,9 @@ pub struct ContextSnapshot {
     pub event_type: String,
     pub scope: ContextScope,
     pub status: String,
+    pub basis: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applies_to_session_seq: Option<i64>,
     pub session_id: Option<String>,
     pub provider: String,
     pub model: String,
@@ -108,8 +111,10 @@ pub(crate) struct ContextRecorder {
 #[derive(Debug, Default)]
 pub(crate) struct ContextRecorderState {
     pub(crate) latest_started_sequence: u64,
+    pub(crate) latest_completed_sequence: u64,
     pub(crate) latest_snapshot: Option<(u64, ContextSnapshot)>,
-    pub(crate) latest_provider_input_tokens: Option<(u64, u64)>,
+    pub(crate) pending_snapshot: Option<(u64, ContextSnapshot)>,
+    pub(crate) latest_provider_total: Option<(u64, EffectiveUsageTotal)>,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +166,7 @@ impl ContextRecorder {
         let sequence = {
             let mut state = self.state.lock().expect("context recorder lock poisoned");
             state.latest_started_sequence = state.latest_started_sequence.saturating_add(1);
+            state.pending_snapshot = None;
             state.latest_started_sequence
         };
         let recorder = self.clone();
@@ -180,16 +186,18 @@ impl ContextRecorder {
     }
 
     pub(crate) fn record_provider_usage(&self, usage: Option<&Value>) {
-        let Some(tokens) = usage.and_then(provider_input_tokens) else {
-            return;
-        };
+        let total = effective_usage_total(usage);
         let mut state = self.state.lock().expect("context recorder lock poisoned");
         let sequence = state.latest_started_sequence;
-        state.latest_provider_input_tokens = Some((sequence, tokens));
-        if let Some((snapshot_sequence, snapshot)) = state.latest_snapshot.as_mut()
-            && *snapshot_sequence == sequence
-        {
-            snapshot.apply_provider_input_tokens(tokens);
+        state.latest_completed_sequence = sequence;
+        state.latest_provider_total = Some((sequence, total));
+        if let Some((snapshot_sequence, mut snapshot)) = state.pending_snapshot.take() {
+            if snapshot_sequence == sequence {
+                snapshot.apply_provider_total(total, None);
+                state.latest_snapshot = Some((sequence, snapshot));
+            } else {
+                state.pending_snapshot = Some((snapshot_sequence, snapshot));
+            }
         }
     }
 
@@ -207,22 +215,35 @@ impl ContextRecorder {
         if sequence != state.latest_started_sequence {
             return;
         }
-        if let Some((usage_sequence, tokens)) = state.latest_provider_input_tokens
+        if let Some((usage_sequence, total)) = state.latest_provider_total
             && usage_sequence == sequence
         {
-            snapshot.apply_provider_input_tokens(tokens);
+            snapshot.apply_provider_total(total, None);
         }
-        state.latest_snapshot = Some((sequence, snapshot));
+        if state.latest_completed_sequence == sequence {
+            state.latest_snapshot = Some((sequence, snapshot));
+        } else {
+            state.pending_snapshot = Some((sequence, snapshot));
+        }
     }
 }
 
 impl ContextSnapshot {
-    pub(crate) fn apply_provider_input_tokens(&mut self, tokens: u64) {
+    pub(crate) fn apply_provider_total(
+        &mut self,
+        total: EffectiveUsageTotal,
+        session_seq: Option<i64>,
+    ) {
+        let Some(tokens) = total.tokens else {
+            return;
+        };
         self.total.tokens = tokens;
         self.total.estimated = false;
-        self.total.source = "provider_usage".to_string();
+        self.total.source = total.status.as_str().to_string();
         self.total.percent = percent(tokens, self.context_limit);
-        self.status = "provider_usage".to_string();
+        self.status = total.status.as_str().to_string();
+        self.basis = "latest_provider_turn".to_string();
+        self.applies_to_session_seq = session_seq;
         rebuild_free_space(self);
         self.advice = context_advice(self);
     }
@@ -268,14 +289,12 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         .load_tui_message_summaries(&summary.id)?
         .into_iter()
         .collect::<Vec<_>>();
-    let has_compaction = store
-        .latest_valid_session_compaction(&summary.id)?
-        .is_some();
-    let latest_input_tokens = if has_compaction {
-        None
-    } else {
-        latest_assistant_usage_input_tokens(&message_summaries)
-    };
+    let latest_compaction = store.latest_valid_session_compaction(&summary.id)?;
+    let after_session_seq = latest_compaction
+        .as_ref()
+        .map(|compaction| compaction.created_after_session_seq);
+    let latest_provider_total = latest_assistant_usage_total(&message_summaries, after_session_seq);
+    let persisted_request_count = persisted_provider_request_count(&store, &summary)?;
     let messages = load_projected_messages(&store, &summary.id, None)?;
     let env = options
         .inherited_env
@@ -317,6 +336,7 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     let project_context_mode =
@@ -405,7 +425,16 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             }
         }),
     };
-    let count = count_openai_chat_request(&request, "");
+    let fallback_count = count_openai_chat_request(&request, "");
+    let (count, reconstructed_session_seq, reconstructed_partial) = persisted_request_count
+        .map(|value| {
+            (
+                value.count,
+                Some(value.assistant_session_seq),
+                value.partial,
+            )
+        })
+        .unwrap_or((fallback_count, None, true));
     let mut snapshot = snapshot_from_count(
         ContextScope::SessionEstimate,
         Some(summary.id),
@@ -415,10 +444,85 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         context_limit,
         count,
     );
-    if let Some(tokens) = latest_input_tokens {
-        snapshot.apply_provider_input_tokens(tokens);
+    snapshot.basis = "persisted_session_projection".to_string();
+    snapshot.applies_to_session_seq = reconstructed_session_seq;
+    if reconstructed_partial {
+        snapshot.status = "partial".to_string();
+        snapshot.total.source = "persisted_projection".to_string();
+    }
+    if let Some((session_seq, total)) = latest_provider_total {
+        snapshot.apply_provider_total(total, Some(session_seq));
+    } else if latest_compaction.is_some() {
+        snapshot.status = "partial".to_string();
+        snapshot.total.source = "persisted_projection".to_string();
     }
     Ok(snapshot)
+}
+
+struct PersistedProviderRequestCount {
+    count: OpenAiChatTokenCount,
+    assistant_session_seq: i64,
+    partial: bool,
+}
+
+fn persisted_provider_request_count(
+    store: &crate::store::SqliteStore,
+    summary: &crate::types::SessionSummary,
+) -> Result<Option<PersistedProviderRequestCount>> {
+    let messages = crate::session_export::load_unfiltered_export_messages(store, &summary.id)?;
+    let Some(reconstructed) = crate::session_export::reconstruct_last_provider_request(
+        store,
+        &summary.id,
+        summary,
+        &messages,
+    )?
+    else {
+        return Ok(None);
+    };
+    let Some(provider_messages) = reconstructed
+        .body
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    let tools = reconstructed
+        .body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| tool.get("function"))
+        .filter_map(|function| {
+            let name = function.get("name").and_then(Value::as_str)?;
+            let description = function
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let parameters = function.get("parameters").cloned().unwrap_or(Value::Null);
+            Some(psychevo_ai::ToolDeclaration::new(
+                name,
+                description,
+                parameters,
+            ))
+        })
+        .map(Into::into)
+        .collect();
+    let request = GenerationRequest {
+        model: ModelTarget {
+            provider: reconstructed.provider.clone(),
+            model: reconstructed.model.clone(),
+        },
+        messages: provider_messages,
+        tools,
+        metadata: json!({}),
+    };
+    Ok(Some(PersistedProviderRequestCount {
+        count: count_openai_chat_request(&request, &reconstructed.base_url),
+        assistant_session_seq: reconstructed.assistant_session_seq,
+        partial: !reconstructed.warnings.is_empty(),
+    }))
 }
 
 pub(crate) fn context_counting_metadata(
@@ -698,6 +802,7 @@ pub(crate) fn configured_context_limit(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     selected_configured_model(&run_options)
@@ -706,14 +811,21 @@ pub(crate) fn configured_context_limit(
         .and_then(|model| model.context_limit)
 }
 
-pub(crate) fn latest_assistant_usage_input_tokens(
+pub(crate) fn latest_assistant_usage_total(
     messages: &[crate::types::TuiMessageSummary],
-) -> Option<u64> {
-    messages.iter().rev().find_map(|summary| {
-        matches!(summary.message, Message::Assistant { .. })
-            .then(|| summary.usage.as_ref().and_then(provider_input_tokens))
-            .flatten()
-    })
+    after_session_seq: Option<i64>,
+) -> Option<(i64, EffectiveUsageTotal)> {
+    messages
+        .iter()
+        .rev()
+        .filter(|summary| after_session_seq.is_none_or(|seq| summary.session_seq > seq))
+        .find_map(|summary| {
+            if !matches!(summary.message, Message::Assistant { .. }) {
+                return None;
+            }
+            let total = effective_usage_total(summary.usage.as_ref());
+            total.tokens.map(|_| (summary.session_seq, total))
+        })
 }
 
 pub(crate) fn snapshot_from_count(
@@ -809,6 +921,12 @@ pub(crate) fn snapshot_from_count(
         event_type: CONTEXT_SNAPSHOT_TYPE.to_string(),
         scope,
         status: "estimated".to_string(),
+        basis: match scope {
+            ContextScope::LastProviderRequest => "latest_provider_request",
+            ContextScope::SessionEstimate => "persisted_session_projection",
+        }
+        .to_string(),
+        applies_to_session_seq: None,
         session_id,
         provider,
         model,
@@ -872,4 +990,120 @@ pub(crate) fn rebuild_free_space(snapshot: &mut ContextSnapshot) {
             details: json!({}),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use psychevo_agent_core::AssistantBlock;
+    use psychevo_ai::Outcome;
+
+    use super::*;
+
+    fn assistant_summary(
+        session_seq: i64,
+        usage: Option<Value>,
+    ) -> crate::types::TuiMessageSummary {
+        crate::types::TuiMessageSummary {
+            session_seq,
+            message: Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "done".to_string(),
+                }],
+                timestamp_ms: session_seq,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: None,
+                provider: None,
+            },
+            usage,
+            metadata: None,
+            accounting: None,
+        }
+    }
+
+    #[test]
+    fn persisted_context_uses_latest_completed_provider_turn_after_compaction() {
+        let messages = vec![
+            assistant_summary(
+                2,
+                Some(json!({
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120
+                })),
+            ),
+            assistant_summary(4, None),
+            assistant_summary(
+                6,
+                Some(json!({
+                    "input_tokens": 200,
+                    "output_tokens": 30,
+                    "reasoning_tokens": 5,
+                    "cached_tokens": 50
+                })),
+            ),
+        ];
+
+        let (session_seq, total) =
+            latest_assistant_usage_total(&messages, Some(3)).expect("post-compaction usage");
+        assert_eq!(session_seq, 6);
+        assert_eq!(total.tokens, Some(230));
+        assert_eq!(total.status, crate::accounting::UsageTotalStatus::Derived);
+        assert_eq!(latest_assistant_usage_total(&messages, Some(6)), None);
+    }
+
+    #[test]
+    fn live_recorder_keeps_the_latest_completed_turn_while_the_next_count_is_pending() {
+        let recorder = ContextRecorder::default();
+        {
+            let mut state = recorder.state.lock().expect("recorder state");
+            state.latest_started_sequence = 1;
+        }
+        recorder.finish_count(
+            1,
+            snapshot_from_count(
+                ContextScope::LastProviderRequest,
+                Some("session".to_string()),
+                "mock".to_string(),
+                "model".to_string(),
+                Some("default".to_string()),
+                Some(1_000),
+                OpenAiChatTokenCount {
+                    total_estimated_tokens: 90,
+                    ..Default::default()
+                },
+            ),
+        );
+        assert!(recorder.latest_snapshot().is_none());
+        recorder.record_provider_usage(Some(&json!({
+            "input_tokens": 80,
+            "output_tokens": 20
+        })));
+        assert_eq!(recorder.latest_snapshot().unwrap().total.tokens, 100);
+
+        {
+            let mut state = recorder.state.lock().expect("recorder state");
+            state.latest_started_sequence = 2;
+        }
+        recorder.finish_count(
+            2,
+            snapshot_from_count(
+                ContextScope::LastProviderRequest,
+                Some("session".to_string()),
+                "mock".to_string(),
+                "model".to_string(),
+                Some("default".to_string()),
+                Some(1_000),
+                OpenAiChatTokenCount {
+                    total_estimated_tokens: 200,
+                    ..Default::default()
+                },
+            ),
+        );
+        assert_eq!(recorder.latest_snapshot().unwrap().total.tokens, 100);
+        recorder.record_provider_usage(None);
+        let completed = recorder.latest_snapshot().unwrap();
+        assert_eq!(completed.total.tokens, 200);
+        assert!(completed.total.estimated);
+    }
 }

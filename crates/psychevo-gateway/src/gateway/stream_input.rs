@@ -26,8 +26,25 @@ fn wrap_stream(
                     // projection fence, but ThreadApplication owns the one
                     // authoritative public terminal after persistence and
                     // delivery classification have completed.
-                    && !matches!(event, GatewayEvent::TurnCompleted { .. })
+                    && !matches!(
+                        event,
+                        GatewayEvent::TurnStarted { .. } | GatewayEvent::TurnCompleted { .. }
+                    )
                 {
+                    let fields = journey_profile::gateway_profile_event_fields(&event);
+                    gateway_profile_mark(
+                        "gateway_event_emitted",
+                        Some(&turn_id),
+                        match &event {
+                            GatewayEvent::EntryStarted { entry, .. }
+                            | GatewayEvent::EntryUpdated { entry, .. }
+                            | GatewayEvent::EntryCompleted { entry, .. } => {
+                                Some(entry.thread_id.as_str())
+                            }
+                            _ => None,
+                        },
+                        fields,
+                    );
                     event_sink(event);
                 }
                 if let Some(stream) = &stream {

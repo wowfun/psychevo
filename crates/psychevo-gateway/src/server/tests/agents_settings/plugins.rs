@@ -145,15 +145,17 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
         &script,
         format!(
             r#"#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 LOG = {log}
 for line in sys.stdin:
     msg = json.loads(line)
     method = msg.get("method")
     if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"gateway-fixture/0.144.1"}}}}), flush=True)
     elif method == "initialized":
         pass
+    elif msg.get("params") is None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
     elif method == "plugin/list":
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":False,"enabled":False,"interface":{{"shortDescription":"Review"}}}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
     elif method == "plugin/installed":
@@ -193,6 +195,13 @@ for line in sys.stdin:
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
+    capability_rpc(
+        &state,
+        "plugin/authority/write",
+        json!({"scope":scope.clone(),"enabled":true,"binary":script}),
+    )
+    .await
+    .expect("enable Codex authority");
 
     let list = capability_rpc(&state, "plugin/list", json!({"scope":scope.clone()}))
         .await
@@ -202,7 +211,7 @@ for line in sys.stdin:
         .expect("plugins")
         .iter()
         .find(|plugin| plugin["selector"] == "codex:review@openai")
-        .expect("Codex plugin");
+        .unwrap_or_else(|| panic!("Codex plugin missing from {list}"));
     assert_eq!(codex["authority"]["kind"], "codex");
     assert_eq!(codex["canonical_id"], "review@openai");
 
@@ -226,7 +235,9 @@ for line in sys.stdin:
     )
     .await
     .expect("plugin/install");
+    assert_eq!(installed["success"], true);
     assert_eq!(installed["authority"]["kind"], "codex");
+    assert!(installed.get("result").is_none());
     let doctor = capability_rpc(
         &state,
         "plugin/doctor",
@@ -1579,6 +1590,120 @@ async fn capability_tool_rpcs_reject_coding_core_configuration() {
         std::fs::read_to_string(state.inner.home.join("config.toml")).expect("config"),
         "# config\n"
     );
+    assert!(!state.inner.cwd.join(".psychevo/config.toml").exists());
+}
+
+#[tokio::test]
+async fn codex_authority_is_default_off_and_policy_is_profile_dominant() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let list = capability_rpc(&state, "plugin/list", json!({"scope":scope.clone()}))
+        .await
+        .expect("plugin/list");
+    let codex = list["authorities"]
+        .as_array()
+        .expect("authorities")
+        .iter()
+        .find(|authority| authority["kind"] == "codex")
+        .expect("Codex authority");
+    assert_eq!(codex["runtime"], "disabled");
+    assert_eq!(codex["privateHome"], json!(state.inner.home.join("codex")));
+
+    let profile = capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "codex:review@openai",
+            "scopeName": "profile",
+            "enabled": true
+        }),
+    )
+    .await
+    .expect("profile allow");
+    assert_eq!(profile["policy"]["profileEnabled"], true);
+    assert_eq!(profile["policy"]["effectiveEnabled"], true);
+
+    let project_enable = capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "codex:review@openai",
+            "scopeName": "project",
+            "enabled": true
+        }),
+    )
+    .await
+    .expect_err("project enable rejected");
+    assert!(project_enable.to_string().contains("cannot enable"));
+
+    let project_disable = capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope.clone(),
+            "selector": "codex:review@openai",
+            "scopeName": "project",
+            "enabled": false
+        }),
+    )
+    .await
+    .expect("project disable");
+    assert_eq!(project_disable["policy"]["projectOverride"], false);
+    assert_eq!(project_disable["policy"]["effectiveEnabled"], false);
+
+    let reset = capability_rpc(
+        &state,
+        "plugin/setEnabled",
+        json!({
+            "scope": scope,
+            "selector": "codex:review@openai",
+            "scopeName": "project",
+            "enabled": null
+        }),
+    )
+    .await
+    .expect("project reset");
+    assert_eq!(reset["policy"]["projectOverride"], Value::Null);
+    assert_eq!(reset["policy"]["effectiveEnabled"], true);
+}
+
+#[tokio::test]
+async fn codex_authority_write_is_profile_scoped_and_preserves_private_home() {
+    let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer)
+        .expect("scope")
+        .to_wire_scope();
+
+    let value = capability_rpc(
+        &state,
+        "plugin/authority/write",
+        json!({
+            "scope": scope,
+            "enabled": false,
+            "binary": "/opt/reviewed-codex"
+        }),
+    )
+    .await
+    .expect("authority write");
+
+    assert_eq!(value["authority"]["runtime"], "disabled");
+    assert_eq!(
+        value["authority"]["privateHome"],
+        json!(state.inner.home.join("codex"))
+    );
+    let config =
+        std::fs::read_to_string(state.inner.home.join("config.toml")).expect("profile config");
+    assert!(config.contains("[codex_plugins]"));
+    assert!(config.contains("binary = \"/opt/reviewed-codex\""));
     assert!(!state.inner.cwd.join(".psychevo/config.toml").exists());
 }
 

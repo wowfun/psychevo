@@ -92,6 +92,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     let (plugin_policy, plugin_env, home) =
@@ -189,6 +190,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             catalog: agent_catalog.clone(),
             control_handle: None,
             stream_events: None,
+            workspace_mutations: None,
             model_metadata: model_metadata.clone(),
             env: env.clone(),
             path_prefixes: Vec::new(),
@@ -231,6 +233,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
         lsp: Default::default(),
         allow_login_shell: false,
         stream_events: None,
+        workspace_mutations: None,
         env: BTreeMap::new(),
         path_prefixes: Vec::new(),
         sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
@@ -378,6 +381,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         selected_capability_roots: options.selected_capability_roots.clone(),
         skill_inputs: options.skill_inputs.clone(),
         mcp_servers: options.mcp_servers.clone(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     let loaded = load_run_config(&run_options, &cwd)?;
@@ -538,6 +542,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         catalog: agent_catalog,
         control_handle: None,
         stream_events: None,
+        workspace_mutations: None,
         model_metadata: resolved.metadata,
         env: loaded.env.clone(),
         path_prefixes: managed_tools.path_prefixes.clone(),

@@ -158,6 +158,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         lsp: child.context.lsp.clone(),
         allow_login_shell: child.context.permission_config.allow_login_shell,
         stream_events: child.context.stream_events.clone(),
+        workspace_mutations: child.context.workspace_mutations.clone(),
         env: child.context.env.clone(),
         path_prefixes: child.context.path_prefixes.clone(),
         sandbox_policy: child.context.sandbox_policy.clone(),
@@ -533,6 +534,7 @@ fn child_hook_runtime_config(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: context.workspace_mutations.clone(),
         runtime_tools: Vec::new(),
     };
     crate::hooks::hook_runtime_config_from_options(&options, &context.cwd)

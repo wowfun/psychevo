@@ -239,8 +239,7 @@ impl<'a> FullscreenUi<'a> {
             .get("tool_call_id")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let result = serde_json::from_str::<Value>(content)
-            .unwrap_or_else(|_| serde_json::json!({ "content": content }));
+        let result = decode_persisted_tool_result_for_display(tool, content);
         let outcome = if is_error && result.get("error").and_then(Value::as_str) == Some("aborted")
         {
             "aborted"

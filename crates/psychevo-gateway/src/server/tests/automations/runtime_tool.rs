@@ -166,16 +166,16 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         Some(target_thread_id.as_str())
     );
 
-    let mut saw_result = false;
+    let mut saw_terminal = false;
     while let Ok(message) = rx.try_recv() {
-        saw_result |= message.contains("\"method\":\"turn/result\"");
+        saw_terminal |= message.contains("\"type\":\"turnCompleted\"");
         assert!(!message.contains("current thread is not available"));
     }
-    assert!(saw_result);
+    assert!(saw_terminal);
 }
 
 #[tokio::test]
-async fn thread_start_remains_empty_draft_without_creating_session() {
+async fn draft_open_remains_empty_without_creating_session() {
     let backend = Arc::new(AutomationFakeBackend::default());
     let (_temp, state) = web_state_with_automation_backend(backend);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -183,20 +183,21 @@ async fn thread_start_remains_empty_draft_without_creating_session() {
         .to_wire_scope();
     let (tx, _rx) = mpsc::unbounded_channel();
 
-    let snapshot = handle_rpc(
+    let opened = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx,
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
-            method: "thread/start".to_string(),
-            params: Some(json!({ "scope": scope })),
+            method: "thread/draft/open".to_string(),
+            params: Some(json!({ "origin": scope, "targetIntent": { "kind": "default" } })),
         },
     )
     .await
-    .expect("thread/start");
+    .expect("thread/draft/open");
 
+    let snapshot = &opened["snapshot"];
     assert!(snapshot.get("thread").is_some_and(Value::is_null));
     assert_eq!(
         state

@@ -596,10 +596,11 @@ fn bound_context_target(
     context: &wire::ThreadContextReadResult,
     thread_id: &str,
 ) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+    let selected_target_id = selected_context_target_id(context)?;
     context
         .compatible_targets
         .iter()
-        .find(|target| target.target_id == context.target_id)
+        .find(|target| target.target_id == selected_target_id)
         .cloned()
         .ok_or_else(|| {
             agent_session_error(

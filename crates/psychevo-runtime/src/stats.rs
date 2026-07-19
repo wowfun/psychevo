@@ -2,6 +2,7 @@ use psychevo_agent_core::{Message, now_ms};
 use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
 use serde_json::{Value, json};
 
+use crate::accounting::{UsageTotalStatus, effective_usage_total_from_parts};
 use crate::error::Result;
 use crate::paths::canonical_cwd;
 use crate::types::{
@@ -120,16 +121,40 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
             usage,
             "reported_total_tokens",
             &["total_tokens", "reported_total_tokens"],
-        )
-        .unwrap_or(0);
-        totals.reported_total_tokens += reported_total;
-        totals.add_cost_status(accounting, is_assistant, reported_total);
+        );
+        totals.reported_total_tokens += reported_total.unwrap_or(0);
+        if is_assistant {
+            let usage_input = usage.and_then(|usage| {
+                [
+                    "input_tokens",
+                    "prompt_tokens",
+                    "context_input_tokens",
+                    "inputTokens",
+                ]
+                .iter()
+                .find_map(|key| usage.get(*key).and_then(Value::as_u64))
+            });
+            let usage_output = usage.and_then(|usage| {
+                ["output_tokens", "completion_tokens", "outputTokens"]
+                    .iter()
+                    .find_map(|key| usage.get(*key).and_then(Value::as_u64))
+            });
+            let accounting_output = json_u64(accounting, "billable_output_tokens")
+                .map(|value| value.saturating_add(reasoning_tokens));
+            let total = effective_usage_total_from_parts(
+                reported_total,
+                json_u64(accounting, "context_input_tokens").or(usage_input),
+                usage_output.or(accounting_output),
+            );
+            totals.record_provider_call(total.status, total.tokens);
+            totals.add_cost_status(accounting, total.tokens.is_some());
+        }
         if let Some(cost) = json_i64(accounting, "estimated_cost_nanodollars") {
             totals.estimated_cost_nanodollars += cost;
         }
     }
     let cache_read_percent =
-        cache_read_percent(totals.cache_read_tokens, totals.billable_input_tokens);
+        cache_read_percent(totals.cache_read_tokens, totals.context_input_tokens);
     Ok(SessionUsageSummary {
         session_id: summary.id,
         provider,
@@ -142,7 +167,11 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
         reasoning_tokens: totals.reasoning_tokens,
         cache_read_tokens: totals.cache_read_tokens,
         cache_write_tokens: totals.cache_write_tokens,
+        effective_total_tokens: totals.effective_total_tokens(),
         reported_total_tokens: totals.reported_total_tokens,
+        total_status: totals.total_status().to_string(),
+        accounted_provider_call_count: totals.accounted_provider_call_count,
+        unaccounted_provider_call_count: totals.unaccounted_provider_call_count,
         estimated_cost_nanodollars: totals.estimated_cost_nanodollars,
         cost_status: totals.cost_status(),
         estimated_pricing_count: totals.estimated_pricing_count,
@@ -193,7 +222,13 @@ struct SessionUsageTotals {
     reasoning_tokens: u64,
     cache_read_tokens: u64,
     cache_write_tokens: u64,
+    effective_total_tokens: u64,
     reported_total_tokens: u64,
+    reported_provider_call_count: u64,
+    derived_provider_call_count: u64,
+    partial_provider_call_count: u64,
+    accounted_provider_call_count: u64,
+    unaccounted_provider_call_count: u64,
     estimated_cost_nanodollars: i64,
     estimated_pricing_count: u64,
     free_pricing_count: u64,
@@ -202,13 +237,53 @@ struct SessionUsageTotals {
 }
 
 impl SessionUsageTotals {
-    fn add_cost_status(
-        &mut self,
-        accounting: Option<&Value>,
-        is_assistant: bool,
-        reported_total_tokens: u64,
-    ) {
-        if !is_assistant || reported_total_tokens == 0 {
+    fn record_provider_call(&mut self, status: UsageTotalStatus, tokens: Option<u64>) {
+        if let Some(tokens) = tokens {
+            self.effective_total_tokens = self.effective_total_tokens.saturating_add(tokens);
+        }
+        match status {
+            UsageTotalStatus::Reported => {
+                self.reported_provider_call_count += 1;
+                self.accounted_provider_call_count += 1;
+            }
+            UsageTotalStatus::Derived => {
+                self.derived_provider_call_count += 1;
+                self.accounted_provider_call_count += 1;
+            }
+            UsageTotalStatus::Partial => {
+                self.partial_provider_call_count += 1;
+                self.unaccounted_provider_call_count += 1;
+            }
+            UsageTotalStatus::Unavailable => self.unaccounted_provider_call_count += 1,
+        }
+    }
+
+    fn effective_total_tokens(&self) -> Option<u64> {
+        (self.reported_provider_call_count
+            + self.derived_provider_call_count
+            + self.partial_provider_call_count
+            > 0)
+        .then_some(self.effective_total_tokens)
+    }
+
+    fn total_status(&self) -> &'static str {
+        if self.unaccounted_provider_call_count > 0 {
+            if self.effective_total_tokens().is_some() {
+                "partial"
+            } else {
+                "unavailable"
+            }
+        } else if self.derived_provider_call_count > 0 {
+            "derived"
+        } else if self.reported_provider_call_count > 0 {
+            "reported"
+        } else {
+            "unavailable"
+        }
+    }
+
+    fn add_cost_status(&mut self, accounting: Option<&Value>, provider_call_has_tokens: bool) {
+        if !provider_call_has_tokens {
             return;
         }
         match cost_status_from_accounting(accounting).as_str() {
@@ -268,9 +343,42 @@ fn aggregate_cost_status(
     }
 }
 
-fn cache_read_percent(cache_read_tokens: u64, billable_input_tokens: u64) -> Option<f64> {
-    let denominator = cache_read_tokens + billable_input_tokens;
-    (denominator > 0).then(|| cache_read_tokens as f64 * 100.0 / denominator as f64)
+fn cache_read_percent(cache_read_tokens: u64, context_input_tokens: u64) -> Option<f64> {
+    (context_input_tokens > 0)
+        .then(|| cache_read_tokens as f64 * 100.0 / context_input_tokens as f64)
+}
+
+fn aggregate_usage_total_status(
+    accounted_provider_call_count: u64,
+    unaccounted_provider_call_count: u64,
+    derived_provider_call_count: u64,
+    partial_provider_call_count: u64,
+) -> &'static str {
+    if unaccounted_provider_call_count > 0 {
+        if accounted_provider_call_count > 0 || partial_provider_call_count > 0 {
+            "partial"
+        } else {
+            "unavailable"
+        }
+    } else if accounted_provider_call_count == 0 {
+        "unavailable"
+    } else if derived_provider_call_count > 0 {
+        "derived"
+    } else {
+        "reported"
+    }
+}
+
+fn usage_reported_total_sql() -> &'static str {
+    "COALESCE(m.reported_total_tokens, json_extract(m.usage_json, '$.total_tokens'), json_extract(m.usage_json, '$.reported_total_tokens'), json_extract(m.usage_json, '$.totalTokens'))"
+}
+
+fn usage_context_input_sql() -> &'static str {
+    "COALESCE(m.context_input_tokens, json_extract(m.usage_json, '$.input_tokens'), json_extract(m.usage_json, '$.prompt_tokens'), json_extract(m.usage_json, '$.context_input_tokens'), json_extract(m.usage_json, '$.inputTokens'))"
+}
+
+fn usage_output_sql() -> &'static str {
+    "COALESCE(json_extract(m.usage_json, '$.output_tokens'), json_extract(m.usage_json, '$.completion_tokens'), json_extract(m.usage_json, '$.outputTokens'), CASE WHEN m.billable_output_tokens IS NOT NULL THEN m.billable_output_tokens + COALESCE(m.reasoning_tokens, 0) END)"
 }
 
 fn usage_window_summary(
@@ -284,6 +392,18 @@ fn usage_window_summary(
     } else {
         "WHERE 1 = 1"
     };
+    let reported_sql = usage_reported_total_sql();
+    let input_sql = usage_context_input_sql();
+    let output_sql = usage_output_sql();
+    let complete_sql = format!(
+        "(({reported_sql}) IS NOT NULL OR (({input_sql}) IS NOT NULL AND ({output_sql}) IS NOT NULL))"
+    );
+    let known_sql = format!(
+        "(({reported_sql}) IS NOT NULL OR ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL)"
+    );
+    let effective_sql = format!(
+        "CASE WHEN ({reported_sql}) IS NOT NULL THEN ({reported_sql}) WHEN ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL THEN COALESCE(({input_sql}), 0) + COALESCE(({output_sql}), 0) ELSE NULL END"
+    );
     let mut stmt = conn.prepare(&format!(
         r#"
         SELECT
@@ -296,24 +416,35 @@ fn usage_window_summary(
             COALESCE(SUM(m.reasoning_tokens), 0),
             COALESCE(SUM(m.cache_read_tokens), 0),
             COALESCE(SUM(m.cache_write_tokens), 0),
-            COALESCE(SUM(m.reported_total_tokens), 0),
+            COALESCE(SUM({reported_sql}), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN {effective_sql} ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {complete_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND NOT {complete_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND ({reported_sql}) IS NULL
+                      AND {complete_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND NOT {complete_sql}
+                      AND {known_sql} THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(m.estimated_cost_nanodollars), 0),
             COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                      AND m.reported_total_tokens IS NOT NULL
+                      AND {complete_sql}
                       AND {cost_status_sql} = 'estimated' THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                      AND m.reported_total_tokens IS NOT NULL
+                      AND {complete_sql}
                       AND {cost_status_sql} = 'free' THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                      AND m.reported_total_tokens IS NOT NULL
+                      AND {complete_sql}
                       AND {cost_status_sql} = 'included' THEN 1 ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                      AND m.reported_total_tokens IS NOT NULL
+                      AND {complete_sql}
                       AND {cost_status_sql} = 'unknown' THEN 1 ELSE 0 END), 0)
         FROM messages m
         {where_clause}
         "#,
         cost_status_sql = cost_status_sql(),
+        effective_sql = effective_sql,
+        complete_sql = complete_sql,
+        known_sql = known_sql,
+        reported_sql = reported_sql,
     ))?;
     let params = since_ms
         .map(|value| vec![SqlValue::Integer(value)])
@@ -321,10 +452,15 @@ fn usage_window_summary(
     stmt.query_row(params_from_iter(params.iter()), |row| {
         let cache_read_tokens = row_u64(row, 7)?;
         let billable_input_tokens = row_u64(row, 4)?;
-        let estimated_pricing_count = row_u64(row, 11)?;
-        let free_pricing_count = row_u64(row, 12)?;
-        let included_pricing_count = row_u64(row, 13)?;
-        let unknown_pricing_count = row_u64(row, 14)?;
+        let effective_total_tokens = row_u64(row, 10)?;
+        let accounted_provider_call_count = row_u64(row, 11)?;
+        let unaccounted_provider_call_count = row_u64(row, 12)?;
+        let derived_provider_call_count = row_u64(row, 13)?;
+        let partial_provider_call_count = row_u64(row, 14)?;
+        let estimated_pricing_count = row_u64(row, 16)?;
+        let free_pricing_count = row_u64(row, 17)?;
+        let included_pricing_count = row_u64(row, 18)?;
+        let unknown_pricing_count = row_u64(row, 19)?;
         Ok(UsageWindowSummary {
             id: id.to_string(),
             label: label.to_string(),
@@ -338,8 +474,18 @@ fn usage_window_summary(
             reasoning_tokens: row_u64(row, 6)?,
             cache_read_tokens,
             cache_write_tokens: row_u64(row, 8)?,
+            effective_total_tokens,
             reported_total_tokens: row_u64(row, 9)?,
-            estimated_cost_nanodollars: row.get(10)?,
+            total_status: aggregate_usage_total_status(
+                accounted_provider_call_count,
+                unaccounted_provider_call_count,
+                derived_provider_call_count,
+                partial_provider_call_count,
+            )
+            .to_string(),
+            accounted_provider_call_count,
+            unaccounted_provider_call_count,
+            estimated_cost_nanodollars: row.get(15)?,
             cost_status: aggregate_cost_status(
                 estimated_pricing_count,
                 free_pricing_count,
@@ -350,7 +496,7 @@ fn usage_window_summary(
             free_pricing_count,
             included_pricing_count,
             unknown_pricing_count,
-            cache_read_percent: cache_read_percent(cache_read_tokens, billable_input_tokens),
+            cache_read_percent: cache_read_percent(cache_read_tokens, row_u64(row, 3)?),
         })
     })
     .map_err(Into::into)
@@ -362,6 +508,18 @@ fn usage_activity(
     activity_days: usize,
 ) -> Result<UsageActivity> {
     let start_modifier = format!("-{} day", activity_days.saturating_sub(1));
+    let reported_sql = usage_reported_total_sql();
+    let input_sql = usage_context_input_sql();
+    let output_sql = usage_output_sql();
+    let complete_sql = format!(
+        "(({reported_sql}) IS NOT NULL OR (({input_sql}) IS NOT NULL AND ({output_sql}) IS NOT NULL))"
+    );
+    let known_sql = format!(
+        "(({reported_sql}) IS NOT NULL OR ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL)"
+    );
+    let effective_sql = format!(
+        "CASE WHEN ({reported_sql}) IS NOT NULL THEN ({reported_sql}) WHEN ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL THEN COALESCE(({input_sql}), 0) + COALESCE(({output_sql}), 0) ELSE NULL END"
+    );
     let mut stmt = conn.prepare(&format!(
         r#"
         WITH RECURSIVE days(day) AS (
@@ -375,25 +533,37 @@ fn usage_activity(
                 date(m.timestamp_ms / 1000, 'unixepoch', 'localtime') AS day,
                 COUNT(DISTINCT m.session_id) AS session_count,
                 COUNT(m.id) AS message_count,
-                COALESCE(SUM(m.reported_total_tokens), 0) AS reported_total_tokens,
+                COALESCE(SUM({reported_sql}), 0) AS reported_total_tokens,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN {effective_sql} ELSE 0 END), 0)
+                    AS effective_total_tokens,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {complete_sql} THEN 1 ELSE 0 END), 0)
+                    AS accounted_provider_call_count,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant' AND NOT {complete_sql} THEN 1 ELSE 0 END), 0)
+                    AS unaccounted_provider_call_count,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant' AND ({reported_sql}) IS NULL
+                          AND {complete_sql} THEN 1 ELSE 0 END), 0)
+                    AS derived_provider_call_count,
+                COALESCE(SUM(CASE WHEN m.role = 'assistant' AND NOT {complete_sql}
+                          AND {known_sql} THEN 1 ELSE 0 END), 0)
+                    AS partial_provider_call_count,
                 COALESCE(SUM(m.context_input_tokens), 0) AS context_input_tokens,
                 COALESCE(SUM(m.cache_read_tokens), 0) AS cache_read_tokens,
                 COALESCE(SUM(m.cache_write_tokens), 0) AS cache_write_tokens,
                 COALESCE(SUM(m.estimated_cost_nanodollars), 0) AS estimated_cost_nanodollars,
                 COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                          AND m.reported_total_tokens IS NOT NULL
+                          AND {complete_sql}
                           AND {cost_status_sql} = 'estimated' THEN 1 ELSE 0 END), 0)
                     AS estimated_pricing_count,
                 COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                          AND m.reported_total_tokens IS NOT NULL
+                          AND {complete_sql}
                           AND {cost_status_sql} = 'free' THEN 1 ELSE 0 END), 0)
                     AS free_pricing_count,
                 COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                          AND m.reported_total_tokens IS NOT NULL
+                          AND {complete_sql}
                           AND {cost_status_sql} = 'included' THEN 1 ELSE 0 END), 0)
                     AS included_pricing_count,
                 COALESCE(SUM(CASE WHEN m.role = 'assistant'
-                          AND m.reported_total_tokens IS NOT NULL
+                          AND {complete_sql}
                           AND {cost_status_sql} = 'unknown' THEN 1 ELSE 0 END), 0)
                     AS unknown_pricing_count
             FROM messages m
@@ -407,6 +577,11 @@ fn usage_activity(
             COALESCE(daily.session_count, 0),
             COALESCE(daily.message_count, 0),
             COALESCE(daily.reported_total_tokens, 0),
+            COALESCE(daily.effective_total_tokens, 0),
+            COALESCE(daily.accounted_provider_call_count, 0),
+            COALESCE(daily.unaccounted_provider_call_count, 0),
+            COALESCE(daily.derived_provider_call_count, 0),
+            COALESCE(daily.partial_provider_call_count, 0),
             COALESCE(daily.context_input_tokens, 0),
             COALESCE(daily.cache_read_tokens, 0),
             COALESCE(daily.cache_write_tokens, 0),
@@ -420,21 +595,39 @@ fn usage_activity(
         ORDER BY days.day ASC
         "#,
         cost_status_sql = cost_status_sql(),
+        effective_sql = effective_sql,
+        complete_sql = complete_sql,
+        known_sql = known_sql,
+        reported_sql = reported_sql,
     ))?;
     let rows = stmt.query_map(params![generated_at_ms, start_modifier], |row| {
-        let estimated_pricing_count = row_u64(row, 8)?;
-        let free_pricing_count = row_u64(row, 9)?;
-        let included_pricing_count = row_u64(row, 10)?;
-        let unknown_pricing_count = row_u64(row, 11)?;
+        let accounted_provider_call_count = row_u64(row, 5)?;
+        let unaccounted_provider_call_count = row_u64(row, 6)?;
+        let derived_provider_call_count = row_u64(row, 7)?;
+        let partial_provider_call_count = row_u64(row, 8)?;
+        let estimated_pricing_count = row_u64(row, 13)?;
+        let free_pricing_count = row_u64(row, 14)?;
+        let included_pricing_count = row_u64(row, 15)?;
+        let unknown_pricing_count = row_u64(row, 16)?;
         Ok(UsageActivityDay {
             date: row.get(0)?,
             session_count: row_u64(row, 1)?,
             message_count: row_u64(row, 2)?,
+            effective_total_tokens: row_u64(row, 4)?,
             reported_total_tokens: row_u64(row, 3)?,
-            context_input_tokens: row_u64(row, 4)?,
-            cache_read_tokens: row_u64(row, 5)?,
-            cache_write_tokens: row_u64(row, 6)?,
-            estimated_cost_nanodollars: row.get(7)?,
+            total_status: aggregate_usage_total_status(
+                accounted_provider_call_count,
+                unaccounted_provider_call_count,
+                derived_provider_call_count,
+                partial_provider_call_count,
+            )
+            .to_string(),
+            accounted_provider_call_count,
+            unaccounted_provider_call_count,
+            context_input_tokens: row_u64(row, 9)?,
+            cache_read_tokens: row_u64(row, 10)?,
+            cache_write_tokens: row_u64(row, 11)?,
+            estimated_cost_nanodollars: row.get(12)?,
             cost_status: aggregate_cost_status(
                 estimated_pricing_count,
                 free_pricing_count,

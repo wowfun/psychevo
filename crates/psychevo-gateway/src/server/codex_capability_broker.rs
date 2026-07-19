@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
@@ -9,15 +10,46 @@ use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
 use psychevo_ai::AbortSignal;
 use psychevo_runtime::{Error, Result};
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, oneshot};
 use tokio::time::timeout;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const ELICITATION_TIMEOUT: Duration = Duration::from_secs(120);
 const ELICITATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(125);
 const RUNTIME_INVENTORY_RETRY_DELAY: Duration = Duration::from_secs(5);
+const REVIEWED_CODEX_VERSION: &str = "0.144.1";
+const REQUIRED_CODEX_METHODS: &[&str] = &[
+    "marketplace/add",
+    "marketplace/remove",
+    "marketplace/upgrade",
+    "plugin/list",
+    "plugin/installed",
+    "plugin/read",
+    "plugin/install",
+    "plugin/uninstall",
+    "app/list",
+    "hooks/list",
+    "mcpServer/oauth/login",
+    "mcpServerStatus/list",
+    "mcpServer/tool/call",
+    "thread/start",
+    "thread/archive",
+];
+const CONNECT_SESSION_TTL: Duration = Duration::from_secs(5 * 60);
+
+fn log_codex_authority_event(event: &str, cwd: &Path, reason: Option<&str>) {
+    eprintln!(
+        "{}",
+        json!({
+            "target": "psychevo.codex_plugins",
+            "event": event,
+            "cwd": cwd,
+            "reason": reason,
+        })
+    );
+}
 
 #[derive(Debug, Clone)]
 struct BrokerCommand {
@@ -26,16 +58,31 @@ struct BrokerCommand {
 }
 
 impl BrokerCommand {
-    fn from_env(env: &BTreeMap<String, String>) -> Self {
+    fn from_profile(
+        config: &psychevo_runtime::CodexPluginsConfig,
+        env: &BTreeMap<String, String>,
+    ) -> Self {
+        let program = config
+            .binary
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codex"));
+        #[cfg(test)]
         let program = env
             .get("PSYCHEVO_CODEX_BIN")
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("codex"));
+            .unwrap_or(program);
+        #[cfg(not(test))]
+        let _ = env;
         Self {
             program,
             args: vec![
                 "app-server".to_string(),
+                "--strict-config".to_string(),
+                "-c".to_string(),
+                "cli_auth_credentials_store=\"file\"".to_string(),
                 "--listen".to_string(),
                 "stdio://".to_string(),
             ],
@@ -43,22 +90,45 @@ impl BrokerCommand {
     }
 }
 
-pub(super) struct CodexCapabilityBroker {
-    command: BrokerCommand,
+/// Versioned external capability authority for Codex plugins.
+///
+/// The public surface is deliberately small: authority state, management
+/// operations, a non-blocking turn snapshot/lease, and shutdown. Process,
+/// compatibility, inventory, trust, and connection details stay behind this
+/// boundary.
+pub(super) struct CodexPluginAuthority {
+    command: std::sync::RwLock<BrokerCommand>,
     env: BTreeMap<String, String>,
+    enabled: AtomicBool,
+    private_home: PathBuf,
+    auth_available: AtomicBool,
+    process_ready: AtomicBool,
+    enforce_compatibility: bool,
+    enforce_policy: bool,
+    incompatible: AtomicBool,
+    negotiated_version: std::sync::RwLock<Option<String>>,
+    compatibility_error: std::sync::RwLock<Option<String>>,
+    generation: std::sync::atomic::AtomicU64,
+    inventory_ready: AtomicBool,
+    connect_sessions: Mutex<BTreeMap<String, CodexConnectSession>>,
+    active_leases: Mutex<BTreeMap<String, u64>>,
+    lease_notify: Notify,
+    draining: AtomicBool,
+    destructive_mutation: Mutex<()>,
     request_timeout: Duration,
     runtime_inventory_retry_delay: Duration,
-    process: Mutex<Option<BrokerProcess>>,
+    process: Mutex<Option<Arc<BrokerProcess>>>,
     thread_ids: Mutex<BTreeMap<String, String>>,
     runtime_inventories: Mutex<BTreeMap<PathBuf, Arc<Mutex<CachedCodexRuntimeInventory>>>>,
-    runtime_profiles: Mutex<BTreeMap<String, Arc<Mutex<Option<CodexRuntimeProfile>>>>>,
 }
+
+// Keep the server wiring stable while the module name is migrated separately.
+pub(super) type CodexCapabilityBroker = CodexPluginAuthority;
 
 pub(super) struct CodexRuntimeContributions {
     pub(super) capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
     pub(super) runtime_tools: Vec<psychevo_runtime::RuntimeTool>,
-    pub(super) warnings: Vec<String>,
-    pub(super) unavailable_warnings: Vec<String>,
+    pub(super) lease_id: Option<String>,
 }
 
 struct RuntimePluginDetail {
@@ -72,14 +142,14 @@ struct RuntimePluginDetail {
 struct CodexRuntimeProfile {
     capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
     delegated_tools: Vec<CodexDelegatedToolDescriptor>,
-    warnings: Vec<String>,
-    unavailable_warnings: Vec<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
+#[allow(dead_code)]
 struct CodexRuntimeInventory {
     capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
     delegated_servers: BTreeSet<String>,
+    delegated_tools: Vec<CodexDelegatedToolDescriptor>,
     warnings: Vec<String>,
 }
 
@@ -94,7 +164,7 @@ struct CachedCodexRuntimeInventoryFailure {
     retry_after: Instant,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct CodexDelegatedToolDescriptor {
     name: String,
     server_name: String,
@@ -103,17 +173,67 @@ struct CodexDelegatedToolDescriptor {
     parameters: Value,
 }
 
-impl CodexCapabilityBroker {
+#[derive(Debug, Clone)]
+struct CodexConnectSession {
+    selector: String,
+    component_id: String,
+    kind: String,
+    authorization_url: String,
+    expires_at: Instant,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexTrustRecord {
+    fingerprint: String,
+    codex_version: String,
+    trusted_at_ms: i64,
+}
+
+impl CodexPluginAuthority {
     pub(super) fn new(env: &BTreeMap<String, String>) -> Self {
+        let profile_home = env
+            .get("PSYCHEVO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(".psychevo"));
+        let config =
+            psychevo_runtime::load_codex_plugins_profile_config(&profile_home).unwrap_or_default();
+        let private_home = profile_home.join("codex");
+        if config.enabled {
+            let _ = ensure_private_home(&private_home);
+        }
+        let auth_available = config.enabled && prepare_private_auth_link(&private_home, env);
+        let mut process_env = env.clone();
+        process_env.remove("CODEX_HOME");
+        process_env.remove("PSYCHEVO_CODEX_BIN");
+        process_env.insert(
+            "CODEX_HOME".to_string(),
+            private_home.to_string_lossy().to_string(),
+        );
         Self {
-            command: BrokerCommand::from_env(env),
-            env: env.clone(),
+            command: std::sync::RwLock::new(BrokerCommand::from_profile(&config, env)),
+            env: process_env,
+            enabled: AtomicBool::new(config.enabled),
+            private_home,
+            auth_available: AtomicBool::new(auth_available),
+            process_ready: AtomicBool::new(false),
+            enforce_compatibility: true,
+            enforce_policy: true,
+            incompatible: AtomicBool::new(false),
+            negotiated_version: std::sync::RwLock::new(None),
+            compatibility_error: std::sync::RwLock::new(None),
+            generation: std::sync::atomic::AtomicU64::new(1),
+            inventory_ready: AtomicBool::new(false),
+            connect_sessions: Mutex::new(BTreeMap::new()),
+            active_leases: Mutex::new(BTreeMap::new()),
+            lease_notify: Notify::new(),
+            draining: AtomicBool::new(false),
+            destructive_mutation: Mutex::new(()),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             runtime_inventory_retry_delay: RUNTIME_INVENTORY_RETRY_DELAY,
             process: Mutex::new(None),
             thread_ids: Mutex::new(BTreeMap::new()),
             runtime_inventories: Mutex::new(BTreeMap::new()),
-            runtime_profiles: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -139,14 +259,29 @@ impl CodexCapabilityBroker {
         runtime_inventory_retry_delay: Duration,
     ) -> Self {
         Self {
-            command,
+            command: std::sync::RwLock::new(command),
             env,
+            enabled: AtomicBool::new(true),
+            private_home: PathBuf::from("/fake"),
+            auth_available: AtomicBool::new(false),
+            process_ready: AtomicBool::new(false),
+            enforce_compatibility: false,
+            enforce_policy: false,
+            incompatible: AtomicBool::new(false),
+            negotiated_version: std::sync::RwLock::new(None),
+            compatibility_error: std::sync::RwLock::new(None),
+            generation: std::sync::atomic::AtomicU64::new(1),
+            inventory_ready: AtomicBool::new(false),
+            connect_sessions: Mutex::new(BTreeMap::new()),
+            active_leases: Mutex::new(BTreeMap::new()),
+            lease_notify: Notify::new(),
+            draining: AtomicBool::new(false),
+            destructive_mutation: Mutex::new(()),
             request_timeout,
             runtime_inventory_retry_delay,
             process: Mutex::new(None),
             thread_ids: Mutex::new(BTreeMap::new()),
             runtime_inventories: Mutex::new(BTreeMap::new()),
-            runtime_profiles: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -160,39 +295,517 @@ impl CodexCapabilityBroker {
         params: Value,
         context: Option<&CodexElicitationContext>,
     ) -> Result<Value> {
-        let (result, effective_plugins_changed, broker_replaced) = {
+        if !self.enabled.load(Ordering::Acquire) {
+            return Err(Error::Message(
+                "Codex plugin authority is disabled in the active profile".to_string(),
+            ));
+        }
+        let process = {
             let mut slot = self.process.lock().await;
             if slot.is_none() {
-                *slot = Some(
-                    BrokerProcess::spawn(&self.command, &self.env, self.request_timeout).await?,
-                );
+                let expected_home = self
+                    .enforce_compatibility
+                    .then_some(self.private_home.as_path());
+                let command = self
+                    .command
+                    .read()
+                    .expect("Codex command lock poisoned")
+                    .clone();
+                let spawned =
+                    BrokerProcess::spawn(&command, &self.env, self.request_timeout, expected_home)
+                        .await;
+                let process = match spawned {
+                    Ok(process) => process,
+                    Err(err) => {
+                        let message = err.to_string();
+                        self.incompatible.store(
+                            message.contains("Codex plugin compatibility profile"),
+                            Ordering::Release,
+                        );
+                        *self
+                            .compatibility_error
+                            .write()
+                            .expect("Codex compatibility error lock poisoned") = Some(message);
+                        return Err(err);
+                    }
+                };
+                *self
+                    .negotiated_version
+                    .write()
+                    .expect("Codex version lock poisoned") = process.codex_version.clone();
+                *self
+                    .compatibility_error
+                    .write()
+                    .expect("Codex compatibility error lock poisoned") = None;
+                self.incompatible.store(false, Ordering::Release);
+                *slot = Some(Arc::new(process));
+                self.process_ready.store(true, Ordering::Release);
             }
-            let process = slot.as_mut().expect("broker process initialized");
-            let result = process
-                .request_with_context(
-                    method,
-                    params,
-                    if context.is_some() {
-                        ELICITATION_REQUEST_TIMEOUT
-                    } else {
-                        self.request_timeout
-                    },
-                    context,
-                )
-                .await;
-            let effective_plugins_changed = process.take_effective_plugins_changed();
-            if result.is_err()
-                && let Some(mut process) = slot.take()
-            {
-                let _ = process.child.kill().await;
-            }
-            let broker_replaced = result.is_err();
-            (result, effective_plugins_changed, broker_replaced)
+            slot.as_ref().expect("broker process initialized").clone()
         };
+        let result = process
+            .request_with_context(
+                method,
+                params,
+                if context.is_some() {
+                    ELICITATION_REQUEST_TIMEOUT
+                } else {
+                    self.request_timeout
+                },
+                context,
+            )
+            .await;
+        let effective_plugins_changed = process.take_effective_plugins_changed();
+        let broker_replaced = result.as_ref().is_err_and(|err| {
+            let message = err.to_string();
+            !message.starts_with("Codex broker request failed")
+        });
+        if broker_replaced {
+            *self
+                .compatibility_error
+                .write()
+                .expect("Codex compatibility error lock poisoned") =
+                result.as_ref().err().map(ToString::to_string);
+            let removed = {
+                let mut slot = self.process.lock().await;
+                if slot
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &process))
+                {
+                    slot.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(process) = removed {
+                process.kill().await;
+            }
+            self.process_ready.store(false, Ordering::Release);
+        }
         if effective_plugins_changed || broker_replaced {
             self.invalidate_runtime_inventories().await;
         }
         result
+    }
+
+    pub(super) fn authority_view(&self) -> Value {
+        let enabled = self.enabled.load(Ordering::Acquire);
+        let incompatible = self.incompatible.load(Ordering::Acquire);
+        let version = self
+            .negotiated_version
+            .read()
+            .expect("Codex version lock poisoned")
+            .clone();
+        let reason = self
+            .compatibility_error
+            .read()
+            .expect("Codex compatibility error lock poisoned")
+            .clone();
+        json!({
+            "kind": "codex",
+            "enabled": enabled,
+            "runtime": if !enabled {
+                "disabled"
+            } else if self.draining.load(Ordering::Acquire) {
+                "draining"
+            } else if incompatible {
+                "incompatible"
+            } else if reason.is_some() {
+                "unavailable"
+            } else if self.process_ready.load(Ordering::Acquire) {
+                "ready"
+            } else {
+                "starting"
+            },
+            "auth": if self.auth_available.load(Ordering::Acquire) {
+                "available"
+            } else {
+                "unavailable"
+            },
+            "resolvedBinary": self.command.read().expect("Codex command lock poisoned").program,
+            "version": version,
+            "compatibilityProfile": psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "privateHome": self.private_home,
+            "platform": std::env::consts::OS,
+            "generation": self.generation.load(Ordering::Acquire),
+            "inventoryReady": self.inventory_ready.load(Ordering::Acquire),
+            "reason": reason,
+            "securityNotes": [
+                "Codex runs with a Psychevo-private CODEX_HOME.",
+                "Authentication is linked without reading or copying credential contents.",
+                "Only reviewed Codex CLI 0.144.1 is admitted; version drift is blocked before inventory or execution."
+            ]
+        })
+    }
+
+    pub(super) fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Acquire)
+    }
+
+    async fn begin_draining(&self) -> DrainingMutationGuard<'_> {
+        let mutation = self.destructive_mutation.lock().await;
+        self.draining.store(true, Ordering::Release);
+        loop {
+            let notified = self.lease_notify.notified();
+            if self.active_leases.lock().await.is_empty() {
+                break;
+            }
+            notified.await;
+        }
+        DrainingMutationGuard {
+            authority: self,
+            _mutation: mutation,
+        }
+    }
+
+    pub(super) async fn release_turn_lease(&self, lease_id: &str) {
+        if self.active_leases.lock().await.remove(lease_id).is_some() {
+            self.lease_notify.notify_waiters();
+        }
+    }
+
+    pub(super) async fn write_authority(
+        &self,
+        enabled: bool,
+        binary: Option<&str>,
+    ) -> Result<Value> {
+        let profile_home = self.private_home.parent().ok_or_else(|| {
+            Error::Message("Codex private home has no profile parent".to_string())
+        })?;
+        let write =
+            psychevo_runtime::write_codex_plugins_profile_config(profile_home, enabled, binary)?;
+        let _draining = self.begin_draining().await;
+        self.enabled.store(false, Ordering::Release);
+        self.stop().await;
+        let config = psychevo_runtime::CodexPluginsConfig {
+            enabled,
+            binary: binary
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        };
+        *self.command.write().expect("Codex command lock poisoned") =
+            BrokerCommand::from_profile(&config, &self.env);
+        if enabled {
+            ensure_private_home(&self.private_home)?;
+        }
+        let auth_available = enabled && prepare_private_auth_link(&self.private_home, &self.env);
+        self.auth_available.store(auth_available, Ordering::Release);
+        self.incompatible.store(false, Ordering::Release);
+        *self
+            .negotiated_version
+            .write()
+            .expect("Codex version lock poisoned") = None;
+        *self
+            .compatibility_error
+            .write()
+            .expect("Codex compatibility error lock poisoned") = None;
+        self.invalidate_runtime_inventories().await;
+        self.enabled.store(enabled, Ordering::Release);
+        Ok(json!({
+            "success": true,
+            "write": write,
+            "authority": self.authority_view(),
+        }))
+    }
+
+    pub(super) async fn refresh_authority(&self, cwd: &Path) -> Result<Value> {
+        if !self.is_enabled() {
+            return Err(Error::Message(
+                "Codex plugin authority is disabled in the active profile".to_string(),
+            ));
+        }
+        let _draining = self.begin_draining().await;
+        self.stop().await;
+        self.invalidate_runtime_inventories().await;
+        let refresh = self.prepare_runtime_inventory(cwd).await;
+        refresh?;
+        Ok(json!({
+            "success": true,
+            "authority": self.authority_view(),
+        }))
+    }
+
+    pub(super) async fn catalog_add(
+        &self,
+        source: &str,
+        git_ref: Option<&str>,
+        sparse_paths: &[String],
+    ) -> Result<Value> {
+        let result = self
+            .request(
+                "marketplace/add",
+                json!({
+                    "source": source,
+                    "refName": git_ref,
+                    "sparsePaths": (!sparse_paths.is_empty()).then_some(sparse_paths),
+                }),
+            )
+            .await?;
+        self.invalidate_runtime_inventories().await;
+        Ok(result)
+    }
+
+    pub(super) async fn catalog_remove(&self, marketplace_name: &str) -> Result<Value> {
+        let _draining = self.begin_draining().await;
+        let result = self
+            .request(
+                "marketplace/remove",
+                json!({"marketplaceName": marketplace_name}),
+            )
+            .await;
+        let result = result?;
+        self.invalidate_runtime_inventories().await;
+        Ok(result)
+    }
+
+    pub(super) async fn catalog_upgrade(
+        &self,
+        marketplace_name: Option<&str>,
+        source: Option<&str>,
+        git_ref: Option<&str>,
+        sparse_paths: &[String],
+    ) -> Result<Value> {
+        let _draining = self.begin_draining().await;
+        let result = self
+            .request(
+                "marketplace/upgrade",
+                json!({
+                    "marketplaceName": marketplace_name,
+                    "source": source,
+                    "refName": git_ref,
+                    "sparsePaths": (!sparse_paths.is_empty()).then_some(sparse_paths),
+                }),
+            )
+            .await;
+        let result = result?;
+        self.invalidate_runtime_inventories().await;
+        Ok(result)
+    }
+
+    pub(super) fn trust_value(
+        &self,
+        identity: &CodexPluginIdentity,
+        detail: &Value,
+    ) -> Result<Value> {
+        let fingerprint = codex_detail_fingerprint(identity, detail)?;
+        let records = self.load_trust_records()?;
+        let record = records.get(&identity.selector());
+        let codex_version = self
+            .negotiated_version
+            .read()
+            .expect("Codex version lock poisoned")
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let status = match record {
+            Some(record)
+                if record.fingerprint == fingerprint && record.codex_version == codex_version =>
+            {
+                "trusted"
+            }
+            Some(_) => "modified",
+            None => "untrusted",
+        };
+        Ok(json!({
+            "required": true,
+            "status": status,
+            "fingerprint": fingerprint,
+            "trustedFingerprint": record.map(|record| record.fingerprint.clone()),
+            "trustedCodexVersion": record.map(|record| record.codex_version.clone()),
+            "trustedAtMs": record.map(|record| record.trusted_at_ms),
+        }))
+    }
+
+    pub(super) fn set_trust(
+        &self,
+        identity: &CodexPluginIdentity,
+        detail: &Value,
+        trusted: bool,
+    ) -> Result<Value> {
+        let fingerprint = codex_detail_fingerprint(identity, detail)?;
+        let codex_version = self
+            .negotiated_version
+            .read()
+            .expect("Codex version lock poisoned")
+            .clone()
+            .ok_or_else(|| Error::Message("Codex version is not negotiated".to_string()))?;
+        let mut records = self.load_trust_records()?;
+        if trusted {
+            records.insert(
+                identity.selector(),
+                CodexTrustRecord {
+                    fingerprint: fingerprint.clone(),
+                    codex_version,
+                    trusted_at_ms: super::gateway_now_ms(),
+                },
+            );
+        } else {
+            records.remove(&identity.selector());
+        }
+        self.write_trust_records(&records)?;
+        Ok(json!({
+            "success": true,
+            "selector": identity.selector(),
+            "trusted": trusted,
+            "trust": self.trust_value(identity, detail)?,
+        }))
+    }
+
+    fn load_trust_records(&self) -> Result<BTreeMap<String, CodexTrustRecord>> {
+        let path = self.private_home.join("plugin-trust.json");
+        if !path.exists() {
+            return Ok(BTreeMap::new());
+        }
+        let bytes = std::fs::read(&path)?;
+        serde_json::from_slice(&bytes).map_err(Into::into)
+    }
+
+    fn write_trust_records(&self, records: &BTreeMap<String, CodexTrustRecord>) -> Result<()> {
+        std::fs::create_dir_all(&self.private_home)?;
+        let path = self.private_home.join("plugin-trust.json");
+        let temporary = self.private_home.join("plugin-trust.json.tmp");
+        std::fs::write(&temporary, serde_json::to_vec_pretty(records)?)?;
+        std::fs::rename(temporary, path)?;
+        Ok(())
+    }
+
+    pub(super) async fn connect_start(
+        &self,
+        selector: &str,
+        component_id: &str,
+        kind: Option<&str>,
+    ) -> Result<Value> {
+        CodexPluginIdentity::parse_selector(selector)?.ok_or_else(|| {
+            Error::Message("Connect requires a Codex authority plugin selector".to_string())
+        })?;
+        let kind = kind.unwrap_or("app");
+        let (authorization_url, status) = if kind == "app" {
+            let apps = self
+                .request("app/list", json!({"threadId":null,"forceRefetch":true}))
+                .await?;
+            let app = apps
+                .get("data")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|app| app.get("id").and_then(Value::as_str) == Some(component_id))
+                .ok_or_else(|| Error::Message(format!("Codex App not found: {component_id}")))?;
+            if app.get("isAccessible").and_then(Value::as_bool) == Some(true) {
+                (String::new(), "succeeded")
+            } else {
+                let url = app
+                    .get("installUrl")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        Error::Message(format!("Codex App `{component_id}` has no install URL"))
+                    })?;
+                validate_connect_url(url)?;
+                (url.to_string(), "pending")
+            }
+        } else if kind == "mcp" {
+            let result = self
+                .request(
+                    "mcpServer/oauth/login",
+                    json!({
+                        "name": component_id,
+                        "threadId": null,
+                        "scopes": null,
+                        "timeoutSecs": 300,
+                    }),
+                )
+                .await?;
+            let url = result
+                .get("authorizationUrl")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    Error::Message("Codex MCP OAuth response has no authorization URL".to_string())
+                })?;
+            validate_connect_url(url)?;
+            (url.to_string(), "pending")
+        } else {
+            return Err(Error::Message(format!(
+                "unsupported Codex connection kind `{kind}`"
+            )));
+        };
+        let session_id = format!("codex-connect:{}", uuid::Uuid::now_v7());
+        self.connect_sessions.lock().await.insert(
+            session_id.clone(),
+            CodexConnectSession {
+                selector: selector.to_string(),
+                component_id: component_id.to_string(),
+                kind: kind.to_string(),
+                authorization_url: authorization_url.clone(),
+                expires_at: Instant::now() + CONNECT_SESSION_TTL,
+            },
+        );
+        Ok(json!({
+            "sessionId": session_id,
+            "status": status,
+            "installUrl": (kind == "app" && !authorization_url.is_empty()).then_some(authorization_url.clone()),
+            "authorizationUrl": (kind == "mcp" && !authorization_url.is_empty()).then_some(authorization_url),
+            "expiresInSeconds": CONNECT_SESSION_TTL.as_secs(),
+        }))
+    }
+
+    pub(super) async fn connect_status(&self, session_id: &str) -> Result<Value> {
+        let Some(session) = self.connect_sessions.lock().await.get(session_id).cloned() else {
+            return Ok(json!({"sessionId":session_id,"status":"expired"}));
+        };
+        if Instant::now() >= session.expires_at {
+            self.connect_sessions.lock().await.remove(session_id);
+            return Ok(json!({"sessionId":session_id,"status":"expired"}));
+        }
+        let status = if session.kind == "app" {
+            let apps = self
+                .request("app/list", json!({"threadId":null,"forceRefetch":true}))
+                .await?;
+            if apps
+                .get("data")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|app| {
+                    app.get("id").and_then(Value::as_str) == Some(&session.component_id)
+                        && app.get("isAccessible").and_then(Value::as_bool) == Some(true)
+                })
+            {
+                "succeeded"
+            } else {
+                "pending"
+            }
+        } else {
+            let servers = self
+                .request(
+                    "mcpServerStatus/list",
+                    json!({"threadId":null,"detail":"toolsAndAuthOnly"}),
+                )
+                .await?;
+            if servers
+                .get("data")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|server| {
+                    server.get("name").and_then(Value::as_str) == Some(&session.component_id)
+                        && matches!(
+                            server.get("authStatus").and_then(Value::as_str),
+                            Some("oAuth" | "oauth" | "bearerToken")
+                        )
+                })
+            {
+                "succeeded"
+            } else {
+                "pending"
+            }
+        };
+        Ok(json!({
+            "sessionId": session_id,
+            "selector": session.selector,
+            "componentId": session.component_id,
+            "kind": session.kind,
+            "status": status,
+            "authorizationUrl": session.authorization_url,
+        }))
     }
 
     pub(super) async fn plugin_list(&self, cwd: &std::path::Path) -> Result<Value> {
@@ -244,9 +857,102 @@ impl CodexCapabilityBroker {
                 }),
             )
             .await?;
+        if !self.enforce_policy {
+            self.invalidate_runtime_inventories().await;
+            let _ = self.prepare_runtime_inventory(cwd).await;
+            return Ok(result);
+        }
+        let mut completed_steps = vec!["materialized"];
+        let detail = match self.plugin_read_target(identity, &target).await {
+            Ok(detail) => {
+                completed_steps.push("detail_reread");
+                detail
+            }
+            Err(err) => {
+                self.invalidate_runtime_inventories().await;
+                return Ok(json!({
+                    "success": false,
+                    "partial": true,
+                    "completedSteps": completed_steps,
+                    "failedStep": "detail_reread",
+                    "reason": err.to_string(),
+                    "materialization": result,
+                    "safeState": "Disabled",
+                }));
+            }
+        };
+        let fingerprint = match codex_detail_fingerprint(identity, &detail) {
+            Ok(fingerprint) => {
+                completed_steps.push("fingerprint");
+                fingerprint
+            }
+            Err(err) => {
+                self.invalidate_runtime_inventories().await;
+                return Ok(json!({
+                    "success": false,
+                    "partial": true,
+                    "completedSteps": completed_steps,
+                    "failedStep": "fingerprint",
+                    "reason": err.to_string(),
+                    "materialization": result,
+                    "safeState": "Needs trust",
+                }));
+            }
+        };
+        let profile_home = self.private_home.parent().ok_or_else(|| {
+            Error::Message("Codex private home has no profile parent".to_string())
+        })?;
+        if let Err(err) = psychevo_runtime::codex_plugin_set_enabled_value(
+            profile_home,
+            cwd,
+            psychevo_runtime::PluginScope::Global,
+            &identity.selector(),
+            Some(true),
+        ) {
+            self.invalidate_runtime_inventories().await;
+            return Ok(json!({
+                "success": false,
+                "partial": true,
+                "completedSteps": completed_steps,
+                "failedStep": "profile_allow",
+                "reason": err.to_string(),
+                "materialization": result,
+                "fingerprint": fingerprint,
+                "safeState": "Disabled",
+            }));
+        }
+        completed_steps.push("profile_allow");
+        if let Err(err) = self.set_trust(identity, &detail, true) {
+            self.invalidate_runtime_inventories().await;
+            return Ok(json!({
+                "success": false,
+                "partial": true,
+                "completedSteps": completed_steps,
+                "failedStep": "trust",
+                "reason": err.to_string(),
+                "materialization": result,
+                "fingerprint": fingerprint,
+                "safeState": "Needs trust",
+            }));
+        }
+        completed_steps.push("trust");
         self.invalidate_runtime_inventories().await;
-        let _ = self.prepare_runtime_inventory(cwd).await;
-        Ok(result)
+        completed_steps.push("generation_published");
+        Ok(json!({
+            "success": true,
+            "partial": false,
+            "completedSteps": completed_steps,
+            "materialization": result,
+            "detail": detail,
+            "fingerprint": fingerprint,
+            "policy": psychevo_runtime::codex_plugin_policy_value(
+                profile_home,
+                cwd,
+                &identity.selector(),
+            )?,
+            "trust": self.trust_value(identity, &detail)?,
+            "generation": self.generation.load(Ordering::Acquire),
+        }))
     }
 
     pub(super) async fn plugin_uninstall(
@@ -256,19 +962,21 @@ impl CodexCapabilityBroker {
     ) -> Result<Value> {
         let catalog = self.plugin_list(cwd).await?;
         let target = find_catalog_plugin(&catalog, identity)?;
+        let _draining = self.begin_draining().await;
         let result = self
             .request("plugin/uninstall", json!({"pluginId": target.plugin_id}))
-            .await?;
+            .await;
+        let result = result?;
         self.invalidate_runtime_inventories().await;
         let _ = self.prepare_runtime_inventory(cwd).await;
         Ok(result)
     }
 
-    #[cfg(test)]
     pub(super) async fn stop(&self) {
-        if let Some(mut process) = self.process.lock().await.take() {
-            let _ = process.child.kill().await;
+        if let Some(process) = self.process.lock().await.take() {
+            process.kill().await;
         }
+        self.process_ready.store(false, Ordering::Release);
     }
 
     async fn ensure_ephemeral_thread(
@@ -302,10 +1010,6 @@ impl CodexCapabilityBroker {
     }
 
     pub(super) async fn archive_ephemeral_thread(&self, psychevo_thread_id: &str) {
-        self.runtime_profiles
-            .lock()
-            .await
-            .remove(psychevo_thread_id);
         let thread_id = self.thread_ids.lock().await.remove(psychevo_thread_id);
         if let Some(thread_id) = thread_id {
             let _ = self
@@ -322,8 +1026,41 @@ impl CodexCapabilityBroker {
         self.runtime_inventory(cwd).await.map(|_| ())
     }
 
-    async fn invalidate_runtime_inventories(&self) {
+    /// Revalidates package fingerprints and policy off the turn hot path.
+    /// Existing ready inventory stays readable while app-server and filesystem
+    /// inspection run; a changed effective inventory is published atomically as
+    /// a new generation.
+    pub(super) async fn refresh_runtime_inventory(&self, cwd: &Path) -> Result<()> {
+        if !self.is_enabled() {
+            return Ok(());
+        }
+        let key = tokio::fs::canonicalize(cwd)
+            .await
+            .unwrap_or_else(|_| cwd.to_path_buf());
+        let existing = self.runtime_inventories.lock().await.get(&key).cloned();
+        let Some(existing) = existing else {
+            return self.prepare_runtime_inventory(&key).await;
+        };
+        let fresh = Arc::new(self.load_runtime_inventory(&key).await?);
+        let mut cached = existing.lock().await;
+        let changed = cached
+            .inventory
+            .as_deref()
+            .is_none_or(|current| current != fresh.as_ref());
+        cached.inventory = Some(fresh);
+        cached.failure = None;
+        self.inventory_ready.store(true, Ordering::Release);
+        drop(cached);
+        if changed {
+            self.generation.fetch_add(1, Ordering::AcqRel);
+        }
+        Ok(())
+    }
+
+    pub(super) async fn invalidate_runtime_inventories(&self) {
         self.runtime_inventories.lock().await.clear();
+        self.inventory_ready.store(false, Ordering::Release);
+        self.generation.fetch_add(1, Ordering::AcqRel);
     }
 
     pub(super) async fn runtime_contributions(
@@ -334,12 +1071,47 @@ impl CodexCapabilityBroker {
         turn_id: Option<String>,
         event_sink: Option<super::GatewayEventSink>,
     ) -> Result<CodexRuntimeContributions> {
-        let profile = self.runtime_profile(cwd, psychevo_thread_id).await?;
+        let Some(profile) = self.ready_runtime_profile(cwd).await else {
+            log_codex_authority_event("inventory_not_ready", cwd, None);
+            return Ok(CodexRuntimeContributions {
+                capability_roots: Vec::new(),
+                runtime_tools: Vec::new(),
+                lease_id: None,
+            });
+        };
+        if self.draining.load(Ordering::Acquire) {
+            log_codex_authority_event("turn_skipped_while_draining", cwd, None);
+            return Ok(CodexRuntimeContributions {
+                capability_roots: Vec::new(),
+                runtime_tools: Vec::new(),
+                lease_id: None,
+            });
+        }
+        let generation = self.generation.load(Ordering::Acquire);
+        let lease_id = format!(
+            "{}:{}:{}:{}",
+            psychevo_thread_id,
+            turn_id.as_deref().unwrap_or("unassigned"),
+            generation,
+            uuid::Uuid::now_v7()
+        );
+        {
+            let mut active_leases = self.active_leases.lock().await;
+            // `begin_draining` sets this flag before it waits on the same map.
+            // Rechecking while holding the map lock closes the admission/drain race.
+            if self.draining.load(Ordering::Acquire) {
+                log_codex_authority_event("turn_skipped_while_draining", cwd, None);
+                return Ok(CodexRuntimeContributions {
+                    capability_roots: Vec::new(),
+                    runtime_tools: Vec::new(),
+                    lease_id: None,
+                });
+            }
+            active_leases.insert(lease_id.clone(), generation);
+        }
         let CodexRuntimeProfile {
             capability_roots,
             delegated_tools,
-            warnings,
-            unavailable_warnings,
         } = profile;
         let tools = delegated_tools
             .into_iter()
@@ -366,69 +1138,19 @@ impl CodexCapabilityBroker {
         Ok(CodexRuntimeContributions {
             capability_roots,
             runtime_tools: tools,
-            warnings,
-            unavailable_warnings,
+            lease_id: Some(lease_id),
         })
     }
 
-    async fn runtime_profile(
-        &self,
-        cwd: &Path,
-        psychevo_thread_id: &str,
-    ) -> Result<CodexRuntimeProfile> {
-        let profile_slot = {
-            let mut profiles = self.runtime_profiles.lock().await;
-            profiles
-                .entry(psychevo_thread_id.to_string())
-                .or_insert_with(|| Arc::new(Mutex::new(None)))
-                .clone()
-        };
-        let mut profile_slot = profile_slot.lock().await;
-        if let Some(profile) = profile_slot.as_ref() {
-            return Ok(profile.clone());
-        }
-
-        let inventory = match self.runtime_inventory(cwd).await {
-            Ok(inventory) => inventory,
-            Err(err) => {
-                let profile = CodexRuntimeProfile {
-                    capability_roots: Vec::new(),
-                    delegated_tools: Vec::new(),
-                    warnings: Vec::new(),
-                    unavailable_warnings: vec![err.to_string()],
-                };
-                *profile_slot = Some(profile.clone());
-                return Ok(profile);
-            }
-        };
-        let mut unavailable_warnings = Vec::new();
-        let delegated_tools = if inventory.delegated_servers.is_empty() {
-            Vec::new()
-        } else {
-            match self
-                .load_delegated_tool_descriptors(
-                    cwd,
-                    psychevo_thread_id,
-                    &inventory.delegated_servers,
-                )
-                .await
-            {
-                Ok(tools) => tools,
-                Err(err) => {
-                    self.forget_ephemeral_thread(psychevo_thread_id).await;
-                    unavailable_warnings.push(err.to_string());
-                    Vec::new()
-                }
-            }
-        };
-        let profile = CodexRuntimeProfile {
+    async fn ready_runtime_profile(&self, cwd: &Path) -> Option<CodexRuntimeProfile> {
+        let key = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+        let entry = self.runtime_inventories.lock().await.get(&key).cloned()?;
+        let cached = entry.try_lock().ok()?;
+        let inventory = cached.inventory.as_ref()?;
+        Some(CodexRuntimeProfile {
             capability_roots: inventory.capability_roots.clone(),
-            delegated_tools,
-            warnings: inventory.warnings.clone(),
-            unavailable_warnings,
-        };
-        *profile_slot = Some(profile.clone());
-        Ok(profile)
+            delegated_tools: inventory.delegated_tools.clone(),
+        })
     }
 
     async fn runtime_inventory(&self, cwd: &Path) -> Result<Arc<CodexRuntimeInventory>> {
@@ -455,8 +1177,12 @@ impl CodexCapabilityBroker {
 
         match self.load_runtime_inventory(&key).await {
             Ok(inventory) => {
+                for warning in &inventory.warnings {
+                    log_codex_authority_event("inventory_component_degraded", &key, Some(warning));
+                }
                 let inventory = Arc::new(inventory);
                 entry.inventory = Some(inventory.clone());
+                self.inventory_ready.store(true, Ordering::Release);
                 Ok(inventory)
             }
             Err(err) => {
@@ -527,9 +1253,30 @@ impl CodexCapabilityBroker {
         capability_roots.sort_by(|left, right| left.id.cmp(&right.id));
         capability_roots.dedup_by(|left, right| left.id == right.id);
 
+        let inventory_thread_id = format!("codex-inventory:{}", cwd.display());
+        let delegated_tools = if delegated_servers.is_empty() {
+            Vec::new()
+        } else {
+            match self
+                .load_delegated_tool_descriptors(cwd, &inventory_thread_id, &delegated_servers)
+                .await
+            {
+                Ok(tools) => tools,
+                Err(err) => {
+                    log_codex_authority_event(
+                        "delegated_tool_inventory_unavailable",
+                        cwd,
+                        Some(&err.to_string()),
+                    );
+                    Vec::new()
+                }
+            }
+        };
+
         Ok(CodexRuntimeInventory {
             capability_roots,
             delegated_servers,
+            delegated_tools,
             warnings,
         })
     }
@@ -568,6 +1315,17 @@ impl CodexCapabilityBroker {
                     plugin: plugin_name.to_string(),
                     marketplace: marketplace_name.to_string(),
                 };
+                if self.enforce_policy {
+                    let profile_home = self.private_home.parent().unwrap_or_else(|| Path::new("."));
+                    let policy = psychevo_runtime::codex_plugin_policy_value(
+                        profile_home,
+                        cwd,
+                        &identity.selector(),
+                    )?;
+                    if policy.get("effectiveEnabled").and_then(Value::as_bool) != Some(true) {
+                        continue;
+                    }
+                }
                 let target = match find_catalog_plugin(&catalog, &identity) {
                     Ok(target) => target,
                     Err(err) => {
@@ -578,6 +1336,27 @@ impl CodexCapabilityBroker {
                 let plugin_id = target.plugin_id.clone();
                 match self.plugin_read_target(&identity, &target).await {
                     Ok(detail) => {
+                        if self.enforce_policy {
+                            match self.trust_value(&identity, &detail) {
+                                Ok(trust)
+                                    if trust.get("status").and_then(Value::as_str)
+                                        == Some("trusted") => {}
+                                Ok(_) => {
+                                    warnings.push(format!(
+                                        "Codex plugin `{}` is not trusted for its current package fingerprint",
+                                        identity.canonical_id()
+                                    ));
+                                    continue;
+                                }
+                                Err(err) => {
+                                    warnings.push(format!(
+                                        "Codex plugin `{}` trust could not be verified: {err}",
+                                        identity.canonical_id()
+                                    ));
+                                    continue;
+                                }
+                            }
+                        }
                         let plugin = detail.get("plugin").cloned().unwrap_or(detail);
                         let package_root = codex_package_root(&plugin);
                         details.push(RuntimePluginDetail {
@@ -730,6 +1509,93 @@ impl CodexCapabilityBroker {
     }
 }
 
+fn prepare_private_auth_link(private_home: &Path, env: &BTreeMap<String, String>) -> bool {
+    let Some(global_home) = env.get("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let source = global_home.join(".codex").join("auth.json");
+    if !source.is_file() || std::fs::create_dir_all(private_home).is_err() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let _ = std::fs::set_permissions(private_home, std::fs::Permissions::from_mode(0o700));
+        let destination = private_home.join("auth.json");
+        if let Ok(metadata) = std::fs::symlink_metadata(&destination) {
+            return metadata.file_type().is_symlink()
+                && std::fs::read_link(&destination).ok().as_deref() == Some(source.as_path());
+        }
+        return symlink(&source, destination).is_ok();
+    }
+    #[cfg(windows)]
+    {
+        let destination = private_home.join("auth.json");
+        if destination.exists() {
+            return false;
+        }
+        return std::fs::hard_link(source, destination).is_ok();
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+fn ensure_private_home(private_home: &Path) -> Result<()> {
+    std::fs::create_dir_all(private_home)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(private_home, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn validate_connect_url(url: &str) -> Result<()> {
+    let has_explicit_authority = url
+        .split_once("://")
+        .is_some_and(|(_, authority_and_path)| {
+            !authority_and_path.is_empty() && !authority_and_path.starts_with(['/', '?', '#'])
+        });
+    if !has_explicit_authority {
+        return Err(Error::Message(
+            "Codex connection URL must use HTTPS or a loopback HTTP origin".to_string(),
+        ));
+    }
+    let parsed = reqwest::Url::parse(url).map_err(|_| {
+        Error::Message("Codex connection URL must use HTTPS or a loopback HTTP origin".to_string())
+    })?;
+    let host = parsed.host_str().ok_or_else(|| {
+        Error::Message("Codex connection URL must use HTTPS or a loopback HTTP origin".to_string())
+    })?;
+    let ip_host = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    let loopback_host = host.eq_ignore_ascii_case("localhost")
+        || ip_host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    let allowed = parsed.scheme() == "https" || (parsed.scheme() == "http" && loopback_host);
+    if allowed {
+        Ok(())
+    } else {
+        Err(Error::Message(
+            "Codex connection URL must use HTTPS or a loopback HTTP origin".to_string(),
+        ))
+    }
+}
+
+struct DrainingMutationGuard<'a> {
+    authority: &'a CodexPluginAuthority,
+    _mutation: MutexGuard<'a, ()>,
+}
+
+impl Drop for DrainingMutationGuard<'_> {
+    fn drop(&mut self) {
+        self.authority.draining.store(false, Ordering::Release);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CodexPluginIdentity {
     pub(super) plugin: String,
@@ -761,7 +1627,7 @@ impl CodexPluginIdentity {
         format!("{}@{}", self.plugin, self.marketplace)
     }
 
-    fn selector(&self) -> String {
+    pub(super) fn selector(&self) -> String {
         format!("codex:{}", self.canonical_id())
     }
 }
@@ -813,6 +1679,17 @@ fn codex_package_root(plugin: &Value) -> Option<PathBuf> {
     candidates
         .into_iter()
         .find_map(|path| find_codex_package_root(&path))
+}
+
+fn codex_detail_fingerprint(identity: &CodexPluginIdentity, detail: &Value) -> Result<String> {
+    let plugin = detail.get("plugin").unwrap_or(detail);
+    let root = codex_package_root(plugin);
+    let version = plugin
+        .pointer("/summary/localVersion")
+        .or_else(|| plugin.pointer("/summary/version"))
+        .or_else(|| plugin.get("version"))
+        .and_then(Value::as_str);
+    psychevo_runtime::external_plugin_fingerprint(root.as_deref(), &identity.selector(), version)
 }
 
 fn find_codex_package_root(path: &Path) -> Option<PathBuf> {
@@ -976,6 +1853,112 @@ pub(super) fn merge_plugin_list(mut native: Value, codex: Result<Value>) -> Valu
     native
 }
 
+pub(super) fn apply_authority_view(mut value: Value, codex_authority: Value) -> Value {
+    let Some(object) = value.as_object_mut() else {
+        return value;
+    };
+    object.insert("codex_authority".to_string(), codex_authority.clone());
+    object.insert(
+        "authorities".to_string(),
+        json!([
+            {
+                "kind": "psychevo",
+                "enabled": true,
+                "runtime": "ready",
+                "auth": "available"
+            },
+            codex_authority
+        ]),
+    );
+    value
+}
+
+pub(super) fn apply_codex_policy_views(mut value: Value, home: &Path, cwd: &Path) -> Result<Value> {
+    for plugin in value
+        .get_mut("plugins")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        let Some(selector) = plugin.get("selector").and_then(Value::as_str) else {
+            continue;
+        };
+        if !selector.starts_with("codex:") {
+            continue;
+        }
+        let policy = psychevo_runtime::codex_plugin_policy_value(home, cwd, selector)?;
+        let enabled = policy
+            .get("effectiveEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let installed = plugin
+            .get("installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Some(object) = plugin.as_object_mut() {
+            object.insert("policy".to_string(), policy);
+            object.insert("enabled".to_string(), Value::Bool(enabled));
+            object.insert("enablement_mutable".to_string(), Value::Bool(true));
+            object.insert(
+                "enablement_scope_name".to_string(),
+                Value::String("profile".to_string()),
+            );
+            object.insert(
+                "readiness".to_string(),
+                Value::String(
+                    if installed && enabled {
+                        "Needs trust"
+                    } else if installed {
+                        "Disabled"
+                    } else {
+                        "Available"
+                    }
+                    .to_string(),
+                ),
+            );
+        }
+    }
+    Ok(value)
+}
+
+pub(super) fn apply_codex_plugin_runtime_state(
+    mut value: Value,
+    policy: Value,
+    trust: Value,
+) -> Value {
+    if let Some(plugin) = value.get_mut("plugin").and_then(Value::as_object_mut) {
+        let enabled = policy
+            .get("effectiveEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let installed = plugin
+            .get("installed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let trusted = trust.get("status").and_then(Value::as_str) == Some("trusted");
+        plugin.insert("policy".to_string(), policy);
+        plugin.insert("trust".to_string(), trust);
+        plugin.insert("enabled".to_string(), Value::Bool(enabled));
+        plugin.insert("enablement_mutable".to_string(), Value::Bool(true));
+        plugin.insert(
+            "readiness".to_string(),
+            Value::String(
+                if !installed {
+                    "Available"
+                } else if !enabled {
+                    "Disabled"
+                } else if !trusted {
+                    "Needs trust"
+                } else {
+                    "Ready"
+                }
+                .to_string(),
+            ),
+        );
+    }
+    value
+}
+
 pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Value) -> Value {
     let plugin = detail.get("plugin").cloned().unwrap_or(detail);
     let native_package_root = codex_package_root(&plugin).is_some();
@@ -1065,23 +2048,34 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
         .and_then(Value::as_array)
         .is_some_and(|items| !items.is_empty())
     {
+        let remote = plugin
+            .get("mcpServers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|server| {
+                server.get("url").and_then(Value::as_str).is_some()
+                    || server.get("appId").and_then(Value::as_str).is_some()
+                    || server.get("remote").and_then(Value::as_bool) == Some(true)
+            });
+        let psychevo_owned = native_package_root && !remote;
         statuses.push(component(
             "mcp_servers",
-            if native_package_root {
+            if psychevo_owned {
                 "execute"
             } else {
                 "delegate"
             },
-            if native_package_root {
+            if psychevo_owned {
                 "psychevo_native"
             } else {
                 "codex_broker"
             },
             if ready { "ready" } else { "disabled" },
-            if native_package_root {
+            if psychevo_owned {
                 "ordinary MCP declarations use Psychevo MCP policy"
             } else {
-                "Codex retains MCP configuration and execution authority"
+                "remote or app-backed MCP configuration and execution remain Codex-owned"
             },
         ));
     }
@@ -1097,6 +2091,89 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
             if ready { "ready" } else { "needs_setup" },
             "Apps inventory, authentication, and tool calls remain Codex-owned",
         ));
+    }
+    if plugin
+        .get("appTemplates")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
+    {
+        statuses.push(component(
+            "app_templates",
+            "inspect",
+            "metadata_only",
+            "metadata_only",
+            "templates describe Apps and execute only after a Codex-owned App is materialized",
+        ));
+    }
+    if plugin
+        .get("scheduledTasks")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
+    {
+        statuses.push(component(
+            "scheduled_tasks",
+            "inspect",
+            "metadata_only",
+            "unsupported",
+            "Codex scheduled tasks are not admitted to the Psychevo scheduler",
+        ));
+    }
+    if summary.get("interface").is_some()
+        || plugin.get("defaultPrompt").is_some()
+        || plugin.get("prompts").is_some()
+    {
+        statuses.push(component(
+            "interface_prompts",
+            "inspect",
+            "psychevo_gui",
+            "metadata_only",
+            "safe interface fields are displayed; prompts are never injected into a turn",
+        ));
+    }
+    if plugin
+        .get("browserExtensions")
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty())
+    {
+        statuses.push(component(
+            "browser_extensions",
+            "inspect",
+            "metadata_only",
+            "unsupported",
+            "browser extension execution is unsupported and cannot be inferred from inventory",
+        ));
+    }
+    if let Some(fields) = plugin.as_object() {
+        let known = BTreeSet::from([
+            "summary",
+            "description",
+            "skills",
+            "hooks",
+            "mcpServers",
+            "apps",
+            "appTemplates",
+            "scheduledTasks",
+            "defaultPrompt",
+            "prompts",
+            "browserExtensions",
+        ]);
+        let unknown = fields
+            .keys()
+            .filter(|key| !known.contains(key.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unknown.is_empty() {
+            statuses.push(component(
+                "unknown_fields",
+                "inspect",
+                "metadata_only",
+                "diagnostic_only",
+                &format!(
+                    "unrecognized manifest fields are not executed: {}",
+                    unknown.join(", ")
+                ),
+            ));
+        }
     }
     json!({
         "plugin": {
@@ -1221,6 +2298,7 @@ impl ToolBinding for CodexMcpTool {
     }
 }
 
+#[derive(Clone)]
 struct CodexElicitationContext {
     state: super::WebState,
     psychevo_thread_id: String,
@@ -1596,12 +2674,94 @@ fn accepted_elicitation(pending: &PendingCodexElicitation, answers: Vec<Vec<Stri
     json!({"action":"accept","content":content,"_meta":pending.meta})
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexNegotiatedProfile {
+    version: String,
+}
+
+fn validate_reviewed_profile(
+    initialize: &Value,
+    expected_home: &Path,
+) -> Result<CodexNegotiatedProfile> {
+    let user_agent = initialize
+        .get("userAgent")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "Codex plugin compatibility profile `{}` requires initialize.userAgent",
+                psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+            ))
+        })?;
+    let version = extract_semantic_version(user_agent).ok_or_else(|| {
+        Error::Message(format!(
+            "Codex plugin compatibility profile `{}` could not extract a version from userAgent",
+            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+        ))
+    })?;
+    if version != REVIEWED_CODEX_VERSION {
+        return Err(Error::Message(format!(
+            "Codex plugin compatibility profile `{}` reviewed `{REVIEWED_CODEX_VERSION}` but resolved `{version}`",
+            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+        )));
+    }
+    let reported_home = initialize
+        .get("codexHome")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "Codex plugin compatibility profile `{}` requires initialize.codexHome",
+                psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+            ))
+        })?;
+    let expected = std::fs::canonicalize(expected_home).map_err(|err| {
+        Error::Message(format!(
+            "Codex plugin compatibility profile `{}` could not canonicalize private home `{}`: {err}",
+            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            expected_home.display()
+        ))
+    })?;
+    let reported = std::fs::canonicalize(&reported_home).map_err(|err| {
+        Error::Message(format!(
+            "Codex plugin compatibility profile `{}` could not canonicalize reported home `{}`: {err}",
+            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            reported_home.display()
+        ))
+    })?;
+    if reported != expected {
+        return Err(Error::Message(format!(
+            "Codex plugin compatibility profile `{}` rejected codexHome `{}`; expected Psychevo private home `{}`",
+            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            reported.display(),
+            expected.display()
+        )));
+    }
+    Ok(CodexNegotiatedProfile { version })
+}
+
+fn extract_semantic_version(user_agent: &str) -> Option<String> {
+    user_agent
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .find(|candidate| {
+            let mut parts = candidate.split('.');
+            let valid = (0..3).all(|_| {
+                parts.next().is_some_and(|part| {
+                    !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit())
+                })
+            });
+            valid && parts.next().is_none()
+        })
+        .map(str::to_string)
+}
+
 struct BrokerProcess {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: Lines<BufReader<ChildStdout>>,
-    next_id: u64,
-    effective_plugins_changed: bool,
+    child: Mutex<Child>,
+    writer: mpsc::UnboundedSender<Value>,
+    pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Value>>>>,
+    elicitation_contexts: Arc<Mutex<BTreeMap<String, CodexElicitationContext>>>,
+    next_id: std::sync::atomic::AtomicU64,
+    effective_plugins_changed: Arc<AtomicBool>,
+    codex_version: Option<String>,
 }
 
 impl BrokerProcess {
@@ -1609,6 +2769,7 @@ impl BrokerProcess {
         broker_command: &BrokerCommand,
         env: &BTreeMap<String, String>,
         request_timeout: Duration,
+        expected_home: Option<&Path>,
     ) -> Result<Self> {
         let mut command = Command::new(&broker_command.program);
         command
@@ -1617,7 +2778,7 @@ impl BrokerProcess {
             .envs(env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         let mut child = command.spawn().map_err(|err| {
             Error::Message(format!(
@@ -1633,14 +2794,32 @@ impl BrokerProcess {
             .stdout
             .take()
             .ok_or_else(|| Error::Message("Codex broker stdout unavailable".to_string()))?;
+        let stderr = child.stderr.take();
+        let (writer, writer_rx) = mpsc::unbounded_channel();
+        let pending = Arc::new(Mutex::new(BTreeMap::new()));
+        let elicitation_contexts = Arc::new(Mutex::new(BTreeMap::new()));
+        let effective_plugins_changed = Arc::new(AtomicBool::new(false));
+        spawn_broker_writer(stdin, writer_rx);
+        spawn_broker_reader(
+            stdout,
+            writer.clone(),
+            pending.clone(),
+            elicitation_contexts.clone(),
+            effective_plugins_changed.clone(),
+        );
+        if let Some(stderr) = stderr {
+            spawn_broker_stderr(stderr);
+        }
         let mut process = Self {
-            child,
-            stdin,
-            stdout: BufReader::new(stdout).lines(),
-            next_id: 1,
-            effective_plugins_changed: false,
+            child: Mutex::new(child),
+            writer,
+            pending,
+            elicitation_contexts,
+            next_id: std::sync::atomic::AtomicU64::new(1),
+            effective_plugins_changed,
+            codex_version: None,
         };
-        process
+        let initialize = process
             .request_with_context(
                 "initialize",
                 json!({
@@ -1658,126 +2837,250 @@ impl BrokerProcess {
                 None,
             )
             .await?;
-        process
-            .write_message(json!({"jsonrpc":"2.0","method":"initialized"}))
-            .await?;
+        if let Some(expected_home) = expected_home {
+            let profile = validate_reviewed_profile(&initialize, expected_home)?;
+            process.codex_version = Some(profile.version);
+        }
+        process.write_message(json!({"jsonrpc":"2.0","method":"initialized"}))?;
+        if expected_home.is_some() {
+            process.probe_required_methods(request_timeout).await?;
+        }
         Ok(process)
     }
 
+    async fn probe_required_methods(&self, request_timeout: Duration) -> Result<()> {
+        for method in REQUIRED_CODEX_METHODS {
+            match self
+                .request_with_context(method, Value::Null, request_timeout, None)
+                .await
+            {
+                Ok(_) => {
+                    return Err(Error::Message(format!(
+                        "Codex plugin compatibility profile `{}` rejected `{method}` because the invalid-parameter probe unexpectedly succeeded",
+                        psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                    )));
+                }
+                Err(err) => {
+                    let message = err.to_string().to_ascii_lowercase();
+                    if message.contains("method not found") || message.contains("-32601") {
+                        return Err(Error::Message(format!(
+                            "Codex plugin compatibility profile `{}` requires method `{method}`",
+                            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                        )));
+                    }
+                    if !message.contains("-32602") {
+                        return Err(Error::Message(format!(
+                            "Codex plugin compatibility profile `{}` expected `{method}` to reject the probe during argument parsing: {err}",
+                            psychevo_runtime::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn request_with_context(
-        &mut self,
+        &self,
         method: &str,
         params: Value,
         request_timeout: Duration,
         context: Option<&CodexElicitationContext>,
     ) -> Result<Value> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.write_message(json!({
+        let id = self.next_id.fetch_add(1, Ordering::AcqRel);
+        let context_key = context.and_then(|_| elicitation_key(&params));
+        if let (Some(key), Some(context)) = (context_key.as_ref(), context) {
+            self.elicitation_contexts
+                .lock()
+                .await
+                .insert(key.clone(), context.clone());
+        }
+        let (sender, receiver) = oneshot::channel();
+        self.pending.lock().await.insert(id, sender);
+        if let Err(err) = self.write_message(json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
             "params": params,
-        }))
-        .await?;
-        timeout(request_timeout, self.read_response(id, context))
-            .await
+        })) {
+            self.pending.lock().await.remove(&id);
+            if let Some(key) = context_key {
+                self.elicitation_contexts.lock().await.remove(&key);
+            }
+            return Err(err);
+        }
+        let response = timeout(request_timeout, receiver).await;
+        self.pending.lock().await.remove(&id);
+        if let Some(key) = context_key {
+            self.elicitation_contexts.lock().await.remove(&key);
+        }
+        let message = response
             .map_err(|_| {
                 Error::Message(format!(
                     "Codex capability broker request `{method}` timed out"
                 ))
             })?
+            .map_err(|_| {
+                Error::Message("Codex capability broker exited unexpectedly".to_string())
+            })?;
+        if let Some(error) = message.get("error") {
+            let code = error.get("code").and_then(Value::as_i64);
+            return Err(Error::Message(format!(
+                "Codex broker request failed{}: {}",
+                code.map(|code| format!(" ({code})")).unwrap_or_default(),
+                error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown JSON-RPC error")
+            )));
+        }
+        Ok(message.get("result").cloned().unwrap_or(Value::Null))
     }
 
-    async fn read_response(
-        &mut self,
-        expected_id: u64,
-        context: Option<&CodexElicitationContext>,
-    ) -> Result<Value> {
-        loop {
-            let line = self
-                .stdout
-                .next_line()
-                .await
-                .map_err(|err| Error::Message(format!("Codex broker read failed: {err}")))?
-                .ok_or_else(|| {
-                    Error::Message("Codex capability broker exited unexpectedly".to_string())
-                })?;
-            let message: Value = serde_json::from_str(&line).map_err(|err| {
-                Error::Message(format!("Codex broker returned invalid JSON: {err}"))
-            })?;
+    fn take_effective_plugins_changed(&self) -> bool {
+        self.effective_plugins_changed.swap(false, Ordering::AcqRel)
+    }
+
+    fn write_message(&self, message: Value) -> Result<()> {
+        self.writer.send(message).map_err(|_| {
+            Error::Message("Codex capability broker writer is unavailable".to_string())
+        })
+    }
+
+    async fn kill(&self) {
+        let _ = self.child.lock().await.kill().await;
+    }
+}
+
+fn spawn_broker_writer(mut stdin: ChildStdin, mut receiver: mpsc::UnboundedReceiver<Value>) {
+    tokio::spawn(async move {
+        while let Some(message) = receiver.recv().await {
+            let Ok(mut bytes) = serde_json::to_vec(&message) else {
+                continue;
+            };
+            bytes.push(b'\n');
+            if stdin.write_all(&bytes).await.is_err() || stdin.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_broker_reader(
+    stdout: ChildStdout,
+    writer: mpsc::UnboundedSender<Value>,
+    pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Value>>>>,
+    elicitation_contexts: Arc<Mutex<BTreeMap<String, CodexElicitationContext>>>,
+    effective_plugins_changed: Arc<AtomicBool>,
+) {
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             if message.get("method").is_some() && message.get("id").is_some() {
-                self.respond_to_server_request(&message, context).await?;
+                let writer = writer.clone();
+                let contexts = elicitation_contexts.clone();
+                tokio::spawn(async move {
+                    respond_to_broker_server_request(message, writer, contexts).await;
+                });
                 continue;
             }
             if message.get("method").and_then(Value::as_str) == Some("account/updated") {
-                self.effective_plugins_changed = true;
+                effective_plugins_changed.store(true, Ordering::Release);
                 continue;
             }
             let Some(id) = message.get("id").and_then(Value::as_u64) else {
                 continue;
             };
-            if id != expected_id {
-                return Err(Error::Message(format!(
-                    "Codex broker response id mismatch: expected {expected_id}, got {id}"
-                )));
+            if let Some(sender) = pending.lock().await.remove(&id) {
+                let _ = sender.send(message);
             }
-            if let Some(error) = message.get("error") {
-                return Err(Error::Message(format!(
-                    "Codex broker request failed: {}",
-                    error
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown JSON-RPC error")
-                )));
-            }
-            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
-    }
+        pending.lock().await.clear();
+    });
+}
 
-    fn take_effective_plugins_changed(&mut self) -> bool {
-        std::mem::take(&mut self.effective_plugins_changed)
-    }
-
-    async fn respond_to_server_request(
-        &mut self,
-        message: &Value,
-        context: Option<&CodexElicitationContext>,
-    ) -> Result<()> {
-        let id = message.get("id").cloned().unwrap_or(Value::Null);
-        let method = message
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let response = if method == "mcpServer/elicitation/request" {
-            let result = if let Some(context) = context {
-                context.route(message).await
-            } else {
-                json!({"action":"decline","content":null,"_meta":null})
-            };
-            json!({"jsonrpc":"2.0","id":id,"result":result})
-        } else {
-            json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {"code":-32601,"message":format!("unsupported broker callback: {method}")},
-            })
+async fn respond_to_broker_server_request(
+    message: Value,
+    writer: mpsc::UnboundedSender<Value>,
+    contexts: Arc<Mutex<BTreeMap<String, CodexElicitationContext>>>,
+) {
+    let id = message.get("id").cloned().unwrap_or(Value::Null);
+    let method = message
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let response = if method == "mcpServer/elicitation/request" {
+        let key = message.get("params").and_then(elicitation_key);
+        let context = {
+            let contexts = contexts.lock().await;
+            key.as_ref()
+                .and_then(|key| contexts.get(key))
+                .cloned()
+                .or_else(|| {
+                    (contexts.len() == 1)
+                        .then(|| contexts.values().next().cloned())
+                        .flatten()
+                })
         };
-        self.write_message(response).await
-    }
+        let result = if let Some(context) = context {
+            context.route(&message).await
+        } else {
+            declined_elicitation()
+        };
+        json!({"jsonrpc":"2.0","id":id,"result":result})
+    } else {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {"code":-32601,"message":format!("unsupported broker callback: {method}")},
+        })
+    };
+    let _ = writer.send(response);
+}
 
-    async fn write_message(&mut self, message: Value) -> Result<()> {
-        let mut bytes = serde_json::to_vec(&message)?;
-        bytes.push(b'\n');
-        self.stdin
-            .write_all(&bytes)
-            .await
-            .map_err(|err| Error::Message(format!("Codex broker write failed: {err}")))?;
-        self.stdin
-            .flush()
-            .await
-            .map_err(|err| Error::Message(format!("Codex broker flush failed: {err}")))
-    }
+fn elicitation_key(params: &Value) -> Option<String> {
+    let thread_id = params.get("threadId").and_then(Value::as_str)?;
+    let turn_id = params
+        .get("turnId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    Some(format!("{thread_id}\u{0}{turn_id}"))
+}
+
+fn spawn_broker_stderr(stderr: tokio::process::ChildStderr) {
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut emitted = 0usize;
+        while let Ok(Some(line)) = lines.next_line().await {
+            if emitted >= 256 {
+                continue;
+            }
+            emitted += 1;
+            let lower = line.to_ascii_lowercase();
+            let classification = if ["token", "secret", "authorization", "credential"]
+                .iter()
+                .any(|needle| lower.contains(needle))
+            {
+                "sensitive"
+            } else {
+                "diagnostic"
+            };
+            eprintln!(
+                "{}",
+                json!({
+                    "target": "psychevo.codex_plugins",
+                    "event": "broker_stderr",
+                    "classification": classification,
+                    "bytes": line.len().min(2_048),
+                    "truncated": line.len() > 2_048,
+                    "redacted": true,
+                })
+            );
+        }
+    });
 }
 
 #[cfg(test)]
@@ -1787,6 +3090,283 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
+    #[test]
+    fn connect_url_validation_uses_the_parsed_origin() {
+        for allowed in [
+            "https://apps.example.test/install/review",
+            "http://localhost:4711/callback",
+            "http://127.0.0.1:4711/callback",
+            "http://[::1]:4711/callback",
+        ] {
+            validate_connect_url(allowed)
+                .unwrap_or_else(|error| panic!("expected `{allowed}` to be accepted: {error}"));
+        }
+        for rejected in [
+            "http://apps.example.test/install/review",
+            "http://localhost.evil.example/install/review",
+            "http://127.0.0.1@evil.example/install/review",
+            "https:///missing-authority",
+            "javascript:alert(1)",
+        ] {
+            assert!(
+                validate_connect_url(rejected).is_err(),
+                "expected `{rejected}` to be rejected"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn default_off_authority_does_not_spawn_codex() {
+        let temp = tempfile::tempdir().expect("temp");
+        let profile_home = temp.path().join("psychevo");
+        let cwd = temp.path().join("work");
+        let script = temp.path().join("fake-codex.py");
+        let spawned = temp.path().join("spawned");
+        fs::create_dir_all(&profile_home).expect("profile home");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::write(profile_home.join("config.toml"), "# default off\n").expect("config");
+        fs::write(
+            &script,
+            format!(
+                "#!/usr/bin/env python3\nfrom pathlib import Path\nPath({spawned}).write_text('spawned')\n",
+                spawned = serde_json::to_string(&spawned).expect("spawned json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let env = BTreeMap::from([
+            ("HOME".to_string(), temp.path().display().to_string()),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                profile_home.display().to_string(),
+            ),
+            (
+                "PSYCHEVO_CODEX_BIN".to_string(),
+                script.display().to_string(),
+            ),
+        ]);
+
+        let broker = CodexCapabilityBroker::new(&env);
+        let error = broker
+            .plugin_list(&cwd)
+            .await
+            .expect_err("disabled authority");
+
+        assert!(error.to_string().contains("disabled"));
+        assert!(
+            !spawned.exists(),
+            "feature-off listing must not spawn Codex"
+        );
+        assert_eq!(broker.authority_view()["runtime"], "disabled");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn enabled_authority_forces_private_home_and_links_auth_without_copying() {
+        let temp = tempfile::tempdir().expect("temp");
+        let user_home = temp.path().join("user");
+        let profile_home = temp.path().join("psychevo");
+        let private_home = profile_home.join("codex");
+        let cwd = temp.path().join("work");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("process.json");
+        fs::create_dir_all(user_home.join(".codex")).expect("global Codex home");
+        fs::create_dir_all(&profile_home).expect("profile home");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::write(user_home.join(".codex/auth.json"), "secret-never-read").expect("auth");
+        fs::write(
+            profile_home.join("config.toml"),
+            "[codex_plugins]\nenabled = true\n",
+        )
+        .expect("config");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, os, sys
+with open({log}, "w", encoding="utf-8") as handle:
+    json.dump({{"codexHome": os.environ.get("CODEX_HOME"), "argv": sys.argv[1:]}}, handle)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"codex_cli_rs/0.144.1"}}}}), flush=True)
+    elif msg.get("method") == "initialized":
+        pass
+    elif msg.get("method") == "plugin/installed" and msg.get("params") is not None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
+    elif msg.get("id") is not None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
+"#,
+                log = serde_json::to_string(&log).expect("log json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let env = BTreeMap::from([
+            ("HOME".to_string(), user_home.display().to_string()),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                profile_home.display().to_string(),
+            ),
+            (
+                "PSYCHEVO_CODEX_BIN".to_string(),
+                script.display().to_string(),
+            ),
+            (
+                "CODEX_HOME".to_string(),
+                temp.path().join("must-not-inherit").display().to_string(),
+            ),
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        ]);
+
+        let broker = CodexCapabilityBroker::new(&env);
+        broker
+            .plugin_installed(&cwd)
+            .await
+            .expect("private broker request");
+
+        let process: Value = serde_json::from_str(&fs::read_to_string(&log).expect("process log"))
+            .expect("process json");
+        assert_eq!(process["codexHome"], private_home.display().to_string());
+        assert_eq!(
+            process["argv"],
+            json!([
+                "app-server",
+                "--strict-config",
+                "-c",
+                "cli_auth_credentials_store=\"file\"",
+                "--listen",
+                "stdio://"
+            ])
+        );
+        assert_eq!(
+            fs::read_link(private_home.join("auth.json")).expect("auth symlink"),
+            user_home.join(".codex/auth.json")
+        );
+        assert_eq!(broker.authority_view()["auth"], "available");
+        broker.stop().await;
+    }
+
+    #[test]
+    fn reviewed_profile_accepts_arbitrary_originator_and_rejects_version_or_home_drift() {
+        let temp = tempfile::tempdir().expect("temp");
+        let private_home = temp.path().join("codex");
+        let other_home = temp.path().join("other");
+        fs::create_dir_all(&private_home).expect("private home");
+        fs::create_dir_all(&other_home).expect("other home");
+
+        for user_agent in [
+            "codex_cli_rs/0.144.1 (Linux 6.8; x86_64)",
+            "codex_vscode/0.144.1 (extension; originator=desktop)",
+            "third-party-originator 0.144.1",
+        ] {
+            let profile = validate_reviewed_profile(
+                &json!({
+                    "userAgent": user_agent,
+                    "codexHome": private_home,
+                }),
+                &private_home,
+            )
+            .expect("reviewed profile");
+            assert_eq!(profile.version, REVIEWED_CODEX_VERSION);
+        }
+
+        let version = validate_reviewed_profile(
+            &json!({
+                "userAgent": "codex_cli_rs/0.145.0",
+                "codexHome": private_home,
+            }),
+            &private_home,
+        )
+        .expect_err("unknown version");
+        assert!(version.to_string().contains("reviewed `0.144.1`"));
+
+        let home = validate_reviewed_profile(
+            &json!({
+                "userAgent": "codex_cli_rs/0.144.1",
+                "codexHome": other_home,
+            }),
+            &private_home,
+        )
+        .expect_err("home drift");
+        assert!(home.to_string().contains("private home"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn preflight_rejects_missing_method_without_fetching_catalog() {
+        let temp = tempfile::tempdir().expect("temp");
+        let profile_home = temp.path().join("psychevo");
+        let private_home = profile_home.join("codex");
+        let cwd = temp.path().join("work");
+        let script = temp.path().join("fake-codex.py");
+        let log = temp.path().join("calls.log");
+        fs::create_dir_all(&profile_home).expect("profile home");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::write(
+            profile_home.join("config.toml"),
+            format!(
+                "[codex_plugins]\nenabled = true\nbinary = {:?}\n",
+                script.display().to_string()
+            ),
+        )
+        .expect("config");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, os, sys
+LOG = {log}
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"any-originator/0.144.1"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    else:
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write(method + ":" + ("null" if msg.get("params") is None else "normal") + "\n")
+        code = -32601 if method == "app/list" else -32602
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":code,"message":"method not found" if code == -32601 else "invalid params"}}}}), flush=True)
+"#,
+                log = serde_json::to_string(&log).expect("log json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let broker = CodexCapabilityBroker::new(&BTreeMap::from([
+            (
+                "PSYCHEVO_HOME".to_string(),
+                profile_home.display().to_string(),
+            ),
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        ]));
+
+        let error = broker.plugin_list(&cwd).await.expect_err("missing method");
+
+        assert!(error.to_string().contains("requires method `app/list`"));
+        assert_eq!(broker.authority_view()["runtime"], "incompatible");
+        let calls = fs::read_to_string(&log).expect("preflight log");
+        assert!(calls.lines().all(|line| line.ends_with(":null")));
+        assert!(!calls.contains("plugin/list:normal"));
+        assert!(private_home.is_dir());
+        broker.stop().await;
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn broker_handshakes_reuses_process_and_declines_unrouted_elicitation() {
@@ -1795,7 +3375,7 @@ mod tests {
         fs::write(
             &script,
             r#"#!/usr/bin/env python3
-import json, sys, time
+import json, os, sys, time
 initialized = False
 for line in sys.stdin:
     msg = json.loads(line)
@@ -1867,6 +3447,117 @@ for line in sys.stdin:
         assert_eq!(install["authPolicy"], "ON_USE");
         assert_eq!(uninstall, json!({}));
         assert_eq!(apps["data"], json!([]));
+        broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn elicitation_wait_does_not_block_catalog_or_another_request() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        let home = temp.path().join("home");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::create_dir_all(&home).expect("home");
+        fs::write(home.join("config.toml"), "# config\n").expect("config");
+        let script = temp.path().join("fake-codex.py");
+        fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys
+pending_tool = None
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif method == "mcpServer/tool/call":
+        pending_tool = msg["id"]
+        print(json.dumps({"jsonrpc":"2.0","id":900,"method":"mcpServer/elicitation/request","params":{"threadId":"codex-thread","turnId":"turn-a","mode":"form","message":"Continue?","requestedSchema":{"type":"object","properties":{"confirmed":{"type":"boolean"}},"required":["confirmed"]}}}), flush=True)
+    elif method == "plugin/list":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"marketplaces":[],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}), flush=True)
+    elif msg.get("id") == 900:
+        print(json.dumps({"jsonrpc":"2.0","id":pending_tool,"result":{"content":[{"type":"text","text":"done"}],"isError":False}}), flush=True)
+"#,
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let env = BTreeMap::from([(
+            "PATH".to_string(),
+            std::env::var("PATH").unwrap_or_default(),
+        )]);
+        let broker = Arc::new(CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: script,
+                args: Vec::new(),
+            },
+            env,
+            Duration::from_secs(3),
+        ));
+        let runtime =
+            psychevo_runtime::StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let gateway = crate::Gateway::new(runtime);
+        let state = super::super::WebState::new(super::super::GatewayWebServerConfig::new(
+            gateway,
+            home,
+            cwd,
+            None,
+            BTreeMap::new(),
+            temp.path().join("static"),
+        ));
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel();
+        let event_sink: crate::GatewayEventSink = Arc::new(move |event| {
+            if let crate::GatewayEvent::ActionRequested { action } = event {
+                let _ = action_tx.send(action.action_id);
+            }
+        });
+        let context = CodexElicitationContext {
+            state: state.clone(),
+            psychevo_thread_id: "psychevo-thread".to_string(),
+            turn_id: Some("turn-a".to_string()),
+            event_sink: Some(event_sink),
+        };
+        let tool_broker = broker.clone();
+        let tool = tokio::spawn(async move {
+            tool_broker
+                .request_with_context(
+                    "mcpServer/tool/call",
+                    json!({
+                        "threadId":"codex-thread",
+                        "turnId":"turn-a",
+                        "serverName":"codex_apps",
+                        "toolName":"review",
+                        "arguments":{},
+                    }),
+                    Some(&context),
+                )
+                .await
+        });
+        let action_id = tokio::time::timeout(Duration::from_secs(1), action_rx.recv())
+            .await
+            .expect("elicitation action")
+            .expect("action id");
+
+        let catalog =
+            tokio::time::timeout(Duration::from_millis(250), broker.plugin_list(temp.path()))
+                .await
+                .expect("catalog must not wait for elicitation")
+                .expect("catalog response");
+        assert_eq!(catalog["marketplaces"], json!([]));
+
+        respond_to_elicitation(
+            &state,
+            &action_id,
+            psychevo_gateway_protocol::ThreadInteractionResponse::Clarify {
+                answers: vec![vec!["Yes".to_string()]],
+            },
+        )
+        .expect("elicitation response");
+        let tool_result = tool.await.expect("tool task").expect("tool response");
+        assert_eq!(tool_result["content"][0]["text"], "done");
         broker.stop().await;
     }
 
@@ -2013,6 +3704,7 @@ for line in sys.stdin:
         let cwd = temp.path().join("work");
         let home = temp.path().join("home");
         fs::create_dir_all(&cwd).expect("cwd");
+        fs::create_dir_all(&home).expect("home");
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
         let release = temp.path().join("release");
@@ -2027,9 +3719,11 @@ for line in sys.stdin:
     msg = json.loads(line)
     method = msg.get("method")
     if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":{private_home},"platformFamily":"unix","platformOs":"linux","userAgent":"codex_cli_rs/0.144.1"}}}}), flush=True)
     elif method == "initialized":
         pass
+    elif msg.get("params") is None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
     elif method == "plugin/installed":
         with open(LOG, "a", encoding="utf-8") as handle:
             handle.write("plugin-installed\n")
@@ -2039,12 +3733,21 @@ for line in sys.stdin:
 "#,
                 log = serde_json::to_string(&log).expect("log json"),
                 release = serde_json::to_string(&release).expect("release json"),
+                private_home = serde_json::to_string(&home.join("codex")).expect("home json"),
             ),
         )
         .expect("script");
         let mut permissions = fs::metadata(&script).expect("metadata").permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&script, permissions).expect("chmod");
+        fs::write(
+            home.join("config.toml"),
+            format!(
+                "[codex_plugins]\nenabled = true\nbinary = {:?}\n",
+                script.display().to_string()
+            ),
+        )
+        .expect("Codex authority config");
         let env = BTreeMap::from([
             ("HOME".to_string(), temp.path().display().to_string()),
             ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
@@ -2096,9 +3799,25 @@ for line in sys.stdin:
         .await
         .expect("inventory prewarm started");
 
+        let degraded = tokio::time::timeout(
+            Duration::from_millis(100),
+            state.inner.codex_capability_broker.runtime_contributions(
+                state.clone(),
+                &cwd,
+                "pending-inventory-thread",
+                Some("pending-inventory-turn".to_string()),
+                None,
+            ),
+        )
+        .await
+        .expect("provider hot path must not wait for Codex inventory")
+        .expect("degraded contributions");
+        assert!(degraded.capability_roots.is_empty());
+        assert!(degraded.runtime_tools.is_empty());
+
         let thread_state = state.clone();
         let thread_cwd = cwd.clone();
-        let mut thread_start = tokio::spawn(async move {
+        let mut draft_open = tokio::spawn(async move {
             super::super::handle_rpc(
                 thread_state,
                 super::super::AuthContext::Bearer,
@@ -2106,33 +3825,34 @@ for line in sys.stdin:
                 super::super::RpcRequest {
                     jsonrpc: "2.0".to_string(),
                     id: Some(json!(2)),
-                    method: "thread/start".to_string(),
+                    method: "thread/draft/open".to_string(),
                     params: Some(json!({
-                        "scope": {
+                        "origin": {
                             "cwd": thread_cwd,
                             "source": {"kind":"web","rawId":"prewarm-test"}
-                        }
+                        },
+                        "targetIntent": {"kind":"default"}
                     })),
                 },
             )
             .await
         });
         let completed_without_inventory =
-            tokio::time::timeout(Duration::from_millis(100), &mut thread_start).await;
-        let thread_start_was_ready = completed_without_inventory.is_ok();
+            tokio::time::timeout(Duration::from_millis(100), &mut draft_open).await;
+        let draft_open_was_ready = completed_without_inventory.is_ok();
         fs::write(&release, "ready").expect("release inventory");
         match completed_without_inventory {
             Ok(response) => response
-                .expect("thread/start task")
-                .expect("thread/start response"),
-            Err(_) => thread_start
+                .expect("thread/draft/open task")
+                .expect("thread/draft/open response"),
+            Err(_) => draft_open
                 .await
-                .expect("thread/start task after inventory release")
-                .expect("thread/start response after inventory release"),
+                .expect("thread/draft/open task after inventory release")
+                .expect("thread/draft/open response after inventory release"),
         };
         assert!(
-            thread_start_was_ready,
-            "thread/start must not wait for runtime inventory"
+            draft_open_was_ready,
+            "thread/draft/open must not wait for runtime inventory"
         );
         assert_eq!(
             fs::read_to_string(&log).expect("prewarm log"),
@@ -2187,35 +3907,15 @@ for line in sys.stdin:
             Duration::from_millis(10),
         );
 
-        let first = broker
-            .runtime_profile(&cwd, "thread-frozen")
-            .await
-            .expect("degraded profile");
-        assert_eq!(first.unavailable_warnings.len(), 1);
-        let second = broker
-            .runtime_profile(&cwd, "thread-frozen")
-            .await
-            .expect("frozen degraded profile");
-        assert_eq!(first.unavailable_warnings, second.unavailable_warnings);
+        assert!(broker.runtime_inventory(&cwd).await.is_err());
+        assert!(broker.runtime_inventory(&cwd).await.is_err());
         assert_eq!(
             fs::read_to_string(&log).expect("negative-cache log"),
             "plugin-installed\n"
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
-        let frozen_after_retry_delay = broker
-            .runtime_profile(&cwd, "thread-frozen")
-            .await
-            .expect("degraded profile stays frozen");
-        assert_eq!(
-            first.unavailable_warnings,
-            frozen_after_retry_delay.unavailable_warnings
-        );
-        let new_thread = broker
-            .runtime_profile(&cwd, "thread-retry")
-            .await
-            .expect("new thread retries into a degraded profile");
-        assert_eq!(new_thread.unavailable_warnings.len(), 1);
+        assert!(broker.runtime_inventory(&cwd).await.is_err());
         assert_eq!(
             fs::read_to_string(&log).expect("retry log"),
             "plugin-installed\nplugin-installed\n"
@@ -2225,7 +3925,7 @@ for line in sys.stdin:
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn catalog_mutation_refreshes_new_threads_without_changing_frozen_threads() {
+    async fn catalog_mutation_publishes_a_new_generation_for_next_turns() {
         let temp = tempfile::tempdir().expect("temp");
         let cwd = temp.path().join("work");
         let home = temp.path().join("home");
@@ -2300,6 +4000,14 @@ for line in sys.stdin:
                 std::env::var("PATH").unwrap_or_default(),
             ),
         ]);
+        let broker = CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: script.clone(),
+                args: Vec::new(),
+            },
+            env.clone(),
+            Duration::from_secs(2),
+        );
         let runtime =
             psychevo_runtime::StateRuntime::open(temp.path().join("state.db")).expect("state");
         let gateway = crate::Gateway::new(runtime);
@@ -2313,9 +4021,11 @@ for line in sys.stdin:
         );
         let state = super::super::WebState::new(config);
 
-        let alpha_profile = state
-            .inner
-            .codex_capability_broker
+        broker
+            .prepare_runtime_inventory(&cwd)
+            .await
+            .expect("prewarm alpha inventory");
+        let alpha_profile = broker
             .runtime_contributions(state.clone(), &cwd, "thread-alpha", None, None)
             .await
             .expect("alpha profile");
@@ -2325,52 +4035,41 @@ for line in sys.stdin:
             plugin: "beta".to_string(),
             marketplace: "openai".to_string(),
         };
-        state
-            .inner
-            .codex_capability_broker
+        broker
             .plugin_install(&cwd, &beta_identity)
             .await
             .expect("install beta");
-        let frozen_alpha = state
-            .inner
-            .codex_capability_broker
-            .runtime_contributions(state.clone(), &cwd, "thread-alpha", None, None)
-            .await
-            .expect("frozen alpha");
-        assert_eq!(frozen_alpha.capability_roots[0].id, "codex:alpha@openai");
-        let beta_profile = state
-            .inner
-            .codex_capability_broker
+        assert_eq!(alpha_profile.capability_roots[0].id, "codex:alpha@openai");
+        broker
+            .release_turn_lease(alpha_profile.lease_id.as_deref().expect("alpha lease"))
+            .await;
+        let beta_profile = broker
             .runtime_contributions(state.clone(), &cwd, "thread-beta", None, None)
             .await
             .expect("beta profile");
         assert_eq!(beta_profile.capability_roots[0].id, "codex:beta@openai");
 
-        state
-            .inner
-            .codex_capability_broker
+        broker
+            .release_turn_lease(beta_profile.lease_id.as_deref().expect("beta lease"))
+            .await;
+        broker
             .plugin_uninstall(&cwd, &beta_identity)
             .await
             .expect("uninstall beta");
-        let frozen_beta = state
-            .inner
-            .codex_capability_broker
-            .runtime_contributions(state.clone(), &cwd, "thread-beta", None, None)
-            .await
-            .expect("frozen beta");
-        assert_eq!(frozen_beta.capability_roots[0].id, "codex:beta@openai");
-        let empty_profile = state
-            .inner
-            .codex_capability_broker
+        assert_eq!(beta_profile.capability_roots[0].id, "codex:beta@openai");
+        let empty_profile = broker
             .runtime_contributions(state.clone(), &cwd, "thread-empty", None, None)
             .await
             .expect("empty profile");
         assert!(empty_profile.capability_roots.is_empty());
+        broker
+            .release_turn_lease(empty_profile.lease_id.as_deref().expect("empty lease"))
+            .await;
         assert_eq!(
             fs::read_to_string(&log).expect("mutation log"),
             "installed:alpha\ninstall\ninstalled:beta\nuninstall\ninstalled:none\n"
         );
-        state.inner.codex_capability_broker.stop().await;
+        broker.stop().await;
     }
 
     #[test]
@@ -2424,8 +4123,13 @@ for line in sys.stdin:
                 "summary":{"installed":true,"enabled":true,"source":{"type":"local","path":package}},
                 "skills":[{"name":"review","path":package.join("skills/review/SKILL.md")}],
                 "hooks":[],
-                "mcpServers":[],
-                "apps":[{"id":"review-app"}]
+                "mcpServers":[{"name":"local-tools","command":"node"}],
+                "apps":[{"id":"review-app"}],
+                "appTemplates":[{"id":"review-template"}],
+                "scheduledTasks":[{"id":"nightly"}],
+                "defaultPrompt":"hidden prompt",
+                "browserExtensions":[{"id":"review-browser"}],
+                "futureComponent":{"enabled":true}
             }}),
         );
 
@@ -2434,13 +4138,338 @@ for line in sys.stdin:
             "psychevo_native"
         );
         assert_eq!(
-            value["plugin"]["component_statuses"][1]["highestLevel"],
+            value["plugin"]["component_statuses"][2]["highestLevel"],
             "delegate"
         );
         assert_eq!(
-            value["plugin"]["component_statuses"][1]["executionOwner"],
+            value["plugin"]["component_statuses"][2]["executionOwner"],
             "codex_broker"
         );
+        let statuses = value["plugin"]["component_statuses"]
+            .as_array()
+            .expect("component statuses");
+        let status = |component: &str| {
+            statuses
+                .iter()
+                .find(|status| status["component"] == component)
+                .unwrap_or_else(|| panic!("missing {component} status"))
+        };
+        assert_eq!(status("mcp_servers")["executionOwner"], "psychevo_native");
+        assert_eq!(status("app_templates")["readiness"], "metadata_only");
+        assert_eq!(status("scheduled_tasks")["readiness"], "unsupported");
+        assert_eq!(
+            status("interface_prompts")["executionOwner"],
+            "psychevo_gui"
+        );
+        assert_eq!(status("browser_extensions")["readiness"], "unsupported");
+        assert_eq!(status("unknown_fields")["readiness"], "diagnostic_only");
+    }
+
+    #[tokio::test]
+    async fn destructive_mutation_drain_waits_for_active_turn_lease() {
+        let broker = Arc::new(CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: PathBuf::from("unused-codex"),
+                args: Vec::new(),
+            },
+            BTreeMap::new(),
+            Duration::from_millis(50),
+        ));
+        broker
+            .active_leases
+            .lock()
+            .await
+            .insert("turn-lease".to_string(), 7);
+
+        let draining_broker = broker.clone();
+        let (release_drain_tx, release_drain_rx) = oneshot::channel();
+        let mut drain = tokio::spawn(async move {
+            let _draining = draining_broker.begin_draining().await;
+            let _ = release_drain_rx.await;
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !broker.draining.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("draining state becomes observable");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut drain)
+                .await
+                .is_err(),
+            "destructive mutation must remain pending while the turn lease is active"
+        );
+
+        broker.release_turn_lease("turn-lease").await;
+        tokio::time::timeout(Duration::from_millis(25), &mut drain)
+            .await
+            .expect_err("draining mutation remains active after lease release");
+        release_drain_tx.send(()).expect("release drain mutation");
+        drain.await.expect("drain task");
+        assert!(!broker.draining.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn destructive_mutations_hold_one_continuous_draining_owner() {
+        let broker = Arc::new(CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: PathBuf::from("unused-codex"),
+                args: Vec::new(),
+            },
+            BTreeMap::new(),
+            Duration::from_millis(50),
+        ));
+        let first = broker.begin_draining().await;
+        let second_broker = broker.clone();
+        let (second_entered_tx, mut second_entered_rx) = oneshot::channel();
+        let (second_release_tx, second_release_rx) = oneshot::channel();
+        let second = tokio::spawn(async move {
+            let _draining = second_broker.begin_draining().await;
+            second_entered_tx.send(()).expect("second mutation entered");
+            let _ = second_release_rx.await;
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut second_entered_rx)
+                .await
+                .is_err(),
+            "the second destructive mutation must wait for the first owner"
+        );
+        drop(first);
+        tokio::time::timeout(Duration::from_secs(1), &mut second_entered_rx)
+            .await
+            .expect("second mutation enters")
+            .expect("second entered signal");
+        assert!(broker.draining.load(Ordering::Acquire));
+        second_release_tx.send(()).expect("release second mutation");
+        second.await.expect("second mutation task");
+        assert!(!broker.draining.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn trust_is_bound_to_package_fingerprint_and_reviewed_codex_version() {
+        let temp = tempfile::tempdir().expect("temp");
+        let home = temp.path().join("home");
+        let package = temp.path().join("review");
+        fs::create_dir_all(package.join(".codex-plugin")).expect("manifest dir");
+        fs::write(package.join(".codex-plugin/plugin.json"), "{}").expect("manifest");
+        fs::write(package.join("payload.txt"), "v1").expect("payload");
+        let broker = CodexCapabilityBroker::new(&BTreeMap::from([
+            ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        ]));
+        *broker
+            .negotiated_version
+            .write()
+            .expect("Codex version lock") = Some(REVIEWED_CODEX_VERSION.to_string());
+        let identity = CodexPluginIdentity {
+            plugin: "review".to_string(),
+            marketplace: "openai".to_string(),
+        };
+        let detail = json!({"plugin":{"summary":{
+            "installed":true,
+            "localVersion":"1.0.0",
+            "source":{"type":"local","path":package.clone()}
+        }}});
+
+        broker
+            .set_trust(&identity, &detail, true)
+            .expect("trust current package");
+        assert_eq!(
+            broker.trust_value(&identity, &detail).expect("trust")["status"],
+            "trusted"
+        );
+
+        fs::write(package.join("payload.txt"), "v2").expect("mutate payload");
+        assert_eq!(
+            broker.trust_value(&identity, &detail).expect("drift trust")["status"],
+            "modified"
+        );
+        broker
+            .set_trust(&identity, &detail, true)
+            .expect("trust new fingerprint");
+        *broker
+            .negotiated_version
+            .write()
+            .expect("Codex version lock") = Some("0.144.2".to_string());
+        assert_eq!(
+            broker
+                .trust_value(&identity, &detail)
+                .expect("version drift")["status"],
+            "modified"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn install_materializes_then_allows_trusts_and_publishes_generation() {
+        let temp = tempfile::tempdir().expect("temp");
+        let profile_home = temp.path().join("psychevo");
+        let private_home = profile_home.join("codex");
+        let cwd = temp.path().join("work");
+        let package = temp.path().join("review");
+        let script = temp.path().join("fake-codex.py");
+        fs::create_dir_all(&profile_home).expect("profile home");
+        fs::create_dir_all(&cwd).expect("cwd");
+        fs::create_dir_all(package.join(".codex-plugin")).expect("manifest dir");
+        fs::write(package.join(".codex-plugin/plugin.json"), "{}").expect("manifest");
+        fs::write(
+            profile_home.join("config.toml"),
+            format!(
+                "[codex_plugins]\nenabled = true\nbinary = {:?}\n",
+                script.display().to_string()
+            ),
+        )
+        .expect("config");
+        fs::write(
+            &script,
+            format!(
+                r#"#!/usr/bin/env python3
+import json, os, sys
+PACKAGE = {package}
+installed = False
+def catalog():
+    return {{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":installed,"enabled":installed,"localVersion":"1.0.0"}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    params = msg.get("params")
+    if method == "initialize":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"review-host/0.144.1"}}}}), flush=True)
+    elif method == "initialized":
+        pass
+    elif params is None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
+    elif method == "plugin/list":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":catalog()}}), flush=True)
+    elif method == "plugin/install":
+        installed = True
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
+    elif method == "plugin/read":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"summary":{{"installed":True,"enabled":True,"localVersion":"1.0.0","source":{{"type":"local","path":PACKAGE}}}},"skills":[],"hooks":[],"mcpServers":[],"apps":[]}}}}}}), flush=True)
+    elif method == "plugin/installed":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":catalog()}}), flush=True)
+    else:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32601,"message":"method not found"}}}}), flush=True)
+"#,
+                package = serde_json::to_string(&package).expect("package json"),
+            ),
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let broker = CodexCapabilityBroker::new(&BTreeMap::from([
+            (
+                "HOME".to_string(),
+                temp.path().join("user").display().to_string(),
+            ),
+            (
+                "PSYCHEVO_HOME".to_string(),
+                profile_home.display().to_string(),
+            ),
+            (
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            ),
+        ]));
+        let identity = CodexPluginIdentity {
+            plugin: "review".to_string(),
+            marketplace: "openai".to_string(),
+        };
+
+        let result = broker
+            .plugin_install(&cwd, &identity)
+            .await
+            .expect("install journey");
+
+        assert_eq!(broker.authority_view()["auth"], "unavailable");
+        assert_eq!(broker.authority_view()["runtime"], "ready");
+        assert_eq!(result["success"], true);
+        assert_eq!(
+            result["completedSteps"],
+            json!([
+                "materialized",
+                "detail_reread",
+                "fingerprint",
+                "profile_allow",
+                "trust",
+                "generation_published"
+            ])
+        );
+        assert_eq!(result["policy"]["profileEnabled"], true);
+        assert_eq!(result["trust"]["status"], "trusted");
+        assert!(result["generation"].as_u64().unwrap_or_default() > 1);
+        assert!(private_home.join("plugin-trust.json").is_file());
+        let config = fs::read_to_string(profile_home.join("config.toml")).expect("profile policy");
+        assert!(config.contains("codex:review@openai"));
+        broker.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn app_connect_uses_install_url_and_observes_accessibility() {
+        let temp = tempfile::tempdir().expect("temp");
+        let script = temp.path().join("fake-codex.py");
+        fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+import json, sys
+calls = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}), flush=True)
+    elif msg.get("method") == "initialized":
+        pass
+    elif msg.get("method") == "app/list":
+        calls += 1
+        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"data":[{"id":"review-app","isAccessible":calls > 1,"installUrl":"https://apps.example.test/install/review"}]}}), flush=True)
+"#,
+        )
+        .expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("chmod");
+        let broker = CodexCapabilityBroker::with_command(
+            BrokerCommand {
+                program: script,
+                args: Vec::new(),
+            },
+            BTreeMap::from([(
+                "PATH".to_string(),
+                std::env::var("PATH").unwrap_or_default(),
+            )]),
+            Duration::from_secs(1),
+        );
+
+        let started = broker
+            .connect_start("codex:review@openai", "review-app", Some("app"))
+            .await
+            .expect("connect start");
+        assert_eq!(started["status"], "pending");
+        assert_eq!(
+            started["installUrl"],
+            "https://apps.example.test/install/review"
+        );
+        assert!(started["authorizationUrl"].is_null());
+        let completed = broker
+            .connect_status(started["sessionId"].as_str().expect("session id"))
+            .await
+            .expect("connect status");
+        assert_eq!(completed["status"], "succeeded");
+        assert_eq!(
+            broker
+                .connect_status("lost-after-restart")
+                .await
+                .expect("expired status")["status"],
+            "expired"
+        );
+        broker.stop().await;
     }
 
     #[test]
@@ -2526,7 +4555,7 @@ for line in sys.stdin:
         let script = temp.path().join("fake-codex.py");
         let script_text = format!(
             r#"#!/usr/bin/env python3
-import json, sys, time
+import json, os, sys, time
 PACKAGE = {package}
 LOG = {log}
 initialized = False
@@ -2535,9 +4564,11 @@ for line in sys.stdin:
     method = msg.get("method")
     if method == "initialize":
         assert msg["params"]["capabilities"]["mcpServerOpenaiFormElicitation"] is True
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"fixture/0.144.1"}}}}), flush=True)
     elif method == "initialized":
         initialized = True
+    elif msg.get("params") is None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
     elif method == "plugin/installed":
         assert initialized
         with open(LOG, "a", encoding="utf-8") as handle:
@@ -2547,7 +4578,9 @@ for line in sys.stdin:
         time.sleep(2)
         with open(LOG, "a", encoding="utf-8") as handle:
             handle.write("plugin-list\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":True,"enabled":True}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
+    elif method == "plugin/install":
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
     elif method == "plugin/read":
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":"review@openai","name":"review","installed":True,"enabled":True,"source":{{"type":"local","path":PACKAGE}}}},"skills":[{{"name":"review","path":PACKAGE + "/skills/review/SKILL.md","enabled":True}}],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
     elif method == "thread/start":
@@ -2576,6 +4609,15 @@ for line in sys.stdin:
         let mut permissions = fs::metadata(&script).expect("metadata").permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&script, permissions).expect("chmod");
+        fs::create_dir_all(&home).expect("profile home");
+        fs::write(
+            home.join("config.toml"),
+            format!(
+                "[codex_plugins]\nenabled = true\nbinary = {:?}\n",
+                script.display().to_string()
+            ),
+        )
+        .expect("Codex authority config");
 
         let env = BTreeMap::from([
             ("HOME".to_string(), temp.path().display().to_string()),
@@ -2606,6 +4648,27 @@ for line in sys.stdin:
         let event_sink: crate::GatewayEventSink = std::sync::Arc::new(move |event| {
             events_for_sink.lock().expect("events").push(event);
         });
+
+        let installed = state
+            .inner
+            .codex_capability_broker
+            .plugin_install(
+                &cwd,
+                &CodexPluginIdentity {
+                    plugin: "review".to_string(),
+                    marketplace: "openai".to_string(),
+                },
+            )
+            .await
+            .expect("install and prewarm reviewed plugin");
+        assert_eq!(installed["success"], true);
+        state
+            .inner
+            .codex_capability_broker
+            .prepare_runtime_inventory(&cwd)
+            .await
+            .expect("prewarm reviewed plugin inventory");
+        fs::write(&log, "").expect("clear setup log");
 
         let contributions = tokio::time::timeout(
             Duration::from_millis(500),
@@ -2644,10 +4707,7 @@ for line in sys.stdin:
             .expect("frozen runtime contributions");
         assert_eq!(second.capability_roots, contributions.capability_roots);
         assert_eq!(second.runtime_tools.len(), 1);
-        assert_eq!(
-            fs::read_to_string(&log).expect("runtime inventory log"),
-            "plugin-installed\nmcp-status\n"
-        );
+        assert_eq!(fs::read_to_string(&log).expect("runtime inventory log"), "");
 
         let other_thread = state
             .inner
@@ -2666,10 +4726,7 @@ for line in sys.stdin:
             contributions.capability_roots
         );
         assert_eq!(other_thread.runtime_tools.len(), 1);
-        assert_eq!(
-            fs::read_to_string(&log).expect("shared inventory log"),
-            "plugin-installed\nmcp-status\nmcp-status\n"
-        );
+        assert_eq!(fs::read_to_string(&log).expect("shared inventory log"), "");
 
         let tool = CodexMcpTool {
             state: state.clone(),
@@ -2731,9 +4788,23 @@ for line in sys.stdin:
             .codex_capability_broker
             .archive_ephemeral_thread("psychevo-thread-2")
             .await;
+        for lease_id in [
+            contributions.lease_id.as_deref(),
+            second.lease_id.as_deref(),
+            other_thread.lease_id.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            state
+                .inner
+                .codex_capability_broker
+                .release_turn_lease(lease_id)
+                .await;
+        }
         assert_eq!(
             fs::read_to_string(&log).expect("archive log"),
-            "plugin-installed\nmcp-status\nmcp-status\ncodex-thread-1\ncodex-thread-1\n"
+            "codex-thread-1\n"
         );
         state.inner.codex_capability_broker.stop().await;
     }

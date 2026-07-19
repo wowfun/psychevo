@@ -41,6 +41,13 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
     }
     let cwd = psychevo_runtime::normalized_native_path(&scope.cwd);
     let mut source = scope.source.clone();
+    let canonical_raw_id = source
+        .raw_identity
+        .as_ref()
+        .and_then(|identity| identity.get("canonicalRawId"))
+        .and_then(Value::as_str)
+        .unwrap_or(source.raw_id.as_str())
+        .to_string();
     source.raw_id = format!("{}:draft:{}", source.raw_id, Uuid::now_v7());
     source.visible_name = source
         .visible_name
@@ -49,7 +56,7 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
     source.raw_identity = Some(json!({
         "kind": source.kind.clone(),
         "rawId": source.raw_id.clone(),
-        "canonicalRawId": scope.source.raw_id.clone(),
+        "canonicalRawId": canonical_raw_id,
         "cwd": cwd.display().to_string(),
         "draft": true,
     }));
@@ -57,6 +64,17 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
         cwd: scope.cwd.clone(),
         source,
     }
+}
+
+fn canonical_source_mutation_key(source: &GatewaySource) -> SourceKey {
+    let raw_id = source
+        .raw_identity
+        .as_ref()
+        .filter(|identity| identity.get("draft").and_then(Value::as_bool) == Some(true))
+        .and_then(|identity| identity.get("canonicalRawId"))
+        .and_then(Value::as_str)
+        .unwrap_or(source.raw_id.as_str());
+    SourceKey(format!("{}:{raw_id}", source.kind))
 }
 
 #[cfg(test)]

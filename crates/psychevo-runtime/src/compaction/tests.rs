@@ -36,6 +36,8 @@ pub(crate) mod tests {
             event_type: "context_snapshot".to_string(),
             scope: ContextScope::LastProviderRequest,
             status: "estimated".to_string(),
+            basis: "latest_provider_request".to_string(),
+            applies_to_session_seq: None,
             session_id: Some("session".to_string()),
             provider: "mock".to_string(),
             model: "model".to_string(),

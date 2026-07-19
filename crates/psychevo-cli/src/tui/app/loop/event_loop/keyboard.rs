@@ -68,8 +68,9 @@ impl TuiApp {
                 KeyCode::Up => ui.move_selection(-1),
                 KeyCode::Down => ui.move_selection(1),
                 KeyCode::Enter => {
-                    let selected_visible =
-                        ui.selected_target.is_some_and(|target| ui.target_visible(target));
+                    let selected_visible = ui
+                        .selected_target
+                        .is_some_and(|target| ui.target_visible(target));
                     if !selected_visible {
                         ui.ensure_agent_open_selection();
                     } else {
@@ -102,12 +103,18 @@ impl TuiApp {
                     }
                 }
                 KeyCode::Char('o') | KeyCode::Char('O') => {
-                    if !ui.selected_target.is_some_and(|target| ui.target_visible(target)) {
+                    if !ui
+                        .selected_target
+                        .is_some_and(|target| ui.target_visible(target))
+                    {
                         ui.ensure_agent_open_selection();
                     } else {
                         ui.ensure_selection();
                     }
-                    if let Some(target) = ui.selected_agent_target().or_else(|| ui.visible_agent_target()) {
+                    if let Some(target) = ui
+                        .selected_agent_target()
+                        .or_else(|| ui.visible_agent_target())
+                    {
                         self.open_agent_target_session(ui, &target)?;
                     }
                 }
@@ -141,7 +148,9 @@ impl TuiApp {
                     ui.dismiss_completion_popup();
                     return Ok(false);
                 }
-                KeyCode::Tab | KeyCode::Enter if ui.selected_completion_popup_target().is_some() => {
+                KeyCode::Tab | KeyCode::Enter
+                    if ui.selected_completion_popup_target().is_some() =>
+                {
                     ui.insert_selected_completion_popup_item();
                     ui.sync_file_popup(&self.cwd);
                     self.sync_agent_popup(ui);
@@ -276,6 +285,16 @@ impl TuiApp {
                         line.clone()
                     }
                 };
+                let profile_prompt = self.journey_profile.is_enabled()
+                    && !ui.shell_mode
+                    && matches!(
+                        self.classify_submitted_slash_input(&submitted),
+                        Ok(SubmittedSlashInput::NotSlash)
+                            | Ok(SubmittedSlashInput::PassThroughPrompt(_))
+                    );
+                if profile_prompt {
+                    self.journey_profile.mark_send_committed();
+                }
                 ui.clear_composer();
                 ui.slash_menu_selected = 0;
                 ui.clear_slash_menu_dismissal();

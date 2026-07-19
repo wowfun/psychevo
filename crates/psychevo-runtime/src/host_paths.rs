@@ -328,12 +328,18 @@ fn existing_file(path: PathBuf, platform: HostPlatform) -> Option<PathBuf> {
     if path.is_file() {
         return Some(path);
     }
+    // Native Windows lookup is already case-insensitive. Directory scans are
+    // only needed by cross-platform fixtures that emulate Windows on POSIX.
+    #[cfg(not(windows))]
     if platform == HostPlatform::Windows {
         return existing_file_case_insensitive(&path);
     }
+    #[cfg(windows)]
+    let _ = platform;
     None
 }
 
+#[cfg(not(windows))]
 fn existing_file_case_insensitive(path: &Path) -> Option<PathBuf> {
     let parent = path.parent()?;
     let expected = path.file_name()?.to_string_lossy();

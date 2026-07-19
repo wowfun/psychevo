@@ -103,6 +103,38 @@ mod tests {
         assert_eq!(value["output"], "from-runtime-env");
     }
 
+    #[tokio::test]
+    async fn exec_command_emits_one_opaque_workspace_invalidation_after_spawn() {
+        let temp = tempfile::tempdir().expect("temp");
+        let cwd = temp.path().join("work");
+        fs::create_dir_all(&cwd).expect("cwd");
+        let mutations = Arc::new(Mutex::new(Vec::new()));
+        let observed = mutations.clone();
+        let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+
+        exec_command_tool_impl_with_context(
+            cwd,
+            ToolRuntimeContext {
+                workspace_mutations: Some(WorkspaceMutationSink::new(move |mutation| {
+                    observed.lock().expect("mutations poisoned").push(mutation);
+                })),
+                ..ToolRuntimeContext::default()
+            },
+            "exec-command-mutation".to_string(),
+            json!({"cmd": "printf done"}),
+            receivers.abort_signal(),
+        )
+        .await
+        .expect("exec command");
+
+        assert_eq!(
+            *mutations.lock().expect("mutations poisoned"),
+            vec![WorkspaceMutation::Opaque {
+                source: "exec_command".to_string(),
+            }]
+        );
+    }
+
     #[test]
     fn subprocess_path_prepends_prefixes_to_runtime_env_path() {
         let temp = tempfile::tempdir().expect("temp");

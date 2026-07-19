@@ -78,14 +78,22 @@ pub(crate) fn write_tool_impl_for_call(
     } else {
         None
     };
-    write_text_to_target(
+    let result = write_text_to_target(
         &tool,
         &target,
         content,
         dirs_created,
         pre_content.as_deref(),
         warning,
-    )
+    );
+    if result.is_ok() {
+        tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+            path: tool.relative(&target),
+            before: pre_content,
+            after: Some(content.to_string()),
+        });
+    }
+    result
 }
 
 #[cfg(test)]
@@ -108,6 +116,21 @@ pub(crate) mod write_tool_tests {
                 path_prefixes: Vec::new(),
                 sandbox_policy: SandboxPolicy::disabled(),
                 sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+                ..ToolRuntimeContext::default()
+            },
+        )
+    }
+
+    fn cwd_tool_with_mutations(
+        path: &Path,
+        mutations: Arc<Mutex<Vec<WorkspaceMutation>>>,
+    ) -> CwdTool {
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
+            ToolRuntimeContext {
+                workspace_mutations: Some(WorkspaceMutationSink::new(move |mutation| {
+                    mutations.lock().expect("mutations poisoned").push(mutation);
+                })),
                 ..ToolRuntimeContext::default()
             },
         )
@@ -215,6 +238,28 @@ pub(crate) mod write_tool_tests {
         assert_eq!(
             fs::read_to_string(temp.path().join("nested/config.json")).expect("file"),
             "{\"ok\": true}\n"
+        );
+    }
+
+    #[test]
+    fn write_emits_exact_workspace_mutation_after_success() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("notes.txt"), "before\n").expect("seed");
+        let mutations = Arc::new(Mutex::new(Vec::new()));
+
+        write_tool_impl(
+            cwd_tool_with_mutations(temp.path(), mutations.clone()),
+            json!({"path": "notes.txt", "content": "after\n"}),
+        )
+        .expect("write");
+
+        assert_eq!(
+            *mutations.lock().expect("mutations poisoned"),
+            vec![WorkspaceMutation::ExactUtf8 {
+                path: "notes.txt".to_string(),
+                before: Some("before\n".to_string()),
+                after: Some("after\n".to_string()),
+            }]
         );
     }
 

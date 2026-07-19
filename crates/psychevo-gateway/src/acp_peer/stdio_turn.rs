@@ -14,6 +14,7 @@ struct AcpPeerTurnContext {
     peer_runtime_options: BTreeMap<String, String>,
     mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
     stream: Option<RunStreamSink>,
+    workspace_mutations: Option<WorkspaceMutationSink>,
     approval_handler: Option<Arc<dyn psychevo_runtime::ApprovalHandler>>,
     clarify_control: Option<RunControlHandle>,
     abort: Option<AbortSignal>,
@@ -318,7 +319,11 @@ async fn execute_resident_acp_turn(
             "process_generation": generation,
         }),
     );
-    let mut state = AcpPeerStreamState::new(turn.stream.clone(), turn.local_session_id.clone());
+    let mut state = AcpPeerStreamState::new(
+        turn.stream.clone(),
+        turn.workspace_mutations.clone(),
+        turn.local_session_id.clone(),
+    );
     let mut session = ensure_resident_acp_session(
         cx,
         initialized,
@@ -493,9 +498,7 @@ async fn execute_resident_acp_turn(
         }
     };
     let codex_prompt_quota = project_codex_prompt_quota(initialized, prompt_response.meta.as_ref());
-    if state.usage_update.is_none()
-        && let Some(usage) = prompt_response.usage
-    {
+    if let Some(usage) = prompt_response.usage {
         state.handle_prompt_usage(serde_json::to_value(usage).unwrap_or(Value::Null));
     }
     match codex_prompt_quota {
@@ -509,6 +512,7 @@ async fn execute_resident_acp_turn(
     let content_slots = state.content_slots.clone();
     let latest_plan = state.latest_plan.clone();
     let session_title = state.session_title.clone();
+    let prompt_usage = state.prompt_usage.clone();
     let usage_update = state.usage_update.clone();
     let tools = state
         .tools
@@ -531,6 +535,7 @@ async fn execute_resident_acp_turn(
         latest_plan,
         session_title,
         tools,
+        prompt_usage,
         usage_update,
         events: state.events,
         session_snapshot,
@@ -593,7 +598,7 @@ async fn load_resident_acp_session(
     cwd: PathBuf,
     mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
 ) -> psychevo_runtime::Result<AcpSessionLoadOutput> {
-    let mut state = AcpPeerStreamState::new(None, local_session_id.clone());
+    let mut state = AcpPeerStreamState::new(None, None, local_session_id.clone());
     let session = ensure_resident_acp_session(
         cx,
         initialized,

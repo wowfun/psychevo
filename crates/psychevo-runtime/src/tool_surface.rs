@@ -21,7 +21,9 @@ use crate::tools::{
     clarify_tool, default_enabled_toolsets, known_tool_name, skill_tools_for_mode,
     tool_allowed_in_mode, tool_by_name, tool_names_for_mode,
 };
-use crate::types::{ClarifyControl, RunMode, RunStreamSink, RunWarning, RuntimeTool};
+use crate::types::{
+    ClarifyControl, RunMode, RunStreamSink, RunWarning, RuntimeTool, WorkspaceMutationSink,
+};
 
 pub(crate) enum ClarifyToolSurface {
     Disabled,
@@ -54,6 +56,7 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) lsp: LspConfig,
     pub(crate) allow_login_shell: bool,
     pub(crate) stream_events: Option<RunStreamSink>,
+    pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) path_prefixes: Vec<PathBuf>,
     pub(crate) sandbox_policy: SandboxPolicy,
@@ -95,6 +98,7 @@ pub(crate) fn assemble_tool_surface_with_warnings(
         lsp_manager: crate::tools::write_support::default_lsp_manager(),
         allow_login_shell: input.allow_login_shell,
         stream_events: input.stream_events.clone(),
+        workspace_mutations: input.workspace_mutations.clone(),
         env: input.env.clone(),
         path_prefixes: input.path_prefixes.clone(),
         sandbox_policy: input.sandbox_policy.clone(),
@@ -820,6 +824,7 @@ mod tests {
             lsp: Default::default(),
             allow_login_shell: false,
             stream_events: None,
+            workspace_mutations: None,
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),
             sandbox_policy: SandboxPolicy::disabled(),

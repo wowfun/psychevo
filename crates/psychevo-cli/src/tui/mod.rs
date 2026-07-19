@@ -53,8 +53,9 @@ pub(crate) use psychevo_runtime::{
     agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_cwd,
     collect_workspace_diff, compact_session, config_show_value, configured_models,
     context_snapshot, create_scoped_custom_provider, custom_provider_api_key_env,
-    default_session_export_filename, discover_agent_teams_with_catalog, discover_agents,
-    discover_skills, fetch_and_cache_model_catalog, format_context_snapshot_text_with_options,
+    decode_persisted_tool_result_for_display, default_session_export_filename,
+    discover_agent_teams_with_catalog, discover_agents, discover_skills, effective_usage_total,
+    fetch_and_cache_model_catalog, format_context_snapshot_text_with_options,
     format_context_total_value, format_context_total_value_parts, install_skill,
     list_skill_bundles, main_agent_default_metadata, main_agent_from_session_metadata,
     main_agent_metadata, model_catalog_providers, model_metadata_explicitly_disallows_image_input,
@@ -121,6 +122,7 @@ pub(crate) enum CompletionPopupTarget {
 
 pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
+    let journey_profile = TuiJourneyProfileProbe::from_env(&env_map)?;
     let cwd = std::env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
@@ -234,6 +236,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         side_cleanup_task: None,
         compaction_task: None,
         diff_task: None,
+        journey_profile,
     };
     if args.new_session {
         app.begin_new_session_draft();
@@ -242,7 +245,13 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     app.refresh_selected_model();
     app.refresh_current_session_title()?;
     app.refresh_current_session_agent()?;
-    app.run(args.message.join(" ")).await
+    let run_result = app.run(args.message.join(" ")).await;
+    let profile_result = app.journey_profile.finish();
+    match (run_result, profile_result) {
+        (Err(err), _) => Err(err),
+        (Ok(_), Err(err)) => Err(err.into()),
+        (Ok(exit_code), Ok(())) => Ok(exit_code),
+    }
 }
 
 pub(crate) fn load_effective_tui_slash_config(
@@ -284,6 +293,7 @@ pub(crate) fn load_effective_tui_slash_config(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     let document = config_show_value(&options, ConfigScope::Effective)?;
@@ -331,6 +341,10 @@ use app_session_state::*;
 pub(crate) mod support_running;
 #[allow(unused_imports)]
 use support_running::*;
+#[path = "support/journey_profile.rs"]
+pub(crate) mod support_journey_profile;
+#[allow(unused_imports)]
+use support_journey_profile::*;
 #[path = "support/file_search.rs"]
 pub(crate) mod support_file_search;
 #[allow(unused_imports)]

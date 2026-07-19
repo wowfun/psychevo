@@ -995,6 +995,53 @@ fn local_policy_can_target_profile_installed_plugin() {
 }
 
 #[test]
+fn resetting_local_policy_restores_profile_inheritance() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+          "name": "cleanup",
+          "version": "1.0.0",
+          "description": "cleanup"
+        }"#,
+    );
+    install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            adapter_mode: None,
+            force: false,
+        },
+    )
+    .expect("profile install");
+    plugin_set_enabled_value(&home, &cwd, PluginScope::Global, "cleanup", true)
+        .expect("profile allow");
+    plugin_set_enabled_value(&home, &cwd, PluginScope::Local, "cleanup", false)
+        .expect("project deny");
+
+    let reset = plugin_reset_enabled_value(&home, &cwd, PluginScope::Local, "cleanup")
+        .expect("reset project override");
+
+    assert!(reset["enabled"].is_null());
+    let local_config =
+        fs::read_to_string(cwd.join(".psychevo/config.toml")).expect("local config after reset");
+    assert!(!local_config.contains("cleanup"));
+    let profile_config =
+        fs::read_to_string(home.join("config.toml")).expect("profile config remains authoritative");
+    assert!(profile_config.contains("enabled = true"));
+}
+
+#[test]
 fn scoped_selectors_and_policy_keys_distinguish_duplicate_installations() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
@@ -1212,6 +1259,7 @@ for line in sys.stdin:
         lsp: Default::default(),
         allow_login_shell: false,
         stream_events: None,
+        workspace_mutations: None,
         env: BTreeMap::new(),
         path_prefixes: Vec::new(),
         sandbox_policy: SandboxPolicy::disabled(),

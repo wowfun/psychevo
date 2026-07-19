@@ -28,12 +28,21 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         else {
             continue;
         };
-        let result_value = serde_json::from_str::<Value>(content).unwrap_or_else(|_| {
-            json!({
-                "content": content,
-            })
-        });
+        let result_value = decode_persisted_tool_result_for_display(tool_name, content);
         let status = tool_result_status(tool_name, *is_error, &result_value);
+        let display_content = if tool_name == "web_search" {
+            result_value
+                .get("payload")
+                .and_then(|payload| serde_json::to_string_pretty(payload).ok())
+                .unwrap_or_else(|| content.clone())
+        } else {
+            content.clone()
+        };
+        let result_content = if tool_name == "web_search" {
+            serde_json::to_string(&result_value).unwrap_or_else(|_| content.clone())
+        } else {
+            content.clone()
+        };
         let mut metadata = metadata_object(block.metadata.take());
         metadata.insert("projection".to_string(), json!("tool"));
         metadata.insert("tool_name".to_string(), json!(tool_name));
@@ -74,16 +83,16 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         block.result = Some(TranscriptToolResult {
             result_message_seq: summary.session_seq,
             status,
-            content: content.clone(),
+            content: result_content,
             is_error: *is_error,
             metadata: summary.metadata.clone(),
             created_at_ms: *timestamp_ms,
             updated_at_ms: *timestamp_ms,
         });
         block.status = status;
-        block.body = Some(content.clone());
-        block.detail = Some(content.clone());
-        block.preview = Some(compact_text(content, 240));
+        block.body = Some(display_content.clone());
+        block.detail = Some(display_content.clone());
+        block.preview = Some(compact_text(&display_content, 240));
         if let Some(artifact) = generated_image {
             block.kind = TranscriptBlockKind::Artifact;
             block.artifact_ids = vec![artifact.artifact_id.clone()];

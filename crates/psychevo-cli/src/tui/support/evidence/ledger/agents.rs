@@ -305,26 +305,7 @@ pub(crate) fn agent_child_latest_tokens(summary: &Value) -> Option<u64> {
 }
 
 pub(crate) fn usage_total_tokens(usage: &Value) -> Option<u64> {
-    usage
-        .get("total_tokens")
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            let mut total = 0u64;
-            let mut any = false;
-            for key in [
-                "input_tokens",
-                "output_tokens",
-                "reasoning_tokens",
-                "cached_tokens",
-                "cache_write_tokens",
-            ] {
-                if let Some(value) = usage.get(key).and_then(Value::as_u64) {
-                    total = total.saturating_add(value);
-                    any = true;
-                }
-            }
-            any.then_some(total)
-        })
+    effective_usage_total(Some(usage)).tokens
 }
 
 pub(crate) fn format_compact_count(value: u64) -> String {

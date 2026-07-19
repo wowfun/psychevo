@@ -122,6 +122,11 @@ pub(crate) fn edit_replace(
     let diff = git_patch_update(&rel, &text.normalized, &outcome.content);
     let restored = restore_text_file(&text, &outcome.content);
     let (lint, lsp) = write_edit_text(&tool, &target, &restored, Some(&text.original))?;
+    tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+        path: rel.clone(),
+        before: Some(text.original.clone()),
+        after: Some(restored),
+    });
     Ok(edit_success_value(EditSuccess {
         diff,
         files_modified: vec![rel],
@@ -202,6 +207,7 @@ pub(crate) enum V4aApply {
         dest: PathBuf,
         source_rel: String,
         dest_rel: String,
+        content: Option<String>,
     },
 }
 
@@ -272,6 +278,7 @@ pub(crate) fn validate_v4a_operations(
                 plan.push(V4aApply::Move {
                     source_rel: tool.relative(&source),
                     dest_rel: tool.relative(&dest),
+                    content: fs::read_to_string(&source).ok(),
                     source,
                     dest,
                 });
@@ -311,6 +318,11 @@ pub(crate) fn apply_v4a_plan(tool: &CwdTool, plan: Vec<V4aApply>) -> Result<Valu
                     fs::create_dir_all(parent)?;
                 }
                 let (lint, lsp) = write_edit_text(tool, &target, &content, None)?;
+                tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+                    path: rel.clone(),
+                    before: None,
+                    after: Some(content.clone()),
+                });
                 diffs.push(git_patch_add(&rel, &content));
                 if let Some(lint) = lint {
                     lint_by_file.insert(rel.clone(), lint);
@@ -328,6 +340,11 @@ pub(crate) fn apply_v4a_plan(tool: &CwdTool, plan: Vec<V4aApply>) -> Result<Valu
             } => {
                 let restored = restore_text_file(&text, &updated);
                 let (lint, lsp) = write_edit_text(tool, &target, &restored, Some(&text.original))?;
+                tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+                    path: rel.clone(),
+                    before: Some(text.original.clone()),
+                    after: Some(restored),
+                });
                 diffs.push(git_patch_update(&rel, &text.normalized, &updated));
                 if let Some(lint) = lint {
                     lint_by_file.insert(rel.clone(), lint);
@@ -339,6 +356,11 @@ pub(crate) fn apply_v4a_plan(tool: &CwdTool, plan: Vec<V4aApply>) -> Result<Valu
             }
             V4aApply::Delete { target, rel, text } => {
                 fs::remove_file(&target)?;
+                tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+                    path: rel.clone(),
+                    before: Some(text.original.clone()),
+                    after: None,
+                });
                 diffs.push(git_patch_delete(&rel, &text.normalized));
                 files_deleted.push(rel);
             }
@@ -347,12 +369,29 @@ pub(crate) fn apply_v4a_plan(tool: &CwdTool, plan: Vec<V4aApply>) -> Result<Valu
                 dest,
                 source_rel,
                 dest_rel,
+                content,
             } => {
                 if let Some(parent) = dest.parent() {
                     fs::create_dir_all(parent)?;
                 }
                 fs::rename(&source, &dest)?;
                 note_file_write(tool.task_id(), &dest);
+                if let Some(content) = content {
+                    tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+                        path: source_rel.clone(),
+                        before: Some(content.clone()),
+                        after: None,
+                    });
+                    tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+                        path: dest_rel.clone(),
+                        before: None,
+                        after: Some(content),
+                    });
+                } else {
+                    tool.observe_workspace_mutation(WorkspaceMutation::Opaque {
+                        source: "edit.patch.move".to_string(),
+                    });
+                }
                 diffs.push(git_patch_move(&source_rel, &dest_rel));
                 files_moved.push(json!({ "from": source_rel, "to": dest_rel }));
             }
@@ -396,6 +435,21 @@ pub(crate) mod edit_tool_tests {
                 path_prefixes: Vec::new(),
                 sandbox_policy: SandboxPolicy::disabled(),
                 sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+                ..ToolRuntimeContext::default()
+            },
+        )
+    }
+
+    fn cwd_tool_with_mutations(
+        path: &Path,
+        mutations: Arc<Mutex<Vec<WorkspaceMutation>>>,
+    ) -> CwdTool {
+        CwdTool::with_context(
+            path.canonicalize().expect("canonical cwd"),
+            ToolRuntimeContext {
+                workspace_mutations: Some(WorkspaceMutationSink::new(move |mutation| {
+                    mutations.lock().expect("mutations poisoned").push(mutation);
+                })),
                 ..ToolRuntimeContext::default()
             },
         )
@@ -573,8 +627,9 @@ pub(crate) mod edit_tool_tests {
 *** Delete File: delete.txt
 *** Move File: move.txt -> moved.txt
 *** End Patch"#;
+        let mutations = Arc::new(Mutex::new(Vec::new()));
         let value = edit_tool_impl(
-            cwd_tool(temp.path()),
+            cwd_tool_with_mutations(temp.path(), mutations.clone()),
             json!({"mode": "patch", "patch": patch}),
         )
         .expect("patch");
@@ -624,6 +679,36 @@ pub(crate) mod edit_tool_tests {
             "{diff}"
         );
         assert!(!diff.contains("# Moved"), "{diff}");
+        assert_eq!(
+            *mutations.lock().expect("mutations poisoned"),
+            vec![
+                WorkspaceMutation::ExactUtf8 {
+                    path: "update.txt".to_string(),
+                    before: Some("alpha\nbeta\n".to_string()),
+                    after: Some("alpha\nbravo\n".to_string()),
+                },
+                WorkspaceMutation::ExactUtf8 {
+                    path: "add.txt".to_string(),
+                    before: None,
+                    after: Some("created\nfile".to_string()),
+                },
+                WorkspaceMutation::ExactUtf8 {
+                    path: "delete.txt".to_string(),
+                    before: Some("remove me\n".to_string()),
+                    after: None,
+                },
+                WorkspaceMutation::ExactUtf8 {
+                    path: "move.txt".to_string(),
+                    before: Some("move me\n".to_string()),
+                    after: None,
+                },
+                WorkspaceMutation::ExactUtf8 {
+                    path: "moved.txt".to_string(),
+                    before: None,
+                    after: Some("move me\n".to_string()),
+                },
+            ]
+        );
     }
 
     #[test]

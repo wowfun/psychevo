@@ -510,6 +510,7 @@ async fn channel_runtime_control_reply(
                 redact_channel_error(&error.to_string())
             ))
         })?;
+    let target_id = selected_context_target_id(&runtime_context)?.to_string();
     let Some(control) = runtime_context.controls.into_iter().find(|control| {
         control.surface_role == role
             && control.stability == wire::RuntimeStabilityView::Stable
@@ -588,7 +589,7 @@ async fn channel_runtime_control_reply(
         context.scope,
         wire::ThreadControlSetParams {
             thread_id: binding.as_ref().map(|binding| binding.thread_id.clone()),
-            target_id: runtime_context.target_id.clone(),
+            target_id,
             control_id: control.id.clone(),
             value: Value::String(value.to_string()),
             expected_capability_revision: control.capability_revision.clone(),

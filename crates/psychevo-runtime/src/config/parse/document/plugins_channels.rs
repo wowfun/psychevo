@@ -1,3 +1,15 @@
+pub(crate) fn parse_codex_plugins_config(value: &Value) -> Result<CodexPluginsConfig> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| Error::Config("codex_plugins must be an object".to_string()))?;
+    let enabled = optional_bool_field(object, "enabled")?.unwrap_or(false);
+    let binary = optional_string_field(object, "binary")?.and_then(|value| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    });
+    Ok(CodexPluginsConfig { enabled, binary })
+}
+
 pub(crate) fn parse_plugin_policy_config(value: &Value) -> Result<PluginPolicyConfig> {
     let object = value
         .as_object()
@@ -43,6 +55,24 @@ pub(crate) fn parse_builtin_plugin_policy_config(
 }
 
 pub(crate) fn validate_plugin_policy_name(name: &str) -> Result<()> {
+    if let Some(identity) = name.strip_prefix("codex:") {
+        let mut parts = identity.split('@');
+        let plugin = parts.next().unwrap_or_default();
+        let marketplace = parts.next().unwrap_or_default();
+        let valid = !plugin.is_empty()
+            && !marketplace.is_empty()
+            && parts.next().is_none()
+            && identity
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '@'));
+        return if valid {
+            Ok(())
+        } else {
+            Err(Error::Config(format!(
+                "plugins.{name} must be a valid authority-qualified Codex plugin policy name"
+            )))
+        };
+    }
     let identity = name
         .strip_prefix("profile:")
         .or_else(|| name.strip_prefix("project:"))

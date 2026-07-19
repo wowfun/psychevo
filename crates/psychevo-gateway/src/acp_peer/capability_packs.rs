@@ -651,9 +651,12 @@ mod capability_pack_tests {
         );
         assert!(!projected_value.to_string().contains("must-not-cross"));
 
-        let mut state = AcpPeerStreamState::new(None, "local-quota".to_string());
+        let mut state = AcpPeerStreamState::new(None, None, "local-quota".to_string());
+        state.handle_usage_update(json!({ "sessionUpdate": "usage_update", "used": 900, "size": 4_000 }));
         state.handle_prompt_usage(json!({ "totalTokens": 2500 }));
         state.handle_codex_prompt_quota(projected);
+        assert_eq!(state.prompt_usage, Some(json!({ "total_tokens": 2500 })));
+        assert_eq!(state.usage_update.as_ref().unwrap()["used"], 900);
         assert_eq!(
             state
                 .usage_update
@@ -728,7 +731,7 @@ mod capability_pack_tests {
             CodexPromptQuotaRejection::InvalidSchema.as_str(),
             "invalid_schema"
         );
-        let mut state = AcpPeerStreamState::new(None, "local-rejected-quota".to_string());
+        let mut state = AcpPeerStreamState::new(None, None, "local-rejected-quota".to_string());
         state.handle_codex_prompt_quota_rejection(CodexPromptQuotaRejection::InvalidSchema);
         let diagnostic = state.events.last().expect("bounded rejection diagnostic");
         assert_eq!(diagnostic["reason"], "invalid_schema");

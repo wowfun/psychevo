@@ -39,6 +39,7 @@ pub(crate) mod state_runtime;
 pub(crate) mod stats;
 pub(crate) mod store;
 pub(crate) mod thread_lineage;
+mod tool_result_display;
 pub(crate) mod tool_surface;
 pub(crate) mod tools;
 pub(crate) mod types;
@@ -49,6 +50,9 @@ pub mod workspace_diff;
 #[cfg(test)]
 pub(crate) mod tests;
 
+pub use accounting::{
+    EffectiveUsageTotal, UsageTotalStatus, effective_usage_total, effective_usage_total_from_parts,
+};
 pub use agents::{
     AgentBackendConfig, AgentBackendKind, AgentBackendRef, AgentCatalog, AgentContribution,
     AgentControl, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint,
@@ -72,22 +76,22 @@ pub use compaction::{
     auto_compaction_due_for_snapshot, compact_session,
 };
 pub use config::{
-    ChannelRuntimeConnection, ChannelSetupInput, ChannelUpdateInput, DEFAULT_WORKSPACE_NAME,
-    DEFAULT_WORKSPACE_ROOT, McpServerConfigInput, McpToolPolicyInput, REASONING_EFFORT_VALUES,
-    ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig, ResolvedVoiceTtsConfig,
-    RuntimeProfileConfig, RuntimeProfileKind, ToolsetMutationResult,
+    ChannelRuntimeConnection, ChannelSetupInput, ChannelUpdateInput, CodexPluginsConfig,
+    DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, McpServerConfigInput, McpToolPolicyInput,
+    REASONING_EFFORT_VALUES, ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig,
+    ResolvedVoiceTtsConfig, RuntimeProfileConfig, RuntimeProfileKind, ToolsetMutationResult,
     append_local_permission_allow_rule, append_local_permission_rule, auth_status_value,
     channel_doctor_value, channel_list_value, channel_runtime_connections, channel_show_value,
     channel_summary_value, clear_mcp_oauth_access_token, config_provider_list_value,
     config_show_value, configured_models, create_global_custom_provider, create_local_toolset,
     create_scoped_custom_provider, custom_provider_api_key_env, delete_channel_connection,
     fetch_and_cache_model_catalog, fetch_model_catalog, image_generation_config_value,
-    load_agent_backend_configs, load_mcp_oauth_access_token, load_runtime_profile_configs,
-    mcp_oauth_keyring_account, mcp_server_value, mcp_servers_value, model_catalog_endpoint,
-    model_catalog_entry_is_free, model_catalog_provider, model_catalog_providers,
-    normalize_provider_id, permission_rules_value, provider_models_cache_path_for_home,
-    read_cached_model_catalog, refresh_model_metadata_cache, remove_config_value,
-    remove_local_permission_rule, remove_local_toolset, remove_mcp_server,
+    load_agent_backend_configs, load_codex_plugins_profile_config, load_mcp_oauth_access_token,
+    load_runtime_profile_configs, mcp_oauth_keyring_account, mcp_server_value, mcp_servers_value,
+    model_catalog_endpoint, model_catalog_entry_is_free, model_catalog_provider,
+    model_catalog_providers, normalize_provider_id, permission_rules_value,
+    provider_models_cache_path_for_home, read_cached_model_catalog, refresh_model_metadata_cache,
+    remove_config_value, remove_local_permission_rule, remove_local_toolset, remove_mcp_server,
     resolve_default_workspace_cwd, resolve_image_generation_config, resolve_voice_asr_config,
     resolve_voice_realtime_config, resolve_voice_tts_config, resolve_workspace_root,
     save_mcp_oauth_access_token, selected_configured_model, set_auxiliary_model,
@@ -97,7 +101,7 @@ pub use config::{
     setup_channel_connection, toolsets_value, update_channel_connection,
     update_global_web_search_settings, upsert_channel_connection, upsert_mcp_server,
     validate_runtime_profile_backend_ref, voice_config_value, web_search_settings_value,
-    write_cached_model_catalog,
+    write_cached_model_catalog, write_codex_plugins_profile_config,
 };
 pub use context::prune_context;
 pub use context_usage::{
@@ -134,10 +138,12 @@ pub use plugins::{
     PluginCompatibilityLevel, PluginComponentKind, PluginComponentStatus, PluginDiagnostic,
     PluginExecutionOwner, PluginInspectOptions, PluginInstallOptions, PluginInstallRecord,
     PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry, PluginReadiness,
-    PluginScope, PluginSourceKind, PluginWorkerSpec, install_plugin, load_plugin_manifest,
-    plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
-    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
-    plugin_set_enabled_value, plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
+    PluginScope, PluginSourceKind, PluginWorkerSpec, codex_plugin_policy_value,
+    codex_plugin_set_enabled_value, external_plugin_fingerprint, install_plugin,
+    load_plugin_manifest, plugin_doctor_value, plugin_import_inspect_value, plugin_install_value,
+    plugin_list_value, plugin_marketplace_add_value, plugin_marketplace_list_value,
+    plugin_marketplace_remove_value, plugin_reset_enabled_value, plugin_set_enabled_value,
+    plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
 };
 pub use process_env::{
     ProcessEnvOptions, apply_process_env, apply_pty_process_env, apply_tokio_process_env,
@@ -213,6 +219,7 @@ pub use thread_lineage::{
     TUI_SIDE_CONVERSATION_SESSION_SOURCE, WEB_SIDE_CONVERSATION_SESSION_SOURCE,
     side_conversation_session_source, side_inherited_metadata_hidden,
 };
+pub use tool_result_display::decode_persisted_tool_result_for_display;
 pub use tools::tool_names_for_mode;
 pub use types::{
     AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalMode, ClarifyAnswer,
@@ -232,7 +239,7 @@ pub use types::{
     StoredEditableInputEnvelope, StoredEditableInputPart, TUI_DISPLAY_METADATA_KEY,
     TuiMessageSummary, USER_SHELL_METADATA_KEY, UsageActivity, UsageActivityDay, UsageReadOptions,
     UsageReadResult, UsageWindowSummary, UserShellContextOptions, UserShellOptions,
-    UserShellResult, run_control,
+    UserShellResult, WorkspaceMutation, WorkspaceMutationSink, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

@@ -10,7 +10,7 @@ use psychevo_runtime::{
     AgentBackendConfig, AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, RunMode, RunOptions,
     SessionSummary, SqliteStore, StateRuntime, TuiMessageSummary, agent_status_value,
     close_agent_id, discover_agents, list_agents_value, load_agent_backend_configs,
-    resolve_agent_definition, resume_agent_id, send_agent_message, set_config_value,
+    effective_usage_total, resolve_agent_definition, resume_agent_id, send_agent_message, set_config_value,
     valid_agent_name, view_agent_value_with_catalog, wait_agent_mailbox,
 };
 use serde_json::{Value, json};
@@ -318,6 +318,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     })
     .await?;
@@ -758,26 +759,7 @@ pub(crate) fn latest_usage_from_summaries(messages: &[TuiMessageSummary]) -> Opt
 }
 
 pub(crate) fn usage_total_tokens(usage: &Value) -> Option<u64> {
-    usage
-        .get("total_tokens")
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            let mut total = 0u64;
-            let mut any = false;
-            for key in [
-                "input_tokens",
-                "output_tokens",
-                "reasoning_tokens",
-                "cached_tokens",
-                "cache_write_tokens",
-            ] {
-                if let Some(value) = usage.get(key).and_then(Value::as_u64) {
-                    total = total.saturating_add(value);
-                    any = true;
-                }
-            }
-            any.then_some(total)
-        })
+    effective_usage_total(Some(usage)).tokens
 }
 
 pub(crate) fn truncate_preview(input: &str, max_chars: usize) -> String {

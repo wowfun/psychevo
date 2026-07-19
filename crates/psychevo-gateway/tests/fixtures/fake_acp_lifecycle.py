@@ -167,6 +167,9 @@ for raw_line in sys.stdin:
         else:
             fail(message_id, -32601, "authentication/status is unavailable")
     elif method == "session/new":
+        if MODE == "session-new-error":
+            fail(message_id, -32001, "fixture session preparation failed")
+            continue
         result = {"sessionId": "draft-native"}
         if MODE != "legacy-models" and MODE != "legacy-models-error":
             result["configOptions"] = config_options()

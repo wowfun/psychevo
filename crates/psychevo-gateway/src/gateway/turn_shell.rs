@@ -127,6 +127,15 @@ impl Gateway {
                 None,
             )?);
         }
+        gateway_profile_mark(
+            "gateway_thread_materialized",
+            Some(&turn_id),
+            active_thread_id.as_deref(),
+            GatewayProfileFields {
+                runtime_source: Some(&source_name),
+                ..GatewayProfileFields::default()
+            },
+        );
         if let Some(thread_id) = active_thread_id.clone() {
             options.cwd = self.thread_cwd(&thread_id)?;
             options.session = Some(thread_id);
@@ -196,12 +205,18 @@ impl Gateway {
         let _heartbeat = durable_activity
             .clone()
             .map(|activity| self.spawn_durable_activity_heartbeat(activity));
-        let event_sink = self.wrap_gateway_event_sink(
+        let durable_event_sink = self.wrap_gateway_event_sink(
             base_event_sink,
             durable_activity.clone(),
             Some(queue_key.to_string()),
             Some(turn_id.clone()),
         );
+        let lifecycle = GatewayTurnLifecycle::new(
+            turn_id.clone(),
+            active_thread_id.clone(),
+            durable_event_sink,
+        );
+        let event_sink = Some(lifecycle.sink());
         let event_sink_for_completion = event_sink.clone();
 
         let (control_handle, control) = match request.control {
@@ -219,6 +234,16 @@ impl Gateway {
             control_handle,
             ActiveActivityKind::Turn,
         );
+        gateway_profile_mark(
+            "gateway_event_emitted",
+            Some(&turn_id),
+            active_thread_id.as_deref(),
+            GatewayProfileFields {
+                event_type: Some("turnStarted"),
+                ..GatewayProfileFields::default()
+            },
+        );
+        lifecycle.start();
         if alias_source_to_active
             && let Some(source) = queue_source.as_ref().or(bind_source.as_ref())
         {
@@ -544,6 +569,12 @@ impl Gateway {
             durable_activity_status_for_turn(turn_status),
         );
         if let Some(event_sink) = event_sink_for_completion {
+            gateway_profile_mark(
+                "gateway_turn_completed",
+                Some(&turn_id),
+                Some(&result.session_id),
+                GatewayProfileFields::default(),
+            );
             event_sink(GatewayEvent::TurnCompleted {
                 thread_id: Some(result.session_id.clone()),
                 turn_id: turn_id.clone(),

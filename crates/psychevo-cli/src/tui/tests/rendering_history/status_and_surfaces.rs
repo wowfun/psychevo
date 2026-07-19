@@ -266,7 +266,7 @@ pub(crate) fn directory_display_uses_home_prefix_and_display_width_truncation() 
 }
 
 #[test]
-pub(crate) fn last_context_input_token_count_uses_input_tokens_when_later_usage_arrives() {
+pub(crate) fn last_context_token_count_uses_complete_provider_turn_when_later_usage_arrives() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -290,7 +290,7 @@ pub(crate) fn last_context_input_token_count_uses_input_tokens_when_later_usage_
         false,
     );
 
-    assert_eq!(ui.sidebar_tokens, Some(20_000));
+    assert_eq!(ui.sidebar_tokens, Some(23_456));
 }
 
 #[test]
@@ -312,7 +312,11 @@ pub(crate) fn bottom_status_session_observability_degrades_with_width() {
         reasoning_tokens: 0,
         cache_read_tokens: 1_000,
         cache_write_tokens: 0,
+        effective_total_tokens: Some(2_500),
         reported_total_tokens: 2_500,
+        total_status: "reported".to_string(),
+        accounted_provider_call_count: 1,
+        unaccounted_provider_call_count: 0,
         estimated_cost_nanodollars: 10_000_000,
         cost_status: "estimated".to_string(),
         estimated_pricing_count: 1,
@@ -326,10 +330,21 @@ pub(crate) fn bottom_status_session_observability_degrades_with_width() {
     assert_eq!(medium, "900/1.0k (90.0%) · cache 50%");
     let narrow = bottom_status_context_for_width(&app, &ui, 20).expect("narrow status");
     assert_eq!(narrow, "900/1.0k (90.0%)");
+
+    let summary = ui.session_usage_summary.as_mut().expect("usage summary");
+    summary.effective_total_tokens = Some(2_300);
+    summary.reported_total_tokens = 1_500;
+    summary.total_status = "partial".to_string();
+    summary.unaccounted_provider_call_count = 1;
+    assert!(
+        bottom_status_session_usage_segments(&ui)
+            .iter()
+            .any(|segment| segment == "tok ≥2.3k")
+    );
 }
 
 #[test]
-pub(crate) fn last_context_input_token_count_ignores_total_tokens_without_input_tokens() {
+pub(crate) fn last_context_token_count_accepts_authoritative_total_only_usage() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
@@ -349,7 +364,7 @@ pub(crate) fn last_context_input_token_count_ignores_total_tokens_without_input_
         false,
     );
 
-    assert_eq!(ui.sidebar_tokens, Some(12_345));
+    assert_eq!(ui.sidebar_tokens, Some(23_456));
 }
 
 #[test]

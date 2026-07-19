@@ -14,6 +14,108 @@ pub(crate) const TUI_MOUSE_CAPTURE_DISABLE_ANSI: &str = concat!(
     "\x1b[?1002l",
     "\x1b[?1000l"
 );
+const TUI_TERMINAL_TITLE_PREFIX: &str = "Pevo | ";
+const TUI_TERMINAL_TITLE_MAX_CHARS: usize = 240;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SetTerminalTitle<'a>(&'a str);
+
+impl crossterm::Command for SetTerminalTitle<'_> {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        write!(f, "\x1b]0;{}\x07", self.0)
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Err(io::Error::other(
+            "tried to execute SetTerminalTitle using WinAPI; use ANSI instead",
+        ))
+    }
+
+    #[cfg(windows)]
+    fn is_ansi_code_supported(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ManagedTerminalTitle {
+    last: Option<String>,
+}
+
+impl ManagedTerminalTitle {
+    pub(crate) fn sync(&mut self, out: &mut impl Write, title: &str) -> io::Result<()> {
+        let title = sanitize_terminal_title(title);
+        if self.last.as_deref() == Some(title.as_str()) {
+            return Ok(());
+        }
+        execute!(out, SetTerminalTitle(&title))?;
+        self.last = Some(title);
+        Ok(())
+    }
+
+    pub(crate) fn clear(&mut self, out: &mut impl Write) -> io::Result<()> {
+        if self.last.is_none() {
+            return Ok(());
+        }
+        execute!(out, SetTerminalTitle(""))?;
+        self.last = None;
+        Ok(())
+    }
+}
+
+fn sanitize_terminal_title(title: &str) -> String {
+    let mut sanitized = String::new();
+    let mut pending_space = false;
+    for ch in title.chars() {
+        if is_terminal_title_unsafe(ch) {
+            continue;
+        }
+        if ch.is_whitespace() {
+            pending_space = !sanitized.is_empty();
+            continue;
+        }
+        if pending_space && sanitized.chars().count() < TUI_TERMINAL_TITLE_MAX_CHARS {
+            sanitized.push(' ');
+        }
+        pending_space = false;
+        if sanitized.chars().count() >= TUI_TERMINAL_TITLE_MAX_CHARS {
+            break;
+        }
+        sanitized.push(ch);
+    }
+    sanitized
+}
+
+fn is_terminal_title_unsafe(ch: char) -> bool {
+    ch.is_control()
+        || matches!(
+            ch,
+            '\u{061c}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+        )
+}
+
+impl TuiApp {
+    pub(crate) fn terminal_tab_title(&self) -> String {
+        let label = self
+            .current_session_title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+            .map(str::to_owned)
+            .or_else(|| {
+                self.current_session
+                    .as_deref()
+                    .map(|session_id| short_session(session_id).to_string())
+            })
+            .unwrap_or_else(|| "New session".to_string());
+        format!("{TUI_TERMINAL_TITLE_PREFIX}{label}")
+    }
+}
 
 pub(crate) fn fullscreen_has_passive_motion(ui: &FullscreenUi<'_>) -> bool {
     ui.running.is_some()
@@ -79,6 +181,7 @@ impl crossterm::Command for DisableTuiMouseCapture {
 #[derive(Debug)]
 pub(crate) struct FullscreenTerminalGuard {
     pub(crate) active: bool,
+    terminal_title: ManagedTerminalTitle,
 }
 
 impl FullscreenTerminalGuard {
@@ -88,11 +191,19 @@ impl FullscreenTerminalGuard {
             let _ = restore_fullscreen_terminal_modes();
             return Err(err.into());
         }
-        Ok(Self { active: true })
+        Ok(Self {
+            active: true,
+            terminal_title: ManagedTerminalTitle::default(),
+        })
+    }
+
+    pub(crate) fn sync_title(&mut self, out: &mut impl Write, title: &str) {
+        let _ = self.terminal_title.sync(out, title);
     }
 
     pub(crate) fn restore(&mut self) -> Result<()> {
         if self.active {
+            let _ = self.terminal_title.clear(&mut io::stdout());
             restore_fullscreen_terminal_modes()?;
             self.active = false;
         }
@@ -103,6 +214,7 @@ impl FullscreenTerminalGuard {
 impl Drop for FullscreenTerminalGuard {
     fn drop(&mut self) {
         if self.active {
+            let _ = self.terminal_title.clear(&mut io::stdout());
             let _ = restore_fullscreen_terminal_modes();
             self.active = false;
         }

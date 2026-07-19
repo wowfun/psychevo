@@ -11,3 +11,11 @@ fn format_cache_read_percent(value: Option<f64>) -> String {
         .map(|percent| format!("{percent:.0}%"))
         .unwrap_or_else(|| "-".to_string())
 }
+
+fn format_effective_token_total(tokens: Option<u64>, status: &str) -> String {
+    match tokens {
+        Some(tokens) if status == "partial" => format!("≥{tokens}"),
+        Some(tokens) => tokens.to_string(),
+        None => "unavailable".to_string(),
+    }
+}

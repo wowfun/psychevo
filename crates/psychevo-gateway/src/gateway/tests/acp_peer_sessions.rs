@@ -662,6 +662,7 @@ def update(session_id, update):
         "update": update
     }})
 
+prompt_count = 0
 for line in sys.stdin:
     if not line.strip():
         continue
@@ -674,6 +675,7 @@ for line in sys.stdin:
     elif method == "session/new":
         send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-stream"}})
     elif method == "session/prompt":
+        prompt_count += 1
         session_id = params.get("sessionId") or "native-stream"
         update(session_id, {"sessionUpdate": "session_info_update", "title": "ACP streamed title"})
         update(session_id, {"sessionUpdate": "available_commands_update", "availableCommands": [
@@ -698,7 +700,17 @@ for line in sys.stdin:
         update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-echo", "status": "completed", "content": [
             {"type": "content", "content": {"type": "text", "text": "done\n"}}
         ], "rawOutput": {"output": "done\n"}})
-        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+        usage = {
+            "totalTokens": 144 if prompt_count == 1 else 200,
+            "inputTokens": 100 if prompt_count == 1 else 140,
+            "outputTokens": 44 if prompt_count == 1 else 60,
+            "cachedReadTokens": 30 if prompt_count == 1 else 50,
+            "thoughtTokens": 4 if prompt_count == 1 else 8
+        }
+        send({"jsonrpc": "2.0", "id": mid, "result": {
+            "stopReason": "end_turn",
+            "usage": usage
+        }})
         update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {
             "type": "text", "text": "must remain after the response fence"
         }})
@@ -751,17 +763,17 @@ tools: [read]
     let raw_events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
     let raw_events_for_sink = Arc::clone(&raw_events);
     let source = GatewaySource::new("web", "peer-stream").persistent();
-    let mut request = request(&harness, source, "hello");
-    request.options.agent = Some("reviewer".to_string());
-    request.options.runtime_ref = Some("acp:fake".to_string());
-    request.options.inherited_env = Some(env);
-    request.event_sink = Some(Arc::new(move |event| {
+    let mut first_request = request(&harness, source, "hello");
+    first_request.options.agent = Some("reviewer".to_string());
+    first_request.options.runtime_ref = Some("acp:fake".to_string());
+    first_request.options.inherited_env = Some(env.clone());
+    first_request.event_sink = Some(Arc::new(move |event| {
         gateway_events_for_sink
             .lock()
             .expect("gateway events lock")
             .push(event);
     }));
-    request.stream = Some(Arc::new(move |event| {
+    first_request.stream = Some(Arc::new(move |event| {
         raw_events_for_sink
             .lock()
             .expect("raw events lock")
@@ -770,7 +782,7 @@ tools: [read]
 
     let result = harness
         .gateway
-        .send_turn(request)
+        .send_turn(first_request)
         .await
         .expect("streaming peer turn");
 
@@ -792,62 +804,66 @@ tools: [read]
         "session info update should be retained as a structured ACP event"
     );
 
-    let raw_events = raw_events.lock().expect("raw events lock");
-    assert!(
-        raw_events.iter().any(|event| matches!(
-            event,
-            RunStreamEvent::Event(value)
-                if value["type"] == "acp_peer_session_update"
-                    && value["update_kind"] == "tool_call_update"
-        )),
-        "raw stream should retain ACP tool updates"
-    );
-    drop(raw_events);
+    {
+        let raw_events = raw_events.lock().expect("raw events lock");
+        assert!(
+            raw_events.iter().any(|event| matches!(
+                event,
+                RunStreamEvent::Event(value)
+                    if value["type"] == "acp_peer_session_update"
+                        && value["update_kind"] == "tool_call_update"
+            )),
+            "raw stream should retain ACP tool updates"
+        );
+    }
 
-    let gateway_events = gateway_events.lock().expect("gateway events lock");
-    let blocks = gateway_events
-        .iter()
-        .filter_map(|event| match event {
-            GatewayEvent::EntryStarted { entry, .. }
-            | GatewayEvent::EntryUpdated { entry, .. }
-            | GatewayEvent::EntryCompleted { entry, .. } => Some(entry.blocks.as_slice()),
-            _ => None,
-        })
-        .flatten()
-        .collect::<Vec<_>>();
-    assert!(
-        blocks.iter().any(|block| {
-            block.kind == TranscriptBlockKind::Reasoning
-                && block.body.as_deref() == Some("think first")
-        }),
-        "thought chunks should render as a live Thinking block"
-    );
-    assert!(
-        blocks.iter().any(|block| {
-            block.kind == TranscriptBlockKind::Text && block.body.as_deref() == Some("hello world")
-        }),
-        "message chunks should render as incremental assistant text"
-    );
-    assert!(
-        blocks.iter().any(|block| {
-            block.kind == TranscriptBlockKind::Shell
-                && block.title.as_deref() == Some("Run echo")
-                && block.status == TranscriptBlockStatus::Completed
-                && block
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| body.contains("done"))
-        }),
-        "ACP tool updates should render as a completed live tool block"
-    );
-    let live_plans = blocks
-        .iter()
-        .filter(|block| {
-            block.kind == TranscriptBlockKind::Status
-                && block.title.as_deref() == Some("Plan")
-        })
-        .map(|block| (*block).clone())
-        .collect::<Vec<_>>();
+    let live_plans = {
+        let gateway_events = gateway_events.lock().expect("gateway events lock");
+        let blocks = gateway_events
+            .iter()
+            .filter_map(|event| match event {
+                GatewayEvent::EntryStarted { entry, .. }
+                | GatewayEvent::EntryUpdated { entry, .. }
+                | GatewayEvent::EntryCompleted { entry, .. } => Some(entry.blocks.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Reasoning
+                    && block.body.as_deref() == Some("think first")
+            }),
+            "thought chunks should render as a live Thinking block"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Text
+                    && block.body.as_deref() == Some("hello world")
+            }),
+            "message chunks should render as incremental assistant text"
+        );
+        assert!(
+            blocks.iter().any(|block| {
+                block.kind == TranscriptBlockKind::Shell
+                    && block.title.as_deref() == Some("Run echo")
+                    && block.status == TranscriptBlockStatus::Completed
+                    && block
+                        .body
+                        .as_deref()
+                        .is_some_and(|body| body.contains("done"))
+            }),
+            "ACP tool updates should render as a completed live tool block"
+        );
+        blocks
+            .iter()
+            .filter(|block| {
+                block.kind == TranscriptBlockKind::Status
+                    && block.title.as_deref() == Some("Plan")
+            })
+            .map(|block| (*block).clone())
+            .collect::<Vec<_>>()
+    };
     assert!(live_plans.len() >= 2, "each ACP plan update should be observable");
     let live_plan = live_plans.last().expect("latest live plan");
     assert!(
@@ -866,8 +882,6 @@ tools: [read]
         live_plan.metadata.as_ref().unwrap()["plan"]["entries"][0]["content"],
         "Persist replacement plan"
     );
-    drop(gateway_events);
-
     let committed_plan = result
         .committed_entries
         .iter()
@@ -929,6 +943,25 @@ tools: [read]
         .iter()
         .find(|summary| matches!(summary.message, psychevo_runtime::Message::Assistant { .. }))
         .expect("stored assistant message");
+    assert_eq!(
+        stored_assistant.usage,
+        Some(json!({
+            "total_tokens": 144,
+            "input_tokens": 100,
+            "output_tokens": 44,
+            "cached_tokens": 30,
+            "reasoning_tokens": 4
+        }))
+    );
+    let usage_summary = psychevo_runtime::session_usage_summary(
+        psychevo_runtime::SessionUsageOptions {
+            state: harness.state.clone(),
+            session_id: result.result.session_id.clone(),
+        },
+    )
+    .expect("session usage");
+    assert_eq!(usage_summary.effective_total_tokens, Some(144));
+    assert_eq!(usage_summary.total_status, "reported");
     let psychevo_runtime::Message::Assistant { content, .. } = &stored_assistant.message else {
         unreachable!("matched assistant message")
     };
@@ -942,4 +975,79 @@ tools: [read]
         stored_assistant.metadata.as_ref().unwrap()["acp"]["plan"]["update"]["entries"][1]["content"],
         "Verify terminal history"
     );
+    assert_eq!(
+        stored_assistant.metadata.as_ref().unwrap()["acp"]["promptUsageCumulative"],
+        json!({
+            "total_tokens": 144,
+            "input_tokens": 100,
+            "output_tokens": 44,
+            "cached_tokens": 30,
+            "reasoning_tokens": 4
+        })
+    );
+    assert_eq!(
+        stored_assistant.metadata.as_ref().unwrap()["acp"]["usageScope"],
+        "acp_session_cumulative"
+    );
+
+    let mut second_request = request(
+        &harness,
+        GatewaySource::new("web", "peer-stream").persistent(),
+        "continue",
+    );
+    second_request.options.agent = Some("reviewer".to_string());
+    second_request.options.runtime_ref = Some("acp:fake".to_string());
+    second_request.options.inherited_env = Some(env);
+    let second_result = harness
+        .gateway
+        .send_turn(second_request)
+        .await
+        .expect("second streaming peer turn");
+    assert_eq!(second_result.result.session_id, result.result.session_id);
+
+    let summaries = harness
+        .state
+        .store()
+        .load_tui_message_summaries(&result.result.session_id)
+        .expect("stored messages after second turn");
+    let stored_assistants = summaries
+        .iter()
+        .filter(|summary| {
+            matches!(
+                summary.message,
+                psychevo_runtime::Message::Assistant { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    let second_assistant = stored_assistants.last().expect("second assistant message");
+    assert_eq!(
+        second_assistant.usage,
+        Some(json!({
+            "total_tokens": 56,
+            "input_tokens": 40,
+            "output_tokens": 16,
+            "cached_tokens": 20,
+            "reasoning_tokens": 4
+        }))
+    );
+    assert_eq!(
+        second_assistant.metadata.as_ref().unwrap()["acp"]["promptUsageCumulative"],
+        json!({
+            "total_tokens": 200,
+            "input_tokens": 140,
+            "output_tokens": 60,
+            "cached_tokens": 50,
+            "reasoning_tokens": 8
+        })
+    );
+    let usage_summary = psychevo_runtime::session_usage_summary(
+        psychevo_runtime::SessionUsageOptions {
+            state: harness.state.clone(),
+            session_id: result.result.session_id.clone(),
+        },
+    )
+    .expect("session usage after cumulative ACP update");
+    assert_eq!(usage_summary.effective_total_tokens, Some(200));
+    assert_eq!(usage_summary.reported_total_tokens, 200);
+    assert_eq!(usage_summary.total_status, "reported");
 }

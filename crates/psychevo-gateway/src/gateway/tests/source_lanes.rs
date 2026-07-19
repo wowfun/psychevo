@@ -505,7 +505,7 @@ model = "lmstudio/test-model"
         harness
             .gateway
             .clear_source_binding(&canonical)
-            .expect("thread/start clears canonical binding");
+            .expect("draft open clears canonical binding");
 
         let mut second_request = request(&harness, draft, "second");
         second_request.bind_source = Some(canonical.clone());
@@ -843,4 +843,46 @@ model = "lmstudio/test-model"
         };
         assert_eq!(action.activity_id.as_deref(), Some("turn-child"));
         assert_eq!(action.turn_id.as_deref(), Some("turn-child"));
+    }
+    #[tokio::test]
+    async fn draft_mutation_guard_serializes_only_the_same_source() {
+        let harness = harness(Arc::new(FakeBackend::default()));
+        let source = GatewaySource::new("web", "same-source").persistent();
+        let other = GatewaySource::new("web", "other-source").persistent();
+        let first_guard = harness
+            .gateway
+            .lock_source_mutation(&source.source_key())
+            .await;
+
+        let other_guard = tokio::time::timeout(
+            Duration::from_secs(1),
+            harness.gateway.lock_source_mutation(&other.source_key()),
+        )
+        .await
+        .expect("an unrelated source must remain concurrent");
+        drop(other_guard);
+
+        let gateway = harness.gateway.clone();
+        let (started_tx, started_rx) = oneshot::channel();
+        let (acquired_tx, mut acquired_rx) = oneshot::channel();
+        let queued_source = source.clone();
+        let queued = tokio::spawn(async move {
+            let _ = started_tx.send(());
+            let _guard = gateway
+                .lock_source_mutation(&queued_source.source_key())
+                .await;
+            let _ = acquired_tx.send(());
+        });
+        started_rx.await.expect("queued mutation started");
+        assert!(matches!(
+            acquired_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        drop(first_guard);
+        tokio::time::timeout(Duration::from_secs(1), acquired_rx)
+            .await
+            .expect("same-source mutation must proceed after release")
+            .expect("queued mutation acquired guard");
+        queued.await.expect("queued mutation task");
     }

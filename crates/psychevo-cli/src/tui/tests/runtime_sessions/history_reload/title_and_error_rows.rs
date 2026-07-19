@@ -471,7 +471,7 @@ pub(crate) fn fullscreen_loads_current_session_history() {
             .iter()
             .all(|row| !row.text.contains("tokens="))
     );
-    assert_eq!(ui.sidebar_tokens, Some(9));
+    assert_eq!(ui.sidebar_tokens, Some(12));
     assert_eq!(ui.sidebar_context_limit, Some(64_000));
     let summary = ui
         .session_usage_summary
@@ -483,7 +483,7 @@ pub(crate) fn fullscreen_loads_current_session_history() {
     let status = bottom_status_context_for_width(&app, &ui, 80).expect("status context");
     assert_eq!(
         status,
-        "9/64.0k (0.0%) · cache 22% · tok 12 · cost $0.010000 · ~/work"
+        "12/64.0k (0.0%) · cache 22% · tok 12 · cost $0.010000 · ~/work"
     );
     assert_eq!(ui.history, ["hello", "follow-up"]);
     ui.textarea = textarea_with_text("draft");

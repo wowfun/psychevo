@@ -98,4 +98,10 @@ impl CwdTool {
             .to_string_lossy()
             .replace('\\', "/")
     }
+
+    pub(crate) fn observe_workspace_mutation(&self, mutation: WorkspaceMutation) {
+        if let Some(sink) = &self.context.workspace_mutations {
+            sink.observe(mutation);
+        }
+    }
 }

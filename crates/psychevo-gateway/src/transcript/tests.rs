@@ -207,6 +207,78 @@
     }
 
     #[test]
+    fn projector_decodes_wrapped_local_web_search_result_for_committed_transcript() {
+        let envelope = json!({
+            "query": "Rust async cancellation",
+            "provider": "exa",
+            "execution_owner": "runtime",
+            "payload": {
+                "type": "results",
+                "items": [{
+                    "title": "Async cancellation in Rust",
+                    "url": "https://example.test/rust-async",
+                    "text": "Cancellation requires an explicit ownership boundary."
+                }]
+            },
+            "truncated": false,
+            "error": null
+        });
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call_search",
+                        "web_search",
+                        json!({"query": "Rust async cancellation"}),
+                    )],
+                    timestamp_ms: 1,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("mock-model".to_string()),
+                    provider: Some("mock".to_string()),
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call_search".to_string(),
+                    tool_name: "web_search".to_string(),
+                    content: format!(
+                        "<external_untrusted_web_search>\n{}\n</external_untrusted_web_search>",
+                        envelope
+                    ),
+                    is_error: false,
+                    timestamp_ms: 2,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = &entries[0].blocks[0];
+        assert_eq!(block.kind, TranscriptBlockKind::Web);
+        assert_eq!(
+            block.metadata.as_ref().unwrap()["result"]["payload"]["items"][0]["title"],
+            "Async cancellation in Rust"
+        );
+        let public_result: Value = serde_json::from_str(
+            &block.result.as_ref().expect("tool result").content,
+        )
+        .expect("decoded public tool result");
+        assert_eq!(
+            public_result["payload"]["items"][0]["title"],
+            "Async cancellation in Rust"
+        );
+        assert!(
+            !block
+                .body
+                .as_deref()
+                .unwrap_or_default()
+                .contains("external_untrusted_web_search")
+        );
+    }
+
+    #[test]
     fn projector_materializes_acp_plan_metadata_as_a_display_only_status_block() {
         let mut assistant = summary(
             1,

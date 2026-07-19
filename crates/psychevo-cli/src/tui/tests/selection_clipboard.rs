@@ -48,6 +48,48 @@ pub(crate) fn fullscreen_exit_commands_restore_terminal_modes() {
 }
 
 #[test]
+pub(crate) fn terminal_tab_title_uses_session_title_short_id_and_new_session_fallback() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+
+    app.current_session = Some("019f691d-3360-75b0-80d0-2678847af384".to_string());
+    app.current_session_title = None;
+    assert_eq!(app.terminal_tab_title(), "Pevo | 019f691d");
+
+    app.current_session_title = Some("Better Session Title".to_string());
+    assert_eq!(app.terminal_tab_title(), "Pevo | Better Session Title");
+
+    app.current_session = None;
+    app.current_session_title = None;
+    assert_eq!(app.terminal_tab_title(), "Pevo | New session");
+}
+
+#[test]
+pub(crate) fn managed_terminal_title_sanitizes_deduplicates_and_clears_osc_output() {
+    let mut title = ManagedTerminalTitle::default();
+    let mut output = Vec::new();
+
+    title
+        .sync(
+            &mut output,
+            "Pevo | Review\u{1b}]0;injected\u{7}\u{202e} title",
+        )
+        .expect("first sync");
+    title
+        .sync(
+            &mut output,
+            "Pevo | Review\u{1b}]0;injected\u{7}\u{202e} title",
+        )
+        .expect("deduplicated sync");
+    title.clear(&mut output).expect("clear");
+
+    assert_eq!(
+        String::from_utf8(output).expect("utf8"),
+        "\u{1b}]0;Pevo | Review]0;injected title\u{7}\u{1b}]0;\u{7}"
+    );
+}
+
+#[test]
 pub(crate) fn passive_mouse_motion_does_not_request_redraw() {
     assert!(!mouse_event_needs_redraw(MouseEventKind::Moved));
     assert!(mouse_event_needs_redraw(MouseEventKind::Drag(

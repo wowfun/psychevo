@@ -1,4 +1,3 @@
-use super::Value;
 use super::snapshot::{
     ADVICE_LIMIT, CATEGORY_ADVICE_PERCENT, CONTEXT_BAR_MAX_CELLS, CONTEXT_BAR_MIN_CELLS,
     ContextAdvice, ContextScope, ContextSnapshot, TOTAL_CRITICAL_PERCENT, TOTAL_WARNING_PERCENT,
@@ -69,14 +68,6 @@ pub(crate) fn context_advice(snapshot: &ContextSnapshot) -> Vec<ContextAdvice> {
     }
     advice.truncate(ADVICE_LIMIT);
     advice
-}
-
-pub(crate) fn provider_input_tokens(usage: &Value) -> Option<u64> {
-    usage
-        .get("input_tokens")
-        .or_else(|| usage.get("prompt_tokens"))
-        .or_else(|| usage.get("context_input_tokens"))
-        .and_then(Value::as_u64)
 }
 
 pub(crate) fn percent(tokens: u64, limit: Option<u64>) -> Option<f64> {
@@ -236,11 +227,16 @@ pub(crate) mod tests {
         assert!(snapshot.total.estimated);
         assert_eq!(snapshot.categories["system_tools"].tokens, 20);
 
-        snapshot.apply_provider_input_tokens(90);
+        snapshot.apply_provider_total(
+            crate::accounting::effective_usage_total(Some(
+                &serde_json::json!({ "total_tokens": 90 }),
+            )),
+            None,
+        );
 
         assert_eq!(snapshot.total.tokens, 90);
         assert!(!snapshot.total.estimated);
-        assert_eq!(snapshot.total.source, "provider_usage");
+        assert_eq!(snapshot.total.source, "reported");
         assert_eq!(snapshot.categories["free_space"].tokens, 110);
         assert_eq!(
             snapshot.categories["history"].details["roles"]["user"]["count"],
@@ -282,7 +278,12 @@ pub(crate) mod tests {
             Some(1_000_000),
             count(350, 674, 341, 31_000),
         );
-        snapshot.apply_provider_input_tokens(34_000);
+        snapshot.apply_provider_total(
+            crate::accounting::effective_usage_total(Some(
+                &serde_json::json!({ "total_tokens": 34_000 }),
+            )),
+            None,
+        );
 
         let text = format_context_snapshot_text_with_options(
             &snapshot,
@@ -399,7 +400,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn recorder_keeps_latest_started_request() {
+    fn recorder_publishes_latest_completed_request() {
         let recorder = ContextRecorder::default();
         {
             let mut state = recorder.state.lock().expect("state");
@@ -428,6 +429,8 @@ pub(crate) mod tests {
         assert!(recorder.latest_snapshot().is_none());
 
         recorder.finish_count(2, latest);
+        assert!(recorder.latest_snapshot().is_none());
+        recorder.record_provider_usage(None);
         assert_eq!(
             recorder.latest_snapshot().expect("snapshot").model,
             "latest"

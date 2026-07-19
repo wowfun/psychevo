@@ -139,19 +139,20 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     .to_wire_scope();
     let (tx, _rx) = mpsc::unbounded_channel();
 
-    let snapshot = handle_rpc(
+    let opened = handle_rpc(
         state.clone(),
         auth.clone(),
         tx.clone(),
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!(1)),
-            method: "thread/start".to_string(),
-            params: Some(json!({ "scope": scope })),
+            method: "thread/draft/open".to_string(),
+            params: Some(json!({ "origin": scope, "targetIntent": { "kind": "default" } })),
         },
     )
     .await
-    .expect("thread/start in known project");
+    .expect("thread/draft/open in known project");
+    let snapshot = &opened["snapshot"];
     assert!(snapshot.get("thread").is_some_and(Value::is_null));
     assert_eq!(
         snapshot["scope"]["cwd"].as_str(),

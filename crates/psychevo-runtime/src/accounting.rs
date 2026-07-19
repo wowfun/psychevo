@@ -4,6 +4,99 @@ use crate::types::{CostStatus, MessageAccounting, ModelCost, ModelCostTier, Mode
 
 pub(crate) const CONTEXT_OVER_200K_THRESHOLD: u64 = 200_000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageTotalStatus {
+    Reported,
+    Derived,
+    Partial,
+    Unavailable,
+}
+
+impl UsageTotalStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reported => "reported",
+            Self::Derived => "derived",
+            Self::Partial => "partial",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectiveUsageTotal {
+    pub tokens: Option<u64>,
+    pub reported_tokens: Option<u64>,
+    pub status: UsageTotalStatus,
+}
+
+pub fn effective_usage_total(usage: Option<&Value>) -> EffectiveUsageTotal {
+    let Some(usage) = usage else {
+        return effective_usage_total_from_parts(None, None, None);
+    };
+    effective_usage_total_from_parts(
+        usage_u64(
+            usage,
+            &[
+                "total_tokens",
+                "reported_total_tokens",
+                "totalTokens",
+                "total",
+            ],
+        ),
+        usage_u64(
+            usage,
+            &[
+                "input_tokens",
+                "prompt_tokens",
+                "context_input_tokens",
+                "inputTokens",
+                "input",
+            ],
+        ),
+        usage_u64(
+            usage,
+            &[
+                "output_tokens",
+                "completion_tokens",
+                "outputTokens",
+                "output",
+            ],
+        ),
+    )
+}
+
+pub fn effective_usage_total_from_parts(
+    reported_tokens: Option<u64>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+) -> EffectiveUsageTotal {
+    if let Some(tokens) = reported_tokens {
+        return EffectiveUsageTotal {
+            tokens: Some(tokens),
+            reported_tokens: Some(tokens),
+            status: UsageTotalStatus::Reported,
+        };
+    }
+    match (input_tokens, output_tokens) {
+        (Some(input), Some(output)) => EffectiveUsageTotal {
+            tokens: Some(input.saturating_add(output)),
+            reported_tokens: None,
+            status: UsageTotalStatus::Derived,
+        },
+        (Some(tokens), None) | (None, Some(tokens)) => EffectiveUsageTotal {
+            tokens: Some(tokens),
+            reported_tokens: None,
+            status: UsageTotalStatus::Partial,
+        },
+        (None, None) => EffectiveUsageTotal {
+            tokens: None,
+            reported_tokens: None,
+            status: UsageTotalStatus::Unavailable,
+        },
+    }
+}
+
 pub(crate) fn account_usage(
     usage: Option<&Value>,
     metadata: &ModelMetadata,
@@ -11,10 +104,18 @@ pub(crate) fn account_usage(
     let usage = usage?;
     let input = usage_u64(
         usage,
-        &["input_tokens", "prompt_tokens", "context_input_tokens"],
+        &[
+            "input_tokens",
+            "prompt_tokens",
+            "context_input_tokens",
+            "inputTokens",
+        ],
     );
-    let output = usage_u64(usage, &["output_tokens", "completion_tokens"]);
-    let total = usage_u64(usage, &["total_tokens", "reported_total_tokens"]);
+    let output = usage_u64(
+        usage,
+        &["output_tokens", "completion_tokens", "outputTokens"],
+    );
+    let total = effective_usage_total(Some(usage)).reported_tokens;
     let reasoning = usage_u64(usage, &["reasoning_tokens"]).unwrap_or(0);
     let cache_read = usage_u64(
         usage,

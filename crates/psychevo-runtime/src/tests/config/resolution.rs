@@ -213,6 +213,70 @@ pub(crate) fn runtime_profile_configs_merge_profile_and_project_overlay() {
 }
 
 #[test]
+pub(crate) fn codex_plugins_are_default_off_and_profile_configurable() {
+    let config = crate::config::config_parse::parse_run_config(json!({})).expect("default config");
+    assert!(!config.codex_plugins.enabled);
+    assert_eq!(config.codex_plugins.binary, None);
+
+    let config = crate::config::config_parse::parse_run_config(json!({
+        "codex_plugins": {
+            "enabled": true,
+            "binary": "/opt/codex"
+        },
+        "plugins": {
+            "codex:review@openai": { "enabled": true }
+        }
+    }))
+    .expect("Codex authority profile config");
+    assert!(config.codex_plugins.enabled);
+    assert_eq!(config.codex_plugins.binary.as_deref(), Some("/opt/codex"));
+    assert!(
+        config
+            .plugins
+            .plugins
+            .get("codex:review@openai")
+            .expect("Codex plugin policy")
+            .plugin_enabled()
+    );
+}
+
+#[test]
+pub(crate) fn project_cannot_configure_or_enable_codex_authority() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let home = home_dir(&temp);
+    let project_dir = options.cwd.join(".psychevo");
+    fs::create_dir_all(&home).expect("home dir");
+    fs::create_dir_all(&project_dir).expect("project dir");
+    write_config(home.join("config.toml"), "").expect("home config");
+
+    write_config(
+        project_dir.join("config.toml"),
+        "[codex_plugins]\nenabled = true\n",
+    )
+    .expect("project config");
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let error = load_run_config(&options, &cwd).expect_err("project authority rejected");
+    assert!(error.to_string().contains("profile-only"));
+
+    write_config(
+        project_dir.join("config.toml"),
+        "[plugins.\"codex:review@openai\"]\nenabled = true\n",
+    )
+    .expect("project config");
+    let error = load_run_config(&options, &cwd).expect_err("project enable rejected");
+    assert!(error.to_string().contains("cannot enable"));
+
+    write_config(
+        project_dir.join("config.toml"),
+        "[plugins.\"codex:review@openai\"]\nenabled = false\n",
+    )
+    .expect("project config");
+    let loaded = load_run_config(&options, &cwd).expect("project disable allowed");
+    assert!(!loaded.config.plugins.plugins["codex:review@openai"].plugin_enabled());
+}
+
+#[test]
 pub(crate) fn runtime_profile_backend_ref_validation_is_fail_closed() {
     let profiles = crate::config::parse_runtime_profile_configs(&json!({
         "cursor-acp": {

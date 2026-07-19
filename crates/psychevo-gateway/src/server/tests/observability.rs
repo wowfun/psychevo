@@ -175,6 +175,7 @@
         env.insert("PSYCHEVO_PROFILE".to_string(), "coder".to_string());
         let (temp, state) = web_state_with_env(env);
         let home = temp.path().join("home").display().to_string();
+        let expected_display_cwd = display_cwd(&state.inner.cwd);
         let (out_tx, _out_rx) = mpsc::unbounded_channel();
 
         let value = handle_rpc(
@@ -190,10 +191,13 @@
         )
         .await
         .expect("initialize");
+        let initialize: wire::InitializeResult =
+            serde_json::from_value(value.clone()).expect("typed initialize result");
 
         assert_eq!(value["profile"]["name"], "coder");
         assert_eq!(value["profile"]["home"].as_str(), Some(home.as_str()));
         assert_eq!(value["profile"]["default"], false);
+        assert_eq!(initialize.display_cwd, expected_display_cwd);
     }
 
     #[tokio::test]
@@ -256,7 +260,7 @@
     }
 
     #[tokio::test]
-    async fn observability_read_projects_acp_peer_usage_update() {
+    async fn observability_read_keeps_acp_context_snapshot_out_of_session_totals() {
         let (_temp, state) = web_state();
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let session_id = state
@@ -303,10 +307,13 @@
 
         assert_eq!(value["context"]["usedTokens"], 1234);
         assert_eq!(value["context"]["contextLimit"], 8000);
-        assert_eq!(value["context"]["status"], "exact");
+        assert_eq!(value["context"]["status"], "partial");
+        assert_eq!(value["context"]["basis"], "agent_reported_context");
         assert_eq!(value["context"]["categories"], json!([]));
-        assert_eq!(value["usage"]["reportedTotalTokens"], 1234);
-        assert_eq!(value["usage"]["contextInputTokens"], 1234);
+        assert_eq!(value["usage"]["reportedTotalTokens"], 0);
+        assert_eq!(value["usage"]["effectiveTotalTokens"], Value::Null);
+        assert_eq!(value["usage"]["totalStatus"], "unavailable");
+        assert_eq!(value["usage"]["contextInputTokens"], 0);
         assert_eq!(value["usage"]["estimatedCostNanodollars"], 2_500_000);
     }
 

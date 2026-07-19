@@ -293,6 +293,18 @@ fn completion_turn_ids(events: &Arc<Mutex<Vec<GatewayEvent>>>) -> Vec<String> {
         .collect()
 }
 
+fn started_turn_ids(events: &Arc<Mutex<Vec<GatewayEvent>>>) -> Vec<String> {
+    events
+        .lock()
+        .expect("conformance events lock")
+        .iter()
+        .filter_map(|event| match event {
+            GatewayEvent::TurnStarted { turn_id, .. } => Some(turn_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 type ConformanceBlockSignature = (TranscriptBlockKind, Option<String>, Option<String>);
 type ConformanceMessageSignature = (TranscriptEntryRole, Vec<ConformanceBlockSignature>);
 
@@ -377,6 +389,7 @@ async fn conformance_success_persists_visible_history_single_terminal_and_certai
 
     harness.assert_binding_was_visible_before_prompt();
     assert_eq!(result.turn.status, GatewayTurnStatus::Completed);
+    assert_eq!(started_turn_ids(&events), vec![result.turn.id.clone()]);
     assert_eq!(completion_turn_ids(&events), vec![result.turn.id.clone()]);
     harness.assert_exactly_one_terminal(
         &result.thread.id,
@@ -1088,6 +1101,14 @@ async fn conformance_process_exit_preserves_unknown_delivery_without_retry(
     );
     let harness = AgentConformanceHarness::new(runtime);
     let mut request = harness.request(harness.source("unknown-delivery", "one"), "legacy prompt");
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured_events = events.clone();
+    request.event_sink = Some(Arc::new(move |event| {
+        captured_events
+            .lock()
+            .expect("conformance events poisoned")
+            .push(event);
+    }));
     request.input = vec![GatewayInputPart::Text {
         text: "crash-on-prompt".to_string(),
     }];
@@ -1128,6 +1149,7 @@ async fn conformance_process_exit_preserves_unknown_delivery_without_retry(
     assert_eq!(delivery.delivery_confirmed_at_ms, None);
     assert_eq!(delivery.terminal_at_ms, None);
     harness.assert_exactly_one_terminal(&delivery.thread_id, turn_id, "failed", None);
+    assert_eq!(completion_turn_ids(&events), vec![turn_id.to_string()]);
     assert_eq!(
         harness
             .records()

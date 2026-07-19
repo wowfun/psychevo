@@ -338,8 +338,12 @@ impl TuiApp {
                         summary.message_count, summary.assistant_message_count
                     ),
                     Some(format!(
-                        "{} tokens  {}",
-                        summary.reported_total_tokens,
+                        "{} tokens ({})  {}",
+                        format_effective_token_total(
+                            summary.effective_total_tokens,
+                            &summary.total_status,
+                        ),
+                        summary.total_status,
                         format_nanodollars(summary.estimated_cost_nanodollars)
                     )),
                     Some("Current session".to_string()),
@@ -353,7 +357,13 @@ impl TuiApp {
                         summary.billable_output_tokens,
                         summary.context_input_tokens
                     ),
-                    Some(format!("{} reasoning", summary.reasoning_tokens)),
+                    Some(format!(
+                        "{} reasoning  {}/{} calls accounted",
+                        summary.reasoning_tokens,
+                        summary.accounted_provider_call_count,
+                        summary.accounted_provider_call_count
+                            + summary.unaccounted_provider_call_count
+                    )),
                     Some("Current session".to_string()),
                 ));
                 rows.push(stats_row(

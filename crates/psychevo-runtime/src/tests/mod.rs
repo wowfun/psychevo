@@ -58,6 +58,7 @@ pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         runtime_ref: None,
         runtime_session_id: None,
         runtime_options: BTreeMap::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
         include_reasoning: false,
         mode: RunMode::Default,

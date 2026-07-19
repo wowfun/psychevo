@@ -78,6 +78,7 @@ impl PsychevoAcpAgent {
             selected_capability_roots: Vec::new(),
             skill_inputs: Vec::new(),
             mcp_servers: session.mcp_servers.clone(),
+            workspace_mutations: None,
             runtime_tools: Vec::new(),
         }
     }
@@ -116,6 +117,7 @@ impl PsychevoAcpAgent {
             selected_capability_roots: Vec::new(),
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
+            workspace_mutations: None,
             runtime_tools: Vec::new(),
         }
     }

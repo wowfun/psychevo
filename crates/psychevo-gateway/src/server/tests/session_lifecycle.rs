@@ -502,9 +502,7 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
     assert_eq!(accepted["accepted"], true);
     let terminal = tokio::time::timeout(Duration::from_secs(3), async {
         while let Some(message) = rx.recv().await {
-            if message.contains("\"method\":\"turn/result\"")
-                || message.contains("\"method\":\"turn/error\"")
-            {
+            if message.contains("\"type\":\"turnCompleted\"") {
                 return message;
             }
         }
@@ -512,7 +510,7 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
     })
     .await
     .expect("follow-up terminal");
-    assert!(terminal.contains("\"method\":\"turn/result\""), "{terminal}");
+    assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
     let after = rpc_test_request(
         &state,
         &mpsc::unbounded_channel().0,

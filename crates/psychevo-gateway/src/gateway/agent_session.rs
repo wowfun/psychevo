@@ -1080,6 +1080,15 @@ impl AttachedAgent {
                 }
                 let runtime_ref = request.options.runtime_ref.clone();
                 delivery.confirm()?;
+                gateway_profile_mark(
+                    "native_adapter_submitted",
+                    Some(&turn_id),
+                    request.options.session.as_deref(),
+                    GatewayProfileFields {
+                        adapter: Some("native"),
+                        ..GatewayProfileFields::default()
+                    },
+                );
                 let run = self.host.native.run_turn(request).await?;
                 Ok(AgentSessionResponse::TurnSubmitted(Box::new(
                     AgentTurnOutput {

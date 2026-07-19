@@ -119,6 +119,7 @@ mod tests {
             catalog,
             control_handle: None,
             stream_events: None,
+            workspace_mutations: None,
             model_metadata: ModelMetadata::default(),
             env: BTreeMap::new(),
             path_prefixes: Vec::new(),

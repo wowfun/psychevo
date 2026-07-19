@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use psychevo_runtime::{
     AgentEdgeRecord, AssistantBlock, GatewayTurnTerminalRecord, Message, SessionCompactionRecord,
     TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserContentBlock,
-    side_inherited_metadata_hidden,
+    decode_persisted_tool_result_for_display, side_inherited_metadata_hidden,
 };
 use serde_json::{Value, json};
 

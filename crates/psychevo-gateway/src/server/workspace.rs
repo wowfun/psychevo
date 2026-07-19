@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read};
 use std::path::{Component, Path, PathBuf};
@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::{
-    Error, WorkspaceDiffFile, WorkspaceDiffFileStatus, canonicalize_cwd, collect_workspace_diff,
+    Error, WorkspaceDiffFileStatus, WorkspaceMutation, canonicalize_cwd, collect_workspace_diff,
     normalized_native_path, resolve_workspace_root,
 };
 use serde_json::Value;
@@ -35,6 +35,7 @@ struct PendingReviewTurn {
     thread_id: Option<String>,
     cwd: PathBuf,
     baseline: WorkspaceBaseline,
+    invalidations: Vec<WorkspaceReviewInvalidation>,
     created_at_ms: i64,
 }
 
@@ -51,6 +52,12 @@ struct WorkspaceReviewGroup {
     created_at_ms: i64,
     completed_at_ms: i64,
     files: Vec<WorkspaceReviewFile>,
+    invalidations: Vec<WorkspaceReviewInvalidation>,
+}
+
+#[derive(Clone)]
+struct WorkspaceReviewInvalidation {
+    source: String,
 }
 
 #[derive(Clone)]
@@ -87,7 +94,6 @@ impl ReviewBaseline {
 
 impl WorkspaceReviewState {
     pub(super) fn begin_turn(&self, turn_id: &str, thread_id: Option<String>, cwd: &Path) {
-        let baseline = capture_workspace_baseline(cwd);
         let mut inner = self.inner.lock().expect("workspace review state poisoned");
         inner
             .pending
@@ -95,9 +101,55 @@ impl WorkspaceReviewState {
             .or_insert_with(|| PendingReviewTurn {
                 thread_id,
                 cwd: cwd.to_path_buf(),
-                baseline,
+                baseline: WorkspaceBaseline::default(),
+                invalidations: Vec::new(),
                 created_at_ms: now_ms(),
             });
+    }
+
+    pub(super) fn observe_event(&self, event: &wire::GatewayEvent, cwd: &Path) {
+        match event {
+            wire::GatewayEvent::TurnStarted {
+                thread_id, turn_id, ..
+            } => self.begin_turn(turn_id, thread_id.clone(), cwd),
+            wire::GatewayEvent::TurnCompleted { turn_id, .. } => self.complete_turn(turn_id),
+            _ => {}
+        }
+    }
+
+    pub(super) fn observe_mutation(&self, turn_id: &str, cwd: &Path, mutation: WorkspaceMutation) {
+        let mut inner = self.inner.lock().expect("workspace review state poisoned");
+        let Some(pending) = inner
+            .pending
+            .get_mut(turn_id)
+            .filter(|pending| pending.cwd == cwd)
+        else {
+            return;
+        };
+        match mutation {
+            WorkspaceMutation::ExactUtf8 { path, before, .. } => {
+                let path = normalize_workspace_path(&path);
+                if path.is_empty() || pending.baseline.files.contains_key(&path) {
+                    return;
+                }
+                let baseline = match before {
+                    Some(content) if content.len() <= MAX_WORKSPACE_TEXT_FILE_BYTES => {
+                        ReviewBaseline::Text { content }
+                    }
+                    Some(_) => ReviewBaseline::Unsupported {
+                        reason: "Files larger than 1 MB cannot be restored from Review."
+                            .to_string(),
+                    },
+                    None => ReviewBaseline::Absent,
+                };
+                pending.baseline.files.insert(path, baseline);
+            }
+            WorkspaceMutation::Opaque { source } => {
+                pending
+                    .invalidations
+                    .push(WorkspaceReviewInvalidation { source });
+            }
+        }
     }
 
     pub(super) fn complete_turn(&self, turn_id: &str) {
@@ -108,8 +160,8 @@ impl WorkspaceReviewState {
         let Some(pending) = pending else {
             return;
         };
-        let files = build_review_files(&pending.cwd, &pending.baseline).unwrap_or_default();
-        if files.is_empty() {
+        let files = build_observed_review_files(&pending.cwd, &pending.baseline);
+        if files.is_empty() && pending.invalidations.is_empty() {
             return;
         }
         let mut inner = self.inner.lock().expect("workspace review state poisoned");
@@ -123,6 +175,7 @@ impl WorkspaceReviewState {
                 created_at_ms: pending.created_at_ms,
                 completed_at_ms: now_ms(),
                 files,
+                invalidations: pending.invalidations,
             },
         );
         inner.groups.truncate(40);
@@ -804,128 +857,67 @@ fn workspace_diff_status(status: WorkspaceDiffFileStatus) -> wire::WorkspaceDiff
     }
 }
 
-fn capture_workspace_baseline(cwd: &Path) -> WorkspaceBaseline {
-    let mut baseline = WorkspaceBaseline::default();
-    if let Ok(diff) = collect_workspace_diff(cwd) {
-        for file in diff.files {
-            baseline
-                .files
-                .insert(file.path.clone(), baseline_from_pre_turn_file(&file));
-        }
-    }
-    baseline
-}
-
-fn baseline_from_pre_turn_file(file: &WorkspaceDiffFile) -> ReviewBaseline {
-    if file.binary {
-        return ReviewBaseline::Unsupported {
-            reason: "Binary baseline cannot be restored.".to_string(),
-        };
-    }
-    if file.unreadable {
-        return ReviewBaseline::Unsupported {
-            reason: "Unreadable baseline cannot be restored.".to_string(),
-        };
-    }
-    if matches!(file.status, WorkspaceDiffFileStatus::Deleted) {
-        return ReviewBaseline::Absent;
-    }
-    file.new_text
-        .as_ref()
-        .map(|content| ReviewBaseline::Text {
-            content: content.clone(),
-        })
-        .unwrap_or_else(|| ReviewBaseline::Unsupported {
-            reason: "Baseline content is unavailable.".to_string(),
-        })
-}
-
-fn build_review_files(
+fn build_observed_review_files(
     cwd: &Path,
     baseline: &WorkspaceBaseline,
-) -> psychevo_runtime::Result<Vec<WorkspaceReviewFile>> {
-    let diff = collect_workspace_diff(cwd)?;
-    let mut post_by_path = HashMap::new();
-    let mut candidates = HashSet::new();
-    for file in diff.files {
-        candidates.insert(file.path.clone());
-        post_by_path.insert(file.path.clone(), file);
-    }
-    for path in baseline.files.keys() {
-        candidates.insert(path.clone());
-    }
+) -> Vec<WorkspaceReviewFile> {
     let mut files = Vec::new();
-    for path in candidates {
-        let pre = baseline.files.get(&path);
-        if let Some(pre) = pre
-            && baseline_matches_current(cwd, &path, pre)?
-        {
+    for (path, pre) in &baseline.files {
+        if baseline_matches_current(cwd, path, pre).unwrap_or(false) {
             continue;
         }
-        let post = post_by_path.get(&path);
-        let review_baseline = pre
-            .cloned()
-            .or_else(|| post.and_then(baseline_from_post_diff))
-            .unwrap_or_else(|| ReviewBaseline::Unsupported {
-                reason: "Turn-start baseline is unavailable.".to_string(),
-            });
-        if post.is_none() && matches!(review_baseline, ReviewBaseline::Unsupported { .. }) {
-            continue;
-        }
-        let post_revision = workspace_path_revision(cwd, &path)?;
-        let status = post
-            .map(|file| workspace_diff_status(file.status))
-            .unwrap_or(wire::WorkspaceDiffFileStatusView::Modified);
-        let binary = post.is_some_and(|file| file.binary);
-        let unreadable = post.is_some_and(|file| file.unreadable);
-        let message = review_baseline.message();
+        let resolved = match resolve_workspace_write_path(cwd, path) {
+            Ok(resolved) => resolved,
+            Err(_) => continue,
+        };
+        let (status, binary, unreadable, post_revision, post_message) = if !resolved.exists() {
+            (
+                wire::WorkspaceDiffFileStatusView::Deleted,
+                false,
+                false,
+                "missing".to_string(),
+                None,
+            )
+        } else {
+            match read_workspace_text_snapshot(&resolved) {
+                Ok(snapshot) => (
+                    if snapshot.binary {
+                        wire::WorkspaceDiffFileStatusView::Binary
+                    } else if matches!(pre, ReviewBaseline::Absent) {
+                        wire::WorkspaceDiffFileStatusView::Added
+                    } else {
+                        wire::WorkspaceDiffFileStatusView::Modified
+                    },
+                    snapshot.binary,
+                    false,
+                    snapshot.revision,
+                    snapshot.truncated.then(|| {
+                        "File is larger than 1 MB; Review recorded only the exact observed path."
+                            .to_string()
+                    }),
+                ),
+                Err(error) => (
+                    wire::WorkspaceDiffFileStatusView::Unreadable,
+                    false,
+                    true,
+                    "unreadable".to_string(),
+                    Some(error.to_string()),
+                ),
+            }
+        };
         files.push(WorkspaceReviewFile {
-            path,
+            path: path.clone(),
             status,
             binary,
             unreadable,
             review_status: wire::WorkspaceChangeReviewStatusView::Pending,
-            baseline: review_baseline,
+            baseline: pre.clone(),
             post_revision,
-            message,
+            message: post_message.or_else(|| pre.message()),
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(files)
-}
-
-fn baseline_from_post_diff(file: &WorkspaceDiffFile) -> Option<ReviewBaseline> {
-    if file.binary {
-        return Some(ReviewBaseline::Unsupported {
-            reason: "Binary baseline cannot be restored.".to_string(),
-        });
-    }
-    if file.unreadable {
-        return Some(ReviewBaseline::Unsupported {
-            reason: "Unreadable baseline cannot be restored.".to_string(),
-        });
-    }
-    match file.status {
-        WorkspaceDiffFileStatus::Added | WorkspaceDiffFileStatus::Untracked => {
-            Some(ReviewBaseline::Absent)
-        }
-        WorkspaceDiffFileStatus::Deleted | WorkspaceDiffFileStatus::Modified => file
-            .old_text
-            .as_ref()
-            .map(|content| ReviewBaseline::Text {
-                content: content.clone(),
-            })
-            .or_else(|| {
-                Some(ReviewBaseline::Unsupported {
-                    reason: "Baseline content is unavailable.".to_string(),
-                })
-            }),
-        WorkspaceDiffFileStatus::Binary | WorkspaceDiffFileStatus::Unreadable => {
-            Some(ReviewBaseline::Unsupported {
-                reason: "Baseline content is unavailable.".to_string(),
-            })
-        }
-    }
+    files
 }
 
 fn baseline_matches_current(
@@ -974,6 +966,17 @@ fn review_group_to_wire(group: &WorkspaceReviewGroup) -> wire::WorkspaceChangeGr
         created_at_ms: group.created_at_ms,
         completed_at_ms: group.completed_at_ms,
         files: group.files.iter().map(review_file_to_wire).collect(),
+        invalidations: group
+            .invalidations
+            .iter()
+            .map(|invalidation| wire::WorkspaceChangeInvalidationView {
+                source: invalidation.source.clone(),
+                message: format!(
+                    "Workspace may have changed via {}; inspect the diff. Exact Reject is unavailable.",
+                    invalidation.source
+                ),
+            })
+            .collect(),
     }
 }
 

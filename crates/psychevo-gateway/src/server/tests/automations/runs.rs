@@ -75,11 +75,11 @@ async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
         psychevo_runtime::RunSandboxMode::WorkspaceWrite
     );
 
-    let mut saw_result = false;
+    let mut saw_terminal = false;
     while let Ok(message) = rx.try_recv() {
-        saw_result |= message.contains("\"method\":\"turn/result\"");
+        saw_terminal |= message.contains("\"type\":\"turnCompleted\"");
     }
-    assert!(saw_result);
+    assert!(saw_terminal);
 }
 
 #[tokio::test]

@@ -357,6 +357,9 @@ struct WebStateInner {
     mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
     voice_policies: Mutex<HashMap<String, wire::VoicePolicyMode>>,
     realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
+    runnable_target_catalog_generation: std::sync::atomic::AtomicU64,
+    runnable_target_catalogs:
+        Mutex<HashMap<PathBuf, (u64, Arc<runtime_profiles::RunnableTargetCatalog>)>>,
     agent_session_imports: Mutex<AgentSessionImportRegistry>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
     codex_capability_broker: codex_capability_broker::CodexCapabilityBroker,
@@ -519,6 +522,8 @@ impl WebState {
                 mcp_oauth_sessions: Mutex::new(HashMap::new()),
                 voice_policies: Mutex::new(HashMap::new()),
                 realtime_sessions: Mutex::new(HashMap::new()),
+                runnable_target_catalog_generation: std::sync::atomic::AtomicU64::new(1),
+                runnable_target_catalogs: Mutex::new(HashMap::new()),
                 agent_session_imports: Mutex::new(AgentSessionImportRegistry::default()),
                 channel_runtime,
                 codex_capability_broker,
@@ -604,6 +609,7 @@ impl WebState {
             selected_capability_roots: Vec::new(),
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
+            workspace_mutations: None,
             runtime_tools: automations::automation_runtime_tools(
                 self.clone(),
                 cwd.clone(),
@@ -769,19 +775,7 @@ impl WebState {
     }
 
     fn record_review_event(&self, event: &GatewayEvent, cwd: &Path) {
-        match event {
-            GatewayEvent::TurnStarted {
-                thread_id, turn_id, ..
-            } => {
-                self.inner
-                    .review
-                    .begin_turn(turn_id, thread_id.clone(), cwd);
-            }
-            GatewayEvent::TurnCompleted { turn_id, .. } => {
-                self.inner.review.complete_turn(turn_id);
-            }
-            _ => {}
-        }
+        self.inner.review.observe_event(event, cwd);
     }
 }
 

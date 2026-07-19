@@ -95,7 +95,7 @@ async fn execute_automation_run(
     run: AutomationRunRecord,
     out_tx: Option<mpsc::UnboundedSender<String>>,
 ) {
-    let result = send_automation_turn(&state, &task).await;
+    let result = send_automation_turn(&state, &task, out_tx.clone()).await;
     match result {
         Ok(turn_result) => {
             let next = next_run_after_now(&task).unwrap_or(None);
@@ -123,17 +123,10 @@ async fn execute_automation_run(
                     metadata: Some(metadata),
                     next_run_at_ms: next,
                 });
-            if let Some(out_tx) = out_tx {
-                let _ = out_tx.send(rpc_notification(
-                    "turn/result",
-                    gateway_turn_result_value(turn_result),
-                ));
-            }
         }
         Err(err) => {
             let next = next_run_after_now(&task).unwrap_or(None);
             let error = err.to_string();
-            let error_view = agent_error_view(error.clone(), err.structured_data());
             let _ = state
                 .inner
                 .state
@@ -147,19 +140,6 @@ async fn execute_automation_run(
                     metadata: Some(json!({"trigger": run.trigger})),
                     next_run_at_ms: next,
                 });
-            if let Some(out_tx) = out_tx {
-                let _ = out_tx.send(rpc_notification(
-                    "turn/error",
-                    serde_json::to_value(wire::TurnErrorPayload {
-                        error: error_view,
-                        thread_id: task.target_thread_id.clone(),
-                        turn_id: None,
-                    })
-                    .unwrap_or_else(|_| {
-                        json!({"error": {"message": error, "delivery": "unknown"}, "threadId": task.target_thread_id})
-                    }),
-                ));
-            }
         }
     }
 }
@@ -167,6 +147,7 @@ async fn execute_automation_run(
 async fn send_automation_turn(
     state: &WebState,
     task: &AutomationTaskRecord,
+    out_tx: Option<mpsc::UnboundedSender<String>>,
 ) -> psychevo_runtime::Result<GatewayTurnResult> {
     let cwd = PathBuf::from(&task.cwd);
     let (thread_id, source, bind_source) = match automation_kind_from_str(&task.kind)? {
@@ -211,5 +192,10 @@ async fn send_automation_turn(
         "automation".to_string(),
     ];
     request.lineage = Some(json!({"automationId": task.id}));
+    if let Some(out_tx) = out_tx {
+        request.event_sink = Some(Arc::new(move |event| {
+            let _ = out_tx.send(rpc_notification("gateway/event", json!(event)));
+        }));
+    }
     state.inner.gateway.run_turn(request).await
 }

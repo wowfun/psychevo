@@ -325,7 +325,6 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
             Some(json!({
                 "input_tokens": 50,
                 "output_tokens": 10,
-                "total_tokens": 60,
                 "reasoning_tokens": 2,
                 "cached_tokens": 25
             })),
@@ -362,14 +361,51 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
     assert_eq!(summary.reasoning_tokens, 7);
     assert_eq!(summary.cache_read_tokens, 35);
     assert_eq!(summary.cache_write_tokens, 10);
-    assert_eq!(summary.reported_total_tokens, 210);
+    assert_eq!(summary.effective_total_tokens, Some(210));
+    assert_eq!(summary.reported_total_tokens, 150);
+    assert_eq!(summary.total_status, "partial");
+    assert_eq!(summary.accounted_provider_call_count, 2);
+    assert_eq!(summary.unaccounted_provider_call_count, 1);
     assert_eq!(summary.estimated_cost_nanodollars, 42);
     assert_eq!(summary.unknown_pricing_count, 1);
     assert_eq!(
         summary
             .cache_read_percent
             .map(|value| (value * 10.0).round() / 10.0),
-        Some(21.9)
+        Some(20.6)
+    );
+}
+
+#[test]
+pub(crate) fn effective_usage_total_never_double_counts_token_subcategories() {
+    use crate::accounting::{UsageTotalStatus, effective_usage_total};
+
+    let reported = effective_usage_total(Some(&json!({
+        "input_tokens": 100,
+        "output_tokens": 30,
+        "total_tokens": 130,
+        "reasoning_tokens": 10,
+        "cached_tokens": 40,
+        "cache_write_tokens": 5
+    })));
+    assert_eq!(reported.tokens, Some(130));
+    assert_eq!(reported.status, UsageTotalStatus::Reported);
+
+    let derived = effective_usage_total(Some(&json!({
+        "input_tokens": 100,
+        "output_tokens": 30,
+        "reasoning_tokens": 10,
+        "cached_tokens": 40
+    })));
+    assert_eq!(derived.tokens, Some(130));
+    assert_eq!(derived.status, UsageTotalStatus::Derived);
+
+    let partial = effective_usage_total(Some(&json!({ "input_tokens": 100 })));
+    assert_eq!(partial.tokens, Some(100));
+    assert_eq!(partial.status, UsageTotalStatus::Partial);
+    assert_eq!(
+        effective_usage_total(None).status,
+        UsageTotalStatus::Unavailable
     );
 }
 
@@ -498,6 +534,41 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
             )
             .expect("append");
     }
+    store
+        .append_message_with_metrics_and_accounting(
+            &session_id,
+            &Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "derived total".to_string(),
+                }],
+                timestamp_ms: now,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("model".to_string()),
+                provider: Some("provider".to_string()),
+            },
+            Some(json!({
+                "input_tokens": 60,
+                "output_tokens": 20
+            })),
+            None,
+            Some(MessageAccounting {
+                context_input_tokens: Some(60),
+                billable_input_tokens: Some(60),
+                billable_output_tokens: Some(15),
+                reasoning_tokens: Some(5),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                reported_total_tokens: None,
+                estimated_cost_nanodollars: Some(80),
+                pricing_source: Some("test".to_string()),
+                pricing_tier: Some("standard".to_string()),
+                cost_status: Some(crate::types::CostStatus::Estimated),
+                pricing_missing_reason: None,
+                pricing_version: None,
+            }),
+        )
+        .expect("append derived total");
 
     let result = usage_read(UsageReadOptions {
         state: StateRuntime::open(&db).expect("state runtime"),
@@ -520,9 +591,19 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
         .find(|window| window.id == "7d")
         .unwrap();
     assert_eq!(all.reported_total_tokens, 300);
+    assert_eq!(all.effective_total_tokens, 380);
+    assert_eq!(all.total_status, "derived");
+    assert_eq!(all.accounted_provider_call_count, 3);
+    assert_eq!(all.unaccounted_provider_call_count, 0);
+    assert_eq!(all.estimated_pricing_count, 3);
     assert_eq!(last_30.reported_total_tokens, 100);
+    assert_eq!(last_30.effective_total_tokens, 180);
+    assert_eq!(last_30.total_status, "derived");
+    assert_eq!(last_30.estimated_pricing_count, 2);
     assert_eq!(last_7.reported_total_tokens, 100);
-    assert_eq!(last_7.cache_read_percent, Some(20.0));
+    assert_eq!(last_7.effective_total_tokens, 180);
+    assert_eq!(last_7.estimated_pricing_count, 2);
+    assert_eq!(last_7.cache_read_percent, Some(12.5));
     assert_eq!(result.activity.days.len(), 365);
     assert!(
         result
@@ -531,6 +612,11 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
             .iter()
             .any(|day| day.reported_total_tokens == 100)
     );
+    assert!(result.activity.days.iter().any(|day| {
+        day.effective_total_tokens == 180
+            && day.total_status == "derived"
+            && day.estimated_pricing_count == 2
+    }));
 }
 
 #[test]

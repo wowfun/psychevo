@@ -171,6 +171,7 @@ pub(crate) fn prepare_user_shell_context(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
     let loaded = load_run_config(&options, cwd)?;

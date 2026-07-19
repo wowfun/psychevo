@@ -277,6 +277,141 @@ pub fn plugin_set_enabled_value(
     }))
 }
 
+/// Removes the enablement override at exactly one configuration scope.
+///
+/// This is intentionally separate from `plugin_set_enabled_value`: `false` is
+/// an explicit deny, while reset restores inheritance from the profile or the
+/// plugin's installed default.
+pub fn plugin_reset_enabled_value(
+    home: &Path,
+    cwd: &Path,
+    scope: PluginScope,
+    selector: &str,
+) -> Result<Value> {
+    let (namespace, key, plugin, source) = if is_builtin_browser_selector(selector) {
+        (
+            "builtin_plugins",
+            BUILTIN_BROWSER_PLUGIN_POLICY_KEY.to_string(),
+            "Browser".to_string(),
+            "built_in".to_string(),
+        )
+    } else {
+        let records = all_records(home, cwd)?;
+        let record = select_record(&records, selector)?.clone();
+        if scope == PluginScope::Global && record.scope != PluginScope::Global {
+            return Err(Error::Config(format!(
+                "plugin `{selector}` is not available to profile policy"
+            )));
+        }
+        (
+            "plugins",
+            policy_key_for_record(&record),
+            record.name,
+            record.source_slug,
+        )
+    };
+    let config_dir = match scope {
+        PluginScope::Global => home.to_path_buf(),
+        PluginScope::Local => canonical_cwd(cwd)?.join(".psychevo"),
+    };
+    fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let mut document = load_toml_config_file(&config_path, false)?;
+    if !document.is_object() {
+        document = json!({});
+    }
+    if let Some(entries) = document.get_mut(namespace).and_then(Value::as_object_mut) {
+        entries.remove(&key);
+    }
+    write_toml_config_file(&config_path, &document)?;
+    Ok(json!({
+        "success": true,
+        "scope": scope.as_str(),
+        "path": config_path,
+        "plugin": plugin,
+        "source": source,
+        "enabled": null,
+    }))
+}
+
+pub fn codex_plugin_set_enabled_value(
+    home: &Path,
+    cwd: &Path,
+    scope: PluginScope,
+    selector: &str,
+    enabled: Option<bool>,
+) -> Result<Value> {
+    if !selector.starts_with("codex:") || !selector.contains('@') {
+        return Err(Error::Config(format!(
+            "Codex plugin selector must be `codex:<plugin>@<marketplace>`, got `{selector}`"
+        )));
+    }
+    if scope == PluginScope::Local && enabled == Some(true) {
+        return Err(Error::Config(format!(
+            "project policy cannot enable Codex plugin `{selector}`; enable it in the profile"
+        )));
+    }
+    let config_dir = match scope {
+        PluginScope::Global => home.to_path_buf(),
+        PluginScope::Local => canonical_cwd(cwd)?.join(".psychevo"),
+    };
+    fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join(CONFIG_FILE_NAME);
+    let mut document = load_toml_config_file(&config_path, false)?;
+    if !document.is_object() {
+        document = json!({});
+    }
+    let root = document
+        .as_object_mut()
+        .expect("Codex plugin policy root initialized as object");
+    let plugins = root
+        .entry("plugins".to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| Error::Config("plugins must be an object".to_string()))?;
+    match enabled {
+        Some(enabled) => {
+            plugins.insert(selector.to_string(), json!({"enabled": enabled}));
+        }
+        None => {
+            plugins.remove(selector);
+        }
+    }
+    write_toml_config_file(&config_path, &document)?;
+    let policy = codex_plugin_policy_value(home, cwd, selector)?;
+    Ok(json!({
+        "success": true,
+        "scope": scope.as_str(),
+        "selector": selector,
+        "enabled": enabled,
+        "policy": policy,
+        "path": config_path,
+    }))
+}
+
+pub fn codex_plugin_policy_value(home: &Path, cwd: &Path, selector: &str) -> Result<Value> {
+    fn value_at(path: &Path, selector: &str) -> Result<Option<bool>> {
+        Ok(load_toml_config_file(path, false)?
+            .get("plugins")
+            .and_then(Value::as_object)
+            .and_then(|plugins| plugins.get(selector))
+            .and_then(Value::as_object)
+            .and_then(|entry| entry.get("enabled"))
+            .and_then(Value::as_bool))
+    }
+    let profile_enabled = value_at(&home.join(CONFIG_FILE_NAME), selector)?.unwrap_or(false);
+    let project_override = value_at(
+        &canonical_cwd(cwd)?.join(".psychevo").join(CONFIG_FILE_NAME),
+        selector,
+    )?;
+    let effective_enabled = profile_enabled && project_override != Some(false);
+    Ok(json!({
+        "profileEnabled": profile_enabled,
+        "projectOverride": project_override,
+        "effectiveEnabled": effective_enabled,
+    }))
+}
+
 fn is_builtin_browser_selector(selector: &str) -> bool {
     selector.trim() == BUILTIN_BROWSER_PLUGIN_SELECTOR
 }

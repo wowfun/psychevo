@@ -453,6 +453,7 @@ async fn run_channel_inbound_turn(
             runtime_source: format!("channel/{}", connection.channel),
             continue_sources: vec![format!("channel/{}", connection.channel)],
             event_sink: Some(event_sink),
+            workspace_mutations: None,
             lineage: Some(json!({
                 "channel": connection.channel,
                 "connectionId": connection.id,

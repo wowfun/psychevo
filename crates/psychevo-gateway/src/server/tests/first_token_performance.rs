@@ -11,25 +11,26 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     let log = temp.path().join("broker.log");
     std::fs::create_dir_all(&cwd).expect("cwd");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(home.join("config.toml"), "# isolated test profile\n").expect("config");
     std::fs::write(
         &script,
         format!(
             r#"#!/usr/bin/env python3
-import json, sys, time
+import json, os, sys, time
 LOG = {log}
 thread_count = 0
 for line in sys.stdin:
     msg = json.loads(line)
     method = msg.get("method")
     if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"performance-fixture/0.144.1"}}}}), flush=True)
     elif method == "initialized":
         pass
+    elif msg.get("params") is None:
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
     elif method == "plugin/installed":
         with open(LOG, "a", encoding="utf-8") as handle:
             handle.write("plugin-installed\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":True,"enabled":True}}]}}],"marketplaceLoadErrors":[]}}}}), flush=True)
+        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
     elif method == "plugin/read":
         print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"summary":{{"id":"review@openai","name":"review","installed":True,"enabled":True}},"skills":[],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
     elif method == "plugin/list":
@@ -56,6 +57,14 @@ for line in sys.stdin:
         .permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&script, permissions).expect("chmod");
+    std::fs::write(
+        home.join("config.toml"),
+        format!(
+            "[codex_plugins]\nenabled = true\nbinary = {:?}\n",
+            script.display().to_string()
+        ),
+    )
+    .expect("config");
 
     let backend = Arc::new(AutomationFakeBackend::default());
     let env = BTreeMap::from([
@@ -121,6 +130,7 @@ for line in sys.stdin:
         )
         .await
         .expect("GUI warmup contributions");
+    let warm_lease = warm_contributions.lease_id.clone();
     let mut warm_request = direct_turn(&state);
     warm_request
         .policy
@@ -133,6 +143,13 @@ for line in sys.stdin:
         .run_turn(warm_request)
         .await
         .expect("GUI warmup");
+    if let Some(lease_id) = warm_lease.as_deref() {
+        state
+            .inner
+            .codex_capability_broker
+            .release_turn_lease(lease_id)
+            .await;
+    }
 
     let mut direct_samples = Vec::new();
     let mut gui_samples = Vec::new();
@@ -174,6 +191,7 @@ for line in sys.stdin:
             )
             .await
             .expect("GUI runtime contributions");
+        let lease_id = contributions.lease_id.clone();
         let mut request = direct_turn(&state);
         request
             .policy
@@ -186,6 +204,13 @@ for line in sys.stdin:
             .run_turn(request)
             .await
             .expect("GUI fake-provider turn");
+        if let Some(lease_id) = lease_id.as_deref() {
+            state
+                .inner
+                .codex_capability_broker
+                .release_turn_lease(lease_id)
+                .await;
+        }
         let completed = started.elapsed();
         let dispatched = backend
             .dispatch_times
@@ -222,7 +247,7 @@ for line in sys.stdin:
     );
     let broker_log = std::fs::read_to_string(&log).expect("broker log");
     assert_eq!(broker_log.matches("plugin-installed\n").count(), 1);
-    assert_eq!(broker_log.matches("mcp-status\n").count(), 10);
+    assert_eq!(broker_log.matches("mcp-status\n").count(), 0);
     assert!(
         !broker_log.contains("plugin-list"),
         "provider dispatch must not enumerate the marketplace catalog: {broker_log}"

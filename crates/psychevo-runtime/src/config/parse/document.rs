@@ -85,6 +85,12 @@ pub(crate) fn parse_run_config(value: Value) -> Result<RunConfig> {
     {
         config.image_generation = parse_image_generation_config(image_generation)?;
     }
+    if let Some(codex_plugins) = object
+        .get("codex_plugins")
+        .or_else(|| object.get("codexPlugins"))
+    {
+        config.codex_plugins = parse_codex_plugins_config(codex_plugins)?;
+    }
     if let Some(plugins) = object.get("plugins") {
         config.plugins = parse_plugin_policy_config(plugins)?;
     }

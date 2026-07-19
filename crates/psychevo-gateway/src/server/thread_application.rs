@@ -11,6 +11,7 @@ pub(super) struct RoutedThreadTurn {
     pub(super) runtime_source: String,
     pub(super) continue_sources: Vec<String>,
     pub(super) event_sink: Option<GatewayEventSink>,
+    pub(super) workspace_mutations: Option<WorkspaceMutationSink>,
     pub(super) lineage: Option<Value>,
     pub(super) source: Option<GatewaySource>,
     pub(super) bind_source: Option<GatewaySource>,
@@ -46,17 +47,18 @@ pub(super) async fn run_routed_turn(
     request: RoutedThreadTurn,
 ) -> psychevo_runtime::Result<crate::GatewayTurnResult> {
     let context = request.context;
+    let selected_target_id = selected_context_target_id(&context)?.to_string();
     let target = context
         .compatible_targets
         .iter()
-        .find(|target| target.target_id == context.target_id)
+        .find(|target| target.target_id == selected_target_id)
         .cloned()
         .or_else(|| {
             context
                 .binding
                 .as_ref()
                 .map(|binding| wire::RunnableTargetView {
-                    target_id: context.target_id.clone(),
+                    target_id: selected_target_id,
                     agent_ref: binding.agent_ref.clone(),
                     runtime_profile_ref: context.runtime_profile_ref.clone(),
                     agent_label: binding
@@ -106,8 +108,10 @@ pub(super) async fn run_routed_turn(
     gateway_request.runtime_source = Some(request.runtime_source);
     gateway_request.continue_sources = request.continue_sources;
     gateway_request.event_sink = request.event_sink;
+    gateway_request.workspace_mutations = request.workspace_mutations;
     gateway_request.lineage = request.lineage;
     gateway_request.turn_id = request.turn_id;
+    let mut codex_lease_id = None;
     if let Some(thread_id) = gateway_request.thread_id.clone() {
         match state
             .inner
@@ -122,52 +126,35 @@ pub(super) async fn run_routed_turn(
             .await
         {
             Ok(contributions) => {
+                codex_lease_id = contributions.lease_id;
                 gateway_request
                     .policy
                     .selected_capability_roots
                     .extend(contributions.capability_roots);
                 gateway_request.extend_runtime_tools(contributions.runtime_tools);
-                if let Some(event_sink) = gateway_request.event_sink.as_ref() {
-                    for message in contributions.warnings {
-                        event_sink(GatewayEvent::Warning {
-                            kind: "codex_plugin_projection".to_string(),
-                            message,
-                            source_path: None,
-                            suggestion: Some(
-                                "Inspect the Codex plugin in Capabilities for component readiness."
-                                    .to_string(),
-                            ),
-                        });
-                    }
-                    for message in contributions.unavailable_warnings {
-                        event_sink(GatewayEvent::Warning {
-                            kind: "codex_capability_broker".to_string(),
-                            message,
-                            source_path: None,
-                            suggestion: Some(
-                                "Check the current CODEX_HOME and Codex app-server availability."
-                                    .to_string(),
-                            ),
-                        });
-                    }
-                }
             }
             Err(err) => {
-                if let Some(event_sink) = gateway_request.event_sink.as_ref() {
-                    event_sink(GatewayEvent::Warning {
-                        kind: "codex_capability_broker".to_string(),
-                        message: err.to_string(),
-                        source_path: None,
-                        suggestion: Some(
-                            "Check the current CODEX_HOME and Codex app-server availability."
-                                .to_string(),
-                        ),
-                    });
-                }
+                eprintln!(
+                    "{}",
+                    json!({
+                        "target": "psychevo.codex_plugins",
+                        "event": "turn_snapshot_failed",
+                        "cwd": scope.cwd,
+                        "reason": err.to_string(),
+                    })
+                );
             }
         }
     }
-    state.inner.gateway.run_turn(gateway_request).await
+    let result = state.inner.gateway.run_turn(gateway_request).await;
+    if let Some(lease_id) = codex_lease_id.as_deref() {
+        state
+            .inner
+            .codex_capability_broker
+            .release_turn_lease(lease_id)
+            .await;
+    }
+    result
 }
 
 pub(super) fn action_descriptors(

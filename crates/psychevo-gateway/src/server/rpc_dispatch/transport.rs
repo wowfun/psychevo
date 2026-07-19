@@ -206,26 +206,125 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
             }
         }
     });
+    let permits = Arc::new(Semaphore::new(RPC_IN_FLIGHT_LIMIT));
+    let mut requests = JoinSet::new();
+    let mut pending = std::collections::VecDeque::new();
 
-    while let Some(message) = receiver.next().await {
-        let Ok(message) = message else {
-            break;
+    loop {
+        let input = if pending.is_empty() {
+            SocketInput::Message(next_socket_message(&mut receiver, &mut requests).await)
+        } else {
+            next_socket_message_or_permit(&mut receiver, &mut requests, permits.clone()).await
         };
-        match message {
-            WsMessage::Text(text) => {
-                let response = handle_rpc_text(&state, &auth, out_tx.clone(), text.as_str()).await;
-                if let Some(response) = response {
+        match input {
+            SocketInput::Message(Some(Ok(WsMessage::Text(text)))) => {
+                let text = text.to_string();
+                if pending.len() < RPC_PENDING_LIMIT {
+                    pending.push_back(text);
+                } else if let Some(response) = rpc_capacity_error(&text) {
                     let _ = out_tx.send(response);
-                }
+                };
             }
-            WsMessage::Close(_) => break,
+            SocketInput::Permit(Some(permit)) => {
+                let Some(text) = pending.pop_front() else {
+                    continue;
+                };
+                let request_state = state.clone();
+                let request_auth = auth.clone();
+                let request_out_tx = out_tx.clone();
+                let response_out_tx = out_tx.clone();
+                spawn_bounded_rpc_response(
+                    &mut requests,
+                    permit,
+                    response_out_tx,
+                    async move {
+                        handle_rpc_text(
+                            &request_state,
+                            &request_auth,
+                            request_out_tx,
+                            &text,
+                        )
+                        .await
+                    },
+                );
+            }
+            SocketInput::Message(Some(Ok(WsMessage::Close(_))))
+            | SocketInput::Message(Some(Err(_)))
+            | SocketInput::Message(None)
+            | SocketInput::Permit(None) => break,
             _ => {}
         }
     }
+    requests.abort_all();
+    while requests.join_next().await.is_some() {}
     relay.abort();
     drop(out_tx);
     let _ = relay.await;
     let _ = writer.await;
+}
+
+enum SocketInput<T> {
+    Message(Option<T>),
+    Permit(Option<OwnedSemaphorePermit>),
+}
+
+async fn next_socket_message_or_permit<S>(
+    receiver: &mut S,
+    requests: &mut JoinSet<()>,
+    permits: Arc<Semaphore>,
+) -> SocketInput<S::Item>
+where
+    S: futures::Stream + Unpin,
+{
+    loop {
+        tokio::select! {
+            completed = requests.join_next(), if !requests.is_empty() => {
+                let _ = completed;
+            }
+            message = receiver.next() => return SocketInput::Message(message),
+            permit = permits.clone().acquire_owned() => return SocketInput::Permit(permit.ok()),
+        }
+    }
+}
+
+fn rpc_capacity_error(text: &str) -> Option<String> {
+    let request = serde_json::from_str::<RpcRequest>(text).ok()?;
+    let id = request.id?;
+    Some(rpc_error(
+        id,
+        -32001,
+        "too many queued requests on this connection".to_string(),
+    ))
+}
+
+async fn next_socket_message<S>(receiver: &mut S, requests: &mut JoinSet<()>) -> Option<S::Item>
+where
+    S: futures::Stream + Unpin,
+{
+    loop {
+        tokio::select! {
+            completed = requests.join_next(), if !requests.is_empty() => {
+                let _ = completed;
+            }
+            message = receiver.next() => return message,
+        }
+    }
+}
+
+fn spawn_bounded_rpc_response<F>(
+    requests: &mut JoinSet<()>,
+    permit: OwnedSemaphorePermit,
+    out_tx: mpsc::UnboundedSender<String>,
+    response: F,
+) where
+    F: Future<Output = Option<String>> + Send + 'static,
+{
+    requests.spawn(async move {
+        let _permit = permit;
+        if let Some(response) = response.await {
+            let _ = out_tx.send(response);
+        }
+    });
 }
 
 async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::UnboundedSender<String>) {
@@ -321,6 +420,92 @@ async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::Unbounded
     }
 }
 
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    use tokio::sync::{Notify, Semaphore};
+    use tokio::task::JoinSet;
+
+    #[tokio::test]
+    async fn held_request_does_not_block_an_independent_response() {
+        let permits = Arc::new(Semaphore::new(RPC_IN_FLIGHT_LIMIT));
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+        let held = Arc::new(Notify::new());
+        let mut requests = JoinSet::new();
+
+        let first_permit = permits.clone().acquire_owned().await.expect("first permit");
+        let first_held = held.clone();
+        spawn_bounded_rpc_response(&mut requests, first_permit, out_tx.clone(), async move {
+            first_held.notified().await;
+            Some("first".to_string())
+        });
+        let second_permit = permits.clone().acquire_owned().await.expect("second permit");
+        spawn_bounded_rpc_response(&mut requests, second_permit, out_tx.clone(), async {
+            Some("second".to_string())
+        });
+
+        assert_eq!(out_rx.recv().await.as_deref(), Some("second"));
+        held.notify_one();
+        assert_eq!(out_rx.recv().await.as_deref(), Some("first"));
+        while requests.join_next().await.is_some() {}
+        assert_eq!(permits.available_permits(), RPC_IN_FLIGHT_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn in_flight_limit_is_fixed_and_abort_releases_every_permit() {
+        let permits = Arc::new(Semaphore::new(RPC_IN_FLIGHT_LIMIT));
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+        let mut requests = JoinSet::new();
+        for _ in 0..RPC_IN_FLIGHT_LIMIT {
+            let permit = permits.clone().acquire_owned().await.expect("bounded permit");
+            spawn_bounded_rpc_response(&mut requests, permit, out_tx.clone(), async {
+                std::future::pending::<Option<String>>().await
+            });
+        }
+
+        assert!(permits.clone().try_acquire_owned().is_err());
+        requests.abort_all();
+        while requests.join_next().await.is_some() {}
+        assert_eq!(permits.available_permits(), RPC_IN_FLIGHT_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn completed_requests_are_reaped_before_the_next_socket_message() {
+        let mut requests = JoinSet::new();
+        for _ in 0..128 {
+            requests.spawn(async {});
+        }
+        let mut messages = Box::pin(futures::stream::once(async {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            "next"
+        }));
+
+        assert_eq!(
+            next_socket_message(&mut messages, &mut requests).await,
+            Some("next")
+        );
+        assert_eq!(requests.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn saturated_permit_wait_still_observes_socket_disconnect() {
+        let permits = Arc::new(Semaphore::new(1));
+        let held_permit = permits.clone().acquire_owned().await.expect("held permit");
+        let mut requests = JoinSet::new();
+        let mut messages = futures::stream::iter(["close"]);
+
+        let input = tokio::time::timeout(
+            Duration::from_millis(100),
+            next_socket_message_or_permit(&mut messages, &mut requests, permits),
+        )
+        .await
+        .expect("disconnect must not wait for a request permit");
+
+        assert!(matches!(input, SocketInput::Message(Some("close"))));
+        drop(held_permit);
+    }
+}
+
 async fn handle_rpc_text(
     state: &WebState,
     auth: &AuthContext,
@@ -356,3 +541,9 @@ async fn handle_rpc_text(
         ),
     })
 }
+use std::future::Future;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinSet;
+
+const RPC_IN_FLIGHT_LIMIT: usize = 32;
+const RPC_PENDING_LIMIT: usize = 32;

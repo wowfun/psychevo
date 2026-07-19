@@ -95,7 +95,7 @@ pub(crate) fn turn_meta_text(meta: TurnMetaProjection<'_>) -> String {
 }
 
 pub(crate) fn usage_context_tokens(usage: &Value) -> Option<u64> {
-    usage.get("input_tokens").and_then(Value::as_u64)
+    effective_usage_total(Some(usage)).tokens
 }
 
 pub(crate) fn format_nanodollars(value: i64) -> String {

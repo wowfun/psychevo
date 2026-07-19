@@ -43,8 +43,9 @@ use psychevo_runtime::{
     HostPlatform, ImageInput, McpTransportInput, Message, Outcome, PermissionApprovalDecision,
     PermissionApprovalOutcome, PermissionApprovalRequest, RunControlHandle, RunResult,
     RunStreamEvent, RunStreamSink, SelectedAgent, ToolCallBlock, UserContentBlock,
-    fallback_visible_session_title, resolve_executable_path, resolve_explicit_image_source,
-    resolve_mcp_server_handoffs, resolve_skills_home,
+    WorkspaceMutation, WorkspaceMutationSink, fallback_visible_session_title,
+    resolve_executable_path, resolve_explicit_image_source, resolve_mcp_server_handoffs,
+    resolve_skills_home,
 };
 use serde_json::{Map, Value, json};
 use sha2::Digest as _;
@@ -1025,7 +1026,7 @@ mod tests {
 
     #[test]
     fn acp_turn_projection_observes_pre_prompt_facts_without_claiming_them_as_output() {
-        let mut state = AcpPeerStreamState::new(None, "local-fixture".to_string());
+        let mut state = AcpPeerStreamState::new(None, None, "local-fixture".to_string());
         state.reduce_notification(
             AcpPeerInboundNotification {
                 sequence: 1,

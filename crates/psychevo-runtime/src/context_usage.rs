@@ -11,6 +11,7 @@ pub(crate) use psychevo_ai::{
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
 
+pub(crate) use crate::accounting::{EffectiveUsageTotal, effective_usage_total};
 pub(crate) use crate::compaction::load_projected_messages;
 pub(crate) use crate::config::{load_project_context_instruction_mode, selected_configured_model};
 pub(crate) use crate::error::{Error, Result};

@@ -322,6 +322,12 @@ pub(crate) struct PluginPolicyConfig {
     pub(crate) plugins: BTreeMap<String, PluginPolicyEntry>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CodexPluginsConfig {
+    pub enabled: bool,
+    pub binary: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BuiltinPluginPolicyConfig {
     pub(crate) entries: BTreeMap<String, PluginPolicyEntry>,
@@ -746,6 +752,74 @@ pub(crate) fn load_run_config(options: &RunOptions, cwd: &Path) -> Result<Loaded
     })
 }
 
+pub fn load_codex_plugins_profile_config(home: &Path) -> Result<CodexPluginsConfig> {
+    let value = load_toml_config_file(&home.join(CONFIG_FILE_NAME), false)?;
+    value
+        .get("codex_plugins")
+        .or_else(|| value.get("codexPlugins"))
+        .map(parse_codex_plugins_config)
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+pub fn write_codex_plugins_profile_config(
+    home: &Path,
+    enabled: bool,
+    binary: Option<&str>,
+) -> Result<Value> {
+    fs::create_dir_all(home)?;
+    let path = home.join(CONFIG_FILE_NAME);
+    let mut value = load_toml_config_file(&path, false)?;
+    if !value.is_object() {
+        value = json!({});
+    }
+    let object = value
+        .as_object_mut()
+        .expect("Codex profile config root initialized as object");
+    let mut authority = serde_json::Map::new();
+    authority.insert("enabled".to_string(), Value::Bool(enabled));
+    if let Some(binary) = binary.map(str::trim).filter(|value| !value.is_empty()) {
+        authority.insert("binary".to_string(), Value::String(binary.to_string()));
+    }
+    object.insert("codex_plugins".to_string(), Value::Object(authority));
+    object.remove("codexPlugins");
+    write_toml_config_file(&path, &value)?;
+    Ok(json!({
+        "success": true,
+        "enabled": enabled,
+        "binary": binary.map(str::trim).filter(|value| !value.is_empty()),
+        "path": path,
+    }))
+}
+
+fn validate_project_codex_plugins(value: &Value) -> Result<()> {
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+    if object.contains_key("codex_plugins") || object.contains_key("codexPlugins") {
+        return Err(Error::Config(
+            "codex_plugins is profile-only and cannot appear in project config".to_string(),
+        ));
+    }
+    let Some(plugins) = object.get("plugins").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    for (selector, entry) in plugins {
+        if selector.starts_with("codex:")
+            && entry
+                .as_object()
+                .and_then(|entry| entry.get("enabled"))
+                .and_then(Value::as_bool)
+                == Some(true)
+        {
+            return Err(Error::Config(format!(
+                "project policy cannot enable Codex plugin `{selector}`; enable it in the profile or remove the project override"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn load_plugin_policy_config_lenient(
     options: &RunOptions,
     cwd: &Path,
@@ -930,6 +1004,9 @@ pub(crate) fn load_config_value(options: &RunOptions, cwd: &Path) -> Result<Load
 
     if let Some(config_path) = resolve_config_path(options, &env_map)? {
         let loaded = load_toml_config_file(&config_path, true)?;
+        if config_path == project_dir.join(CONFIG_FILE_NAME) {
+            validate_project_codex_plugins(&loaded)?;
+        }
         deep_merge(&mut value, loaded);
         sources.push(config_path.clone());
         if let Some(parent) = config_path.parent() {
@@ -950,6 +1027,7 @@ pub(crate) fn load_config_value(options: &RunOptions, cwd: &Path) -> Result<Load
         load_dotenv_file(&home.join(".env"), &mut env_map)?;
         let project_config = project_dir.join(CONFIG_FILE_NAME);
         let loaded = load_toml_config_file(&project_config, false)?;
+        validate_project_codex_plugins(&loaded)?;
         if project_config.exists() {
             sources.push(project_config);
         }

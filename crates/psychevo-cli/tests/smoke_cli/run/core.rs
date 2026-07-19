@@ -561,7 +561,7 @@ pub(crate) fn cli_context_reports_latest_session_json() {
     let snapshot: Value = serde_json::from_slice(&context.stdout).expect("context json");
     assert_eq!(snapshot["type"], "context_snapshot");
     assert_eq!(snapshot["scope"], "session_estimate");
-    assert_eq!(snapshot["total"]["tokens"], 3);
+    assert_eq!(snapshot["total"]["tokens"], 7);
     assert!(
         snapshot["categories"]["history"]["tokens"]
             .as_u64()
@@ -589,7 +589,7 @@ pub(crate) fn cli_context_reports_latest_session_json() {
     assert!(text.starts_with("Context Usage\n"));
     assert!(!text.contains("> /context"));
     assert!(!text.contains('└'));
-    assert!(text.contains("\ntokens: 3 tokens\n"));
+    assert!(text.contains("\ntokens: 7 tokens\n"));
     assert!(text.contains("\ninput_history:"));
     assert!(!text.contains("\nmessages:"));
     assert!(text.contains("\nscope: session estimate\nmodel: mock/mock-model\n"));

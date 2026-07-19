@@ -50,6 +50,7 @@ pub(crate) struct TuiApp {
     pub(crate) side_cleanup_task: Option<SideCleanupTask>,
     pub(crate) compaction_task: Option<CompactionTask>,
     pub(crate) diff_task: Option<DiffTask>,
+    pub(crate) journey_profile: TuiJourneyProfileProbe,
 }
 
 pub(crate) struct SideConversationState {
