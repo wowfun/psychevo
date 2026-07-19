@@ -229,7 +229,10 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5175,
-    strictPort: true
+    strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/target/**"]
+    }
   },
   test: {
     exclude: [...configDefaults.exclude, "src-tauri/**", "wdio/**"]

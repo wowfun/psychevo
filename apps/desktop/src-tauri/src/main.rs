@@ -1,3 +1,3 @@
 fn main() {
-    psychevo_desktop::run()
+    psychevo_desktop_lib::run()
 }
