@@ -195,11 +195,12 @@ including `CARGO_HTTP_CHECK_REVOKE=true`. It does not change Cargo timeout,
 retry, multiplexing, proxy, registry, mirror, or CA settings, and direct package
 scripts remain caller-owned.
 
-`pevo desktop [--dir <DIR>]` preserves the active Psychevo profile for the
-Desktop child process through `PSYCHEVO_HOME`, `PSYCHEVO_PROFILE`, and
+`pevo desktop -C <DIR>` (or `--cd <DIR>`) preserves the active Psychevo profile
+for the Desktop child process through `PSYCHEVO_HOME`, `PSYCHEVO_PROFILE`, and
 `PSYCHEVO_PROFILE_HOME`. The Desktop workspace cwd is the caller's cwd by
-default, or `--dir` when provided, and is passed to the Tauri process as
-`PSYCHEVO_DESKTOP_CWD`. Desktop uses that value as its fallback cwd before
+default, or `-C/--cd` when provided, and is passed to the Tauri process as
+`PSYCHEVO_DESKTOP_CWD`; the removed `--dir` spelling is rejected. Desktop uses
+that value as its fallback cwd before
 falling back to the Tauri process cwd. The launcher also passes the current
 `pevo` executable path as `PSYCHEVO_PEVO_BIN` so Desktop managed Gateway startup
 uses the same CLI build that launched the native shell instead of resolving an

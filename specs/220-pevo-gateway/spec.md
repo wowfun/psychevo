@@ -141,9 +141,10 @@ Lifecycle JSON for `open`, `start`, `status`, and `restart` includes
 
 ## Launch Bootstrap
 
-`pevo gateway open --dir <dir>` canonicalizes the cwd, ensures the managed
-server is running, records a launch entry, and opens the browser unless
-`--no-browser` is set. `pevo gateway open --default-workspace` resolves the
+`pevo gateway open -C <DIR>` (or `--cd <DIR>`) canonicalizes the cwd, ensures
+the managed server is running, records a launch entry, and opens the browser unless
+`--no-browser` is set. The removed `--dir` spelling is rejected for both
+`gateway open` and its `pevo web` alias. `pevo gateway open --default-workspace` resolves the
 configured workspace root, creates `<root>/general` on demand, and launches it
 as an ordinary cwd. `--print-url` prints the one-time launch URL and expiry
 metadata in the JSON response for Playwright and desktop shells.

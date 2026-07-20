@@ -43,8 +43,12 @@ During `run`, normal stdout progress is captured to the step log without being
 mirrored to the terminal. Stdout warning lines are mirrored to terminal
 diagnostics. Stdout error lines are not mirrored by default; errors should
 surface through stderr to avoid duplicate diagnostics. Stderr is mirrored to the
-terminal and also captured in the step log. Failed steps report the log path and
-a bounded log tail rather than dumping unbounded output.
+terminal and also captured in the step log. When a failed step captured any
+output that was not mirrored to the terminal, it reports the log path and the
+last 80 log lines to stderr even if the command also emitted a generic stderr
+summary. A failure whose captured output was already fully mirrored does not
+repeat the log tail. Empty or unreadable logs do not replace the original step
+failure.
 
 All commands accept `--json` for machine-readable output. JSON output must
 include profile ids, profile descriptions, step ids, command arrays, live

@@ -87,6 +87,14 @@ gate.
   during streaming survives later deltas, manual expansion after completion
   survives repeated terminal rendering, and already-terminal history defaults
   collapsed.
+- A streaming core `write` row decodes partial top-level `path` and `content`
+  arguments into one bounded preview owned by its tool position/call id.
+  Parallel writes remain distinct; duplicate cumulative snapshots do not
+  duplicate content; escaped JSON and Unicode chunk boundaries decode exactly.
+- The first non-empty write preview opens automatically, later snapshots honor
+  manual collapse, successful completion removes and collapses it once, and
+  failed or cancelled settlement preserves it with the failure. Preview text
+  never enters persisted messages, provider context, exports, or accounting.
 - Agent invocation handoff, stale pending blocks, child previews, and
   completion metadata leave exactly one parent Agent row.
 - Folding preserves useful head/tail previews without turning large outputs

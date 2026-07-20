@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-20
+
+- Added bounded workspace previews for written content and common document,
+  media, table, archive, and drawing formats across Workbench, Desktop, and
+  TUI, with canonical renderers and bounded CSV/TSV materialization.
+- Added cross-platform external file actions and `-C/--cd` launch-directory
+  selection without changing the caller's process cwd.
+- Hardened Gateway, ACP, TUI, transcript, runtime, and Windows/Git Bash/Desktop
+  behavior, including shared fixture-based test doubles.
+- Improved CI journey profiling and failure diagnostics with bounded output.
+
 ## 2026-07-19
 
 - Added authenticated cross-platform Files actions for opening files in VS Code

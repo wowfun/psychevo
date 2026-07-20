@@ -70,7 +70,9 @@ working directory.
 
 Accepted first-slice flags are:
 
-- `--dir <path>` selects the working directory.
+- `-C, --cd <path>` selects the working directory. The root form
+  `pevo -C <path>` selects the same cwd for the default TUI. The removed
+  `--dir` spelling is rejected.
 - `-m, --model <provider/model>` selects the model for this TUI process only.
 - `--variant <none|minimal|low|medium|high|xhigh|max>` selects the reasoning
   effort for this TUI process only.

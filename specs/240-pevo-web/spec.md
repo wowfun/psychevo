@@ -628,6 +628,12 @@ narrow viewport layout, Gateway connection, source/thread startup, history
 management, composer submission, permission/clarify surfaces, and download
 flows.
 
+Browser fixtures that run as separate processes are maintained as standalone
+sources under `apps/workbench/e2e/fixtures`. Specs and support modules may copy
+those sources into isolated artifact roots and parameterize them through
+arguments, environment, or state files, but must not embed complete executable
+program bodies in multiline string literals.
+
 Live provider browser validation is opt-in only. It may reuse the user's real
 Psychevo config and credentials, but must still use an isolated cwd and
 repo-local test state unless the caller explicitly chooses otherwise.

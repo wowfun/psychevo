@@ -68,6 +68,23 @@ of the same live overlay and must be replaced by the owner's user entry for the
 turn. A terminal clears retained live snapshots; later recovery loads the
 declared history owner rather than inventing a local content copy.
 
+While the core `write` tool's JSON arguments are still being generated, the
+runtime and Gateway may derive a bounded `write_argument_preview` from the
+cumulative `arguments_json`. This preview is a transient display snapshot of
+the proposed `path` and `content`; it is not evidence that a file has been
+written. It must not alter the complete tool call, tool execution input, tool
+result, persisted message, provider context, export, or accounting. The same
+position and tool-call identity used by the pending call owns every preview so
+parallel writes remain distinct and completion updates the existing row.
+
+The preview remains visible when the call moves from argument generation into
+real execution. A successful terminal result removes it and restores the
+ordinary compact `write` result. A failed or cancelled call may retain the last
+bounded preview as diagnostic display material alongside the authoritative
+failure. Committed failed or cancelled rows derive that same bounded view from
+their existing tool-call arguments; they do not persist the live overlay as a
+new transcript fact.
+
 A message-derived committed user entry replaces its optimistic owner as soon as
 that entry is observed, including through `entryStarted`, `entryUpdated`, or
 `entryCompleted`; the client does not wait for the terminal event to remove the
@@ -174,6 +191,12 @@ Projection must preserve stable call identity fields, including arguments,
 content index, call index, assistant message sequence, and result message
 sequence, so display surfaces can associate terminal updates with the block
 created when the tool call first appeared.
+`write_argument_preview` is a closed display metadata object containing its
+phase, bounded path/text, decoded byte and line counts, omitted byte count, and
+truncation state. The preview text is limited to 8 KiB of UTF-8-safe head/tail
+content and its path to 512 display characters. It is refreshed at most every
+500 ms after the first visible snapshot, with a final flush before execution or
+terminal settlement. Invalid partial JSON suppresses only the preview.
 Within one assistant segment, a positioned tool observation is identified by
 its `content_index` and `call_index` before any tool-name fallback is applied.
 Different positions remain different calls even when they have the same tool

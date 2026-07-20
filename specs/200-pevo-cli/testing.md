@@ -181,6 +181,17 @@ come from the focused command and smoke tests below.
 
 ## Desktop Launcher Coverage
 
+- CLI parsing covers root and command-local `-C/--cd` for the default TUI,
+  explicit TUI, managed Web, native Desktop, and `gateway open`. A
+  command-local value wins when both positions are present, while root
+  `-C/--cd` rejects non-UI commands and Web/Gateway lifecycle-only commands.
+- CLI parsing rejects the removed UI `--dir` spelling for TUI, Web,
+  `gateway open`, and Desktop while preserving command-specific `--dir` options
+  on non-UI commands.
+- UI cwd coverage verifies relative paths resolve from the caller's cwd and the
+  same selected workspace reaches scripted TUI execution, managed-Web launch
+  JSON, and the Desktop fallback-cwd environment without changing Desktop
+  source-checkout discovery.
 - Platform-parameterized launcher coverage verifies that every Windows
   `pevo desktop` child defaults to `CARGO_HTTP_CHECK_REVOKE=false`, explicit
   caller values are preserved case-insensitively, and non-Windows children do

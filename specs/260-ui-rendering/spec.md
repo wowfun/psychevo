@@ -58,6 +58,15 @@ Long-running Thinking may retain a renderer-specific bounded preview instead
 of forcing the full body open; this lifecycle folding does not alter global
 Thinking visibility or stored transcript content.
 
+Core `write` rows default open once a non-empty argument preview appears. The
+expanded detail renders the bounded content as plain preformatted text, labels
+argument generation separately from real file writing, and follows the newest
+tail only while the viewer remains at the bottom. Manual collapse during
+streaming survives later preview snapshots. Successful completion collapses
+the row once and removes the preview; repeated terminal rendering must not
+collapse a later manual expansion. Failed or cancelled writes retain the last
+preview together with the failure evidence.
+
 Tool and Agent rows require explicit typed transcript blocks, execution
 observations, or message-derived tool-result relationships. Reasoning or
 assistant prose that describes intended work must not create active `read`,

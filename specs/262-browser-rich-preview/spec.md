@@ -12,6 +12,8 @@ rendering, and Browser surface.
 
 - right-workspace preview destinations for Markdown documents, local HTML, and
   Browser state
+- authorized workspace-file previews for images, PDF, media, modern Office,
+  compatible documents, delimited tables, Excalidraw, and ZIP directories
 - shared Markdown rendering for fenced Mermaid diagrams
 - Workbench Browser pane product behavior and Web/PWA fallback
 - Desktop-owned managed Browser host contract
@@ -24,6 +26,10 @@ Out of scope:
 - arbitrary `file://` loading from Workbench
 - per-origin Browser permission prompts in the first slice
 - screenshot-backed annotation context
+- legacy binary Office (`.doc`, `.dot`, `.xls`, `.xlt`, `.ppt`), streaming
+  playlists, MOV/MKV/AVI, TIFF/JXL, MIDI, XMind, draw.io, EPUB, email,
+  CAD/3D/Geo/EDA, and Typst rendering
+- remote document conversion or browser access to raw `file://` resources
 
 ## Product Model
 
@@ -123,6 +129,162 @@ explicitly restores the tree even when reusing a preview-focused Files tab.
 Selecting another file from that tree preserves the current tree visibility.
 The persistent header toggle remains the explicit way to override either
 default.
+
+## Workspace File Surface
+
+Files owns one deep `WorkspaceFileSurface` module. Its public interface is:
+
+```ts
+WorkspaceFileSurface({
+  target: { scope, path } | null,
+  active,
+  textEditing: "enabled" | "disabled",
+  onDirtyChange,
+  onCompare
+})
+```
+
+Callers supply only the selected target, activation state, editing capability,
+and file-level callbacks. Format recognition, loading, renderer selection,
+progress and error presentation, lease renewal, parse cancellation, workers,
+object URLs, and media lifecycle remain private to the module. The renderer
+catalog is not a public plugin API and vendor renderer names never cross the
+wire protocol. A Files tab retains navigation, selected path, tree visibility,
+and dirty state; it does not retain file bodies, blobs, object URLs, or preview
+leases.
+
+All ordinary files enter this surface. Files must not reject a target merely
+from its extension before Gateway authorization and media classification. An
+unsupported or oversized target receives the same compact error state as a
+failed renderer, including a system external-open action when the host exposes
+one. No additional product mode, nested preview card, or `file://` path is
+introduced. Desktop, Web, and PWA use the same Gateway preview adapter. After
+Gateway opens a target, the returned canonical `path` is authoritative for
+format classification and renderer selection; the originally selected target
+continues to identify editing, comparison, and external-file actions.
+
+The supported read-only preview matrix is:
+
+| Category | Extensions |
+| --- | --- |
+| Images | `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `bmp`, `svg`, `ico`, `heic`, `heif` |
+| PDF | `pdf` |
+| Video | `mp4`, `webm` |
+| Audio | `mp3`, `wav`, `ogg`, `oga`, `opus`, `m4a`, `aac`, `flac`, `weba` |
+| Modern Office | `docx`, `xlsx`, `pptx` |
+| Office companions | `docm`, `dotx`, `dotm`, `xlsm`, `xlsb`, `xltx`, `xltm`, `pptm`, `potx`, `potm`, `ppsx`, `ppsm` |
+| Compatible documents | `rtf`, `odt`, `ods`, `odp`, `ofd` |
+| Delimited tables | `csv`, `tsv` |
+| Other | `excalidraw`, `zip` |
+
+MP4 support is validated against H.264/AAC and WebM against VP9/Opus. Browser
+codec availability remains authoritative for a user's host. Complex Office
+layout is best effort and does not promise Microsoft Office pixel parity.
+Macros, scripts, OLE objects, and external document relationships are never
+executed. External links are inert by default and document rendering must not
+initiate external network requests.
+
+Native images, video, and audio consume the authorized Range URL directly.
+PDF uses the renderer's streaming-URL path. Office, delimited tables, HEIC,
+OFD, ZIP, and Excalidraw use a bounded whole-file blob. Whole-file parsing is
+limited to 32 MiB. ZIP preview lists at most 5,000 sanitized directory entries
+without extracting content. Excalidraw preview is a lightweight read-only
+canvas limited to 5 MiB and 5,000 elements; it does not depend on the official
+Excalidraw application package. CSV and TSV render as read-only tables bounded
+to 2,000 total rows, 100 columns per row, and 20,000 rendered cells. Parsing
+retains no cells beyond those structural limits and stops early once no further
+row or cell can be retained. The table displays a truncation notice instead of
+materializing the remainder into DOM nodes. SVG, CSV, TSV, and Excalidraw may
+still switch to source editing when the existing 1 MiB text limit and revision
+rules permit it.
+
+Renderer code is loaded only after classification selects it. The initial
+Workbench JavaScript request graph and budget must not grow with preview
+renderers. The Vite build copies required workers and assets and creates
+renderer-specific deferred chunks. File Viewer integration is locked exactly
+to the compatible `@file-viewer/*` `2.2.2` React/core, PDF, Word, Spreadsheet,
+Presentation, OFD, Image, Drawing, and Vite-plugin packages. ZIP parsing uses a
+direct `jszip` dependency. Preset packages and vendor download, export, or edit
+actions are not part of the surface.
+
+Office sanitization, ZIP directory parsing, CSV/TSV parsing, and Excalidraw
+parsing run in a task-scoped Vite module Worker whenever the host exposes the
+Worker API. Each task owns one Worker and terminates it after success, failure,
+or abort; aborting the task must terminate the Worker immediately rather than
+only ignoring a later result. Non-browser and deterministic test hosts without
+Worker support may execute the same pure parser functions in-process. The
+parser Worker remains deferred with the selected preview chunk and must not
+enter the initial Workbench request graph.
+
+Only controls needed to inspect the selected content remain: page, slide, or
+sheet navigation; search; zoom and fit; and native media controls. When
+`active` becomes false, unfinished reads and parsing are aborted and media is
+paused. The one completed Files surface may keep its DOM while inactive.
+Changing target or workspace, closing the tab, or unmounting the surface
+terminates workers, revokes object URLs, and releases the active lease.
+
+## Workspace Preview Transport
+
+Gateway exposes two typed RPC methods:
+
+- `workspace/file/preview/open`
+- `workspace/file/preview/release`
+
+Open accepts a normal scoped workspace-file target. Its result reuses the
+text snapshot, binary flag, revision, truncation, and editing metadata of
+`WorkspaceFileReadResult`, adds Gateway-classified `mediaType`, and adds an
+opaque resource lease:
+
+```ts
+{
+  resourceId: string;
+  resourcePath: string;
+  expiresAtMs: number;
+}
+```
+
+`resourcePath` is a Gateway-relative path and is the only URL callers may use.
+The lease ID contains at least 128 bits of cryptographically secure randomness
+and is bound to one canonical file path, its opened-file identity, revision,
+byte size, and MIME. Gateway reuses the existing workspace scope resolution,
+canonical containment, and symlink escape protections both when opening and
+serving a resource. Lease creation derives the returned text snapshot,
+binary/truncation/editing metadata, identity, size, and revision from one opened
+handle, then verifies that the current workspace path still resolves to that
+identity. Each GET or HEAD reopens the canonical workspace path and validates
+identity, revision, and size on that same handle before serving it. Windows also
+validates final-handle path containment. A path or parent-directory symlink swap
+between validation and I/O therefore fails closed.
+
+`GET`, `HEAD`, and `OPTIONS` on
+`/_gateway/workspace-preview/{resourceId}` serve the lease. GET supports a
+complete response or one RFC byte range and returns `206` or `416` as
+appropriate. HEAD returns the same representation headers without a body.
+Responses include a stable lease `ETag`, correct `Content-Type` and
+`Content-Length`, `Accept-Ranges: bytes`, `Cache-Control: no-store`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a
+sandboxing Content Security Policy. Controlled CORS permits only the Gateway's
+configured Workbench origins, product-owned Desktop development and packaged
+webview origins, and the methods and Range-related headers required by remote
+Web/PWA or Desktop PDF and media clients. Gateway lifecycle configuration
+registers `http://127.0.0.1:5175`, `http://tauri.localhost`, and
+`tauri://localhost` without requiring users to set
+`PSYCHEVO_WORKBENCH_ORIGINS`; other origins remain explicit. This never turns a
+workspace path into public authority.
+
+Leases expire after 30 minutes without a successful resource access and after
+8 hours absolutely. Successful GET or HEAD access advances only the idle
+deadline. An expired or explicitly released ID returns `410`; a file whose
+canonical target, revision, or byte size has changed returns `409`. Unknown or
+malformed IDs do not disclose file existence. Opening a replacement target and
+unmounting proactively release the prior lease. If an active surface observes
+lease expiration, it may reopen the same target automatically once; repeated
+expiration is shown as an ordinary preview error.
+
+`workspace/file/read` and `workspace/file/write` remain the authority for text
+editing and revision-conflict behavior. The opaque resource URL grants only
+read access to the bound representation and does not authorize listing,
+writing, another workspace file, or a changed version of the same path.
 
 The Browser pane has compact toolbar controls for navigation, reload, address,
 annotation, and external open. Web and managed-Web hosts show ordinary
@@ -228,6 +390,28 @@ Default validation uses deterministic local harnesses and fake providers.
   is hidden, browser-entry restoration of a previously hidden file tree,
   file-preview expansion after hiding the tree, and right workspace navigation
   without text overlap.
+- Gateway preview tests cover scoped authorization, traversal, pre-lookup
+  symlink swaps, opened-handle text projection after path rebinding, and a
+  deterministic lookup-to-open same-size/same-mtime swap rejection,
+  unpredictable and distinct lease IDs, explicit release, idle and absolute
+  expiration, changed-file conflicts, complete GET, HEAD, OPTIONS, open,
+  closed, suffix, and invalid single ranges, rejected multi-range input,
+  controlled CORS, and every security response header.
+- Workspace file-surface tests exercise the public component seam and cover
+  latest-target-wins, stale-lease release, inactive parsing cancellation and
+  media pause, one automatic expired-lease reopen, loading progress, parser
+  limits, common error presentation, and the existing text editing and dirty
+  guard behavior.
+- Deterministically generated, traceable fixtures cover PNG, SVG, HEIC, PDF,
+  H.264/AAC MP4, VP9/Opus WebM, MP3, DOCX, XLSX, PPTX, ODF, RTF, OFD, CSV, TSV,
+  ZIP, and Excalidraw by asserting visible content through real renderers rather
+  than mocking vendor internals. Security fixtures prove SVG scripts, Office
+  macros and external relationships, and hostile ZIP paths cannot execute,
+  fetch, or write.
+- Playwright validates PDF Range traffic, media play and seek, Office worker and
+  asset delivery without 404s, narrow and wide layout, and external-open
+  fallback. Its startup-performance assertion verifies that preview chunks are
+  absent from the initial Workbench request graph.
 - Gateway/runtime tests cover the built-in Browser plugin list row, default
   enabled policy, explicit disable policy, and secret-free projection.
 - Desktop tests cover Browser host command routing once the native host lands.

@@ -70,6 +70,14 @@ tool-name-first title language; completion updates the same row in place.
 Active rows should not show a redundant body line that says only `running` or
 `preparing`; the activity marker and elapsed duration carry that state.
 
+A core `write` call may additionally expose a bounded live argument preview.
+During argument generation it is labelled `Generating`; after execution starts
+the last snapshot remains visible under `Writing` until the call settles. The
+preview shows the proposed path, decoded byte/line progress, and UTF-8-safe
+head/tail content as plain text. It never claims that the target has changed and
+never replaces the authoritative tool result. Success removes it; failure or
+interruption keeps it as diagnostic detail without hiding the error.
+
 Rows match primarily by `tool_call_id`. If the id has not arrived yet, the
 projector may use an assistant-message-scoped stream position as a temporary
 key and migrate it when the id appears. The same stream position may recur in

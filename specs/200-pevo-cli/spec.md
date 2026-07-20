@@ -162,11 +162,24 @@ command invocation. It does not change the workspace/cwd protocol scope.
 Profile selection is resolved before subcommand execution and before Gateway or
 ACP child processes are launched.
 
+`pevo -C, --cd <DIR>` selects the workspace cwd used to open an interactive UI.
+It applies to the default TUI and may be supplied before `tui`, `web`,
+`desktop`, or the equivalent `gateway open` command. The same flag may also be
+supplied directly on those UI-opening commands; a command-local value takes
+precedence over the root value. Relative paths resolve from the caller's cwd,
+`~` uses the caller environment, and the selected path is canonicalized before
+it reaches TUI, Web, or Desktop runtime state. The flag changes the opened
+workspace only: Desktop source-checkout discovery still starts from the
+caller's cwd, and non-UI commands reject the root flag instead of silently
+changing their cwd. UI-opening commands do not accept the removed `--dir`
+spelling. Command-specific `--dir` options owned by non-UI commands such as
+`pevo run`, `pevo stats`, and `pevo context` are unaffected.
+
 `pevo` with no subcommand is the interactive default entrypoint. When stdin
-and stdout are both terminals, it is equivalent to `pevo tui`. When either side
-is not a terminal, it must not consume stdin; it exits with a concise error and
-points users to explicit commands such as `pevo tui`, `pevo run`, `pevo web`,
-and `pevo --help`.
+and stdout are both terminals, it is equivalent to `pevo tui`; `-C/--cd`
+selects that TUI's workspace cwd. When either side is not a terminal, it must
+not consume stdin; it exits with a concise error and points users to explicit
+commands such as `pevo tui`, `pevo run`, `pevo web`, and `pevo --help`.
 
 `pevo agent` owns local agent definition inspection and first-class child-agent
 control.
@@ -202,7 +215,7 @@ turn provider metadata into transcript content.
 `pevo web` is the convenience entrypoint for the managed local Web UI. With no
 subcommand it is equivalent to `pevo gateway open`, defaults to the current
 working directory, keeps stdout as exactly one JSON object, and accepts the same
-first-slice open flags: `--dir`, `--bind`, `--no-browser`, and `--print-url`.
+first-slice open flags: `-C/--cd`, `--bind`, `--no-browser`, and `--print-url`.
 `pevo web start [--bind <ADDR>]`, `pevo web stop`, and
 `pevo web restart [--bind <ADDR>]` are Web-facing aliases for the matching
 managed Gateway lifecycle commands. `pevo web restart` stops the current
@@ -216,7 +229,7 @@ JSON response always reports the actual bound URL in `baseUrl`. An explicit
 `pevo desktop` is the source-checkout developer launcher for the native Desktop
 shell. It discovers a Psychevo source checkout containing `apps/desktop/` and
 runs the existing `@psychevo/desktop` Tauri development entrypoint. It accepts
-`--dir <DIR>` to choose the Desktop fallback workspace cwd; otherwise it uses
+`-C, --cd <DIR>` to choose the Desktop fallback workspace cwd; otherwise it uses
 the caller's cwd. The launcher resolves pnpm through the shared host executable
 boundary, including Windows `PATH`/`PATHEXT` command shims, and defaults the
 pnpm child to the installed usable package-manager version instead of requiring

@@ -147,6 +147,14 @@ belong behind the workflow runner interface, not shell-script compatibility
 entrypoints. Shell scripts may still own specialized fixture setup, environment
 selection, and process wiring when a profile step delegates to them.
 
+Executable test doubles longer than a minimal process launcher belong in the
+owning crate or application's tracked fixture directory, not in multiline
+source strings inside test modules. Tests copy those sources into isolated
+temporary roots and parameterize scenarios through arguments, environment, or
+state files. Short launch shims and declarative protocol/configuration payloads
+may remain inline; related dynamic scenarios should share a scenario-driven
+fixture instead of proliferating generated program bodies.
+
 ## Delivery Boundaries
 
 Artifact-only CD may produce local build outputs, package trees, checksums,

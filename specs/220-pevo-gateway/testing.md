@@ -66,8 +66,10 @@ Manual real-provider validation is not required for this lifecycle topic.
   replaying earlier appended log entries.
 - Default bind fallback and explicit bind strictness are observable in
   lifecycle responses.
-- `--dir`, `--default-workspace`, `--print-url`, and `--no-browser` produce a
+- `-C/--cd`, `--default-workspace`, `--print-url`, and `--no-browser` produce a
   launch entry with clean browser recovery behavior.
+- Managed Web and Gateway-open argument parsing reject the removed `--dir`
+  spelling.
 - Consumed or expired launch URLs recover cleanly with and without a valid
   browser-session cookie.
 - Direct visits to the managed base URL without a valid browser session show a
