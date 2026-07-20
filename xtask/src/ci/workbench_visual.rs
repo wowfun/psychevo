@@ -125,17 +125,20 @@ pub(crate) fn run_workbench_visual(
     )?;
 
     let mut mirrored_diagnostics = 0;
+    let mut had_suppressed_output = false;
     let mut version = ProcessCommand::new("pnpm");
     version.args(["exec", "playwright", "--version"]);
     apply_workbench_visual_env(&mut version, root, artifact_root, &screenshot_root);
     let outcome = run_logged_process("playwright version", &mut version, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         write_mirrored_line(&log, &format!("run: {PLAYWRIGHT_INSTALL_HINT}"))?;
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics: mirrored_diagnostics + 1,
+            had_suppressed_output,
         });
     }
 
@@ -144,11 +147,13 @@ pub(crate) fn run_workbench_visual(
     apply_workbench_visual_env(&mut build, root, artifact_root, &screenshot_root);
     let outcome = run_logged_process("workbench visual build", &mut build, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
 
@@ -173,11 +178,13 @@ pub(crate) fn run_workbench_visual(
             Arc::clone(&log),
         )?;
         mirrored_diagnostics += outcome.mirrored_diagnostics;
+        had_suppressed_output |= outcome.had_suppressed_output;
         if !outcome.passed {
             return Ok(ProcessOutcome {
                 passed: false,
                 exit_code: outcome.exit_code,
                 mirrored_diagnostics,
+                had_suppressed_output,
             });
         }
         let errors = validate_critical_journey_evidence(
@@ -193,6 +200,7 @@ pub(crate) fn run_workbench_visual(
                 passed: false,
                 exit_code: outcome.exit_code,
                 mirrored_diagnostics: mirrored_diagnostics + errors.len(),
+                had_suppressed_output,
             });
         }
     }
@@ -212,6 +220,7 @@ pub(crate) fn run_workbench_visual(
     test.env_remove("NO_COLOR");
     let outcome = run_logged_process("workbench visual playwright", &mut test, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if outcome.passed {
         let missing = REQUIRED_RUNTIME_PROFILE_PROOFS
             .iter()
@@ -232,6 +241,7 @@ pub(crate) fn run_workbench_visual(
                 passed: false,
                 exit_code: outcome.exit_code,
                 mirrored_diagnostics: mirrored_diagnostics + missing.len(),
+                had_suppressed_output,
             });
         }
     }
@@ -239,6 +249,7 @@ pub(crate) fn run_workbench_visual(
         passed: outcome.passed,
         exit_code: outcome.exit_code,
         mirrored_diagnostics,
+        had_suppressed_output,
     })
 }
 
@@ -437,6 +448,7 @@ fn failed_workbench_visual(log: Arc<Mutex<fs::File>>, lines: &[String]) -> Resul
         passed: false,
         exit_code: None,
         mirrored_diagnostics: lines.len(),
+        had_suppressed_output: false,
     })
 }
 

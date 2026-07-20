@@ -13,11 +13,20 @@ pub(crate) struct ProcessOutcome {
     pub(crate) passed: bool,
     pub(crate) exit_code: Option<i32>,
     pub(crate) mirrored_diagnostics: usize,
+    pub(crate) had_suppressed_output: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CaptureStats {
     pub(crate) mirrored_lines: usize,
+    pub(crate) had_suppressed_output: bool,
+}
+
+impl CaptureStats {
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.mirrored_lines += other.mirrored_lines;
+        self.had_suppressed_output |= other.had_suppressed_output;
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,13 +65,14 @@ pub(crate) fn run_logged_process(
     let stderr_handle = spawn_capture_stream(stderr, Arc::clone(&log), OutputStream::Stderr);
 
     let status = child.wait().with_context(|| format!("wait for {label}"))?;
-    let stdout_stats = join_capture_stream("stdout", stdout_handle)?;
-    let stderr_stats = join_capture_stream("stderr", stderr_handle)?;
+    let mut stats = join_capture_stream("stdout", stdout_handle)?;
+    stats.merge(join_capture_stream("stderr", stderr_handle)?);
 
     Ok(ProcessOutcome {
         passed: status.success(),
         exit_code: status.code(),
-        mirrored_diagnostics: stdout_stats.mirrored_lines + stderr_stats.mirrored_lines,
+        mirrored_diagnostics: stats.mirrored_lines,
+        had_suppressed_output: stats.had_suppressed_output,
     })
 }
 
@@ -109,6 +119,8 @@ where
                 .context("write terminal diagnostic")?;
             stderr.flush().context("flush terminal diagnostic")?;
             stats.mirrored_lines += 1;
+        } else {
+            stats.had_suppressed_output = true;
         }
     }
     Ok(stats)
@@ -209,10 +221,10 @@ impl LoggedChild {
         }
         let mut stats = CaptureStats::default();
         if let Some(handle) = self.stdout_handle.take() {
-            stats.mirrored_lines += join_capture_stream("stdout", handle)?.mirrored_lines;
+            stats.merge(join_capture_stream("stdout", handle)?);
         }
         if let Some(handle) = self.stderr_handle.take() {
-            stats.mirrored_lines += join_capture_stream("stderr", handle)?.mirrored_lines;
+            stats.merge(join_capture_stream("stderr", handle)?);
         }
         Ok(stats)
     }
@@ -235,7 +247,25 @@ impl Drop for LoggedChild {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    static NEXT_TEST_LOG: AtomicUsize = AtomicUsize::new(0);
+
+    fn capture_stats(input: &[u8], stream: OutputStream) -> CaptureStats {
+        let id = NEXT_TEST_LOG.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "psychevo-xtask-process-{}-{id}.log",
+            std::process::id()
+        ));
+        let log = create_step_log(&path).expect("create capture test log");
+        let stats =
+            capture_stream(Cursor::new(input.to_vec()), log, stream).expect("capture test output");
+        fs::remove_file(path).expect("remove capture test log");
+        stats
+    }
 
     #[test]
     fn normal_stdout_is_not_mirrored_to_terminal() {
@@ -271,5 +301,53 @@ mod tests {
             OutputStream::Stderr,
             b"any stderr line\n"
         ));
+    }
+
+    #[test]
+    fn normal_stdout_marks_suppressed_output() {
+        assert_eq!(
+            capture_stats(b"assertion failed: left == right\n", OutputStream::Stdout),
+            CaptureStats {
+                mirrored_lines: 0,
+                had_suppressed_output: true,
+            }
+        );
+    }
+
+    #[test]
+    fn stdout_warning_and_stderr_do_not_mark_suppressed_output() {
+        assert_eq!(
+            capture_stats(b"warning: unused import\n", OutputStream::Stdout),
+            CaptureStats {
+                mirrored_lines: 1,
+                had_suppressed_output: false,
+            }
+        );
+        assert_eq!(
+            capture_stats(b"error: test failed\n", OutputStream::Stderr),
+            CaptureStats {
+                mirrored_lines: 1,
+                had_suppressed_output: false,
+            }
+        );
+    }
+
+    #[test]
+    fn capture_stats_merge_sums_mirrors_and_ors_suppressed_output() {
+        let mut stats = CaptureStats {
+            mirrored_lines: 1,
+            had_suppressed_output: false,
+        };
+        stats.merge(CaptureStats {
+            mirrored_lines: 2,
+            had_suppressed_output: true,
+        });
+        assert_eq!(
+            stats,
+            CaptureStats {
+                mirrored_lines: 3,
+                had_suppressed_output: true,
+            }
+        );
     }
 }

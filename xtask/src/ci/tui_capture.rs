@@ -93,6 +93,7 @@ pub(crate) fn run_tui_vhs_demo(
 
     let pevo_bin = pevo_bin_path(root);
     let mut mirrored_diagnostics = 0;
+    let mut had_suppressed_output = false;
     if env::var_os("PEVO_BIN").is_none() {
         let mut cargo = ProcessCommand::new("cargo");
         cargo
@@ -101,11 +102,13 @@ pub(crate) fn run_tui_vhs_demo(
             .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
         let outcome = run_logged_process("build psychevo-cli", &mut cargo, Arc::clone(&log))?;
         mirrored_diagnostics += outcome.mirrored_diagnostics;
+        had_suppressed_output |= outcome.had_suppressed_output;
         if !outcome.passed {
             return Ok(ProcessOutcome {
                 passed: false,
                 exit_code: outcome.exit_code,
                 mirrored_diagnostics,
+                had_suppressed_output,
             });
         }
     }
@@ -118,11 +121,13 @@ pub(crate) fn run_tui_vhs_demo(
 
     let outcome = prepare_fixture_workdir(root, artifact_root, &workdir_path, &log)?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
 
@@ -150,12 +155,16 @@ pub(crate) fn run_tui_vhs_demo(
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
     let outcome = run_logged_process("pevo init for TUI capture", &mut init, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
-        mirrored_diagnostics += mock_provider.stop()?.mirrored_lines;
+        let mock_stats = mock_provider.stop()?;
+        mirrored_diagnostics += mock_stats.mirrored_lines;
+        had_suppressed_output |= mock_stats.had_suppressed_output;
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
     copy_dir_contents(&fixture_home, &home)?;
@@ -174,7 +183,7 @@ pub(crate) fn run_tui_vhs_demo(
         "CLICOLOR_FORCE=1",
         &pevo_bin_arg,
         "tui",
-        "--dir",
+        "--cd",
         &workdir_arg,
         "-m",
         "mock/mock-model",
@@ -199,12 +208,16 @@ pub(crate) fn run_tui_vhs_demo(
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root);
     let outcome = run_logged_process("vhs TUI capture", &mut vhs, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
-    mirrored_diagnostics += mock_provider.stop()?.mirrored_lines;
+    had_suppressed_output |= outcome.had_suppressed_output;
+    let mock_stats = mock_provider.stop()?;
+    mirrored_diagnostics += mock_stats.mirrored_lines;
+    had_suppressed_output |= mock_stats.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
 
@@ -227,6 +240,7 @@ pub(crate) fn run_tui_vhs_demo(
         passed: true,
         exit_code: Some(0),
         mirrored_diagnostics,
+        had_suppressed_output,
     })
 }
 
@@ -237,6 +251,7 @@ fn prepare_fixture_workdir(
     log: &Arc<Mutex<fs::File>>,
 ) -> Result<ProcessOutcome> {
     let mut mirrored_diagnostics = 0;
+    let mut had_suppressed_output = false;
     let mut git_init = ProcessCommand::new("git");
     git_init
         .arg("-C")
@@ -250,11 +265,13 @@ fn prepare_fixture_workdir(
         Arc::clone(log),
     )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
     fs::write(
@@ -277,11 +294,13 @@ fn prepare_fixture_workdir(
         Arc::clone(log),
     )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
 
@@ -300,11 +319,13 @@ fn prepare_fixture_workdir(
         Arc::clone(log),
     )?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
     write_diff_demo_fixture(workdir_path)?;
@@ -312,6 +333,7 @@ fn prepare_fixture_workdir(
         passed: true,
         exit_code: Some(0),
         mirrored_diagnostics,
+        had_suppressed_output,
     })
 }
 
@@ -323,6 +345,7 @@ fn failed_tui_capture(log: Arc<Mutex<fs::File>>, lines: &[String]) -> Result<Pro
         passed: false,
         exit_code: Some(1),
         mirrored_diagnostics: lines.len(),
+        had_suppressed_output: false,
     })
 }
 

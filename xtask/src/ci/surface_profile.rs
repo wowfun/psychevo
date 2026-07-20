@@ -81,6 +81,7 @@ pub(crate) fn run_surface_profile(
             passed: false,
             exit_code: version_outcome.exit_code,
             mirrored_diagnostics: version_outcome.mirrored_diagnostics + 1,
+            had_suppressed_output: version_outcome.had_suppressed_output,
         });
     }
 
@@ -97,11 +98,14 @@ pub(crate) fn run_surface_profile(
     )?;
     let mut mirrored_diagnostics =
         version_outcome.mirrored_diagnostics + outcome.mirrored_diagnostics;
+    let had_suppressed_output =
+        version_outcome.had_suppressed_output || outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
 
@@ -114,6 +118,7 @@ pub(crate) fn run_surface_profile(
         passed: errors.is_empty(),
         exit_code: outcome.exit_code,
         mirrored_diagnostics,
+        had_suppressed_output,
     })
 }
 
@@ -350,6 +355,7 @@ fn failed(log: Arc<Mutex<fs::File>>, lines: &[String]) -> Result<ProcessOutcome>
         passed: false,
         exit_code: None,
         mirrored_diagnostics: lines.len(),
+        had_suppressed_output: false,
     })
 }
 

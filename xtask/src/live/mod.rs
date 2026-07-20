@@ -147,6 +147,14 @@ struct CheckResult {
     status: LiveStatus,
     detail: Option<String>,
     environment: Option<LiveEnvironmentPathsOutput>,
+    had_suppressed_output: bool,
+}
+
+impl CheckResult {
+    fn include_suppressed_output(mut self, had_suppressed_output: bool) -> Self {
+        self.had_suppressed_output |= had_suppressed_output;
+        self
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -257,6 +265,7 @@ pub(crate) fn run_ci_single_provider_live(
             passed: true,
             exit_code: Some(0),
             mirrored_diagnostics: 0,
+            had_suppressed_output: result.had_suppressed_output,
         });
     }
 
@@ -274,6 +283,7 @@ pub(crate) fn run_ci_single_provider_live(
         passed: false,
         exit_code: Some(status_code),
         mirrored_diagnostics: 1,
+        had_suppressed_output: result.had_suppressed_output,
     })
 }
 
@@ -562,8 +572,8 @@ fn run_deterministic_playwright_check(
         db_path: db_path.display().to_string(),
     };
 
-    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
-        Ok(path) => path,
+    let (pevo_bin, mut had_suppressed_output) = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(value) => value,
         Err(mut result) => {
             result.environment = Some(environment);
             return Ok(result);
@@ -599,12 +609,14 @@ fn run_deterministic_playwright_check(
         Arc::clone(&log),
     )?;
     if !build_outcome.passed {
-        return check_result_from_outcome(
+        return Ok(check_result_from_outcome(
             build_outcome,
             "Workbench build failed",
             Some(environment),
-        );
+        )?
+        .include_suppressed_output(had_suppressed_output));
     }
+    had_suppressed_output |= build_outcome.had_suppressed_output;
 
     let mut test = ProcessCommand::new("pnpm");
     test.args([
@@ -623,11 +635,12 @@ fn run_deterministic_playwright_check(
     .env("PSYCHEVO_RUNTIME_LIVE_FAKE", "1")
     .env_remove("NO_COLOR");
     let outcome = run_logged_process(check.id, &mut test, log)?;
-    check_result_from_outcome(
+    Ok(check_result_from_outcome(
         outcome,
         &format!("deterministic Agent Playwright check {} failed", check.id),
         Some(environment),
-    )
+    )?
+    .include_suppressed_output(had_suppressed_output))
 }
 
 fn run_desktop_native_smoke_check(
@@ -678,8 +691,8 @@ fn run_desktop_native_smoke_check(
             environment,
         );
     }
-    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
-        Ok(path) => path,
+    let (pevo_bin, mut had_suppressed_output) = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(value) => value,
         Err(mut result) => {
             result.environment = environment;
             return Ok(result);
@@ -707,8 +720,14 @@ fn run_desktop_native_smoke_check(
     );
     let outcome = run_logged_process("desktop native WDIO build", &mut build, Arc::clone(&log))?;
     if !outcome.passed {
-        return check_result_from_outcome(outcome, "Desktop native WDIO build failed", environment);
+        return Ok(check_result_from_outcome(
+            outcome,
+            "Desktop native WDIO build failed",
+            environment,
+        )?
+        .include_suppressed_output(had_suppressed_output));
     }
+    had_suppressed_output |= outcome.had_suppressed_output;
 
     let mut wdio = ProcessCommand::new("pnpm");
     wdio.args(["--filter", "@psychevo/desktop", "wdio"])
@@ -723,16 +742,21 @@ fn run_desktop_native_smoke_check(
         provider_token.as_deref(),
     );
     let outcome = run_logged_process("desktop native WDIO smoke", &mut wdio, Arc::clone(&log))?;
+    let outcome_had_suppressed_output = outcome.had_suppressed_output;
     if outcome.passed
         && let Err(error) = validate_desktop_startup_artifacts(&wdio_artifact_root)
     {
-        return failed_result(
+        return Ok(failed_result(
             log,
             format!("Desktop native startup evidence is invalid: {error:#}"),
             environment,
-        );
+        )?
+        .include_suppressed_output(had_suppressed_output || outcome_had_suppressed_output));
     }
-    check_result_from_outcome(outcome, "Desktop native WDIO smoke failed", environment)
+    Ok(
+        check_result_from_outcome(outcome, "Desktop native WDIO smoke failed", environment)?
+            .include_suppressed_output(had_suppressed_output),
+    )
 }
 
 fn validate_desktop_startup_artifacts(wdio_artifact_root: &Path) -> Result<()> {
@@ -899,8 +923,8 @@ fn run_provider_smoke_check(
         Err(error) => return failed_result(log, format!("{error:#}"), None),
     };
     let environment = live_env.to_output();
-    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
-        Ok(path) => path,
+    let (pevo_bin, had_suppressed_output) = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(value) => value,
         Err(mut result) => {
             result.environment = Some(environment.clone());
             return Ok(result);
@@ -926,10 +950,12 @@ fn run_provider_smoke_check(
     }
 
     if let Some(detail) = failed {
-        return failed_result(log, detail, Some(environment));
+        return Ok(failed_result(log, detail, Some(environment))?
+            .include_suppressed_output(had_suppressed_output));
     }
     if let Some(reason) = blocked_reason {
-        return blocked_with_env(log, reason, Some(environment));
+        return Ok(blocked_with_env(log, reason, Some(environment))?
+            .include_suppressed_output(had_suppressed_output));
     }
     Ok(CheckResult {
         status: LiveStatus::Passed,
@@ -938,6 +964,7 @@ fn run_provider_smoke_check(
             verifications.len()
         )),
         environment: Some(environment),
+        had_suppressed_output,
     })
 }
 
@@ -969,8 +996,8 @@ fn run_pevo_doctor_live_check(
             );
         }
     }
-    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
-        Ok(path) => path,
+    let (pevo_bin, had_suppressed_output) = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(value) => value,
         Err(mut result) => {
             result.environment = Some(environment.clone());
             return Ok(result);
@@ -982,11 +1009,12 @@ fn run_pevo_doctor_live_check(
         .current_dir(root);
     live_env.apply_to_command(&mut command, None);
     let outcome = run_logged_process("pevo-doctor-live", &mut command, log)?;
-    check_result_from_outcome(
+    Ok(check_result_from_outcome(
         outcome,
         "pevo doctor --live failed",
         Some(live_env.to_output()),
-    )
+    )?
+    .include_suppressed_output(had_suppressed_output))
 }
 
 fn run_cargo_ignored_live_check(
@@ -1104,8 +1132,8 @@ fn run_playwright_live_check(
         None
     };
 
-    let pevo_bin = match ensure_pevo_built(root, Arc::clone(&log))? {
-        Ok(path) => path,
+    let (pevo_bin, mut had_suppressed_output) = match ensure_pevo_built(root, Arc::clone(&log))? {
+        Ok(value) => value,
         Err(mut result) => {
             result.environment = Some(environment.clone());
             return Ok(result);
@@ -1143,12 +1171,14 @@ fn run_playwright_live_check(
     build.env("PSYCHEVO_XTASK_LIVE_CONTEXT", &context_path);
     let build_outcome = run_logged_process("workbench live build", &mut build, Arc::clone(&log))?;
     if !build_outcome.passed {
-        return check_result_from_outcome(
+        return Ok(check_result_from_outcome(
             build_outcome,
             "Workbench build failed",
             Some(live_env.to_output()),
-        );
+        )?
+        .include_suppressed_output(had_suppressed_output));
     }
+    had_suppressed_output |= build_outcome.had_suppressed_output;
 
     let mut test = ProcessCommand::new("pnpm");
     test.args([
@@ -1167,11 +1197,12 @@ fn run_playwright_live_check(
         .env("PSYCHEVO_CI_ARTIFACT_ROOT", artifact_root)
         .env_remove("NO_COLOR");
     let outcome = run_logged_process(check.id, &mut test, log)?;
-    check_result_from_outcome(
+    Ok(check_result_from_outcome(
         outcome,
         &format!("Playwright live check {} failed", check.id),
         Some(live_env.to_output()),
-    )
+    )?
+    .include_suppressed_output(had_suppressed_output))
 }
 
 fn run_provider_smoke(
@@ -1296,13 +1327,14 @@ fn run_pevo_json_turn(
         passed: output.status.success(),
         exit_code: output.status.code(),
         mirrored_diagnostics: mirrored,
+        had_suppressed_output: false,
     })
 }
 
 fn ensure_pevo_built(
     root: &Path,
     log: Arc<Mutex<fs::File>>,
-) -> Result<Result<PathBuf, CheckResult>> {
+) -> Result<Result<(PathBuf, bool), CheckResult>> {
     let mut command = ProcessCommand::new("cargo");
     command
         .args(["build", "-p", "psychevo-cli", "--quiet"])
@@ -1313,6 +1345,7 @@ fn ensure_pevo_built(
             status: LiveStatus::Failed,
             detail: Some("cargo build -p psychevo-cli failed".to_string()),
             environment: None,
+            had_suppressed_output: outcome.had_suppressed_output,
         }));
     }
     let pevo_bin = root.join("target").join("debug").join(binary_name("pevo"));
@@ -1324,9 +1357,10 @@ fn ensure_pevo_built(
                 pevo_bin.display()
             )),
             environment: None,
+            had_suppressed_output: outcome.had_suppressed_output,
         }));
     }
-    Ok(Ok(pevo_bin))
+    Ok(Ok((pevo_bin, outcome.had_suppressed_output)))
 }
 
 fn prepare_automation_cwd(check_dir: &Path) -> Result<PathBuf> {
@@ -1369,6 +1403,7 @@ fn check_result_from_outcome(
         },
         detail: (!outcome.passed).then(|| failure.to_string()),
         environment,
+        had_suppressed_output: outcome.had_suppressed_output,
     })
 }
 
@@ -1386,6 +1421,7 @@ fn blocked_with_env(
         status: LiveStatus::Blocked,
         detail: Some(reason),
         environment,
+        had_suppressed_output: false,
     })
 }
 
@@ -1399,6 +1435,7 @@ fn failed_result(
         status: LiveStatus::Failed,
         detail: Some(detail),
         environment,
+        had_suppressed_output: false,
     })
 }
 
@@ -1412,6 +1449,7 @@ fn skipped_with_env(
         status: LiveStatus::Skipped,
         detail: Some(reason),
         environment,
+        had_suppressed_output: true,
     })
 }
 

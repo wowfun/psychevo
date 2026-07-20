@@ -51,17 +51,20 @@ pub(crate) fn run_desktop_visual(
     )?;
 
     let mut mirrored_diagnostics = 0;
+    let mut had_suppressed_output = false;
     let mut version = ProcessCommand::new("pnpm");
     version.args(["exec", "playwright", "--version"]);
     apply_desktop_visual_env(&mut version, root, artifact_root, &screenshot_root);
     let outcome = run_logged_process("playwright version", &mut version, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         write_mirrored_line(&log, &format!("run: {PLAYWRIGHT_INSTALL_HINT}"))?;
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics: mirrored_diagnostics + 1,
+            had_suppressed_output,
         });
     }
 
@@ -70,11 +73,13 @@ pub(crate) fn run_desktop_visual(
     apply_desktop_visual_env(&mut build, root, artifact_root, &screenshot_root);
     let outcome = run_logged_process("desktop visual build", &mut build, Arc::clone(&log))?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     if !outcome.passed {
         return Ok(ProcessOutcome {
             passed: false,
             exit_code: outcome.exit_code,
             mirrored_diagnostics,
+            had_suppressed_output,
         });
     }
 
@@ -91,10 +96,12 @@ pub(crate) fn run_desktop_visual(
     test.env_remove("NO_COLOR");
     let outcome = run_logged_process("desktop visual playwright", &mut test, log)?;
     mirrored_diagnostics += outcome.mirrored_diagnostics;
+    had_suppressed_output |= outcome.had_suppressed_output;
     Ok(ProcessOutcome {
         passed: outcome.passed,
         exit_code: outcome.exit_code,
         mirrored_diagnostics,
+        had_suppressed_output,
     })
 }
 
@@ -118,5 +125,6 @@ fn failed_desktop_visual(log: Arc<Mutex<fs::File>>, lines: &[String]) -> Result<
         passed: false,
         exit_code: None,
         mirrored_diagnostics: lines.len(),
+        had_suppressed_output: false,
     })
 }

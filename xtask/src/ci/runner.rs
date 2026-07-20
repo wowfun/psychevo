@@ -74,10 +74,7 @@ pub(crate) fn execute_profile(
         let failed = matches!(execution.output.status, StepStatus::Failed);
         if failed {
             let summary = failure_summary(profile.id, &execution.output);
-            if execution.mirrored_diagnostics == 0
-                && let Ok(tail) = read_log_tail(&log_path, FAILURE_TAIL_LINES)
-                && !tail.trim().is_empty()
-            {
+            if let Some(tail) = failure_log_tail(&log_path, execution.had_suppressed_output) {
                 eprintln!("last log output from {}:\n{}", log_path.display(), tail);
             }
             steps.push(execution.output);
@@ -170,7 +167,7 @@ fn run_surface_profile_step(
         step.action.command_for_plan(),
         outcome.passed,
         outcome.exit_code,
-        outcome.mirrored_diagnostics,
+        outcome.had_suppressed_output,
     ))
 }
 
@@ -203,7 +200,7 @@ fn run_command_step(
         command,
         outcome.passed,
         outcome.exit_code,
-        outcome.mirrored_diagnostics,
+        outcome.had_suppressed_output,
     ))
 }
 
@@ -226,7 +223,7 @@ fn run_tui_vhs_demo_step(
         step.action.command_for_plan(),
         outcome.passed,
         outcome.exit_code,
-        outcome.mirrored_diagnostics,
+        outcome.had_suppressed_output,
     ))
 }
 
@@ -249,7 +246,7 @@ fn run_desktop_visual_step(
         step.action.command_for_plan(),
         outcome.passed,
         outcome.exit_code,
-        outcome.mirrored_diagnostics,
+        outcome.had_suppressed_output,
     ))
 }
 
@@ -272,7 +269,7 @@ fn run_workbench_visual_step(
         step.action.command_for_plan(),
         outcome.passed,
         outcome.exit_code,
-        outcome.mirrored_diagnostics,
+        outcome.had_suppressed_output,
     ))
 }
 
@@ -297,7 +294,7 @@ fn run_single_provider_live_step(
         step.action.command_for_plan(),
         outcome.passed,
         outcome.exit_code,
-        outcome.mirrored_diagnostics,
+        outcome.had_suppressed_output,
     ))
 }
 
@@ -307,7 +304,7 @@ fn step_execution(
     command: &'static [&'static str],
     passed: bool,
     exit_code: Option<i32>,
-    mirrored_diagnostics: usize,
+    had_suppressed_output: bool,
 ) -> StepExecution {
     StepExecution {
         output: StepRunOutput {
@@ -323,14 +320,14 @@ fn step_execution(
             exit_code,
             log_path: display_path(log_path),
         },
-        mirrored_diagnostics,
+        had_suppressed_output,
     }
 }
 
 #[derive(Debug)]
 struct StepExecution {
     output: StepRunOutput,
-    mirrored_diagnostics: usize,
+    had_suppressed_output: bool,
 }
 
 fn failure_summary(profile_id: &str, output: &StepRunOutput) -> String {
@@ -345,6 +342,15 @@ fn read_log_tail(path: &Path, max_lines: usize) -> Result<String> {
     Ok(tail_lines(&String::from_utf8_lossy(&bytes), max_lines))
 }
 
+fn failure_log_tail(path: &Path, had_suppressed_output: bool) -> Option<String> {
+    if !had_suppressed_output {
+        return None;
+    }
+    read_log_tail(path, FAILURE_TAIL_LINES)
+        .ok()
+        .filter(|tail| !tail.trim().is_empty())
+}
+
 fn tail_lines(contents: &str, max_lines: usize) -> String {
     let lines: Vec<_> = contents.lines().collect();
     let start = lines.len().saturating_sub(max_lines);
@@ -357,7 +363,19 @@ fn tail_lines(contents: &str, max_lines: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+
+    static NEXT_TEST_LOG: AtomicUsize = AtomicUsize::new(0);
+
+    fn test_log_path(label: &str) -> PathBuf {
+        let id = NEXT_TEST_LOG.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "psychevo-xtask-runner-{label}-{}-{id}.log",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn live_profile_requires_explicit_opt_in() {
@@ -397,6 +415,59 @@ mod tests {
             "CI/CD profile 'changed' failed at step 'demo'; log: /tmp/demo.log"
         );
         assert_eq!(tail_lines("one\ntwo\nthree\n", 2), "two\nthree\n");
+    }
+
+    #[test]
+    fn suppressed_stdout_triggers_tail_even_with_mirrored_stderr() {
+        let path = test_log_path("mixed-output");
+        fs::write(
+            &path,
+            "assertion failed: left == right\nerror: test failed, to rerun pass `-p demo`\n",
+        )
+        .expect("write mixed output log");
+
+        assert_eq!(
+            failure_log_tail(&path, true).as_deref(),
+            Some("assertion failed: left == right\nerror: test failed, to rerun pass `-p demo`\n")
+        );
+        fs::remove_file(path).expect("remove mixed output log");
+    }
+
+    #[test]
+    fn fully_mirrored_failure_does_not_repeat_log_tail() {
+        let path = test_log_path("stderr-only");
+        fs::write(&path, "error: command failed\n").expect("write stderr-only log");
+
+        assert_eq!(failure_log_tail(&path, false), None);
+        fs::remove_file(path).expect("remove stderr-only log");
+    }
+
+    #[test]
+    fn failure_tail_is_empty_for_empty_or_unreadable_logs() {
+        let empty_path = test_log_path("empty");
+        fs::write(&empty_path, "").expect("write empty log");
+        assert_eq!(failure_log_tail(&empty_path, true), None);
+        fs::remove_file(empty_path).expect("remove empty log");
+
+        let missing_path = test_log_path("missing");
+        assert_eq!(failure_log_tail(&missing_path, true), None);
+    }
+
+    #[test]
+    fn failure_tail_keeps_only_last_eighty_lines_without_adding_a_newline() {
+        let path = test_log_path("bounded");
+        let contents = (1..=81)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&path, contents).expect("write bounded log");
+
+        let tail = failure_log_tail(&path, true).expect("suppressed log tail");
+        assert!(!tail.contains("line 1\n"));
+        assert!(tail.starts_with("line 2\n"));
+        assert!(tail.ends_with("line 81"));
+        assert_eq!(tail.lines().count(), FAILURE_TAIL_LINES);
+        fs::remove_file(path).expect("remove bounded log");
     }
 
     #[test]
