@@ -135,6 +135,8 @@ import { clientRequestWorkspaceFoldersSchema } from './rpc/client-request/worksp
 import { clientRequestWorkspaceGitBranchesSchema } from './rpc/client-request/workspace-git-branches';
 import { clientRequestWorkspaceGitCheckoutSchema } from './rpc/client-request/workspace-git-checkout';
 import { clientRequestWorkspaceFileReadSchema } from './rpc/client-request/workspace-file-read';
+import { clientRequestWorkspaceFilePreviewOpenSchema } from './rpc/client-request/workspace-file-preview-open';
+import { clientRequestWorkspaceFilePreviewReleaseSchema } from './rpc/client-request/workspace-file-preview-release';
 import { clientRequestWorkspaceFileWriteSchema } from './rpc/client-request/workspace-file-write';
 import { clientRequestWorkspaceFileExternalActionsSchema } from './rpc/client-request/workspace-file-external-actions';
 import { clientRequestWorkspaceFileOpenExternalSchema } from './rpc/client-request/workspace-file-open-external';
@@ -757,6 +759,12 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/workspace-file-read.json"
     },
     {
+      "$ref": "ClientRequest/workspace-file-preview-open.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-file-preview-release.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-file-write.json"
     },
     {
@@ -972,6 +980,8 @@ export const rpcSchemaRefs = [
   clientRequestWorkspaceGitBranchesSchema,
   clientRequestWorkspaceGitCheckoutSchema,
   clientRequestWorkspaceFileReadSchema,
+  clientRequestWorkspaceFilePreviewOpenSchema,
+  clientRequestWorkspaceFilePreviewReleaseSchema,
   clientRequestWorkspaceFileWriteSchema,
   clientRequestWorkspaceFileExternalActionsSchema,
   clientRequestWorkspaceFileOpenExternalSchema,

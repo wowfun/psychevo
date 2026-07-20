@@ -407,6 +407,12 @@
       "$ref": "ClientRequest/workspace-file-read.json"
     },
     {
+      "$ref": "ClientRequest/workspace-file-preview-open.json"
+    },
+    {
+      "$ref": "ClientRequest/workspace-file-preview-release.json"
+    },
+    {
       "$ref": "ClientRequest/workspace-file-write.json"
     },
     {

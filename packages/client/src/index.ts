@@ -215,6 +215,10 @@ import {
   type WorkspaceFileExternalActionsResult,
   type WorkspaceFileOpenExternalParams,
   type WorkspaceFileOpenExternalResult,
+  type WorkspaceFilePreviewOpenParams,
+  type WorkspaceFilePreviewOpenResult,
+  type WorkspaceFilePreviewReleaseParams,
+  type WorkspaceFilePreviewReleaseResult,
   type WorkspaceFileReadParams,
   type WorkspaceFileReadResult,
   type WorkspaceFileWriteParams,
@@ -402,6 +406,8 @@ export interface GatewayRequestParams {
   "workspace/diff": WorkspaceDiffParams;
   "workspace/file/externalActions": WorkspaceFileExternalActionsParams;
   "workspace/file/openExternal": WorkspaceFileOpenExternalParams;
+  "workspace/file/preview/open": WorkspaceFilePreviewOpenParams;
+  "workspace/file/preview/release": WorkspaceFilePreviewReleaseParams;
   "workspace/file/read": WorkspaceFileReadParams;
   "workspace/file/write": WorkspaceFileWriteParams;
   "workspace/files": WorkspaceFilesParams;
@@ -550,6 +556,8 @@ export interface GatewayRequestResults {
   "workspace/diff": WorkspaceDiffResult;
   "workspace/file/externalActions": WorkspaceFileExternalActionsResult;
   "workspace/file/openExternal": WorkspaceFileOpenExternalResult;
+  "workspace/file/preview/open": WorkspaceFilePreviewOpenResult;
+  "workspace/file/preview/release": WorkspaceFilePreviewReleaseResult;
   "workspace/file/read": WorkspaceFileReadResult;
   "workspace/file/write": WorkspaceFileWriteResult;
   "workspace/files": WorkspaceFilesResult;

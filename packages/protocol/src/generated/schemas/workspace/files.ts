@@ -1061,6 +1061,193 @@ export const workspaceFileSchemas = {
   "title": "WorkspaceFileReadResult",
   "type": "object"
 },
+  WorkspaceFilePreviewOpenParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "$ref": "#/definitions/GatewayRequestScope"
+    }
+  },
+  "required": [
+    "path",
+    "scope"
+  ],
+  "title": "WorkspaceFilePreviewOpenParams",
+  "type": "object"
+},
+  WorkspaceFilePreviewOpenResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "binary": {
+      "type": "boolean"
+    },
+    "content": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "editable": {
+      "default": false,
+      "type": "boolean"
+    },
+    "editableReason": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expiresAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "lineEnding": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mediaType": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "resourceId": {
+      "type": "string"
+    },
+    "resourcePath": {
+      "type": "string"
+    },
+    "revision": {
+      "default": "",
+      "type": "string"
+    },
+    "sizeBytes": {
+      "default": 0,
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "unreadable": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "binary",
+    "expiresAtMs",
+    "mediaType",
+    "path",
+    "resourceId",
+    "resourcePath",
+    "truncated"
+  ],
+  "title": "WorkspaceFilePreviewOpenResult",
+  "type": "object"
+},
+  WorkspaceFilePreviewReleaseParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "resourceId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "resourceId"
+  ],
+  "title": "WorkspaceFilePreviewReleaseParams",
+  "type": "object"
+},
+  WorkspaceFilePreviewReleaseResult: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "released": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "released"
+  ],
+  "title": "WorkspaceFilePreviewReleaseResult",
+  "type": "object"
+},
   WorkspaceFileWriteParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {

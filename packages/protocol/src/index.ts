@@ -36,6 +36,8 @@ import type {
   WorkspaceChangeMutationResult,
   WorkspaceChangesResult,
   WorkspaceDiffResult,
+  WorkspaceFilePreviewOpenResult,
+  WorkspaceFilePreviewReleaseResult,
   WorkspaceFileReadResult,
   WorkspaceFileWriteResult,
   WorkspaceFilesResult
@@ -95,6 +97,10 @@ export const WorkspaceFilesResultSchema =
   schema<WorkspaceFilesResult>("WorkspaceFilesResult");
 export const WorkspaceFileReadResultSchema =
   schema<WorkspaceFileReadResult>("WorkspaceFileReadResult");
+export const WorkspaceFilePreviewOpenResultSchema =
+  schema<WorkspaceFilePreviewOpenResult>("WorkspaceFilePreviewOpenResult");
+export const WorkspaceFilePreviewReleaseResultSchema =
+  schema<WorkspaceFilePreviewReleaseResult>("WorkspaceFilePreviewReleaseResult");
 export const WorkspaceFileWriteResultSchema =
   schema<WorkspaceFileWriteResult>("WorkspaceFileWriteResult");
 export const WorkspaceDiffResultSchema =

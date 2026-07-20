@@ -2030,6 +2030,10 @@ pub enum ClientRequest {
     WorkspaceGitCheckout(WorkspaceGitCheckoutParams),
     #[serde(rename = "workspace/file/read")]
     WorkspaceFileRead(WorkspaceFileReadParams),
+    #[serde(rename = "workspace/file/preview/open")]
+    WorkspaceFilePreviewOpen(WorkspaceFilePreviewOpenParams),
+    #[serde(rename = "workspace/file/preview/release")]
+    WorkspaceFilePreviewRelease(WorkspaceFilePreviewReleaseParams),
     #[serde(rename = "workspace/file/write")]
     WorkspaceFileWrite(WorkspaceFileWriteParams),
     #[serde(rename = "workspace/file/externalActions")]

@@ -526,6 +526,51 @@ pub struct WorkspaceFileReadResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceFilePreviewOpenParams {
+    pub scope: GatewayRequestScope,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFilePreviewOpenResult {
+    pub path: String,
+    #[serde(default)]
+    pub content: Option<String>,
+    pub truncated: bool,
+    pub binary: bool,
+    #[serde(default)]
+    pub editable: bool,
+    #[serde(default)]
+    pub editable_reason: Option<String>,
+    #[serde(default)]
+    pub size_bytes: usize,
+    #[serde(default)]
+    pub revision: String,
+    #[serde(default)]
+    pub line_ending: Option<String>,
+    #[serde(default)]
+    pub unreadable: Option<String>,
+    pub media_type: String,
+    pub resource_id: String,
+    pub resource_path: String,
+    pub expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFilePreviewReleaseParams {
+    pub resource_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFilePreviewReleaseResult {
+    pub released: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceFileWriteParams {
     pub scope: GatewayRequestScope,
     pub path: String,
