@@ -311,89 +311,10 @@ async fn acp_peer_agent_turn_routes_to_backend_and_persists_native_session() {
     let harness = harness(backend.clone());
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp.py");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/fake_acp_session_persistence.py");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json
-import os
-import sqlite3
-import sys
-
-loaded_session = None
-counter_path = sys.argv[0] + ".counter"
-process_counter_path = sys.argv[0] + ".processes"
-try:
-    with open(process_counter_path, "r", encoding="utf-8") as process_counter_file:
-        process_counter = int(process_counter_file.read())
-except (FileNotFoundError, ValueError):
-    process_counter = 0
-with open(process_counter_path, "w", encoding="utf-8") as process_counter_file:
-    process_counter_file.write(str(process_counter + 1))
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def update(session_id, update):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": session_id,
-        "update": update
-    }})
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    params = message.get("params") or {}
-    if method == "initialize":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
-    elif method == "session/new":
-        try:
-            with open(counter_path, "r", encoding="utf-8") as counter_file:
-                counter = int(counter_file.read())
-        except (FileNotFoundError, ValueError):
-            counter = 0
-        counter += 1
-        with open(counter_path, "w", encoding="utf-8") as counter_file:
-            counter_file.write(str(counter))
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-" + str(counter)}})
-    elif method == "session/load":
-        loaded_session = params.get("sessionId")
-        update(loaded_session, {
-            "sessionUpdate": "agent_message_chunk",
-            "content": {"type": "text", "text": "old answer from loaded history"}
-        })
-        send({"jsonrpc": "2.0", "id": mid, "result": {}})
-    elif method == "session/prompt":
-        session_id = params.get("sessionId") or "native-1"
-        with sqlite3.connect(os.environ["PSYCHEVO_BINDING_DB"]) as connection:
-            persisted = connection.execute(
-                "SELECT native_session_id FROM gateway_runtime_bindings WHERE native_session_id = ?",
-                (session_id,),
-            ).fetchone()
-        if persisted != (session_id,):
-            raise RuntimeError("native session binding was not persisted before prompt")
-        chunks = []
-        for block in params.get("prompt") or []:
-            if block.get("type") == "text":
-                chunks.append(block.get("text") or "")
-        prefix = "loaded:" + loaded_session if loaded_session else "new:" + session_id
-        text = prefix + ":" + "\n".join(chunks)
-        send({"jsonrpc": "2.0", "method": "session/update", "params": {
-            "sessionId": session_id,
-            "update": {
-                "sessionUpdate": "agent_message_chunk",
-                "content": {"type": "text", "text": text}
-            }
-        }})
-        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
-    else:
-        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
-"#,
-        )
-        .expect("fake acp script");
+    std::fs::copy(fixture, &script).expect("fake acp script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -646,79 +567,10 @@ async fn acp_peer_agent_streams_standard_session_updates_to_gateway_events() {
     let harness = harness(backend.clone());
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_stream.py");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/fake_acp_stream_updates.py");
     std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json
-import sys
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def update(session_id, update):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": session_id,
-        "update": update
-    }})
-
-prompt_count = 0
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    params = message.get("params") or {}
-    if method == "initialize":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
-    elif method == "session/new":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-stream"}})
-    elif method == "session/prompt":
-        prompt_count += 1
-        session_id = params.get("sessionId") or "native-stream"
-        update(session_id, {"sessionUpdate": "session_info_update", "title": "ACP streamed title"})
-        update(session_id, {"sessionUpdate": "available_commands_update", "availableCommands": [
-            {"name": "research", "description": "Run peer research"}
-        ]})
-        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "think "}})
-        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "first"}})
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hello "}})
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "world"}})
-        update(session_id, {"sessionUpdate": "tool_call", "toolCallId": "call-echo", "title": "Run echo", "kind": "execute", "status": "pending", "rawInput": {"cmd": "echo done"}})
-        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-echo", "status": "in_progress", "content": [
-            {"type": "content", "content": {"type": "text", "text": "running\n"}}
-        ]})
-        update(session_id, {"sessionUpdate": "plan", "entries": [
-            {"content": "Inspect repo", "priority": "high", "status": "completed"},
-            {"content": "Patch bridge", "priority": "high", "status": "in_progress"}
-        ]})
-        update(session_id, {"sessionUpdate": "plan", "entries": [
-            {"content": "Persist replacement plan", "priority": "high", "status": "completed"},
-            {"content": "Verify terminal history", "priority": "high", "status": "in_progress"}
-        ]})
-        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call-echo", "status": "completed", "content": [
-            {"type": "content", "content": {"type": "text", "text": "done\n"}}
-        ], "rawOutput": {"output": "done\n"}})
-        usage = {
-            "totalTokens": 144 if prompt_count == 1 else 200,
-            "inputTokens": 100 if prompt_count == 1 else 140,
-            "outputTokens": 44 if prompt_count == 1 else 60,
-            "cachedReadTokens": 30 if prompt_count == 1 else 50,
-            "thoughtTokens": 4 if prompt_count == 1 else 8
-        }
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "stopReason": "end_turn",
-            "usage": usage
-        }})
-        update(session_id, {"sessionUpdate": "agent_message_chunk", "content": {
-            "type": "text", "text": "must remain after the response fence"
-        }})
-    else:
-        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
-"#,
-        )
-        .expect("fake acp stream script");
+    std::fs::copy(fixture, &script).expect("fake acp stream script");
     std::fs::write(
         home.join("config.toml"),
         format!(

@@ -646,20 +646,7 @@ fn worker_handler_calls_hooks_call_adapter() {
     let worker = temp.path().join("worker.py");
     fs::write(
         &worker,
-        r#"import json, sys
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-    elif method=="hooks/call":
-        result={"feedback":"worker saw hook"}
-    elif method=="shutdown":
-        result={"ok": True}
-    else:
-        result={}
-    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-"#,
+        include_str!("../../tests/fixtures/hook_worker_call_adapter.py"),
     )
     .expect("worker");
     let mut source = source(

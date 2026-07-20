@@ -302,6 +302,25 @@ fn resolve_external_file_scope(
     Ok(resolved)
 }
 
+fn resolve_workspace_preview_scope(
+    state: &WebState,
+    auth: &AuthContext,
+    scope: wire::GatewayRequestScope,
+) -> psychevo_runtime::Result<ResolvedScope> {
+    let resolved = resolve_required_scope(state, auth, scope)?;
+    if matches!(auth, AuthContext::Browser { .. }) {
+        let session = current_browser_session(state, auth)?;
+        let authorized_cwd = canonicalize_cwd(&session.cwd)?;
+        if resolved.cwd != authorized_cwd {
+            return Err(Error::Message(
+                "browser session is not authorized for file previews in this workspace"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(resolved)
+}
+
 fn resolve_start_scope(
     _state: &WebState,
     _auth: &AuthContext,

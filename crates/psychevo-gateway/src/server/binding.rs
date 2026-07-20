@@ -14,6 +14,7 @@ pub struct GatewayWebServerConfig {
     pub token: String,
     pub managed_state_path: Option<PathBuf>,
     pub managed_instance_id: Option<String>,
+    pub workspace_preview_origins: BTreeSet<String>,
 }
 
 impl GatewayWebServerConfig {
@@ -25,6 +26,7 @@ impl GatewayWebServerConfig {
         inherited_env: BTreeMap<String, String>,
         static_dir: PathBuf,
     ) -> Self {
+        let workspace_preview_origins = configured_workspace_preview_origins(&inherited_env);
         Self {
             gateway,
             home,
@@ -37,6 +39,7 @@ impl GatewayWebServerConfig {
             token: Uuid::now_v7().to_string(),
             managed_state_path: None,
             managed_instance_id: None,
+            workspace_preview_origins,
         }
     }
 
@@ -48,6 +51,7 @@ impl GatewayWebServerConfig {
         inherited_env: BTreeMap<String, String>,
         token: String,
     ) -> Self {
+        let workspace_preview_origins = configured_workspace_preview_origins(&inherited_env);
         Self {
             gateway,
             home,
@@ -60,6 +64,7 @@ impl GatewayWebServerConfig {
             token,
             managed_state_path: None,
             managed_instance_id: None,
+            workspace_preview_origins,
         }
     }
 }
@@ -213,6 +218,12 @@ pub async fn bind_gateway_web_server(
             get(download_session),
         )
         .route("/_gateway/media/{artifact_id}", get(read_media_artifact));
+    app = app.route(
+        "/_gateway/workspace-preview/{resource_id}",
+        get(workspace_preview_resource)
+            .head(workspace_preview_resource)
+            .options(workspace_preview_resource),
+    );
     if managed {
         app = app
             .route("/_gateway/managed/identity", get(managed_identity))
@@ -353,6 +364,8 @@ struct WebStateInner {
     terminals: TerminalManager,
     review: WorkspaceReviewState,
     workspace_external: WorkspaceExternalState,
+    workspace_preview: WorkspacePreviewLeaseStore,
+    workspace_preview_origins: BTreeSet<String>,
     pending_actions: Mutex<HashMap<String, PendingActionView>>,
     wechat_qr_sessions: Mutex<HashMap<String, channels::WechatQrSetupSession>>,
     mcp_oauth_sessions: Mutex<HashMap<String, McpOAuthSession>>,
@@ -532,6 +545,8 @@ impl WebState {
                 terminals: TerminalManager::default(),
                 review: WorkspaceReviewState::default(),
                 workspace_external,
+                workspace_preview: WorkspacePreviewLeaseStore::production(),
+                workspace_preview_origins: config.workspace_preview_origins,
                 pending_actions: Mutex::new(HashMap::new()),
                 wechat_qr_sessions: Mutex::new(HashMap::new()),
                 mcp_oauth_sessions: Mutex::new(HashMap::new()),

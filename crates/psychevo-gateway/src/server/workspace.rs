@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -556,36 +556,11 @@ pub(super) fn workspace_file_read_value(
     let resolved = resolve_workspace_relative_path(&scope.cwd, path)?;
     let display_path =
         path_from_root(&scope.cwd, &resolved).unwrap_or_else(|| normalize_workspace_path(path));
-    let snapshot = match read_workspace_text_snapshot(&resolved) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            return Ok(serde_json::to_value(wire::WorkspaceFileReadResult {
-                path: display_path,
-                content: None,
-                truncated: false,
-                binary: false,
-                editable: false,
-                editable_reason: Some(err.to_string()),
-                size_bytes: 0,
-                revision: "unreadable".to_string(),
-                line_ending: None,
-                unreadable: Some(err.to_string()),
-            })?);
-        }
+    let read = match std::fs::File::open(&resolved) {
+        Ok(mut file) => workspace_file_read_result_from_file(&mut file, display_path),
+        Err(error) => unreadable_workspace_file_read_result(display_path, error.to_string()),
     };
-    let editable_reason = workspace_editable_reason(&snapshot);
-    Ok(serde_json::to_value(wire::WorkspaceFileReadResult {
-        path: display_path,
-        content: snapshot.content,
-        truncated: snapshot.truncated,
-        binary: snapshot.binary,
-        editable: editable_reason.is_none(),
-        editable_reason,
-        size_bytes: snapshot.size_bytes,
-        revision: snapshot.revision,
-        line_ending: snapshot.line_ending,
-        unreadable: None,
-    })?)
+    Ok(serde_json::to_value(read)?)
 }
 
 pub(super) fn workspace_file_write_value(
@@ -715,11 +690,18 @@ struct WorkspaceTextSnapshot {
 }
 
 fn read_workspace_text_snapshot(path: &Path) -> psychevo_runtime::Result<WorkspaceTextSnapshot> {
-    let metadata = std::fs::metadata(path)?;
-    let size_bytes = metadata.len() as usize;
     let mut file = std::fs::File::open(path)?;
+    read_workspace_text_snapshot_from_file(&mut file)
+}
+
+fn read_workspace_text_snapshot_from_file(
+    file: &mut std::fs::File,
+) -> psychevo_runtime::Result<WorkspaceTextSnapshot> {
+    let metadata = file.metadata()?;
+    let size_bytes = metadata.len() as usize;
+    file.seek(SeekFrom::Start(0))?;
     let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
+    Read::by_ref(file)
         .take((MAX_WORKSPACE_TEXT_FILE_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
     let truncated = bytes.len() > MAX_WORKSPACE_TEXT_FILE_BYTES;
@@ -741,6 +723,53 @@ fn read_workspace_text_snapshot(path: &Path) -> psychevo_runtime::Result<Workspa
         revision: revision_for_bytes(&bytes, Some(size_bytes)),
         line_ending,
     })
+}
+
+pub(super) fn workspace_file_read_result_from_file(
+    file: &mut std::fs::File,
+    display_path: String,
+) -> wire::WorkspaceFileReadResult {
+    match read_workspace_text_snapshot_from_file(file) {
+        Ok(snapshot) => {
+            let editable_reason = workspace_editable_reason(&snapshot);
+            wire::WorkspaceFileReadResult {
+                path: display_path,
+                content: snapshot.content,
+                truncated: snapshot.truncated,
+                binary: snapshot.binary,
+                editable: editable_reason.is_none(),
+                editable_reason,
+                size_bytes: snapshot.size_bytes,
+                revision: snapshot.revision,
+                line_ending: snapshot.line_ending,
+                unreadable: None,
+            }
+        }
+        Err(error) => unreadable_workspace_file_read_result(display_path, error.to_string()),
+    }
+}
+
+fn unreadable_workspace_file_read_result(
+    display_path: String,
+    message: String,
+) -> wire::WorkspaceFileReadResult {
+    wire::WorkspaceFileReadResult {
+        path: display_path,
+        content: None,
+        truncated: false,
+        binary: false,
+        editable: false,
+        editable_reason: Some(message.clone()),
+        size_bytes: 0,
+        revision: "unreadable".to_string(),
+        line_ending: None,
+        unreadable: Some(message),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn workspace_file_snapshot_revision(path: &Path) -> psychevo_runtime::Result<String> {
+    Ok(read_workspace_text_snapshot(path)?.revision)
 }
 
 fn workspace_editable_reason(snapshot: &WorkspaceTextSnapshot) -> Option<String> {

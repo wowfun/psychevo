@@ -143,40 +143,21 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     let log = bootstrap.path().join("calls.log");
     std::fs::write(
         &script,
-        format!(
-            r#"#!/usr/bin/env python3
-import json, os, sys
-LOG = {log}
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"gateway-fixture/0.144.1"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif msg.get("params") is None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
-    elif method == "plugin/list":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":False,"enabled":False,"interface":{{"shortDescription":"Review"}}}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
-    elif method == "plugin/installed":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
-    elif method == "plugin/read":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":"review@openai","name":"review","installed":False,"enabled":False}},"description":"Review plugin","skills":[],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
-    elif method == "plugin/install":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("install\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
-    elif method == "plugin/uninstall":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("uninstall\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{}}}}), flush=True)
-    elif method == "app/list":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"data":[],"nextCursor":None}}}}), flush=True)
-"#,
-            log = serde_json::to_string(&log).expect("log json"),
-        ),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/codex_app_server.py"
+        )),
     )
     .expect("script");
+    std::fs::write(
+        script.with_extension("json"),
+        serde_json::to_vec(&serde_json::json!({
+            "scenario": "gateway_plugin_rpcs",
+            "log": &log,
+        }))
+        .expect("fixture config json"),
+    )
+    .expect("fixture config");
     let mut permissions = std::fs::metadata(&script).expect("metadata").permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&script, permissions).expect("chmod");

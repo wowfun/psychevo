@@ -1,6 +1,10 @@
 use std::collections::BTreeMap;
+use std::time::Instant;
 
-use psychevo_runtime::{RunStreamEvent, RunWarning};
+use psychevo_runtime::{
+    RunStreamEvent, RunWarning, WriteArgumentPreview, WriteArgumentPreviewTracker,
+    write_argument_preview_from_args,
+};
 use serde_json::{Value, json};
 
 use crate::protocol::{
@@ -21,6 +25,7 @@ pub struct GatewayLiveProjector {
     tool_aliases: BTreeMap<String, String>,
     tool_positions: BTreeMap<String, String>,
     tool_args: BTreeMap<String, Value>,
+    write_previews: BTreeMap<String, LiveWritePreviewState>,
     exec_sessions: BTreeMap<u64, LiveExecState>,
     child_projectors: BTreeMap<String, GatewayLiveProjector>,
 }
@@ -41,6 +46,12 @@ struct LiveExecState {
     segment: usize,
     metadata: Value,
     output: String,
+}
+
+#[derive(Debug, Default)]
+struct LiveWritePreviewState {
+    tracker: WriteArgumentPreviewTracker,
+    preview: Option<WriteArgumentPreview>,
 }
 
 struct AssistantContentProjection<'a> {

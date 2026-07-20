@@ -545,27 +545,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     .expect("plugin runtime overlay");
     fs::write(
         plugin_source_root.join("worker.py"),
-        r#"#!/usr/bin/env python3
-import json, os, pathlib, sys
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-    elif method=="contributions/list":
-        result={"tools": []}
-    elif method=="hooks/call":
-        data=pathlib.Path(os.environ["PSYCHEVO_PLUGIN_DATA"])
-        data.mkdir(parents=True, exist_ok=True)
-        with (data/"child-hook.jsonl").open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"event": req.get("params", {}).get("hook", {}).get("event")})+"\n")
-        result={"feedback":"plugin child hook ran"}
-    elif method=="shutdown":
-        result={"ok": True}
-    else:
-        result={}
-    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-"#,
+        include_str!("fixtures/child_hook_plugin_worker.py"),
     )
     .expect("plugin worker");
     #[cfg(unix)]

@@ -10,6 +10,7 @@ impl GatewayLiveProjector {
             tool_aliases: BTreeMap::new(),
             tool_positions: BTreeMap::new(),
             tool_args: BTreeMap::new(),
+            write_previews: BTreeMap::new(),
             exec_sessions: BTreeMap::new(),
             child_projectors: BTreeMap::new(),
         }

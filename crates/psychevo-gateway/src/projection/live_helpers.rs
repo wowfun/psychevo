@@ -120,7 +120,13 @@ fn merge_live_block_status(
     existing: TranscriptBlockStatus,
     next: TranscriptBlockStatus,
 ) -> TranscriptBlockStatus {
-    if next == TranscriptBlockStatus::Pending && existing != TranscriptBlockStatus::Pending {
+    if matches!(
+        existing,
+        TranscriptBlockStatus::Completed
+            | TranscriptBlockStatus::Failed
+            | TranscriptBlockStatus::Cancelled
+    ) || next == TranscriptBlockStatus::Pending && existing != TranscriptBlockStatus::Pending
+    {
         existing
     } else {
         next

@@ -39,6 +39,7 @@ pub(crate) mod state_runtime;
 pub(crate) mod stats;
 pub(crate) mod store;
 pub(crate) mod thread_lineage;
+mod tool_argument_display;
 mod tool_result_display;
 pub(crate) mod tool_surface;
 pub(crate) mod tools;
@@ -218,6 +219,10 @@ pub use thread_lineage::{
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,
     TUI_SIDE_CONVERSATION_SESSION_SOURCE, WEB_SIDE_CONVERSATION_SESSION_SOURCE,
     side_conversation_session_source, side_inherited_metadata_hidden,
+};
+pub use tool_argument_display::{
+    WRITE_ARGUMENT_PREVIEW_INTERVAL, WriteArgumentPreview, WriteArgumentPreviewTracker,
+    write_argument_preview_from_args, write_argument_preview_from_json,
 };
 pub use tool_result_display::decode_persisted_tool_result_for_display;
 pub use tools::tool_names_for_mode;

@@ -112,6 +112,7 @@ mod thread_application;
 mod voice;
 mod workspace;
 mod workspace_external;
+mod workspace_preview;
 
 use agents::{
     active_profile_config_dir, agent_control_result, agent_list_result, agent_read_result,
@@ -190,6 +191,11 @@ use workspace_external::{
     WorkspaceExternalState, workspace_file_external_actions_value,
     workspace_file_open_external_value,
 };
+use workspace_preview::{
+    WorkspacePreviewLeaseStore, configured_workspace_preview_origins,
+    workspace_file_preview_open_value, workspace_file_preview_release_value,
+    workspace_preview_resource,
+};
 
 include!("server/binding.rs");
 include!("server/rpc_dispatch.rs");
@@ -211,6 +217,7 @@ mod tests {
     include!("server/tests/session_browser.rs");
     include!("server/tests/agents_settings.rs");
     include!("server/tests/workspace_commands.rs");
+    include!("server/tests/workspace_preview.rs");
     include!("server/tests/automations.rs");
     include!("server/tests/voice_rpc.rs");
     include!("server/tests/terminal_launch.rs");

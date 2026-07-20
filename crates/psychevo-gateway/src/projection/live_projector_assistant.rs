@@ -209,6 +209,15 @@ impl GatewayLiveProjector {
                 if let Some(args) = metadata.get("args").cloned() {
                     self.tool_args.insert(tool_call_id.clone(), args);
                 }
+                if tool_name == "write"
+                    && !self.tool_block_is_terminal(turn_id, &tool_call_id)
+                {
+                    self.enrich_write_preview_from_metadata(
+                        &tool_call_id,
+                        &mut metadata,
+                        event_value.get("type").and_then(Value::as_str) == Some("message_end"),
+                    );
+                }
                 if tool_name == "write_stdin" {
                     return None;
                 }

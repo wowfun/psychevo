@@ -701,6 +701,15 @@ async fn handle_rpc(
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
             workspace_file_read_value(&scope, &params.path)
         }
+        "workspace/file/preview/open" => {
+            let params = request.required_params::<wire::WorkspaceFilePreviewOpenParams>()?;
+            let scope = resolve_workspace_preview_scope(&state, &auth, params.scope)?;
+            workspace_file_preview_open_value(&state, &scope, &params.path)
+        }
+        "workspace/file/preview/release" => {
+            let params = request.required_params::<wire::WorkspaceFilePreviewReleaseParams>()?;
+            workspace_file_preview_release_value(&state, &params.resource_id)
+        }
         "workspace/file/write" => {
             let params = request.required_params::<wire::WorkspaceFileWriteParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;

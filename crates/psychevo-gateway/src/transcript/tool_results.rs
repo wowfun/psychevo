@@ -78,6 +78,24 @@ fn attach_tool_results(entries: &mut [TranscriptEntry], summaries: &[TuiMessageS
         if tool_name == "spawn_agent" {
             enrich_committed_agent_metadata(&mut metadata);
         }
+        if tool_name == "write" && status == TranscriptBlockStatus::Failed {
+            let preview = metadata
+                .get("args")
+                .or_else(|| metadata.get("arguments"))
+                .and_then(write_argument_preview_from_args)
+                .or_else(|| {
+                    block
+                        .detail
+                        .as_deref()
+                        .and_then(write_argument_preview_from_json)
+                });
+            if let Some(preview) = preview {
+                metadata.insert(
+                    "write_argument_preview".to_string(),
+                    crate::projection::write_argument_preview_metadata_value(&preview, "failed"),
+                );
+            }
+        }
         let generated_image = generated_image_metadata(&metadata);
         block.metadata = Some(Value::Object(metadata.clone()));
         block.result = Some(TranscriptToolResult {

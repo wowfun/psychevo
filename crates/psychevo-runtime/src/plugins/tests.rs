@@ -1204,19 +1204,7 @@ fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
-import json, sys
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-    elif method=="contributions/list":
-        result={"tools":[{"name":"cleanup_status","description":"status","parameters":{"type":"object","properties":{}}}]}
-    else:
-        result={}
-    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-"#,
+        include_str!("../../tests/fixtures/plugin_worker_tool_discovery.py"),
     );
     install_plugin(
         &home,
@@ -1370,21 +1358,7 @@ fn worker_tool_executes_through_binding() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
-import json, sys
-for line in sys.stdin:
-    req=json.loads(line)
-    mid=req.get("method")
-    if mid=="initialize":
-        result={"ok": True}
-    elif mid=="contributions/list":
-        result={"tools":[{"name":"cleanup_status","description":"status","parameters":{"type":"object","properties":{}}}]}
-    elif mid=="tools/call":
-        result={"json":{"status":"ok","plugin":req["params"]["name"]},"content":"ok"}
-    else:
-        result={}
-    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-"#,
+        include_str!("../../tests/fixtures/plugin_worker_tool_call.py"),
     );
     let record = install_plugin(
         &home,
@@ -1436,22 +1410,7 @@ fn worker_contribution_discovery_receives_effective_env() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
-import json, os, sys
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-    elif method=="contributions/list":
-        if os.environ.get("PLUGIN_DISCOVERY_TOKEN") == "ok":
-            result={"tools":[{"name":"env_tool","description":"env","parameters":{"type":"object","properties":{}}}]}
-        else:
-            result={"tools":[]}
-    else:
-        result={}
-    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-"#,
+        include_str!("../../tests/fixtures/plugin_worker_effective_env.py"),
     );
     let record = install_plugin(
         &home,
@@ -1496,19 +1455,7 @@ fn worker_contribution_discovery_times_out() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
-import json, sys, time
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-        print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-    elif method=="contributions/list":
-        time.sleep(30)
-    else:
-        print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":{}}), flush=True)
-"#,
+        include_str!("../../tests/fixtures/plugin_worker_contribution_timeout.py"),
     );
     let record = install_plugin(
         &home,
@@ -1551,19 +1498,7 @@ async fn worker_tool_call_timeout_returns_tool_error() {
     );
     write_worker(
         &source,
-        r#"#!/usr/bin/env python3
-import json, sys, time
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-        print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-    elif method=="tools/call":
-        time.sleep(30)
-    else:
-        print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":{}}), flush=True)
-"#,
+        include_str!("../../tests/fixtures/plugin_worker_tool_call_timeout.py"),
     );
     let record = install_plugin(
         &home,

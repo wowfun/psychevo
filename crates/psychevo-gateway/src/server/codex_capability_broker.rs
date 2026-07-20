@@ -3090,6 +3090,31 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
+    #[cfg(unix)]
+    const CODEX_APP_SERVER_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/codex_app_server.py"
+    ));
+
+    #[cfg(unix)]
+    fn write_codex_app_server_fixture(script: &Path, scenario: &str, mut config: Value) {
+        config
+            .as_object_mut()
+            .expect("Codex fixture config object")
+            .insert("scenario".to_string(), json!(scenario));
+        fs::write(script, CODEX_APP_SERVER_FIXTURE).expect("Codex app-server fixture");
+        fs::write(
+            script.with_extension("json"),
+            serde_json::to_vec(&config).expect("Codex fixture config JSON"),
+        )
+        .expect("Codex fixture config");
+        let mut permissions = fs::metadata(script)
+            .expect("fixture metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(script, permissions).expect("fixture permissions");
+    }
+
     #[test]
     fn connect_url_validation_uses_the_parsed_origin() {
         for allowed in [
@@ -3182,31 +3207,7 @@ mod tests {
             "[codex_plugins]\nenabled = true\n",
         )
         .expect("config");
-        fs::write(
-            &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, os, sys
-with open({log}, "w", encoding="utf-8") as handle:
-    json.dump({{"codexHome": os.environ.get("CODEX_HOME"), "argv": sys.argv[1:]}}, handle)
-for line in sys.stdin:
-    msg = json.loads(line)
-    if msg.get("method") == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"codex_cli_rs/0.144.1"}}}}), flush=True)
-    elif msg.get("method") == "initialized":
-        pass
-    elif msg.get("method") == "plugin/installed" and msg.get("params") is not None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
-    elif msg.get("id") is not None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
-"#,
-                log = serde_json::to_string(&log).expect("log json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "private_home", json!({"log": log}));
         let env = BTreeMap::from([
             ("HOME".to_string(), user_home.display().to_string()),
             (
@@ -3319,32 +3320,7 @@ for line in sys.stdin:
             ),
         )
         .expect("config");
-        fs::write(
-            &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, os, sys
-LOG = {log}
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"any-originator/0.144.1"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    else:
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write(method + ":" + ("null" if msg.get("params") is None else "normal") + "\n")
-        code = -32601 if method == "app/list" else -32602
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":code,"message":"method not found" if code == -32601 else "invalid params"}}}}), flush=True)
-"#,
-                log = serde_json::to_string(&log).expect("log json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "preflight_missing_method", json!({"log": log}));
         let broker = CodexCapabilityBroker::new(&BTreeMap::from([
             (
                 "PSYCHEVO_HOME".to_string(),
@@ -3372,40 +3348,7 @@ for line in sys.stdin:
     async fn broker_handshakes_reuses_process_and_declines_unrouted_elicitation() {
         let temp = tempfile::tempdir().expect("temp");
         let script = temp.path().join("fake-codex.py");
-        fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json, os, sys, time
-initialized = False
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}), flush=True)
-    elif method == "initialized":
-        initialized = True
-    elif method == "plugin/list":
-        assert initialized
-        print(json.dumps({"jsonrpc":"2.0","id":900,"method":"mcpServer/elicitation/request","params":{"request":{"mode":"form"}}}), flush=True)
-        response = json.loads(sys.stdin.readline())
-        assert response["result"]["action"] == "decline"
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"marketplaces":[{"name":"openai","path":None,"plugins":[{"id":"review@openai","name":"review","installed":False,"enabled":False}]}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}), flush=True)
-    elif method == "plugin/installed":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"marketplaces":[],"marketplaceLoadErrors":[]}}), flush=True)
-    elif method == "plugin/read":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"plugin":{"marketplaceName":"openai","summary":{"name":"review","installed":False,"enabled":False},"description":"Review","skills":[{"name":"review"}],"hooks":[],"apps":[{"id":"review-app","name":"Review"}],"mcpServers":[]}}}), flush=True)
-    elif method == "plugin/install":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"authPolicy":"ON_USE","appsNeedingAuth":[]}}), flush=True)
-    elif method == "plugin/uninstall":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{}}), flush=True)
-    elif method == "app/list":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"data":[],"nextCursor":None}}), flush=True)
-"#,
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "handshake", json!({}));
         let broker = CodexCapabilityBroker::with_command(
             BrokerCommand {
                 program: script,
@@ -3460,31 +3403,7 @@ for line in sys.stdin:
         fs::create_dir_all(&home).expect("home");
         fs::write(home.join("config.toml"), "# config\n").expect("config");
         let script = temp.path().join("fake-codex.py");
-        fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json, sys
-pending_tool = None
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif method == "mcpServer/tool/call":
-        pending_tool = msg["id"]
-        print(json.dumps({"jsonrpc":"2.0","id":900,"method":"mcpServer/elicitation/request","params":{"threadId":"codex-thread","turnId":"turn-a","mode":"form","message":"Continue?","requestedSchema":{"type":"object","properties":{"confirmed":{"type":"boolean"}},"required":["confirmed"]}}}), flush=True)
-    elif method == "plugin/list":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"marketplaces":[],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}), flush=True)
-    elif msg.get("id") == 900:
-        print(json.dumps({"jsonrpc":"2.0","id":pending_tool,"result":{"content":[{"type":"text","text":"done"}],"isError":False}}), flush=True)
-"#,
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "elicitation_wait", json!({}));
         let env = BTreeMap::from([(
             "PATH".to_string(),
             std::env::var("PATH").unwrap_or_default(),
@@ -3571,34 +3490,7 @@ for line in sys.stdin:
         fs::create_dir_all(&other_cwd).expect("other cwd");
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
-        fs::write(
-            &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, sys, time
-LOG = {log}
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif method == "plugin/installed":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-installed\n")
-        time.sleep(0.1)
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
-    else:
-        raise AssertionError("unexpected method: " + str(method))
-"#,
-                log = serde_json::to_string(&log).expect("log json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "inventory_single_flight", json!({"log": log}));
         let broker = CodexCapabilityBroker::with_command(
             BrokerCommand {
                 program: script,
@@ -3641,35 +3533,7 @@ for line in sys.stdin:
         fs::create_dir_all(&cwd).expect("cwd");
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
-        fs::write(
-            &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, sys
-LOG = {log}
-count = 0
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif method == "plugin/installed":
-        count += 1
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-installed\n")
-        if count == 1:
-            print(json.dumps({{"jsonrpc":"2.0","method":"account/updated","params":{{"authMode":"chatgpt"}}}}), flush=True)
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
-"#,
-                log = serde_json::to_string(&log).expect("log json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "account_update", json!({"log": log}));
         let broker = CodexCapabilityBroker::with_command(
             BrokerCommand {
                 program: script,
@@ -3708,38 +3572,15 @@ for line in sys.stdin:
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
         let release = temp.path().join("release");
-        fs::write(
+        write_codex_app_server_fixture(
             &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, os, sys, time
-LOG = {log}
-RELEASE = {release}
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":{private_home},"platformFamily":"unix","platformOs":"linux","userAgent":"codex_cli_rs/0.144.1"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif msg.get("params") is None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
-    elif method == "plugin/installed":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-installed\n")
-        while not os.path.exists(RELEASE):
-            time.sleep(0.005)
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
-"#,
-                log = serde_json::to_string(&log).expect("log json"),
-                release = serde_json::to_string(&release).expect("release json"),
-                private_home = serde_json::to_string(&home.join("codex")).expect("home json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+            "prewarm_inventory",
+            json!({
+                "log": log,
+                "release": release,
+                "private_home": home.join("codex"),
+            }),
+        );
         fs::write(
             home.join("config.toml"),
             format!(
@@ -3869,31 +3710,7 @@ for line in sys.stdin:
         fs::create_dir_all(&cwd).expect("cwd");
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
-        fs::write(
-            &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, sys
-LOG = {log}
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif method == "plugin/installed":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-installed\n")
-        sys.exit(1)
-"#,
-                log = serde_json::to_string(&log).expect("log json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "failed_inventory", json!({"log": log}));
         let broker = CodexCapabilityBroker::with_command_and_runtime_retry(
             BrokerCommand {
                 program: script,
@@ -3938,56 +3755,11 @@ for line in sys.stdin:
         fs::write(beta.join(".codex-plugin/plugin.json"), "{}").expect("beta manifest");
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
-        fs::write(
+        write_codex_app_server_fixture(
             &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, sys
-ALPHA = {alpha}
-BETA = {beta}
-LOG = {log}
-active = "alpha"
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif method == "plugin/installed":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("installed:" + active + "\n")
-        plugins = [] if active == "none" else [{{"id":active + "@openai","name":active,"installed":True,"enabled":True}}]
-        marketplaces = [] if not plugins else [{{"name":"openai","path":None,"plugins":plugins}}]
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":marketplaces,"marketplaceLoadErrors":[]}}}}), flush=True)
-    elif method == "plugin/list":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"beta@openai","name":"beta","installed":active == "beta","enabled":active == "beta"}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
-    elif method == "plugin/read":
-        name = msg["params"]["pluginName"]
-        path = ALPHA if name == "alpha" else BETA
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":name + "@openai","name":name,"installed":True,"enabled":True,"source":{{"type":"local","path":path}}}},"description":name,"skills":[{{"name":name,"path":path + "/skills/" + name + "/SKILL.md","enabled":True}}],"hooks":[],"apps":[],"mcpServers":[]}}}}}}), flush=True)
-    elif method == "plugin/install":
-        active = "beta"
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("install\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
-    elif method == "plugin/uninstall":
-        active = "none"
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("uninstall\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{}}}}), flush=True)
-    else:
-        raise AssertionError("unexpected method: " + str(method))
-"#,
-                alpha = serde_json::to_string(&alpha).expect("alpha json"),
-                beta = serde_json::to_string(&beta).expect("beta json"),
-                log = serde_json::to_string(&log).expect("log json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+            "catalog_mutation",
+            json!({"alpha": alpha, "beta": beta, "log": log}),
+        );
         let env = BTreeMap::from([
             ("HOME".to_string(), temp.path().display().to_string()),
             ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
@@ -4325,44 +4097,11 @@ for line in sys.stdin:
             ),
         )
         .expect("config");
-        fs::write(
+        write_codex_app_server_fixture(
             &script,
-            format!(
-                r#"#!/usr/bin/env python3
-import json, os, sys
-PACKAGE = {package}
-installed = False
-def catalog():
-    return {{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":installed,"enabled":installed,"localVersion":"1.0.0"}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    params = msg.get("params")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"review-host/0.144.1"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif params is None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
-    elif method == "plugin/list":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":catalog()}}), flush=True)
-    elif method == "plugin/install":
-        installed = True
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
-    elif method == "plugin/read":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"summary":{{"installed":True,"enabled":True,"localVersion":"1.0.0","source":{{"type":"local","path":PACKAGE}}}},"skills":[],"hooks":[],"mcpServers":[],"apps":[]}}}}}}), flush=True)
-    elif method == "plugin/installed":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":catalog()}}), flush=True)
-    else:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32601,"message":"method not found"}}}}), flush=True)
-"#,
-                package = serde_json::to_string(&package).expect("package json"),
-            ),
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+            "install_materializes",
+            json!({"package": package}),
+        );
         let broker = CodexCapabilityBroker::new(&BTreeMap::from([
             (
                 "HOME".to_string(),
@@ -4415,26 +4154,7 @@ for line in sys.stdin:
     async fn app_connect_uses_install_url_and_observes_accessibility() {
         let temp = tempfile::tempdir().expect("temp");
         let script = temp.path().join("fake-codex.py");
-        fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json, sys
-calls = 0
-for line in sys.stdin:
-    msg = json.loads(line)
-    if msg.get("method") == "initialize":
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"codexHome":"/fake","platformFamily":"unix","platformOs":"linux","userAgent":"fake"}}), flush=True)
-    elif msg.get("method") == "initialized":
-        pass
-    elif msg.get("method") == "app/list":
-        calls += 1
-        print(json.dumps({"jsonrpc":"2.0","id":msg["id"],"result":{"data":[{"id":"review-app","isAccessible":calls > 1,"installUrl":"https://apps.example.test/install/review"}]}}), flush=True)
-"#,
-        )
-        .expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
+        write_codex_app_server_fixture(&script, "app_connect", json!({}));
         let broker = CodexCapabilityBroker::with_command(
             BrokerCommand {
                 program: script,
@@ -4553,62 +4273,11 @@ for line in sys.stdin:
         fs::write(package.join(".app.json"), "{}").expect("app");
         let log = temp.path().join("broker.log");
         let script = temp.path().join("fake-codex.py");
-        let script_text = format!(
-            r#"#!/usr/bin/env python3
-import json, os, sys, time
-PACKAGE = {package}
-LOG = {log}
-initialized = False
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        assert msg["params"]["capabilities"]["mcpServerOpenaiFormElicitation"] is True
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"fixture/0.144.1"}}}}), flush=True)
-    elif method == "initialized":
-        initialized = True
-    elif msg.get("params") is None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
-    elif method == "plugin/installed":
-        assert initialized
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-installed\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":True,"enabled":True}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
-    elif method == "plugin/list":
-        time.sleep(2)
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-list\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[{{"name":"openai","path":None,"plugins":[{{"id":"review@openai","name":"review","installed":True,"enabled":True}}]}}],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
-    elif method == "plugin/install":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"authPolicy":"ON_USE","appsNeedingAuth":[]}}}}), flush=True)
-    elif method == "plugin/read":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"marketplaceName":"openai","summary":{{"id":"review@openai","name":"review","installed":True,"enabled":True,"source":{{"type":"local","path":PACKAGE}}}},"skills":[{{"name":"review","path":PACKAGE + "/skills/review/SKILL.md","enabled":True}}],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
-    elif method == "thread/start":
-        assert msg["params"]["ephemeral"] is True
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"thread":{{"id":"codex-thread-1"}}}}}}), flush=True)
-    elif method == "mcpServerStatus/list":
-        assert msg["params"]["threadId"] == "codex-thread-1"
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("mcp-status\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"data":[{{"name":"codex_apps","tools":{{"review":{{"description":"Review app","inputSchema":{{"type":"object","properties":{{}}}}}}}}}}],"nextCursor":None}}}}), flush=True)
-    elif method == "mcpServer/tool/call":
-        print(json.dumps({{"jsonrpc":"2.0","id":9001,"method":"mcpServer/elicitation/request","params":{{"threadId":"codex-thread-1","turnId":"turn-1","serverName":"codex_apps","mode":"form","_meta":{{"source":"test"}},"message":"Continue?","requestedSchema":{{"type":"object","properties":{{"confirmed":{{"type":"boolean"}}}},"required":["confirmed"]}}}}}}), flush=True)
-        answer = json.loads(sys.stdin.readline())
-        assert answer["result"]["action"] == "accept"
-        assert answer["result"]["content"]["confirmed"] is True
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"content":[{{"type":"text","text":"done"}}],"structuredContent":{{"ok":True}},"isError":False}}}}), flush=True)
-    elif method == "thread/archive":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write(msg["params"]["threadId"] + "\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{}}}}), flush=True)
-"#,
-            package = serde_json::to_string(&package).expect("package json"),
-            log = serde_json::to_string(&log).expect("log json"),
+        write_codex_app_server_fixture(
+            &script,
+            "installed_package",
+            json!({"package": package, "log": log}),
         );
-        fs::write(&script, script_text).expect("script");
-        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&script, permissions).expect("chmod");
         fs::create_dir_all(&home).expect("profile home");
         fs::write(
             home.join("config.toml"),

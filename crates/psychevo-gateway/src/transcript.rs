@@ -4,6 +4,7 @@ use psychevo_runtime::{
     AgentEdgeRecord, AssistantBlock, GatewayTurnTerminalRecord, Message, SessionCompactionRecord,
     TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY, UserContentBlock,
     decode_persisted_tool_result_for_display, side_inherited_metadata_hidden,
+    write_argument_preview_from_args, write_argument_preview_from_json,
 };
 use serde_json::{Value, json};
 
@@ -122,6 +123,14 @@ pub(crate) fn reconcile_terminal_bounded_running_blocks(
                     TranscriptBlockStatus::Pending | TranscriptBlockStatus::Running
                 ) {
                     block.status = replacement;
+                    retain_terminal_write_preview(
+                        block,
+                        if replacement == TranscriptBlockStatus::Cancelled {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        },
+                    );
                     block.updated_at_ms = block.updated_at_ms.max(terminal.completed_at_ms);
                     changed = true;
                 }
@@ -131,6 +140,28 @@ pub(crate) fn reconcile_terminal_bounded_running_blocks(
                 entry.updated_at_ms = entry.updated_at_ms.max(terminal.completed_at_ms);
             }
         }
+    }
+}
+
+fn retain_terminal_write_preview(block: &mut TranscriptBlock, phase: &str) {
+    let Some(metadata) = block.metadata.as_mut() else {
+        return;
+    };
+    if metadata.get("tool_name").and_then(Value::as_str) != Some("write") {
+        return;
+    }
+    let preview = metadata
+        .get("args")
+        .or_else(|| metadata.get("arguments"))
+        .and_then(write_argument_preview_from_args)
+        .or_else(|| {
+            block
+                .detail
+                .as_deref()
+                .and_then(write_argument_preview_from_json)
+        });
+    if let Some(preview) = preview {
+        crate::projection::set_write_argument_preview(metadata, &preview, phase);
     }
 }
 

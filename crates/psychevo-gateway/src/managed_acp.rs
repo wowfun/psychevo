@@ -902,10 +902,19 @@ mod tests {
     }
 
     fn test_install_env() -> BTreeMap<String, String> {
-        std::env::var("PATH")
+        let mut env = std::env::var("PATH")
             .ok()
             .map(|path| BTreeMap::from([("PATH".to_string(), path)]))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        env.insert(
+            "PSYCHEVO_TEST_CODEX_ACP_PACKAGE".to_string(),
+            CODEX_ACP_PACKAGE.to_string(),
+        );
+        env.insert(
+            "PSYCHEVO_TEST_CODEX_ACP_VERSION".to_string(),
+            CODEX_ACP_VERSION.to_string(),
+        );
+        env
     }
 
     #[cfg(unix)]
@@ -914,23 +923,11 @@ mod tests {
 
         let path = temp.join(if succeeds { "fake-npm" } else { "failing-npm" });
         let body = if succeeds {
-            format!(
-                r#"#!/bin/sh
-set -eu
-test "$#" -eq 5
-test "$1" = ci
-test "$2" = --omit=dev
-test "$3" = --ignore-scripts
-test "$4" = --no-audit
-test "$5" = --no-fund
-mkdir -p node_modules/@agentclientprotocol/codex-acp node_modules/.bin
-mkdir -p node_modules/@agentclientprotocol/codex-acp/dist
-printf '%s' '{{"name":"{CODEX_ACP_PACKAGE}","version":"{CODEX_ACP_VERSION}"}}' > node_modules/@agentclientprotocol/codex-acp/package.json
-printf '%s\n' '#!/bin/sh' 'exit 0' > node_modules/@agentclientprotocol/codex-acp/dist/cli.js
-chmod 755 node_modules/@agentclientprotocol/codex-acp/dist/cli.js
-ln -s ../@agentclientprotocol/codex-acp/dist/cli.js node_modules/.bin/codex-acp
-"#
-            )
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/fake_managed_codex_npm.sh"
+            ))
+            .to_string()
         } else {
             "#!/bin/sh\nexit 17\n".to_string()
         };
@@ -944,14 +941,8 @@ ln -s ../@agentclientprotocol/codex-acp/dist/cli.js node_modules/.bin/codex-acp
     #[cfg(unix)]
     fn fake_npm_requiring_captured_env(temp: &Path) -> PathBuf {
         let path = fake_npm(temp, true);
-        let body = std::fs::read_to_string(&path)
-            .expect("fake npm body")
-            .replacen(
-                "set -eu\n",
-                "set -eu\ntest \"${PSYCHEVO_CAPTURED_INSTALL_ENV:-}\" = captured\ntest -z \"${HOME+x}\"\n",
-                1,
-            );
-        std::fs::write(&path, body).expect("captured-env fake npm");
+        std::fs::write(path.with_extension("require-captured-env"), "required\n")
+            .expect("captured-env marker");
         path
     }
 

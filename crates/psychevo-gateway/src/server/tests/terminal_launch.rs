@@ -908,6 +908,28 @@ async fn fingerprinted_static_asset_is_immutable_cacheable() {
 }
 
 #[tokio::test]
+async fn module_worker_static_asset_uses_javascript_content_type() {
+    let (temp, state) = web_state_with_static();
+    let worker = temp.path().join("static/file-viewer/vendor/pdf/pdf.worker.mjs");
+    std::fs::create_dir_all(worker.parent().expect("worker parent")).expect("worker dir");
+    std::fs::write(&worker, "export const WorkerMessageHandler = {};").expect("worker");
+
+    let response = static_asset(
+        State(state),
+        HeaderMap::new(),
+        axum::http::Uri::from_static("/file-viewer/vendor/pdf/pdf.worker.mjs"),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        Some("text/javascript; charset=utf-8")
+    );
+}
+
+#[tokio::test]
 async fn download_session_honors_export_query_options() {
     let (_temp, state) = web_state_with_static();
     let session_id = state

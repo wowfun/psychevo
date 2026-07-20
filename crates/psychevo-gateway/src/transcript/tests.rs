@@ -279,6 +279,101 @@
     }
 
     #[test]
+    fn projector_derives_failed_write_preview_without_changing_persisted_values() {
+        let arguments = json!({"path": "report.md", "content": "unfinished body"});
+        let result_content = json!({"error": "permission denied"}).to_string();
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call("call-write", "write", arguments.clone())],
+                    timestamp_ms: 1,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call-write".to_string(),
+                    tool_name: "write".to_string(),
+                    content: result_content.clone(),
+                    is_error: true,
+                    timestamp_ms: 2,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let block = &entries[0].blocks[0];
+        let metadata = block.metadata.as_ref().expect("write metadata");
+        assert_eq!(metadata["args"], arguments);
+        assert_eq!(
+            metadata["write_argument_preview"],
+            json!({
+                "phase": "failed",
+                "path": "report.md",
+                "text": "unfinished body",
+                "bytes_seen": 15,
+                "lines_seen": 1,
+                "omitted_bytes": 0,
+                "truncated": false,
+            })
+        );
+        assert_eq!(
+            block.result.as_ref().expect("write result").content,
+            result_content
+        );
+        match &summaries[0].message {
+            Message::Assistant { content, .. } => match &content[0] {
+                AssistantBlock::ToolCall(call) => assert_eq!(call.arguments, arguments),
+                other => panic!("unexpected assistant block: {other:?}"),
+            },
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn projector_does_not_attach_write_preview_to_successful_history() {
+        let summaries = vec![
+            summary(
+                1,
+                Message::Assistant {
+                    content: vec![tool_call(
+                        "call-write",
+                        "write",
+                        json!({"path": "report.md", "content": "complete body"}),
+                    )],
+                    timestamp_ms: 1,
+                    finish_reason: Some("tool_calls".to_string()),
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            summary(
+                2,
+                Message::ToolResult {
+                    tool_call_id: "call-write".to_string(),
+                    tool_name: "write".to_string(),
+                    content: json!({"path": "report.md", "bytes_written": 13}).to_string(),
+                    is_error: false,
+                    timestamp_ms: 2,
+                },
+            ),
+        ];
+
+        let entries = project_transcript_entries("thread-1", &summaries);
+        let metadata = entries[0].blocks[0]
+            .metadata
+            .as_ref()
+            .expect("write metadata");
+        assert!(metadata.get("write_argument_preview").is_none());
+    }
+
+    #[test]
     fn projector_materializes_acp_plan_metadata_as_a_display_only_status_block() {
         let mut assistant = summary(
             1,

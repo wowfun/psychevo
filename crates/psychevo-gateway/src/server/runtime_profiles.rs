@@ -3963,29 +3963,10 @@ mod runtime_session_ownership_tests {
         let log_path = temp.path().join("process_ephemeral_methods.log");
         std::fs::write(
             &script_path,
-            format!(
-                r#"import json
-import sys
-
-log_path = {log_path:?}
-for line in sys.stdin:
-    message = json.loads(line)
-    method = message.get("method")
-    with open(log_path, "a", encoding="utf-8") as log:
-        log.write(str(method) + "\n")
-    if method == "initialize":
-        response = {{
-            "protocolVersion": 1,
-            "agentInfo": {{"name": "ephemeral-test", "title": "Ephemeral", "version": "1.0.0"}},
-            "agentCapabilities": {{"promptCapabilities": {{"embeddedContext": True}}}},
-            "authMethods": []
-        }}
-        print(json.dumps({{"jsonrpc": "2.0", "id": message["id"], "result": response}}), flush=True)
-    else:
-        print(json.dumps({{"jsonrpc": "2.0", "id": message.get("id"), "error": {{"code": -32601, "message": "unexpected method"}}}}), flush=True)
-"#,
-                log_path = log_path.to_string_lossy(),
-            ),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/process_ephemeral_acp.py"
+            )),
         )
         .expect("ACP fixture");
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
@@ -4005,7 +3986,7 @@ for line in sys.stdin:
 kind = "acp"
 label = "Ephemeral"
 command = {}
-args = [{}]
+args = [{}, {}]
 entrypoints = ["peer"]
 
 [runtime_profiles.ephemeral]
@@ -4016,6 +3997,7 @@ backend_ref = "ephemeral"
 "#,
                 serde_json::to_string(&python.to_string_lossy()).expect("python path"),
                 serde_json::to_string(&script_path.to_string_lossy()).expect("script path"),
+                serde_json::to_string(&log_path.to_string_lossy()).expect("log path"),
             ),
         )
         .expect("config");

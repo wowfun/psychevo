@@ -2812,6 +2812,7 @@ dependencies = [
  "chrono",
  "feishu-sdk",
  "futures",
+ "getrandom 0.3.4",
  "http",
  "portable-pty",
  "psychevo-agent-core",

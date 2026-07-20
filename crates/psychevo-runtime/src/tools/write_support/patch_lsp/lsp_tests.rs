@@ -144,10 +144,7 @@ pub(crate) mod lsp_tests {
         let sink_events = Arc::clone(&events);
         let stream: RunStreamSink = Arc::new(move |event| {
             if let RunStreamEvent::Event(value) = event {
-                sink_events
-                    .lock()
-                    .expect("events")
-                    .push(value.into_value());
+                sink_events.lock().expect("events").push(value.into_value());
             }
         });
         let tool = test_tool(
@@ -246,57 +243,7 @@ pub(crate) mod lsp_tests {
         }
         let temp = tempfile::tempdir().expect("temp");
         let script = temp.path().join("fake_lsp.py");
-        fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json
-import sys
-
-def read_msg():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        line = line.decode("ascii").strip()
-        if not line:
-            break
-        key, value = line.split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers.get("content-length", "0"))
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
-
-def send(msg):
-    body = json.dumps(msg).encode("utf-8")
-    sys.stdout.buffer.write(b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body)
-    sys.stdout.buffer.flush()
-
-while True:
-    msg = read_msg()
-    if msg is None:
-        break
-    method = msg.get("method")
-    if method == "initialize":
-        send({"jsonrpc":"2.0","id":msg["id"],"result":{"capabilities":{"textDocumentSync":1}}})
-    elif method == "textDocument/didOpen":
-        doc = msg["params"]["textDocument"]
-        diagnostics = []
-        if "bad" in doc.get("text", ""):
-            diagnostics.append({
-                "range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 4}},
-                "severity": 1,
-                "source": "fake",
-                "code": "E001",
-                "message": "bad token"
-            })
-        send({"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":doc["uri"],"diagnostics":diagnostics}})
-    elif method == "shutdown":
-        send({"jsonrpc":"2.0","id":msg["id"],"result":None})
-    elif method == "exit":
-        break
-"#,
-        )
-        .expect("script");
+        fs::write(&script, include_str!("fixtures/fake_lsp_server.py")).expect("script");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -339,76 +286,18 @@ while True:
         fs::create_dir_all(&home).expect("home");
         fs::create_dir_all(&path_dir).expect("path");
         let count_path = temp.path().join("starts.txt");
-        let count_repr = format!("{:?}", count_path.to_string_lossy().to_string());
-        let fake_server = r#"#!/usr/bin/env python3
-import json
-import sys
-
-COUNT = __COUNT__
-with open(COUNT, "a", encoding="utf-8") as f:
-    f.write("start\n")
-
-def read_msg():
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        line = line.decode("ascii").strip()
-        if not line:
-            break
-        key, value = line.split(":", 1)
-        headers[key.lower()] = value.strip()
-    length = int(headers.get("content-length", "0"))
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
-
-def send(msg):
-    body = json.dumps(msg).encode("utf-8")
-    sys.stdout.buffer.write(b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n\r\n" + body)
-    sys.stdout.buffer.flush()
-
-while True:
-    msg = read_msg()
-    if msg is None:
-        break
-    method = msg.get("method")
-    if method == "initialize":
-        send({"jsonrpc":"2.0","id":msg["id"],"result":{"capabilities":{"textDocumentSync":2}}})
-    elif method in ("textDocument/didOpen", "textDocument/didChange"):
-        if method == "textDocument/didOpen":
-            uri = msg["params"]["textDocument"]["uri"]
-            text = msg["params"]["textDocument"].get("text", "")
-        else:
-            uri = msg["params"]["textDocument"]["uri"]
-            text = msg["params"]["contentChanges"][0].get("text", "")
-        diagnostics = []
-        if "bad" in text:
-            diagnostics.append({
-                "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 3}},
-                "severity": 1,
-                "source": "fake",
-                "code": "E001",
-                "message": "bad token"
-            })
-        if "worse" in text:
-            diagnostics.append({
-                "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 5}},
-                "severity": 1,
-                "source": "fake",
-                "code": "E002",
-                "message": "worse token"
-            })
-        send({"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":uri,"diagnostics":diagnostics}})
-    elif method == "shutdown":
-        send({"jsonrpc":"2.0","id":msg["id"],"result":None})
-    elif method == "exit":
-        break
-"#
-        .replace("__COUNT__", &count_repr);
-        write_executable(&path_dir.join("pyright-langserver"), &fake_server);
+        write_executable(
+            &path_dir.join("pyright-langserver"),
+            include_str!("fixtures/reusable_fake_lsp_server.py"),
+        );
         let manager = Arc::new(LspManager::new(Arc::new(|_request| {
             Err(Error::Message("unexpected install".to_string()))
         })));
+        let mut env = env_for_with_system_path(&home, &path_dir);
+        env.insert(
+            "PSYCHEVO_TEST_LSP_START_COUNT".to_string(),
+            count_path.display().to_string(),
+        );
         let tool = test_tool(
             &cwd,
             LspConfig {
@@ -417,7 +306,7 @@ while True:
                 ..Default::default()
             },
             manager,
-            env_for_with_system_path(&home, &path_dir),
+            env,
             None,
         );
         let file = cwd.join("sample.py");
@@ -454,10 +343,7 @@ while True:
         let sink_events = Arc::clone(&events);
         let stream: RunStreamSink = Arc::new(move |event| {
             if let RunStreamEvent::Event(value) = event {
-                sink_events
-                    .lock()
-                    .expect("events")
-                    .push(value.into_value());
+                sink_events.lock().expect("events").push(value.into_value());
             }
         });
         let tool = test_tool(

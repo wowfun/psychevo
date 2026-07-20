@@ -515,6 +515,191 @@ fn live_projector_keeps_positioned_parallel_same_name_tool_calls_distinct() {
 }
 
 #[test]
+fn live_projector_streams_write_preview_through_identity_migration_and_success() {
+    let mut projector = GatewayLiveProjector::default();
+    let pending = projector
+        .project(
+            "turn-write",
+            &RunStreamEvent::value(json!({
+                "type": "tool_call_pending",
+                "tool_name": "write",
+                "tool_call_id": "",
+                "arguments_json": "{\"path\":\"report.md\",\"content\":\"hello",
+                "content_index": 0,
+                "call_index": 0
+            })),
+        )
+        .expect("pending write preview");
+    let block = &gateway_entry(&pending).blocks[0];
+    assert_eq!(block.title.as_deref(), Some("write report.md"));
+    assert_eq!(
+        block.metadata.as_ref().unwrap()["write_argument_preview"],
+        json!({
+            "phase": "generating",
+            "path": "report.md",
+            "text": "hello",
+            "bytes_seen": 5,
+            "lines_seen": 1,
+            "omitted_bytes": 0,
+            "truncated": false,
+        })
+    );
+
+    let authoritative = projector
+        .project(
+            "turn-write",
+            &RunStreamEvent::value(json!({
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_call",
+                        "id": "call-write",
+                        "name": "write",
+                        "arguments": {"path": "report.md", "content": "hello world"},
+                        "arguments_json": "{\"path\":\"report.md\",\"content\":\"hello world\"}",
+                        "content_index": 0,
+                        "call_index": 0
+                    }],
+                    "finish_reason": "tool_calls",
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("authoritative write call");
+    let block = &gateway_entry(&authoritative).blocks[0];
+    assert_eq!(block.id, "live:turn-write:tool:call-write");
+    assert_eq!(
+        block.metadata.as_ref().unwrap()["write_argument_preview"]["text"],
+        "hello world"
+    );
+
+    let started = projector
+        .project(
+            "turn-write",
+            &RunStreamEvent::value(json!({
+                "type": "tool_execution_start",
+                "tool_name": "write",
+                "tool_call_id": "call-write",
+                "args": {"path": "report.md", "content": "hello world"},
+                "started_at_ms": 1
+            })),
+        )
+        .expect("write started");
+    assert_eq!(
+        gateway_entry(&started).blocks[0].metadata.as_ref().unwrap()
+            ["write_argument_preview"]["phase"],
+        "writing"
+    );
+
+    let completed = projector
+        .project(
+            "turn-write",
+            &RunStreamEvent::value(json!({
+                "type": "tool_execution_end",
+                "tool_name": "write",
+                "tool_call_id": "call-write",
+                "result": {"path": "report.md", "bytes_written": 11},
+                "outcome": "normal",
+                "elapsed_ms": 2
+            })),
+        )
+        .expect("write completed");
+    let block = &gateway_entry(&completed).blocks[0];
+    assert_eq!(block.status, TranscriptBlockStatus::Completed);
+    assert_eq!(
+        block.metadata.as_ref().unwrap()["write_argument_preview"],
+        Value::Null
+    );
+
+    for event in [
+        json!({
+            "type": "tool_call_pending",
+            "tool_name": "write",
+            "tool_call_id": "call-write",
+            "arguments_json": "{\"path\":\"report.md\",\"content\":\"late preview",
+        }),
+        json!({
+            "type": "tool_execution_start",
+            "tool_name": "write",
+            "tool_call_id": "call-write",
+            "args": {"path": "report.md", "content": "late preview"},
+        }),
+    ] {
+        let late = projector
+            .project("turn-write", &RunStreamEvent::value(event))
+            .expect("late write update");
+        let block = &gateway_entry(&late).blocks[0];
+        assert_eq!(block.status, TranscriptBlockStatus::Completed);
+        assert_eq!(
+            block.metadata.as_ref().unwrap()["write_argument_preview"],
+            Value::Null
+        );
+    }
+}
+
+#[test]
+fn live_projector_keeps_failed_write_preview_and_parallel_writes_distinct() {
+    let mut projector = GatewayLiveProjector::default();
+    for (id, position, path, content) in [
+        ("call-a", 0, "a.md", "alpha"),
+        ("call-b", 1, "b.md", "beta"),
+    ] {
+        let _ = projector.project(
+            "turn-write",
+            &RunStreamEvent::value(json!({
+                "type": "tool_call_pending",
+                "tool_name": "write",
+                "tool_call_id": id,
+                "arguments_json": format!(
+                    "{{\"path\":\"{path}\",\"content\":\"{content}"
+                ),
+                "content_index": position,
+                "call_index": position
+            })),
+        );
+    }
+    let failed = projector
+        .project(
+            "turn-write",
+            &RunStreamEvent::value(json!({
+                "type": "tool_execution_end",
+                "tool_name": "write",
+                "tool_call_id": "call-a",
+                "result": {"error": "permission denied"},
+                "outcome": "failed",
+                "elapsed_ms": 2
+            })),
+        )
+        .expect("failed write");
+    let entry = gateway_entry(&failed);
+    assert_eq!(entry.blocks.len(), 2);
+    let first = entry
+        .blocks
+        .iter()
+        .find(|block| block.id.ends_with("call-a"))
+        .expect("first write");
+    let second = entry
+        .blocks
+        .iter()
+        .find(|block| block.id.ends_with("call-b"))
+        .expect("second write");
+    assert_eq!(first.status, TranscriptBlockStatus::Failed);
+    assert_eq!(
+        first.metadata.as_ref().unwrap()["write_argument_preview"]["phase"],
+        "failed"
+    );
+    assert_eq!(
+        first.metadata.as_ref().unwrap()["write_argument_preview"]["text"],
+        "alpha"
+    );
+    assert_eq!(
+        second.metadata.as_ref().unwrap()["write_argument_preview"]["text"],
+        "beta"
+    );
+}
+
+#[test]
 fn live_projector_message_end_tool_call_does_not_downgrade_completed_tool_block() {
     let mut projector = GatewayLiveProjector::default();
     let _ = projector.project(

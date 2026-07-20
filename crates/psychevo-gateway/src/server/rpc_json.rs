@@ -79,7 +79,7 @@ fn stable_hash_hex(value: &str) -> String {
 fn content_type_for_path(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()).unwrap_or("") {
         "html" => "text/html; charset=utf-8",
-        "js" => "text/javascript; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "svg" => "image/svg+xml",
         "png" => "image/png",

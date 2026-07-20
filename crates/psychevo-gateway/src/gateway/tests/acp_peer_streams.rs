@@ -8,27 +8,7 @@ async fn acp_peer_rejects_non_v1_protocol_without_fallback() {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(
         &script,
-        r#"#!/usr/bin/env python3
-import json
-import sys
-
-log_path = sys.argv[1]
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    with open(log_path, "a", encoding="utf-8") as log_file:
-        log_file.write(json.dumps({"method": message.get("method")}) + "\n")
-    if message.get("method") == "initialize":
-        send({"jsonrpc": "2.0", "id": message.get("id"), "result": {
-            "protocolVersion": 2,
-            "agentCapabilities": {}
-        }})
-"#,
+        include_str!("../../../tests/fixtures/fake_acp_wrong_version.py"),
     )
     .expect("fake ACP script");
     std::fs::write(
@@ -129,104 +109,10 @@ async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     )
     .expect("image");
     std::fs::write(
-            &script,
-            r#"#!/usr/bin/env python3
-import json
-import sys
-
-log_path = sys.argv[1]
-values = {"model": "test/default-model", "effort": "low", "mode": "ask", "fast": False}
-next_session_id = 0
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def record(value):
-    with open(log_path, "a", encoding="utf-8") as log_file:
-        log_file.write(json.dumps(value) + "\n")
-
-def update(session_id, update_value):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": session_id,
-        "update": update_value
-    }})
-
-def config_options():
-    return [
-        {"id": "model", "name": "Model", "category": "model", "type": "select",
-         "currentValue": values["model"], "options": [
-             {"value": "test/default-model", "name": "Default"},
-             {"value": "test/second-model", "name": "Second"}]},
-        {"id": "effort", "name": "Effort", "category": "thought_level", "type": "select",
-         "currentValue": values["effort"], "options": [
-             {"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
-        {"id": "mode", "name": "Mode", "category": "mode", "type": "select",
-         "currentValue": values["mode"], "options": [
-             {"value": "ask", "name": "Ask"}, {"value": "code", "name": "Code"}]},
-        {"id": "fast", "name": "Fast", "type": "boolean", "currentValue": values["fast"]}
-    ]
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    params = message.get("params") or {}
-    if method == "initialize":
-        record({"event": "initialize", "version": params.get("protocolVersion")})
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "protocolVersion": 1,
-            "agentCapabilities": {
-                "loadSession": True,
-                "promptCapabilities": {"image": True, "embeddedContext": True},
-                "sessionCapabilities": {"close": {}}
-            }
-        }})
-    elif method == "session/new":
-        next_session_id += 1
-        record({"event": "new"})
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "sessionId": "native-v1-contract-" + str(next_session_id), "configOptions": config_options()
-        }})
-    elif method == "session/set_config_option":
-        config_id = params.get("configId")
-        value = params.get("value")
-        if isinstance(value, dict):
-            value = value.get("value", value.get("boolean"))
-        values[config_id] = value
-        record({"event": "set", "id": config_id, "value": value})
-        send({"jsonrpc": "2.0", "id": mid, "result": {"configOptions": config_options()}})
-    elif method == "session/prompt":
-        blocks = params.get("prompt") or []
-        types = [block.get("type") for block in blocks]
-        resource = next((block.get("resource") or {} for block in blocks if block.get("type") == "resource"), {})
-        image = next((block for block in blocks if block.get("type") == "image"), {})
-        record({
-            "event": "prompt",
-            "types": types,
-            "resourceText": resource.get("text"),
-            "resourceMime": resource.get("mimeType"),
-            "imageMime": image.get("mimeType"),
-            "imageDataLength": len(image.get("data") or ""),
-            "values": values
-        })
-        update(params.get("sessionId"), {
-            "sessionUpdate": "_future_status",
-            "label": "forward compatible"
-        })
-        text = "structured:" + ",".join(types) + ":" + values["model"] + ":" + values["effort"] + ":" + values["mode"] + ":" + str(values["fast"]).lower()
-        update(params.get("sessionId"), {
-            "sessionUpdate": "agent_message_chunk",
-            "content": {"type": "text", "text": text}
-        })
-        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
-    elif method == "session/close":
-        record({"event": "close", "sessionId": params.get("sessionId")})
-        send({"jsonrpc": "2.0", "id": mid, "result": {}})
-"#,
-        )
-        .expect("fake ACP script");
+        &script,
+        include_str!("../../../tests/fixtures/fake_acp_v1_contract.py"),
+    )
+    .expect("fake ACP script");
     std::fs::write(
         home.join("config.toml"),
         format!(
@@ -403,39 +289,7 @@ async fn acp_peer_abort_sends_session_cancel_before_process_cleanup() {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(
         &script,
-        r#"#!/usr/bin/env python3
-import json
-import sys
-
-log_path = sys.argv[1]
-prompt_id = None
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def record(method):
-    with open(log_path, "a", encoding="utf-8") as log_file:
-        log_file.write(method + "\n")
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    record(method or "response")
-    if method == "initialize":
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "protocolVersion": 1, "agentCapabilities": {}
-        }})
-    elif method == "session/new":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-cancel"}})
-    elif method == "session/prompt":
-        prompt_id = mid
-    elif method == "session/cancel" and prompt_id is not None:
-        send({"jsonrpc": "2.0", "id": prompt_id, "result": {"stopReason": "end_turn"}})
-        prompt_id = None
-"#,
+        include_str!("../../../tests/fixtures/fake_acp_cancel.py"),
     )
     .expect("fake ACP script");
     std::fs::write(
@@ -530,35 +384,7 @@ async fn acp_unknown_delivery_retains_input_without_automatic_retry() {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(
         &script,
-        r#"#!/usr/bin/env python3
-import json
-import sys
-
-log_path = sys.argv[1]
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def record(method):
-    with open(log_path, "a", encoding="utf-8") as log_file:
-        log_file.write(method + "\n")
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    record(method or "response")
-    if method == "initialize":
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "protocolVersion": 1, "agentCapabilities": {"loadSession": True}
-        }})
-    elif method == "session/new":
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-unknown"}})
-    elif method == "session/prompt":
-        sys.exit(0)
-"#,
+        include_str!("../../../tests/fixtures/fake_acp_unknown_delivery.py"),
     )
     .expect("fake ACP script");
     std::fs::write(
@@ -673,106 +499,7 @@ async fn acp_next_turn_load_reconciles_unknown_delivery_before_new_input() {
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(
         &script,
-        r#"#!/usr/bin/env python3
-import json
-import os
-import sys
-
-log_path = sys.argv[1]
-state_path = sys.argv[2]
-
-def load_state():
-    try:
-        with open(state_path, "r", encoding="utf-8") as state_file:
-            return json.load(state_file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"promptCount": 0, "messages": []}
-
-def save_state(state):
-    with open(state_path, "w", encoding="utf-8") as state_file:
-        json.dump(state, state_file)
-
-def record(method, **fields):
-    with open(log_path, "a", encoding="utf-8") as log_file:
-        log_file.write(json.dumps({"method": method, **fields}) + "\n")
-
-def send(value):
-    print(json.dumps(value), flush=True)
-
-def update(session_id, message_id, text):
-    send({"jsonrpc": "2.0", "method": "session/update", "params": {
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "agent_message_chunk",
-            "messageId": message_id,
-            "content": {"type": "text", "text": text}
-        }
-    }})
-
-for line in sys.stdin:
-    if not line.strip():
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    mid = message.get("id")
-    params = message.get("params") or {}
-    if method == "initialize":
-        record(method)
-        send({"jsonrpc": "2.0", "id": mid, "result": {
-            "protocolVersion": 1,
-            "agentCapabilities": {"loadSession": True}
-        }})
-    elif method == "session/new":
-        record(method)
-        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "native-reconcile"}})
-    elif method == "session/load":
-        state = load_state()
-        record(method, sessionId=params.get("sessionId"))
-        send({"jsonrpc": "2.0", "method": "session/update", "params": {
-            "sessionId": params.get("sessionId"),
-            "update": {
-                "sessionUpdate": "tool_call",
-                "toolCallId": "replayed-tool-only",
-                "title": "Replay tool-only fact",
-                "kind": "execute",
-                "status": "completed"
-            }
-        }})
-        send({"jsonrpc": "2.0", "method": "session/update", "params": {
-            "sessionId": params.get("sessionId"),
-            "update": {
-                "sessionUpdate": "plan",
-                "entries": [{
-                    "content": "Replay replacement plan",
-                    "priority": "high",
-                    "status": "completed"
-                }]
-            }
-        }})
-        for replay in state["messages"]:
-            update(params.get("sessionId"), replay["id"], replay["text"])
-        send({"jsonrpc": "2.0", "id": mid, "result": {}})
-    elif method == "session/prompt":
-        state = load_state()
-        state["promptCount"] += 1
-        turn = state["promptCount"]
-        prompt = "\n".join(
-            block.get("text") or ""
-            for block in params.get("prompt") or []
-            if block.get("type") == "text"
-        )
-        answer = "reconciled answer " + str(turn)
-        replay = {"id": "assistant-" + str(turn), "text": answer}
-        state["messages"].append(replay)
-        save_state(state)
-        record(method, turn=turn, prompt=prompt)
-        if turn == 1:
-            os._exit(17)
-        update(params.get("sessionId"), replay["id"], answer)
-        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
-    else:
-        send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "method not found"}})
-"#,
+        include_str!("../../../tests/fixtures/fake_acp_reconcile.py"),
     )
     .expect("fake ACP reconciliation script");
     std::fs::write(
@@ -917,13 +644,11 @@ entrypoints: [peer]
             .count(),
         2
     );
-    assert!(
-        messages.iter().any(|summary| {
-            serde_json::to_string(&summary.message)
-                .expect("replayed message json")
-                .contains("reconciled answer 1")
-        })
-    );
+    assert!(messages.iter().any(|summary| {
+        serde_json::to_string(&summary.message)
+            .expect("replayed message json")
+            .contains("reconciled answer 1")
+    }));
     assert!(
         messages.iter().any(|summary| {
             summary

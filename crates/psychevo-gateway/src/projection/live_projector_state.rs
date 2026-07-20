@@ -67,6 +67,7 @@ impl GatewayLiveProjector {
         self.tool_aliases.clear();
         self.tool_positions.clear();
         self.tool_args.clear();
+        self.write_previews.clear();
         self.exec_sessions.clear();
     }
 

@@ -13,45 +13,21 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     std::fs::create_dir_all(&home).expect("home");
     std::fs::write(
         &script,
-        format!(
-            r#"#!/usr/bin/env python3
-import json, os, sys, time
-LOG = {log}
-thread_count = 0
-for line in sys.stdin:
-    msg = json.loads(line)
-    method = msg.get("method")
-    if method == "initialize":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"linux","userAgent":"performance-fixture/0.144.1"}}}}), flush=True)
-    elif method == "initialized":
-        pass
-    elif msg.get("params") is None:
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"error":{{"code":-32602,"message":"invalid params"}}}}), flush=True)
-    elif method == "plugin/installed":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-installed\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[]}}}}), flush=True)
-    elif method == "plugin/read":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"plugin":{{"summary":{{"id":"review@openai","name":"review","installed":True,"enabled":True}},"skills":[],"hooks":[],"apps":[{{"id":"review-app"}}],"mcpServers":[]}}}}}}), flush=True)
-    elif method == "plugin/list":
-        time.sleep(2)
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("plugin-list\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"marketplaces":[],"marketplaceLoadErrors":[],"featuredPluginIds":[]}}}}), flush=True)
-    elif method == "thread/start":
-        thread_count += 1
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"thread":{{"id":"codex-thread-" + str(thread_count)}}}}}}), flush=True)
-    elif method == "mcpServerStatus/list":
-        with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("mcp-status\n")
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{"data":[{{"name":"codex_apps","tools":{{"review":{{"description":"Review app","inputSchema":{{"type":"object","properties":{{}}}}}}}}}}],"nextCursor":None}}}}), flush=True)
-    elif method == "thread/archive":
-        print(json.dumps({{"jsonrpc":"2.0","id":msg["id"],"result":{{}}}}), flush=True)
-"#,
-            log = serde_json::to_string(&log).expect("log json"),
-        ),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/codex_app_server.py"
+        )),
     )
     .expect("script");
+    std::fs::write(
+        script.with_extension("json"),
+        serde_json::to_vec(&serde_json::json!({
+            "scenario": "first_token_performance",
+            "log": &log,
+        }))
+        .expect("fixture config json"),
+    )
+    .expect("fixture config");
     let mut permissions = std::fs::metadata(&script)
         .expect("script metadata")
         .permissions();

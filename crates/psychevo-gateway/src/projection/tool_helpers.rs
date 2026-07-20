@@ -60,6 +60,16 @@ fn live_tool_title(tool_name: &str, metadata: &Value) -> String {
     {
         return format!("exec_command {command}");
     }
+    if tool_name == "write"
+        && let Some(path) = metadata
+            .get("write_argument_preview")
+            .and_then(|preview| preview.get("path"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+    {
+        return format!("write {path}");
+    }
     if tool_name == "spawn_agent"
         && let Some(title) = live_agent_tool_title(metadata)
     {
