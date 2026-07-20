@@ -345,6 +345,9 @@ impl<'a> FullscreenUi<'a> {
                 let id_key = (!tool_call_id.is_empty()).then(|| tool_id_key(&tool_call_id));
                 let position_key =
                     event_scoped_tool_position_key(self.streaming_tool_message_seq, value);
+                let write_preview = (tool == "write")
+                    .then(|| value.get("args").and_then(write_argument_preview_from_args))
+                    .flatten();
                 let idx = id_key
                     .as_ref()
                     .and_then(|key| self.tool_rows.get(key))
@@ -372,6 +375,14 @@ impl<'a> FullscreenUi<'a> {
                         row.tool_started = Some(tool_started_instant(value));
                         self.insert_evidence_row(row)
                     });
+                if tool == "write"
+                    && self
+                        .transcript
+                        .get(idx)
+                        .is_some_and(TranscriptRow::is_terminal_write_row)
+                {
+                    return false;
+                }
                 self.remove_turn_meta();
                 let row = &mut self.transcript[idx];
                 row.kind = evidence_kind_for_value(tool, value);
@@ -383,6 +394,10 @@ impl<'a> FullscreenUi<'a> {
                     row.agent_child_tool_uses = 0;
                     row.agent_child_latest_tokens = None;
                     row.agent_child_live_text.clear();
+                } else if let Some(preview) = write_preview {
+                    row.set_write_argument_preview(preview, "writing", None);
+                } else if tool == "write" && row.write_argument_preview.is_some() {
+                    row.refresh_write_argument_preview("writing", None);
                 } else {
                     row.text = "running".to_string();
                 }
@@ -574,6 +589,22 @@ impl<'a> FullscreenUi<'a> {
                         collapsed
                     };
                     row.full_text = full;
+                }
+                if tool == "write" {
+                    if failed || interrupted {
+                        if row.write_argument_preview.is_none()
+                            && let Some(preview) =
+                                value.get("args").and_then(write_argument_preview_from_args)
+                        {
+                            row.write_argument_preview = Some(preview);
+                        }
+                        let terminal_detail =
+                            row.full_text.clone().unwrap_or_else(|| row.text.clone());
+                        let phase = if interrupted { "cancelled" } else { "failed" };
+                        row.refresh_write_argument_preview(phase, Some(&terminal_detail));
+                    } else {
+                        row.clear_write_argument_preview_after_success();
+                    }
                 }
                 if is_write_like_tool(tool) {
                     self.remove_orphan_provisional_tool_intents(tool, Some(idx));

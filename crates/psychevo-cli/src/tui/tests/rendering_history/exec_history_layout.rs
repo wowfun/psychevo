@@ -650,8 +650,12 @@ pub(crate) fn streaming_tool_call_creates_pending_updating_row_before_execution(
 
     assert_eq!(ui.transcript.len(), 1);
     assert_eq!(ui.transcript[0].kind, TranscriptKind::Updated);
-    assert_eq!(ui.transcript[0].title, "write");
-    assert_eq!(ui.transcript[0].text, "preparing");
+    assert_eq!(ui.transcript[0].title, "write report.md");
+    assert_eq!(
+        ui.transcript[0].write_preview_phase.as_deref(),
+        Some("generating")
+    );
+    assert!(ui.transcript[0].text.starts_with("Generating · 0 bytes"));
     assert!(ui.transcript[0].tool_started.is_some());
     assert!(
         ui.transcript

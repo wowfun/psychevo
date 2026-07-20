@@ -2,11 +2,12 @@
 #[derive(Debug, Parser, Default)]
 pub(crate) struct TuiArgs {
     #[arg(
-        long = "dir",
+        short = 'C',
+        long = "cd",
         value_name = "DIR",
         help = "Open the TUI for this cwd"
     )]
-    pub(crate) dir: Option<PathBuf>,
+    pub(crate) cd: Option<PathBuf>,
     #[arg(
         short = 'm',
         long,

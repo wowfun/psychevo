@@ -11,6 +11,7 @@ impl<'a> FullscreenUi<'a> {
             meta_row: None,
             gateway_item_rows: BTreeMap::new(),
             tool_rows: BTreeMap::new(),
+            write_preview_trackers: BTreeMap::new(),
             streaming_tool_message_seq: 0,
             streaming_tool_message_open: false,
             deferred_stream_events: VecDeque::new(),
@@ -199,6 +200,7 @@ impl<'a> FullscreenUi<'a> {
         self.meta_row = None;
         self.gateway_item_rows.clear();
         self.tool_rows.clear();
+        self.write_preview_trackers.clear();
         self.history_tool_titles.clear();
         self.history_tool_args.clear();
         self.live_tool_args.clear();

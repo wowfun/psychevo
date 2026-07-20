@@ -164,6 +164,9 @@ impl TuiApp {
                 row.tool_started = Some(tool_started_instant(&value));
                 row.tool_elapsed = None;
             }
+            if let Some((preview, phase)) = gateway_write_argument_preview(block) {
+                row.set_write_argument_preview(preview, &phase, None);
+            }
             tag_gateway_transcript_row(ui, idx, entry_meta, block);
             if tool == "spawn_agent" {
                 ui.remove_duplicate_agent_placeholders_for_tool_value(idx, &value);
@@ -371,6 +374,17 @@ impl TuiApp {
                 collapsed
             };
             row.full_text = full;
+        }
+        if tool == "write" {
+            if let Some((preview, phase)) = gateway_write_argument_preview(block) {
+                let terminal_detail = row
+                    .full_text
+                    .clone()
+                    .unwrap_or_else(|| row.text.clone());
+                row.set_write_argument_preview(preview, &phase, Some(&terminal_detail));
+            } else if block.status == TranscriptBlockStatus::Completed {
+                row.clear_write_argument_preview_after_success();
+            }
         }
         tag_gateway_transcript_row(ui, idx, entry_meta, block);
         if is_write_like_tool(tool) {

@@ -184,6 +184,10 @@ impl<'a> FullscreenUi<'a> {
         });
         if call.name == "spawn_agent" {
             row.full_text = running_agent_tool_full_text(&tool_value);
+        } else if call.name == "write"
+            && let Some(preview) = write_argument_preview_from_args(&call.args)
+        {
+            row.set_write_argument_preview(preview, "writing", None);
         }
         row.tool_call_id = Some(call.id.clone());
         row.tool_name = Some(call.name.clone());
@@ -215,6 +219,10 @@ impl<'a> FullscreenUi<'a> {
         });
         if call.name == "spawn_agent" {
             row.full_text = running_agent_tool_full_text(&tool_value);
+        } else if call.name == "write"
+            && let Some(preview) = write_argument_preview_from_args(&call.args)
+        {
+            row.set_write_argument_preview(preview, "cancelled", Some("interrupted"));
         }
         row.tool_name = Some(call.name);
         row.tool_elapsed = metadata_elapsed_duration(metadata);
@@ -298,6 +306,21 @@ impl<'a> FullscreenUi<'a> {
                 collapsed
             };
             row.full_text = full;
+        }
+        if tool == "write" && (is_error || interrupted) {
+            if row.write_argument_preview.is_none()
+                && let Some(preview) = write_argument_preview_from_args(
+                    value.get("args").unwrap_or(&Value::Null),
+                )
+            {
+                row.write_argument_preview = Some(preview);
+            }
+            let terminal_detail = row
+                .full_text
+                .clone()
+                .unwrap_or_else(|| row.text.clone());
+            let phase = if interrupted { "cancelled" } else { "failed" };
+            row.refresh_write_argument_preview(phase, Some(&terminal_detail));
         }
         if let Some(idx) = idx {
             self.transcript[idx] = row;

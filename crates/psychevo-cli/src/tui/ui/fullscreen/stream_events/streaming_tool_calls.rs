@@ -26,7 +26,8 @@ impl<'a> FullscreenUi<'a> {
         let mut active_tool_frame_requested = false;
         for mut call in calls {
             call.position_key = scoped_tool_position_key(message_scope, &call.position_key);
-            active_tool_frame_requested |= self.upsert_streaming_tool_call(call);
+            active_tool_frame_requested |=
+                self.upsert_streaming_tool_call(call, event_type == "message_end");
         }
         if event_type == "message_end" {
             self.streaming_tool_message_open = false;

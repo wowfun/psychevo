@@ -32,21 +32,10 @@ pub(crate) fn write_cli_plugin(root: &Path) {
     .expect("skill");
     std::fs::write(
         root.join("worker.py"),
-        r#"#!/usr/bin/env python3
-import json, sys
-for line in sys.stdin:
-    req=json.loads(line)
-    method=req.get("method")
-    if method=="initialize":
-        result={"ok": True}
-    elif method=="contributions/list":
-        result={"tools":[{"name":"cleanup_status","description":"Report cleanup status","parameters":{"type":"object","properties":{}}}]}
-    elif method=="tools/call":
-        result={"json":{"status":"ok"},"content":"cleanup ok"}
-    else:
-        result={}
-    print(json.dumps({"jsonrpc":"2.0","id":req.get("id"),"result":result}), flush=True)
-"#,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/cli_plugin_worker.py"
+        )),
     )
     .expect("worker");
     #[cfg(unix)]

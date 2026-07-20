@@ -29,7 +29,7 @@ const PNPM_RUNTIME_ENV_DEFAULTS: [(&str, &str); 4] = [
 pub(crate) async fn run_desktop_command(args: DesktopArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir().context("resolve current directory")?;
-    let desktop_cwd = resolve_desktop_cwd(args.dir.as_deref(), &env_map, &cwd)?;
+    let desktop_cwd = resolve_desktop_cwd(args.cd.as_deref(), &env_map, &cwd)?;
     let source_root = desktop_source_root(&cwd)?;
     let pevo_bin = env::current_exe().context("resolve current pevo executable")?;
     let mut command = desktop_command_for_platform(

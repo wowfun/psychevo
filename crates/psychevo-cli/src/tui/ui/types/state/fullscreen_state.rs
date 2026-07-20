@@ -8,6 +8,7 @@ pub(crate) struct FullscreenUi<'a> {
     pub(crate) meta_row: Option<usize>,
     pub(crate) gateway_item_rows: BTreeMap<String, usize>,
     pub(crate) tool_rows: BTreeMap<String, usize>,
+    pub(crate) write_preview_trackers: BTreeMap<String, WriteArgumentPreviewTracker>,
     pub(crate) streaming_tool_message_seq: u64,
     pub(crate) streaming_tool_message_open: bool,
     pub(crate) deferred_stream_events: VecDeque<TuiLiveEvent>,

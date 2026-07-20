@@ -868,6 +868,8 @@ pub(crate) fn streaming_tool_call_migrates_position_key_to_tool_id_without_dupli
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].title, "write report.md");
-    assert_eq!(rows[0].text, "running");
+    assert_eq!(rows[0].write_preview_phase.as_deref(), Some("writing"));
+    assert!(rows[0].expandable_text().contains("Writing · 4 bytes"));
+    assert!(rows[0].expandable_text().contains("body"));
     assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_write"));
 }

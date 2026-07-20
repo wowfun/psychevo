@@ -17,6 +17,7 @@ pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     assert!(stdout.contains("init"));
     assert!(stdout.contains("Create or repair the active Psychevo profile home"));
     assert!(stdout.contains("--profile <NAME>"));
+    assert!(stdout.contains("--cd <DIR>"));
     assert!(stdout.contains("profile"));
     assert!(stdout.contains("List, inspect, create, switch, and manage local profiles"));
     assert!(stdout.contains("Run one coding-agent turn"));
@@ -46,6 +47,7 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
         &["tui", "--help"],
         &[
             "Open the fullscreen terminal UI",
+            "--cd <DIR>",
             "--new",
             "leading ! runs a local shell escape",
         ],
@@ -55,6 +57,7 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
         &["web", "--help"],
         &[
             "start, stop, and restart the managed Web server",
+            "--cd <DIR>",
             "--no-browser",
             "--print-url",
             "start",
@@ -66,7 +69,7 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
         &["desktop", "--help"],
         &[
             "Open the native Desktop app from a Psychevo source checkout",
-            "--dir <DIR>",
+            "--cd <DIR>",
         ],
     );
     assert_help_contains(
@@ -219,7 +222,7 @@ pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
 }
 
 #[test]
-pub(crate) fn cli_web_opens_current_cwd_with_json_output() {
+pub(crate) fn cli_web_opens_root_cd_with_json_output() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -242,13 +245,13 @@ pub(crate) fn cli_web_opens_current_cwd_with_json_output() {
     let output = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
         .env("PSYCHEVO_WEB_DIST", &dist)
-        .current_dir(&cwd)
-        .args(["web", "--no-browser", "--print-url"])
+        .current_dir(temp.path())
+        .args(["-C", "work", "web", "--no-browser", "--print-url"])
         .output()
         .expect("pevo web");
     let stop = pevo_cmd(temp.path())
         .env("PSYCHEVO_HOME", &psychevo_home)
-        .current_dir(&cwd)
+        .current_dir(temp.path())
         .args(["gateway", "stop"])
         .output()
         .expect("pevo gateway stop");

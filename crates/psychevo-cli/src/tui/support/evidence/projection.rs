@@ -108,6 +108,7 @@ pub(crate) struct StreamingToolCall {
     pub(crate) position_key: String,
     pub(crate) tool_name: String,
     pub(crate) args: Value,
+    pub(crate) arguments_json: Option<String>,
     pub(crate) display: Option<ToolDisplaySpec>,
 }
 
@@ -149,6 +150,10 @@ pub(crate) fn streaming_tool_call_from_pending_event(value: &Value) -> Option<St
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    let arguments_json = value
+        .get("arguments_json")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let args = value
         .get("arguments")
         .filter(|value| !value.is_null())
@@ -165,6 +170,7 @@ pub(crate) fn streaming_tool_call_from_pending_event(value: &Value) -> Option<St
         position_key: tool_position_key(content_index, call_index),
         tool_name,
         args,
+        arguments_json,
         display: value
             .get("display")
             .cloned()
@@ -188,6 +194,10 @@ pub(crate) fn streaming_tool_call_from_block(block: &Value) -> Option<StreamingT
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string);
+    let arguments_json = block
+        .get("arguments_json")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let args = block
         .get("arguments")
         .filter(|value| !value.is_null())
@@ -204,6 +214,7 @@ pub(crate) fn streaming_tool_call_from_block(block: &Value) -> Option<StreamingT
         position_key: tool_position_key(content_index, call_index),
         tool_name,
         args,
+        arguments_json,
         display: None,
     })
 }

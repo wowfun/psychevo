@@ -50,15 +50,16 @@ pub(crate) use psychevo_runtime::{
     TUI_DISPLAY_METADATA_KEY, TUI_SIDE_CONVERSATION_SESSION_SOURCE, TerminalReason,
     ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
     USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, WorkspaceDiff,
-    agent_spawn_paused, agent_status_value, auto_compaction_due_for_snapshot, canonicalize_cwd,
-    collect_workspace_diff, compact_session, config_show_value, configured_models,
-    context_snapshot, create_scoped_custom_provider, custom_provider_api_key_env,
-    decode_persisted_tool_result_for_display, default_session_export_filename,
-    discover_agent_teams_with_catalog, discover_agents, discover_skills, effective_usage_total,
-    fetch_and_cache_model_catalog, format_context_snapshot_text_with_options,
-    format_context_total_value, format_context_total_value_parts, install_skill,
-    list_skill_bundles, main_agent_default_metadata, main_agent_from_session_metadata,
-    main_agent_metadata, model_catalog_providers, model_metadata_explicitly_disallows_image_input,
+    WriteArgumentPreview, WriteArgumentPreviewTracker, agent_spawn_paused, agent_status_value,
+    auto_compaction_due_for_snapshot, canonicalize_cwd, collect_workspace_diff, compact_session,
+    config_show_value, configured_models, context_snapshot, create_scoped_custom_provider,
+    custom_provider_api_key_env, decode_persisted_tool_result_for_display,
+    default_session_export_filename, discover_agent_teams_with_catalog, discover_agents,
+    discover_skills, effective_usage_total, fetch_and_cache_model_catalog,
+    format_context_snapshot_text_with_options, format_context_total_value,
+    format_context_total_value_parts, install_skill, list_skill_bundles,
+    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
+    model_catalog_providers, model_metadata_explicitly_disallows_image_input,
     normalize_context_bar_width, normalize_reasoning_effort, permission_rules_value,
     prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
     read_cached_model_catalog, redo_session, refresh_model_metadata_cache, reload_session_context,
@@ -69,7 +70,7 @@ pub(crate) use psychevo_runtime::{
     set_local_toolset_enabled, set_provider_api_key, set_skill_config_value, set_skill_enabled,
     side_conversation_boundary_prompt, side_inherited_metadata_hidden, spawn_agent_background,
     stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats, view_skill_value,
-    write_session_export,
+    write_argument_preview_from_args, write_session_export,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -129,8 +130,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let state_runtime = StateRuntime::open(&db_path)?;
-    let cwd = match &args.dir {
-        Some(dir) => resolve_explicit_path(dir, &env_map, &cwd)?,
+    let cwd = match &args.cd {
+        Some(cd) => resolve_explicit_path(cd, &env_map, &cwd)?,
         None => cwd,
     };
     let cwd = canonicalize_cwd(&cwd)?;

@@ -32,7 +32,7 @@ pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
         Some(GatewayCommand::Restart(args)) => restart(args).await,
         None => {
             open(GatewayOpenArgs {
-                dir: None,
+                cd: None,
                 default_workspace: false,
                 bind: None,
                 no_browser: false,
@@ -98,9 +98,9 @@ fn resolve_open_cwd(ctx: &GatewayContext, args: &GatewayOpenArgs) -> Result<Path
             &options, &ctx.cwd,
         )?)?);
     }
-    match &args.dir {
-        Some(dir) => Ok(canonicalize_cwd(&resolve_explicit_path(
-            dir,
+    match &args.cd {
+        Some(cd) => Ok(canonicalize_cwd(&resolve_explicit_path(
+            cd,
             &ctx.env_map,
             &ctx.cwd,
         )?)?),

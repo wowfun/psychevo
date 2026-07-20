@@ -1,5 +1,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::path::Path;
+
     pub(crate) use super::*;
 
     #[test]
@@ -115,12 +117,14 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_new_cli_command_families() {
-        assert!(
-            Cli::try_parse_from(["pevo"])
-                .expect("default")
-                .command
-                .is_none()
-        );
+        let cli = Cli::try_parse_from(["pevo", "-C", "work"]).expect("default");
+        assert_eq!(cli.cd.as_deref(), Some(Path::new("work")));
+        assert!(cli.command.is_none());
+        let cli = Cli::try_parse_from(["pevo", "tui", "--cd", "work"]).expect("tui");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Tui(TuiArgs { cd: Some(_), .. }))
+        ));
         let cli = Cli::try_parse_from(["pevo", "web", "--no-browser", "--print-url"])
             .expect("web open");
         assert!(matches!(
@@ -140,13 +144,31 @@ pub(crate) mod tests {
             Cli::try_parse_from(["pevo", "web", "restart", "--bind", "127.0.0.1:58081"])
                 .is_ok()
         );
-        let cli = Cli::try_parse_from(["pevo", "desktop", "--dir", "work"]).expect("desktop");
+        let cli = Cli::try_parse_from(["pevo", "web", "-C", "work"]).expect("web cwd");
         assert!(matches!(
             cli.command,
-            Some(Commands::Desktop(DesktopArgs {
-                dir: Some(_),
+            Some(Commands::Web(WebArgs {
+                command: None,
+                open: GatewayOpenArgs { cd: Some(_), .. }
             }))
         ));
+        let cli = Cli::try_parse_from(["pevo", "desktop", "--cd", "work"]).expect("desktop");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Desktop(DesktopArgs { cd: Some(_) }))
+        ));
+        assert!(Cli::try_parse_from(["pevo", "gateway", "open", "-C", "work"]).is_ok());
+        for args in [
+            ["pevo", "tui", "--dir", "work"],
+            ["pevo", "web", "--dir", "work"],
+            ["pevo", "desktop", "--dir", "work"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err(), "{args:?}");
+        }
+        assert!(
+            Cli::try_parse_from(["pevo", "gateway", "open", "--dir", "work"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["pevo", "run", "--dir", "work", "hello"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "doctor", "--json"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "doctor", "--live"]).is_ok());
         assert!(Cli::try_parse_from(["pevo", "setup", "--dry-run"]).is_ok());

@@ -146,7 +146,9 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
         .iter()
         .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
         .expect("write row");
-    assert_eq!(row.text, "interrupted");
+    assert_eq!(row.write_preview_phase.as_deref(), Some("cancelled"));
+    assert!(row.expandable_text().contains("report body"));
+    assert!(row.expandable_text().contains("interrupted"));
     assert!(row.interrupted);
     assert!(row.tool_started.is_none());
     assert!(ui.tool_rows.is_empty());
@@ -252,7 +254,8 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
         .iter()
         .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
         .expect("write row");
-    assert_eq!(row.text, "preparing");
+    assert_eq!(row.write_preview_phase.as_deref(), Some("writing"));
+    assert!(row.expandable_text().contains("report body"));
     assert!(row.tool_started.is_some());
     assert!(ui.tool_rows.contains_key(&tool_id_key("call_write_report")));
 
@@ -291,7 +294,8 @@ pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gatewa
         .iter()
         .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
         .expect("write row");
-    assert_eq!(row.text, "preparing");
+    assert_eq!(row.write_preview_phase.as_deref(), Some("writing"));
+    assert!(row.expandable_text().contains("report body"));
     assert!(!row.interrupted);
     assert!(row.tool_started.is_some());
     assert!(ui.tool_rows.contains_key(&tool_id_key("call_write_report")));
@@ -329,7 +333,9 @@ pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
         .iter()
         .find(|row| row.title == "write feeds/2026-05-10/hackernews-hot-06-42.md")
         .expect("write row");
-    assert_eq!(row.text, "interrupted");
+    assert_eq!(row.write_preview_phase.as_deref(), Some("cancelled"));
+    assert!(row.expandable_text().contains("report body"));
+    assert!(row.expandable_text().contains("interrupted"));
     assert!(row.interrupted);
     assert!(row.tool_started.is_none());
     assert!(!ui.status_has_running(Some(&session_id)));

@@ -116,6 +116,10 @@ pub(crate) struct TranscriptRow {
     pub(crate) user_shell: bool,
     pub(crate) tool_call_id: Option<String>,
     pub(crate) tool_name: Option<String>,
+    pub(crate) write_argument_preview: Option<WriteArgumentPreview>,
+    pub(crate) write_preview_phase: Option<String>,
+    pub(crate) write_preview_auto_opened: bool,
+    pub(crate) write_preview_success_collapsed: bool,
     pub(crate) agent_target: Option<String>,
     pub(crate) agent_child_tool_uses: i64,
     pub(crate) agent_child_latest_tokens: Option<u64>,
@@ -207,6 +211,10 @@ impl TranscriptRow {
             user_shell: false,
             tool_call_id: None,
             tool_name: None,
+            write_argument_preview: None,
+            write_preview_phase: None,
+            write_preview_auto_opened: false,
+            write_preview_success_collapsed: false,
             agent_target: None,
             agent_child_tool_uses: 0,
             agent_child_latest_tokens: None,
@@ -286,6 +294,87 @@ impl TranscriptRow {
             self.details_collapsed = self.is_expandable();
         }
     }
+
+    pub(crate) fn set_write_argument_preview(
+        &mut self,
+        preview: WriteArgumentPreview,
+        phase: &str,
+        terminal_detail: Option<&str>,
+    ) {
+        if let Some(path) = preview.path.as_deref().filter(|path| !path.trim().is_empty()) {
+            self.title = format!("write {path}");
+        }
+        let first_content = !preview.text.is_empty() && !self.write_preview_auto_opened;
+        let full = format_write_argument_preview(&preview, phase, terminal_detail);
+        self.write_argument_preview = Some(preview);
+        self.write_preview_phase = Some(phase.to_string());
+        self.set_evidence_body_text(full);
+        if first_content {
+            self.details_collapsed = false;
+            self.expanded = self.full_text.is_some();
+            self.write_preview_auto_opened = true;
+        }
+    }
+
+    pub(crate) fn refresh_write_argument_preview(
+        &mut self,
+        phase: &str,
+        terminal_detail: Option<&str>,
+    ) {
+        let Some(preview) = self.write_argument_preview.clone() else {
+            return;
+        };
+        self.set_write_argument_preview(preview, phase, terminal_detail);
+    }
+
+    pub(crate) fn clear_write_argument_preview_after_success(&mut self) {
+        self.write_argument_preview = None;
+        self.write_preview_phase = None;
+        if self.write_preview_auto_opened && !self.write_preview_success_collapsed {
+            self.details_collapsed = self.is_expandable();
+            self.expanded = false;
+            self.write_preview_success_collapsed = true;
+        }
+    }
+
+    pub(crate) fn is_terminal_write_row(&self) -> bool {
+        self.tool_name.as_deref() == Some("write")
+            && self.tool_started.is_none()
+            && (self.tool_elapsed.is_some()
+                || self.failed
+                || self.interrupted
+                || self.write_preview_success_collapsed)
+    }
+}
+
+fn format_write_argument_preview(
+    preview: &WriteArgumentPreview,
+    phase: &str,
+    terminal_detail: Option<&str>,
+) -> String {
+    let phase = match phase {
+        "writing" => "Writing",
+        "failed" => "Failed",
+        "cancelled" => "Cancelled",
+        _ => "Generating",
+    };
+    let line_label = if preview.lines_seen == 1 { "line" } else { "lines" };
+    let mut full = format!(
+        "{phase} · {} bytes · {} {line_label}",
+        preview.bytes_seen, preview.lines_seen
+    );
+    if preview.truncated {
+        full.push_str(&format!(" · {} bytes omitted", preview.omitted_bytes));
+    }
+    if !preview.text.is_empty() {
+        full.push_str("\n\n");
+        full.push_str(&preview.text);
+    }
+    if let Some(detail) = terminal_detail.filter(|detail| !detail.trim().is_empty()) {
+        full.push_str("\n\n");
+        full.push_str(detail.trim());
+    }
+    full
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

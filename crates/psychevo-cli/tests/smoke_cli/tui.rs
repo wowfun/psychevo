@@ -13,7 +13,7 @@ pub(crate) fn cli_tui_initial_prompt_shows_thinking_by_default() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
+        .args(["-C", cwd.to_str().expect("cwd"), "tui", "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -38,7 +38,7 @@ pub(crate) fn cli_tui_bang_shell_rejects_missing_provider_config_before_executio
     let config = temp.path().join("missing-config.toml");
 
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "!touch marker"])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd"), "!touch marker"])
         .output()
         .expect("pevo tui shell");
 
@@ -62,7 +62,7 @@ pub(crate) fn cli_tui_bang_shell_persists_context_with_config() {
     let output = isolated_tui_cmd(temp.path(), &home, &config, &db)
         .args([
             "tui",
-            "--dir",
+            "--cd",
             cwd.to_str().expect("cwd"),
             "!printf shell-cli-ok",
         ])
@@ -114,7 +114,7 @@ pub(crate) fn cli_tui_debug_shows_usage_metadata_summary() {
         .args([
             "tui",
             "--debug",
-            "--dir",
+            "--cd",
             cwd.to_str().expect("cwd"),
             "hello",
         ])
@@ -145,7 +145,7 @@ pub(crate) fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -186,7 +186,7 @@ pub(crate) fn cli_tui_status_shows_configured_default_variant() {
     );
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -230,7 +230,7 @@ pub(crate) fn cli_tui_help_prints_commands_from_registry() {
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -269,7 +269,7 @@ pub(crate) fn cli_tui_new_is_silent_until_next_prompt() {
     let config = write_run_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -312,7 +312,7 @@ pub(crate) fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -346,7 +346,7 @@ pub(crate) fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -425,7 +425,7 @@ pub(crate) fn cli_tui_model_lists_configured_entries_without_prompt() {
     let config = write_multi_model_config(&temp.path().join("config"), "http://127.0.0.1:9");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -474,7 +474,7 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
     );
 
     let continued = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "second"])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd"), "second"])
         .output()
         .expect("pevo tui continue");
     assert!(
@@ -494,7 +494,7 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
     assert_eq!(messages, 4);
 
     let new_session = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "--new", "third"])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd"), "--new", "third"])
         .output()
         .expect("pevo tui new");
     assert!(
@@ -531,7 +531,7 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_pr
     let config = write_run_config(&config_dir, &initial_server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -546,7 +546,7 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_pr
     ]);
     let config = write_run_config(&config_dir, &fallback_server.base_url);
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -582,7 +582,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -592,7 +592,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     );
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -625,7 +625,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
     let config = write_run_config(&temp.path().join("config"), &server.base_url);
 
     let first = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd"), "hello"])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd"), "hello"])
         .output()
         .expect("pevo tui");
     assert!(
@@ -638,7 +638,7 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
         .expect("archive");
 
     let mut child = isolated_tui_cmd(temp.path(), &home, &config, &db)
-        .args(["tui", "--dir", cwd.to_str().expect("cwd")])
+        .args(["tui", "--cd", cwd.to_str().expect("cwd")])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

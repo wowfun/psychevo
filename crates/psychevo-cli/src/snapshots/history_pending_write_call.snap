@@ -1,5 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
+assertion_line: 733
 expression: combined
 ---
 fixture=history_pending_write_call
@@ -9,9 +10,9 @@ size=120x18
 NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report.
 
 ⠼ write feeds/2026-05-10/hackernews-hot-06-42.md                                                                     2s
+  └ Writing · 11 bytes · 1 line
 
-
-
+    report body
 
 
 
@@ -29,9 +30,9 @@ mock/model  high  ~/work
 [default]NYT is behind a paywall. Based on comments, I can still summarize the Meta article. Let me now write the report.
 [default]
 [cyan]⠼ [default]write feeds/2026-05-10/hackernews-hot-06-42.md                                                                     [dim]2s[default]
-[default]
-[default]
-[default]
+[dim]  └ [default]Writing · 11 bytes · 1 line
+[dim]    [default]
+[dim]    [default]report body
 [default]
 [default]
 [default]

@@ -94,6 +94,268 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     );
 }
 
+#[test]
+pub(crate) fn fullscreen_write_preview_opens_once_and_preserves_manual_collapse() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_name": "write",
+            "arguments_json": r#"{"path":"report.md","content":"first"#,
+            "content_index": 0,
+            "call_index": 0
+        }),
+        false,
+    );
+    let idx = ui
+        .transcript
+        .iter()
+        .position(|row| row.tool_name.as_deref() == Some("write"))
+        .expect("write row");
+    let row = &ui.transcript[idx];
+    assert_eq!(row.title, "write report.md");
+    assert_eq!(row.write_preview_phase.as_deref(), Some("generating"));
+    assert!(row.expandable_text().contains("Generating · 5 bytes · 1 line"));
+    assert!(row.expandable_text().contains("first"));
+    assert!(!row.details_collapsed);
+
+    toggle_transcript_row_details(&mut ui.transcript[idx]);
+    assert!(ui.transcript[idx].details_collapsed);
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_call",
+                    "id": "call-write",
+                    "name": "write",
+                    "arguments": {"path": "report.md", "content": "first second"},
+                    "arguments_json": "{\"path\":\"report.md\",\"content\":\"first second\"}",
+                    "content_index": 0,
+                    "call_index": 0
+                }]
+            }
+        }),
+        false,
+    );
+
+    let row = &ui.transcript[idx];
+    assert!(row.details_collapsed);
+    assert!(row.expandable_text().contains("first second"));
+}
+
+#[test]
+pub(crate) fn fullscreen_write_preview_transitions_to_writing_and_collapses_once_on_success() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let pending = serde_json::json!({
+        "type": "tool_call_pending",
+        "tool_call_id": "call-write",
+        "tool_name": "write",
+        "arguments_json": r#"{"path":"report.md","content":"complete body"#,
+        "content_index": 0,
+        "call_index": 0
+    });
+    ui.apply_value_event(&pending, false);
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call-write",
+            "tool_name": "write",
+            "args": {"path": "report.md", "content": "complete body"}
+        }),
+        false,
+    );
+    let idx = *ui
+        .tool_rows
+        .get(&tool_id_key("call-write"))
+        .expect("write row");
+    assert_eq!(
+        ui.transcript[idx].write_preview_phase.as_deref(),
+        Some("writing")
+    );
+    assert!(ui.transcript[idx].expandable_text().contains("Writing"));
+
+    let completed = serde_json::json!({
+        "type": "tool_execution_end",
+        "tool_call_id": "call-write",
+        "tool_name": "write",
+        "args": {"path": "report.md", "content": "complete body"},
+        "result": {"path": "report.md", "bytes_written": 13},
+        "outcome": "normal"
+    });
+    ui.apply_value_event(&completed, false);
+    assert!(ui.transcript[idx].write_argument_preview.is_none());
+    assert!(ui.transcript[idx].details_collapsed);
+    assert!(!ui.transcript[idx].expandable_text().contains("complete body"));
+
+    toggle_transcript_row_details(&mut ui.transcript[idx]);
+    assert!(!ui.transcript[idx].details_collapsed);
+    ui.apply_value_event(&completed, false);
+    assert!(!ui.transcript[idx].details_collapsed);
+
+    for late in [
+        serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call-write",
+            "tool_name": "write",
+            "arguments_json": r#"{"path":"report.md","content":"late preview"#,
+            "content_index": 0,
+            "call_index": 0
+        }),
+        serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call-write",
+            "tool_name": "write",
+            "args": {"path": "report.md", "content": "late preview"}
+        }),
+    ] {
+        ui.apply_value_event(&late, false);
+        assert!(ui.transcript[idx].write_argument_preview.is_none());
+        assert!(ui.transcript[idx].tool_started.is_none());
+        assert!(!ui.transcript[idx].expandable_text().contains("late preview"));
+    }
+}
+
+#[test]
+pub(crate) fn fullscreen_failed_write_retains_preview_and_failure_reason() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_call_pending",
+            "tool_call_id": "call-write",
+            "tool_name": "write",
+            "arguments_json": r#"{"content":"unfinished body","path":"report.md"}"#,
+            "content_index": 0,
+            "call_index": 0
+        }),
+        false,
+    );
+    ui.apply_value_event(
+        &serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": "call-write",
+            "tool_name": "write",
+            "args": {"path": "report.md", "content": "unfinished body"},
+            "result": {"error": "permission denied"},
+            "outcome": "failed"
+        }),
+        false,
+    );
+
+    let idx = *ui
+        .tool_rows
+        .get(&tool_id_key("call-write"))
+        .expect("write row");
+    let row = &ui.transcript[idx];
+    assert!(row.failed);
+    assert!(!row.details_collapsed);
+    assert_eq!(row.write_preview_phase.as_deref(), Some("failed"));
+    assert!(row.expandable_text().contains("unfinished body"));
+    assert!(row.expandable_text().contains("permission denied"));
+}
+
+#[test]
+pub(crate) fn fullscreen_consumes_gateway_write_preview_metadata() {
+    fn entry(status: TranscriptBlockStatus, phase: &str, text: &str, body: &str) -> TranscriptEntry {
+        TranscriptEntry {
+            id: "live:turn-write:assistant:0".to_string(),
+            thread_id: "session-1".to_string(),
+            turn_id: Some("turn-write".to_string()),
+            message_seq: None,
+            role: TranscriptEntryRole::Assistant,
+            status,
+            source: "runtime.stream".to_string(),
+            blocks: vec![TranscriptBlock {
+                id: "live:turn-write:tool:call-write".to_string(),
+                kind: TranscriptBlockKind::File,
+                status,
+                order: 0,
+                phase_ordinal: None,
+                source: "runtime.stream".to_string(),
+                title: Some("write report.md".to_string()),
+                body: (!body.is_empty()).then(|| body.to_string()),
+                preview: None,
+                detail: None,
+                artifact_ids: Vec::new(),
+                metadata: Some(serde_json::json!({
+                    "projection": "tool",
+                    "tool_name": "write",
+                    "tool_call_id": "call-write",
+                    "outcome": if phase == "failed" { "failed" } else { "normal" },
+                    "result": {"error": body},
+                    "write_argument_preview": {
+                        "phase": phase,
+                        "path": "report.md",
+                        "text": text,
+                        "bytes_seen": text.len(),
+                        "lines_seen": 1,
+                        "omitted_bytes": 0,
+                        "truncated": false
+                    }
+                })),
+                result: None,
+                created_at_ms: 1,
+                updated_at_ms: 2,
+            }],
+            metadata: None,
+            usage: None,
+            accounting: None,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+        }
+    }
+
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        entry(
+            TranscriptBlockStatus::Running,
+            "generating",
+            "unfinished body",
+            "",
+        ),
+    );
+    let idx = ui
+        .transcript
+        .iter()
+        .position(|row| row.tool_call_id.as_deref() == Some("call-write"))
+        .expect("write row");
+    assert!(!ui.transcript[idx].details_collapsed);
+    assert!(
+        ui.transcript[idx].expandable_text().contains("unfinished body"),
+        "{:#?}",
+        ui.transcript[idx]
+    );
+
+    app.apply_gateway_transcript_entry(
+        &mut ui,
+        Some("session-1"),
+        entry(
+            TranscriptBlockStatus::Failed,
+            "failed",
+            "unfinished body",
+            "permission denied",
+        ),
+    );
+    let row = &ui.transcript[idx];
+    assert!(row.failed);
+    assert_eq!(row.write_preview_phase.as_deref(), Some("failed"));
+    assert!(row.expandable_text().contains("unfinished body"));
+    assert!(row.expandable_text().contains("permission denied"));
+}
+
 #[tokio::test]
 pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_completion() {
     let temp = tempdir().expect("temp");

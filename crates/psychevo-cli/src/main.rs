@@ -1,9 +1,10 @@
 #![allow(clippy::module_inception)]
 
 use std::io::{self, IsTerminal};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Parser;
 
 pub(crate) mod args;
@@ -53,10 +54,11 @@ pub(crate) async fn run() -> Result<ExitCode> {
             .iter()
             .all(|spec| spec.surface == command_registry::CommandSurface::PevoCli)
     );
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    let default_tui_cd = apply_root_cd(cli.cd.take(), &mut cli.command)?;
     profiles::set_cli_profile_override(cli.profile.clone())?;
     match cli.command {
-        None => run_default_command().await,
+        None => run_default_command(default_tui_cd).await,
         Some(Commands::Init(args)) => run_init_command(args).await,
         Some(Commands::Profile(args)) => run_profile_command(args),
         Some(Commands::Agent(args)) => run_agent_command(args).await,
@@ -94,9 +96,70 @@ pub(crate) async fn run() -> Result<ExitCode> {
     }
 }
 
-async fn run_default_command() -> Result<ExitCode> {
+fn apply_root_cd(
+    root_cd: Option<PathBuf>,
+    command: &mut Option<Commands>,
+) -> Result<Option<PathBuf>> {
+    let Some(root_cd) = root_cd else {
+        return Ok(None);
+    };
+    match command {
+        None => Ok(Some(root_cd)),
+        Some(Commands::Tui(args)) => {
+            args.cd.get_or_insert(root_cd);
+            Ok(None)
+        }
+        Some(Commands::Web(args)) if args.command.is_none() => {
+            merge_open_cd(&mut args.open, root_cd)?;
+            Ok(None)
+        }
+        Some(Commands::Desktop(args)) => {
+            args.cd.get_or_insert(root_cd);
+            Ok(None)
+        }
+        Some(Commands::Gateway(args)) => {
+            match &mut args.command {
+                Some(crate::args::GatewayCommand::Open(args)) => {
+                    merge_open_cd(args, root_cd)?;
+                }
+                None => {
+                    args.command = Some(crate::args::GatewayCommand::Open(
+                        crate::args::GatewayOpenArgs {
+                            cd: Some(root_cd),
+                            default_workspace: false,
+                            bind: None,
+                            no_browser: false,
+                            print_url: false,
+                        },
+                    ));
+                }
+                Some(_) => bail!("`-C/--cd` can only be used with `gateway open`"),
+            }
+            Ok(None)
+        }
+        Some(Commands::Web(_)) => {
+            bail!("`-C/--cd` opens a workspace and cannot be used with Web lifecycle commands")
+        }
+        Some(_) => bail!("`-C/--cd` is only supported when opening the TUI or GUI"),
+    }
+}
+
+fn merge_open_cd(args: &mut crate::args::GatewayOpenArgs, root_cd: PathBuf) -> Result<()> {
+    if args.cd.is_none() {
+        if args.default_workspace {
+            bail!("`-C/--cd` cannot be used with `--default-workspace`");
+        }
+        args.cd = Some(root_cd);
+    }
+    Ok(())
+}
+
+async fn run_default_command(cd: Option<PathBuf>) -> Result<ExitCode> {
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        let args = crate::args::TuiArgs::default();
+        let args = crate::args::TuiArgs {
+            cd,
+            ..Default::default()
+        };
         return tui::run_tui_command(&args).await;
     }
     eprintln!("pevo with no command requires an interactive terminal.");
@@ -106,4 +169,108 @@ async fn run_default_command() -> Result<ExitCode> {
     eprintln!("  pevo web");
     eprintln!("  pevo --help");
     Ok(ExitCode::from(2))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn root_cd_routes_to_default_tui() {
+        let mut command = None;
+
+        let default_cd =
+            apply_root_cd(Some(PathBuf::from("workspace")), &mut command).expect("root cwd");
+
+        assert_eq!(default_cd.as_deref(), Some(Path::new("workspace")));
+    }
+
+    #[test]
+    fn command_local_cd_wins_over_root_cd() {
+        let mut command = Some(Commands::Tui(crate::args::TuiArgs {
+            cd: Some(PathBuf::from("local")),
+            ..Default::default()
+        }));
+
+        apply_root_cd(Some(PathBuf::from("root")), &mut command).expect("root cwd");
+
+        assert!(matches!(
+            command,
+            Some(Commands::Tui(crate::args::TuiArgs { cd: Some(path), .. }))
+                if path == Path::new("local")
+        ));
+    }
+
+    #[test]
+    fn root_cd_routes_to_default_gateway_open() {
+        let mut command = Some(Commands::Gateway(crate::args::GatewayArgs {
+            command: None,
+        }));
+
+        apply_root_cd(Some(PathBuf::from("workspace")), &mut command).expect("root cwd");
+
+        assert!(matches!(
+            command,
+            Some(Commands::Gateway(crate::args::GatewayArgs {
+                command: Some(crate::args::GatewayCommand::Open(
+                    crate::args::GatewayOpenArgs { cd: Some(path), .. }
+                )),
+            })) if path == Path::new("workspace")
+        ));
+    }
+
+    #[test]
+    fn root_cd_routes_to_native_desktop() {
+        let mut command = Some(Commands::Desktop(crate::args::DesktopArgs { cd: None }));
+
+        apply_root_cd(Some(PathBuf::from("workspace")), &mut command).expect("root cwd");
+
+        assert!(matches!(
+            command,
+            Some(Commands::Desktop(crate::args::DesktopArgs { cd: Some(path) }))
+                if path == Path::new("workspace")
+        ));
+    }
+
+    #[test]
+    fn root_cd_rejects_web_lifecycle_commands() {
+        let mut command = Some(Commands::Web(crate::args::WebArgs {
+            open: crate::args::GatewayOpenArgs {
+                cd: None,
+                default_workspace: false,
+                bind: None,
+                no_browser: false,
+                print_url: false,
+            },
+            command: Some(crate::args::WebCommand::Start(
+                crate::args::GatewayStartArgs { bind: None },
+            )),
+        }));
+
+        let error = apply_root_cd(Some(PathBuf::from("workspace")), &mut command)
+            .expect_err("Web lifecycle command must reject cwd");
+
+        assert_eq!(
+            error.to_string(),
+            "`-C/--cd` opens a workspace and cannot be used with Web lifecycle commands"
+        );
+    }
+
+    #[test]
+    fn root_cd_rejects_non_ui_commands() {
+        let mut command = Some(Commands::Doctor(crate::args::DoctorArgs {
+            json: false,
+            live: false,
+        }));
+
+        let error = apply_root_cd(Some(PathBuf::from("workspace")), &mut command)
+            .expect_err("non-UI command must reject cwd");
+
+        assert_eq!(
+            error.to_string(),
+            "`-C/--cd` is only supported when opening the TUI or GUI"
+        );
+    }
 }

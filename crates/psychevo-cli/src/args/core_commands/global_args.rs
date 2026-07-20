@@ -15,6 +15,13 @@ pub(crate) struct Cli {
         help = "Use a named Psychevo profile for this invocation"
     )]
     pub(crate) profile: Option<String>,
+    #[arg(
+        short = 'C',
+        long = "cd",
+        value_name = "DIR",
+        help = "Open the TUI or GUI with this workspace cwd"
+    )]
+    pub(crate) cd: Option<PathBuf>,
     #[command(subcommand)]
     pub(crate) command: Option<Commands>,
 }

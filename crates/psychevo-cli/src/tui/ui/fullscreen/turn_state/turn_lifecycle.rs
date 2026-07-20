@@ -127,7 +127,11 @@ impl<'a> FullscreenUi<'a> {
         row.transcript_message_seq = None;
     }
 
-    pub(crate) fn upsert_streaming_tool_call(&mut self, call: StreamingToolCall) -> bool {
+    pub(crate) fn upsert_streaming_tool_call(
+        &mut self,
+        call: StreamingToolCall,
+        force_write_preview: bool,
+    ) -> bool {
         if call.tool_name == "clarify" {
             return false;
         }
@@ -142,6 +146,23 @@ impl<'a> FullscreenUi<'a> {
             );
             return false;
         }
+        let write_preview = if call.tool_name == "write" {
+            if let Some(arguments_json) = call.arguments_json.as_deref() {
+                let tracker = self
+                    .write_preview_trackers
+                    .entry(call.position_key.clone())
+                    .or_default();
+                if force_write_preview {
+                    tracker.flush(arguments_json, Instant::now())
+                } else {
+                    tracker.observe(arguments_json, Instant::now())
+                }
+            } else {
+                write_argument_preview_from_args(&call.args)
+            }
+        } else {
+            None
+        };
         let mut value = serde_json::json!({ "args": call.args });
         if let Some(display) = &call.display
             && let Some(object) = value.as_object_mut()
@@ -178,6 +199,18 @@ impl<'a> FullscreenUi<'a> {
             });
         let mut active_tool_frame_requested = false;
         let idx = if let Some(idx) = idx {
+            if call.tool_name == "write"
+                && self
+                    .transcript
+                    .get(idx)
+                    .is_some_and(TranscriptRow::is_terminal_write_row)
+            {
+                self.tool_rows.insert(call.position_key, idx);
+                if let Some(id_key) = id_key {
+                    self.tool_rows.insert(id_key, idx);
+                }
+                return false;
+            }
             if call.tool_name == "spawn_agent"
                 && self
                     .transcript
@@ -205,6 +238,9 @@ impl<'a> FullscreenUi<'a> {
             {
                 row.full_text = Some(full_text);
             }
+            if let Some(preview) = write_preview.clone() {
+                row.set_write_argument_preview(preview, "generating", None);
+            }
             if call.id.is_some() {
                 row.tool_call_id = call.id.clone();
             }
@@ -229,6 +265,9 @@ impl<'a> FullscreenUi<'a> {
             row.tool_call_id = call.id.clone();
             if call.tool_name == "spawn_agent" {
                 row.full_text = running_agent_tool_full_text(&value);
+            }
+            if let Some(preview) = write_preview {
+                row.set_write_argument_preview(preview, "generating", None);
             }
             row.tool_started = Some(Instant::now());
             active_tool_frame_requested = true;
@@ -291,6 +330,7 @@ impl<'a> FullscreenUi<'a> {
         self.meta_row = None;
         self.gateway_item_rows.clear();
         self.tool_rows.clear();
+        self.write_preview_trackers.clear();
         self.live_tool_args.clear();
         self.streaming_tool_message_open = false;
         self.deferred_stream_events.clear();
@@ -347,7 +387,13 @@ impl<'a> FullscreenUi<'a> {
             row.title = completed_tool_title_from_active(row.kind, &row.title);
             row.failed = false;
             row.interrupted = true;
-            row.text = "interrupted".to_string();
+            if row.tool_name.as_deref() == Some("write")
+                && row.write_argument_preview.is_some()
+            {
+                row.refresh_write_argument_preview("cancelled", Some("interrupted"));
+            } else {
+                row.text = "interrupted".to_string();
+            }
         }
     }
 

@@ -139,12 +139,13 @@ pub(crate) struct GatewayStatusArgs {
 #[derive(Debug, Parser, Clone)]
 pub(crate) struct GatewayOpenArgs {
     #[arg(
-        long = "dir",
+        short = 'C',
+        long = "cd",
         value_name = "DIR",
         conflicts_with = "default_workspace",
         help = "Open this cwd in the Web Shell"
     )]
-    pub(crate) dir: Option<PathBuf>,
+    pub(crate) cd: Option<PathBuf>,
     #[arg(
         long = "default-workspace",
         help = "Open the configured default GUI workspace instead of the current cwd"

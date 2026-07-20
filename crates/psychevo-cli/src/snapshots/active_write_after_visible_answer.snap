@@ -1,6 +1,6 @@
 ---
 source: crates/psychevo-cli/src/tui/tests/fixtures.rs
-assertion_line: 732
+assertion_line: 733
 expression: combined
 ---
 fixture=active_write_after_visible_answer
@@ -12,9 +12,9 @@ size=120x24
 • Thinking                                                                                                    ▸ details
 
 ⠋ write /tmp/hackernews-hot-05-15.md
+  └ Generating · 11 bytes · 1 line
 
-
-
+    report body
 
 
 
@@ -38,9 +38,9 @@ mock/model  high  ⠋ 0s · Esc  ~/work · main
 [green]• [default]Thinking                                                                                                    [dim]▸ details[default]
 [default]
 [cyan]⠋ [default]write /tmp/hackernews-hot-05-15.md
-[default]
-[default]
-[default]
+[dim]  └ [default]Generating · 11 bytes · 1 line
+[dim]    [default]
+[dim]    [default]report body
 [default]
 [default]
 [default]

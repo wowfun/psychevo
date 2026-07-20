@@ -587,6 +587,31 @@ impl TuiApp {
     }
 }
 
+fn gateway_block_tool_name(block: &TranscriptBlock) -> Option<&str> {
+    block
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("tool_name"))
+        .and_then(Value::as_str)
+}
+
+fn gateway_write_argument_preview(
+    block: &TranscriptBlock,
+) -> Option<(WriteArgumentPreview, String)> {
+    if gateway_block_tool_name(block) != Some("write") {
+        return None;
+    }
+    let metadata = block.metadata.as_ref()?;
+    let value = metadata.get("write_argument_preview")?;
+    let preview = serde_json::from_value::<WriteArgumentPreview>(value.clone()).ok()?;
+    let phase = value
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("generating")
+        .to_string();
+    Some((preview, phase))
+}
+
 fn clarify_reason_from_action(
     outcome: GatewayActionOutcome,
     payload: &Value,
