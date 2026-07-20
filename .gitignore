@@ -7,5 +7,9 @@ coverage/
 **/dist/
 playwright-report/
 test-results/
+apps/workbench/public/file-viewer/
+apps/workbench/dummy-non-existing-folder/
+apps/desktop/public/file-viewer/
+apps/desktop/dummy-non-existing-folder/
 __pycache__/
 *.pyc

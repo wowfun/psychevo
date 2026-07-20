@@ -833,7 +833,7 @@ describe("Workbench layout and workspace panels", () => {
     });
   });
 
-  it("opens file-tree external actions and keeps non-previewable files context-menu accessible", async () => {
+  it("opens file-tree external actions and keeps rich-preview files context-menu accessible", async () => {
     gatewayMock.workspaceFilesResult = {
       root: gatewayMock.scope.cwd,
       entries: [
@@ -876,7 +876,7 @@ describe("Workbench layout and workspace panels", () => {
     const image = within(files).getByRole("treeitem", { name: /photo\.png/ });
     expect((image as HTMLButtonElement).disabled).toBe(false);
     expect(image.hasAttribute("aria-disabled")).toBe(false);
-    expect(image.getAttribute("aria-describedby")).toBeTruthy();
+    expect(image.getAttribute("aria-describedby")).toBeNull();
     fireEvent.contextMenu(image, { clientX: 40, clientY: 56 });
     expect(await screen.findByRole("menuitem", { name: "Open in Default Image Viewer" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Show in Finder" })).toBeTruthy();
@@ -929,6 +929,9 @@ describe("Workbench layout and workspace panels", () => {
 
     fireEvent.click(pathButton("site/index.html"));
     const files = await screen.findByRole("region", { name: "Workspace files" });
+    await waitFor(() => {
+      expect(files.querySelector('iframe[title="site/index.html"]')).toBeInstanceOf(HTMLIFrameElement);
+    });
     const frame = files.querySelector('iframe[title="site/index.html"]');
     if (!(frame instanceof HTMLIFrameElement)) {
       throw new Error("missing interactive HTML artifact preview");
@@ -946,13 +949,9 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(pathButton("/c/repo/site/index.html"));
     await waitFor(() => {
       const openedPaths = gatewayMock.requestLog
-        .filter((entry) => entry.method === "workspace/file/read")
+        .filter((entry) => entry.method === "workspace/file/preview/open")
         .map((entry) => (entry.params as { path?: string }).path);
-      expect(openedPaths).toEqual([
-        "site/index.html",
-        "site/index.html",
-        "site/index.html"
-      ]);
+      expect(openedPaths).toEqual(["site/index.html"]);
     });
   });
 
@@ -993,7 +992,7 @@ describe("Workbench layout and workspace panels", () => {
       expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
       await waitFor(() => {
         expect(gatewayMock.requestLog).toContainEqual({
-          method: "workspace/file/read",
+          method: "workspace/file/preview/open",
           params: expect.objectContaining({ path: "docs/report.md" })
         });
       });
@@ -1205,6 +1204,7 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(within(files).getByRole("treeitem", { name: /index\.html/ }));
 
     expect(await within(files).findByText("/tmp/project/site/index.html")).toBeTruthy();
+    await waitFor(() => expect(files.querySelector(".htmlStaticPreview iframe")).toBeTruthy());
     const inlineFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement | null;
     if (!inlineFrame) {
       throw new Error("missing inline HTML preview iframe");
@@ -1259,7 +1259,9 @@ describe("Workbench layout and workspace panels", () => {
     });
     fireEvent.click(within(files).getByLabelText("Save file"));
     await waitFor(() => expect(within(files).queryByText("unsaved")).toBeNull());
-    await waitFor(() => expect(files.querySelector(".htmlStaticPreview iframe")).toBeTruthy());
+    await waitFor(() => expect(
+      (files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement | null)?.getAttribute("srcdoc")
+    ).toContain("textContent = \"changed\""));
     let activeFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement;
     expect(activeFrame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(activeFrame.getAttribute("srcdoc")).toContain("textContent = \"changed\"");
@@ -1361,6 +1363,7 @@ describe("Workbench layout and workspace panels", () => {
 
     fireEvent.click(within(files).getByRole("treeitem", { name: /main\.py/ }));
     expect(await within(files).findByText("/tmp/project/src/main.py")).toBeTruthy();
+    await waitFor(() => expect(container.querySelector(".rightCodePreview")).toBeTruthy());
     const preview = container.querySelector(".rightCodePreview") as HTMLElement | null;
     expect(preview?.dataset.lang).toBe("python");
     expect(preview?.querySelector(".hljs-keyword, .hljs-title")).toBeTruthy();

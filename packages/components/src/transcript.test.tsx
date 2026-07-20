@@ -224,6 +224,110 @@ describe("TranscriptPanel Thinking lifecycle", () => {
   });
 });
 
+describe("TranscriptPanel write argument previews", () => {
+  function writePreviewBlock(
+    text: string,
+    phase: "generating" | "writing" | "failed" | "cancelled" = "generating",
+    status: TranscriptBlock["status"] = "pending"
+  ): TranscriptBlock {
+    return transcriptBlock({
+      id: "write-preview-1",
+      kind: "file",
+      status,
+      title: "write report.md",
+      metadata: {
+        projection: "tool",
+        tool_name: "write",
+        tool_call_id: "call-write",
+        args: null,
+        write_argument_preview: {
+          phase,
+          path: "report.md",
+          text,
+          bytes_seen: new TextEncoder().encode(text).length,
+          lines_seen: text ? text.split("\n").length : 0,
+          omitted_bytes: 0,
+          truncated: false
+        }
+      }
+    });
+  }
+
+  it("opens the first preview and preserves manual collapse across deltas", () => {
+    const { rerender } = render(
+      <TranscriptPanel entries={[transcriptEntry([writePreviewBlock("first")])]} />
+    );
+    const header = screen.getByRole("button", { name: /write report\.md/ });
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("File content")).toBeTruthy();
+    expect(screen.getByText("first")).toBeTruthy();
+    expect(screen.getByText(/Generating · 5 bytes · 1 line/)).toBeTruthy();
+
+    fireEvent.click(header);
+    rerender(
+      <TranscriptPanel entries={[transcriptEntry([writePreviewBlock("first second")])]} />
+    );
+    expect(screen.getByRole("button", { name: /write report\.md/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("first second")).toBeNull();
+  });
+
+  it("collapses once after success and preserves later manual expansion", () => {
+    const { rerender } = render(
+      <TranscriptPanel entries={[transcriptEntry([writePreviewBlock("complete body", "writing", "running")])]} />
+    );
+    expect(screen.getByRole("button", { name: /write report\.md/ }).getAttribute("aria-expanded")).toBe("true");
+
+    const completed = transcriptBlock({
+      id: "write-preview-1",
+      kind: "file",
+      status: "completed",
+      title: "write report.md",
+      metadata: {
+        projection: "tool",
+        tool_name: "write",
+        tool_call_id: "call-write",
+        args: { path: "report.md", content: "complete body" },
+        write_argument_preview: null
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "completed",
+        content: JSON.stringify({ path: "report.md", bytes_written: 13 }),
+        isError: false,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+    rerender(<TranscriptPanel entries={[transcriptEntry([completed])]} />);
+    const completedHeader = screen.getByRole("button", { name: /write report\.md/ });
+    expect(completedHeader.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("complete body")).toBeNull();
+
+    fireEvent.click(completedHeader);
+    rerender(<TranscriptPanel entries={[transcriptEntry([{ ...completed, updatedAtMs: 3 }])]} />);
+    expect(screen.getByRole("button", { name: /write report\.md/ }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps a failed write preview open with the error result", () => {
+    const block = writePreviewBlock("unfinished body", "failed", "failed");
+    block.result = {
+      resultMessageSeq: 2,
+      status: "failed",
+      content: JSON.stringify({ error: "permission denied" }),
+      isError: true,
+      metadata: null,
+      createdAtMs: 2,
+      updatedAtMs: 2
+    };
+    render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
+
+    expect(screen.getByRole("button", { name: /write report\.md/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("unfinished body")).toBeTruthy();
+    expect(screen.getAllByText("permission denied").length).toBeGreaterThan(0);
+  });
+});
+
 describe("TranscriptPanel evidence titles", () => {
   it("gives parallel live web search titles the remaining row width without provider summaries", () => {
     const queries = [

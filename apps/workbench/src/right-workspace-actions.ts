@@ -62,6 +62,18 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       : null;
     const nextId = existingThreadTab?.id
       ?? (reusable && !forceNew ? params.rightTabs.find((tab) => tab.kind === kind)?.id ?? createRightTabId(kind) : createRightTabId(kind));
+    const replacedFileTab = kind === "files"
+      ? params.rightTabs.find((tab) => tab.id === nextId) ?? null
+      : null;
+    if (
+      replacedFileTab
+      && params.dirtyRightTabs[nextId]
+      && patch.path !== undefined
+      && (replacedFileTab.path ?? null) !== (patch.path ?? null)
+      && !window.confirm("Discard unsaved file edits?")
+    ) {
+      return;
+    }
     const nextTab: RightWorkspaceTab = {
       id: nextId,
       kind,
@@ -71,7 +83,6 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       pendingPrompt: patch.pendingPrompt ?? null,
       path: patch.path ?? null,
       diff: patch.diff ?? null,
-      file: patch.file ?? null,
       preview: patch.preview ?? null,
       message: patch.message ?? null
     };
@@ -90,7 +101,15 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       }
       return current.map((tab) => (
         tab.id === nextId
-          ? { ...tab, ...nextTab, id: tab.id, kind: tab.kind }
+          ? {
+              ...tab,
+              ...nextTab,
+              ...(kind === "files" && patch.path === undefined
+                ? { message: tab.message, path: tab.path, title: tab.title }
+                : {}),
+              id: tab.id,
+              kind: tab.kind
+            }
           : tab
       ));
     });

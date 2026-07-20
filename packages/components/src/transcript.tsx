@@ -529,6 +529,7 @@ function TranscriptBlockView({
   const [open, setOpen] = useState(shouldDefaultOpen);
   const [copied, setCopied] = useState(false);
   const wasRunningReasoningRef = useRef(block.kind === "reasoning" && block.status === "running");
+  const wasWritePreviewRef = useRef(display.writePreviewPhase !== null);
   const status = statusLabel(block);
   const artifactIds = transcriptArtifactIds(block);
   useEffect(() => {
@@ -543,6 +544,13 @@ function TranscriptBlockView({
     }
     wasRunningReasoningRef.current = runningReasoning;
   }, [block.id, block.kind, block.status]);
+  useEffect(() => {
+    const hasWritePreview = display.writePreviewPhase !== null;
+    if (wasWritePreviewRef.current && !hasWritePreview && block.status === "completed") {
+      setOpen(false);
+    }
+    wasWritePreviewRef.current = hasWritePreview;
+  }, [block.id, block.status, display.writePreviewPhase]);
 
   if (block.kind === "text" && entry.role === "user") {
     return (

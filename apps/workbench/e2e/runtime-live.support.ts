@@ -14,6 +14,9 @@ import { fileURLToPath } from "node:url";
 const STABLE_V1_ACP_AGENT_PATH = fileURLToPath(
   new URL("./fixtures/stable-v1-acp-agent.mjs", import.meta.url)
 );
+const MANAGED_CODEX_FAKE_NPM_PATH = fileURLToPath(
+  new URL("./fixtures/managed-codex-fake-npm.mjs", import.meta.url)
+);
 
 export type DeterministicAcpAgentKind = "codex" | "opencode";
 
@@ -265,57 +268,28 @@ function prepareManagedCodexFakeNpm(options: {
 }): { env: NodeJS.ProcessEnv; logPath: string; path: string } {
   const binDir = path.join(options.root, "fake-npm-bin");
   const installerPath = path.join(options.root, "fake-npm.mjs");
+  const configPath = path.join(options.root, "fake-npm-config.json");
   const npmLogPath = path.join(options.root, "fake-npm.json");
   mkdirSync(binDir, { recursive: true });
-  writeFileSync(installerPath, `
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
-import path from "node:path";
-
-const expectedArgs = ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"];
-const actualArgs = process.argv.slice(2);
-if (JSON.stringify(actualArgs) !== JSON.stringify(expectedArgs)) {
-  throw new Error("unexpected managed npm args: " + JSON.stringify(actualArgs));
-}
-if (process.env.PSYCHEVO_MANAGED_FIXTURE_CAPTURED !== "captured") {
-  throw new Error("managed npm did not receive the Gateway-captured environment");
-}
-const packageRoot = path.join(process.cwd(), "node_modules", "@agentclientprotocol", "codex-acp");
-const distRoot = path.join(packageRoot, "dist");
-const binRoot = path.join(process.cwd(), "node_modules", ".bin");
-mkdirSync(distRoot, { recursive: true });
-mkdirSync(binRoot, { recursive: true });
-writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
-  name: "@agentclientprotocol/codex-acp",
-  version: "1.1.2"
-}));
-if (process.platform === "win32") {
-  writeFileSync(
-    path.join(binRoot, "codex-acp.cmd"),
-    ${JSON.stringify(`@echo off\r\n"${process.execPath}" "${options.scriptPath}" codex managed "${options.logPath}" "${options.statePath}" "${options.version}"\r\n`)}
-  );
-} else {
-  const launcher = path.join(distRoot, "cli.js");
-  writeFileSync(
-    launcher,
-    ${JSON.stringify(`#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(options.scriptPath)} codex managed ${shellQuote(options.logPath)} ${shellQuote(options.statePath)} ${shellQuote(options.version)}\n`)}
-  );
-  chmodSync(launcher, 0o755);
-  symlinkSync("../@agentclientprotocol/codex-acp/dist/cli.js", path.join(binRoot, "codex-acp"));
-}
-writeFileSync(${JSON.stringify(npmLogPath)}, JSON.stringify({
-  args: actualArgs,
-  capturedMarker: process.env.PSYCHEVO_MANAGED_FIXTURE_CAPTURED,
-  cwd: process.cwd(),
-  path: process.env.PATH
-}, null, 2));
-`);
+  copyFileSync(MANAGED_CODEX_FAKE_NPM_PATH, installerPath);
+  chmodSync(installerPath, 0o755);
+  writeFileSync(configPath, `${JSON.stringify({
+    logPath: options.logPath,
+    npmLogPath,
+    scriptPath: options.scriptPath,
+    statePath: options.statePath,
+    version: options.version
+  })}\n`);
   const npmPath = path.join(binDir, process.platform === "win32" ? "npm.cmd" : "npm");
   if (process.platform === "win32") {
-    writeFileSync(npmPath, `@echo off\r\n"${process.execPath}" "${installerPath}" %*\r\n`);
+    writeFileSync(
+      npmPath,
+      `@echo off\r\n"${process.execPath}" "${installerPath}" "${configPath}" %*\r\n`
+    );
   } else {
     writeFileSync(
       npmPath,
-      `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(installerPath)} "$@"\n`
+      `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(installerPath)} ${shellQuote(configPath)} "$@"\n`
     );
     chmodSync(npmPath, 0o755);
   }

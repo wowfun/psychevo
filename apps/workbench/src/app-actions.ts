@@ -10,7 +10,6 @@ import {
   WorkspaceChangeMutationResultSchema,
   WorkspaceCreateResultSchema,
   WorkspaceDiffResultSchema,
-  WorkspaceFileReadResultSchema,
   WorkspaceFileWriteResultSchema,
   type ChannelUpdateParams,
   type ChannelSourceListResult,
@@ -65,8 +64,7 @@ import {
   type PendingDetachedShell
 } from "./viewGuard";
 import {
-  fileBasename,
-  isUnsupportedPreviewFile
+  fileBasename
 } from "./right-workspace-model";
 import { parseThreadContext, runtimeControlSelections } from "./runtime-context";
 import type { ComposerSessionCoordinator } from "./composer-session-coordinator";
@@ -481,33 +479,10 @@ export function createAppActions(params: AppActionsParams) {
     const layoutPatch: Partial<RightWorkspaceTab> = options.hideFileTree
       ? { fileTreeOpen: false }
       : {};
-    if (isUnsupportedPreviewFile(path)) {
-      params.openRightWorkspaceTab("files", {
-        ...layoutPatch,
-        path,
-        title: fileBasename(path),
-        file: null,
-        message: "Preview is not available for this file type."
-      });
-      return;
-    }
-    const result = WorkspaceFileReadResultSchema.parse(await params.client?.request("workspace/file/read", { scope: scope(), path }));
-    if (result.binary || result.content === null) {
-      params.openRightWorkspaceTab("files", {
-        ...layoutPatch,
-        path: result.path,
-        title: fileBasename(result.path),
-        file: result,
-        message: result.unreadable ?? "Preview is not available for this file."
-      });
-      return;
-    }
     params.openRightWorkspaceTab("files", {
       ...layoutPatch,
-      path: result.path,
-      title: fileBasename(result.path),
-      file: result,
-      message: result.truncated ? "Preview truncated." : null
+      path,
+      title: fileBasename(path)
     });
   }
 
@@ -525,10 +500,9 @@ export function createAppActions(params: AppActionsParams) {
       expectedRevision,
       force
     }));
-    const read = WorkspaceFileReadResultSchema.parse(await params.client?.request("workspace/file/read", { scope: nextScope, path: result.path }));
     params.setRightTabs((current) => current.map((tab) => (
       tab.kind === "files" && tab.path === result.path
-        ? { ...tab, file: read, message: null, title: fileBasename(result.path) }
+        ? { ...tab, message: null, title: fileBasename(result.path) }
         : tab
     )));
     await params.refreshWorkspaceSurface(params.client, nextScope, params.currentThreadId ?? null);

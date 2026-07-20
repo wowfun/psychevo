@@ -26,6 +26,13 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@file-viewer/renderer-image": "2.2.2",
+    "@file-viewer/renderer-ofd": "2.2.2",
+    "@file-viewer/renderer-pdf": "2.2.2",
+    "@file-viewer/renderer-presentation": "2.2.2",
+    "@file-viewer/renderer-spreadsheet": "2.2.2",
+    "@file-viewer/renderer-word": "2.2.2",
+    "@file-viewer/vite-plugin": "2.2.2",
     "@tauri-apps/cli": "2.11.4",
     "@vitejs/plugin-react": "^6.0.2",
     "@wdio/cli": "9.29.1",

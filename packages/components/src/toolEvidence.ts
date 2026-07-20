@@ -47,6 +47,19 @@ export type EvidenceDisplay = {
   singleTitle: boolean;
   summary: string | null;
   title: string;
+  writePreviewPhase: WriteArgumentPreviewPhase | null;
+};
+
+export type WriteArgumentPreviewPhase = "generating" | "writing" | "failed" | "cancelled";
+
+type WriteArgumentPreview = {
+  bytesSeen: number;
+  linesSeen: number;
+  omittedBytes: number;
+  path: string | null;
+  phase: WriteArgumentPreviewPhase;
+  text: string;
+  truncated: boolean;
 };
 
 const BODY_KEYS = new Set(["body", "chars", "content", "diff", "input", "metadata", "output", "result"]);
@@ -81,7 +94,8 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
       sections: detail ? [{ code: block.kind === "shell", kind: "text", text: detail, title: "Detail" }] : [],
       singleTitle: Boolean(invocation || !summary),
       summary: invocation ? null : summary,
-      title: invocation ?? title
+      title: invocation ?? title,
+      writePreviewPhase: null
     };
   }
 
@@ -92,19 +106,75 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
   const explicitTitle = explicitToolTitle(toolName, title, metadata);
   const invocation = explicitTitle ? null : execCommandInvocation(toolName, title, args, block.preview ?? "");
   const inlineDiff = inlineDiffDisplay(spec, result, block);
+  const writePreview = writeArgumentPreview(toolName, metadata);
   const displayTitle = inlineDiff?.title ?? explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
-  const summary = inlineDiff || invocation || explicitTitle ? null : toolSummary(spec, result, args);
-  const sections = toolSections(toolName, spec, args, result, metadata, block, inlineDiff);
+  const summary = writePreviewSummary(writePreview) ?? (
+    inlineDiff || invocation || explicitTitle ? null : toolSummary(spec, result, args)
+  );
+  const sections = toolSections(toolName, spec, args, result, metadata, block, inlineDiff, writePreview);
   const singleTitle = !summary;
 
   return {
     category: spec.category,
-    defaultOpen: Boolean(inlineDiff),
+    defaultOpen: Boolean(inlineDiff || writePreview?.text),
     sections,
     singleTitle,
     summary,
-    title: displayTitle
+    title: displayTitle,
+    writePreviewPhase: writePreview?.phase ?? null
   };
+}
+
+function writeArgumentPreview(
+  toolName: string,
+  metadata: Record<string, unknown>
+): WriteArgumentPreview | null {
+  if (toolName !== "write") {
+    return null;
+  }
+  const value = asRecord(metadata.write_argument_preview ?? metadata.writeArgumentPreview);
+  const phase = writeArgumentPreviewPhase(value.phase);
+  const text = typeof value.text === "string" ? value.text : null;
+  if (!phase || text === null) {
+    return null;
+  }
+  return {
+    bytesSeen: nonNegativeNumber(value.bytes_seen ?? value.bytesSeen),
+    linesSeen: nonNegativeNumber(value.lines_seen ?? value.linesSeen),
+    omittedBytes: nonNegativeNumber(value.omitted_bytes ?? value.omittedBytes),
+    path: stringValue(value.path),
+    phase,
+    text,
+    truncated: value.truncated === true
+  };
+}
+
+function writeArgumentPreviewPhase(value: unknown): WriteArgumentPreviewPhase | null {
+  return value === "generating" || value === "writing" || value === "failed" || value === "cancelled"
+    ? value
+    : null;
+}
+
+function nonNegativeNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function writePreviewSummary(preview: WriteArgumentPreview | null): string | null {
+  if (!preview) {
+    return null;
+  }
+  const phase = preview.phase === "generating"
+    ? "Generating"
+    : preview.phase === "writing"
+      ? "Writing"
+      : preview.phase === "failed"
+        ? "Failed"
+        : "Cancelled";
+  const parts = [phase, `${formatCount(preview.bytesSeen)} bytes`];
+  if (preview.linesSeen > 0) {
+    parts.push(`${formatCount(preview.linesSeen)} ${preview.linesSeen === 1 ? "line" : "lines"}`);
+  }
+  return parts.join(" · ");
 }
 
 function explicitToolTitle(toolName: string, title: string, metadata: Record<string, unknown>): string | null {
@@ -360,7 +430,8 @@ function toolSections(
   result: unknown,
   metadata: Record<string, unknown>,
   block: TranscriptBlock,
-  inlineDiff: InlineDiffDisplay | null
+  inlineDiff: InlineDiffDisplay | null,
+  writePreview: WriteArgumentPreview | null
 ): ToolDetailSection[] {
   if (toolName === "exec_command") {
     return execCommandSections(args, result, metadata, block);
@@ -375,7 +446,19 @@ function toolSections(
     return readSections(result, block);
   }
   const sections: ToolDetailSection[] = [];
-  const inputs = visibleRows(args, "input", EMPTY_KEYS);
+  if (writePreview?.text) {
+    sections.push({
+      code: true,
+      kind: "text",
+      text: writePreview.text,
+      title: "File content"
+    });
+  }
+  const inputs = visibleRows(
+    args,
+    "input",
+    writePreview ? new Set(["path", "file", "file_path"]) : EMPTY_KEYS
+  );
   if (inputs.length > 0) {
     sections.push({ kind: "kv", rows: inputs, title: "Input" });
   }

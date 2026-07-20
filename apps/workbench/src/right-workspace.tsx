@@ -17,6 +17,7 @@ import type { Appearance, DebugEvent, RightWorkspaceBrowserState, RightWorkspace
 import { BrowserPanel } from "./right-workspace/browser";
 import { DebugPanel } from "./right-workspace/debug";
 import { FilesPanel } from "./right-workspace/files";
+import { WorkspaceFileGatewayAdapterProvider } from "./right-workspace/workspace-file-gateway-adapter";
 import { PreviewPanel } from "./right-workspace/preview";
 import { ReviewPanel } from "./right-workspace/review";
 import { TeamPanel } from "./right-workspace/team";
@@ -30,7 +31,6 @@ import {
 export {
   createRightTabId,
   fileBasename,
-  isUnsupportedPreviewFile,
   rightWorkspaceDefaultTitle,
   rightWorkspaceTabLabel,
   rightWorkspaceTabVisibleForSession
@@ -176,23 +176,9 @@ export function RightWorkspace({
               />
             )}
             {tab.kind === "files" && (
-              <FilesPanel
+              <WorkspaceFileGatewayAdapterProvider
                 client={client}
-                files={files}
-                preview={tab.file ?? null}
-                previewMessage={tab.message ?? null}
-                root={root}
-                scope={scope}
-                selectedPath={tab.path ?? null}
-                tabId={tab.id}
-                truncated={truncated}
-                onCompare={onChangedFile}
                 onCopyText={onCopyText}
-                onDirtyChange={onDirtyTabChange}
-                fileTreeOpen={tab.fileTreeOpen ?? true}
-                htmlExecutionActive={tab.id === activeTab?.id}
-                onFileTreeOpenChange={(open) => onFileTreeOpenChange(tab.id, open)}
-                onOpen={onOpenFile}
                 onOpenHtmlPreview={(path, content) => onOpenPreview({
                   content,
                   kind: "html",
@@ -200,7 +186,23 @@ export function RightWorkspace({
                   title: path.split(/[\\/]/).pop() || "HTML preview"
                 })}
                 onSave={onSaveFile}
-              />
+              >
+                <FilesPanel
+                  client={client}
+                  files={files}
+                  root={root}
+                  scope={scope}
+                  selectedPath={tab.path ?? null}
+                  tabId={tab.id}
+                  truncated={truncated}
+                  onCompare={onChangedFile}
+                  onDirtyChange={onDirtyTabChange}
+                  fileTreeOpen={tab.fileTreeOpen ?? true}
+                  htmlExecutionActive={tab.id === activeTab?.id}
+                  onFileTreeOpenChange={(open) => onFileTreeOpenChange(tab.id, open)}
+                  onOpen={onOpenFile}
+                />
+              </WorkspaceFileGatewayAdapterProvider>
             )}
             {tab.kind === "preview" && tab.preview && (
               <PreviewPanel

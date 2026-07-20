@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import { fileViewerRenderers } from "@file-viewer/vite-plugin";
 import { configDefaults, defineConfig } from "vitest/config";
 
 const CHUNK_SIZE_WARNING_LIMIT_KB = 700;
@@ -101,13 +102,23 @@ function isMermaidRendererVendor(id: string): boolean {
   );
 }
 
-function isMermaidPackageVendor(id: string): boolean {
-  return includesNodePackage(normalizedModuleId(id), "mermaid");
-}
-
 export default defineConfig({
   clearScreen: false,
-  plugins: [react()],
+  plugins: [
+    react(),
+    fileViewerRenderers({
+      copyAssets: { baseDir: "file-viewer", mode: "both" },
+      formats: [
+        "pdf",
+        "docx", "docm", "dotx", "dotm", "rtf", "odt",
+        "xlsx", "xlsm", "xlsb", "xltx", "xltm", "ods",
+        "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "odp",
+        "ofd", "heic", "heif"
+      ],
+      inject: false,
+      chunkStrategy: "none"
+    })
+  ],
   build: {
     rolldownOptions: {
       output: {
@@ -176,18 +187,8 @@ export default defineConfig({
               test: (id) => includesNodePackagePrefix(normalizedModuleId(id), "@xterm/")
             },
             {
-              name: "vendor",
-              priority: 70,
-              test: (id) => normalizedModuleId(id).includes("/node_modules/") && !isMermaidPackageVendor(id)
-            },
-            {
               name: (id) => protocolSchemaChunkName(normalizedModuleId(id)),
               priority: 65
-            },
-            {
-              name: "workbench-app",
-              priority: 62,
-              test: (id) => normalizedModuleId(id).includes("/apps/workbench/src/")
             },
             {
               name: "floating-app",

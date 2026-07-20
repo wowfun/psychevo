@@ -606,6 +606,9 @@ vi.mock("@psychevo/client", async () => {
   const actual = await vi.importActual<typeof import("@psychevo/client")>("@psychevo/client");
 
   class GatewayClient {
+    readonly endpoint = gatewayMock.endpoint
+      ? { httpBase: gatewayMock.endpoint.baseUrl, wsUrl: gatewayMock.endpoint.wsUrl }
+      : null;
     subscribe = vi.fn((callback: (notification: { method: string; params?: unknown }) => void) => {
       gatewayMock.subscribers.push(callback);
       return () => {
@@ -2541,6 +2544,31 @@ vi.mock("@psychevo/client", async () => {
           truncated: false
         };
       }
+      if (method === "workspace/file/preview/open") {
+        const record = params as { path?: string | null } | undefined;
+        const path = record?.path ?? "";
+        const read = gatewayMock.workspaceFileReadResults.get(path) as Record<string, unknown> | undefined;
+        return {
+          path,
+          content: "",
+          binary: false,
+          editable: true,
+          editableReason: null,
+          revision: "preview-revision",
+          sizeBytes: 0,
+          lineEnding: "none",
+          unreadable: null,
+          truncated: false,
+          ...read,
+          mediaType: testWorkspaceMediaType(path),
+          resourceId: `preview-${encodeURIComponent(path)}`,
+          resourcePath: `/_gateway/workspace-preview/preview-${encodeURIComponent(path)}`,
+          expiresAtMs: Date.now() + 60_000
+        };
+      }
+      if (method === "workspace/file/preview/release") {
+        return { released: true };
+      }
       if (method === "workspace/file/write") {
         const record = params as { content?: string; path?: string };
         return {
@@ -2742,6 +2770,18 @@ vi.mock("@psychevo/client", async () => {
     threadTurnStartParams: actual.threadTurnStartParams
   };
 });
+
+function testWorkspaceMediaType(path: string): string {
+  const extension = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
+  switch (extension) {
+    case "html": return "text/html";
+    case "md": return "text/markdown";
+    case "png": return "image/png";
+    case "pdf": return "application/pdf";
+    case "csv": return "text/csv";
+    default: return "text/plain";
+  }
+}
 
 vi.mock("@psychevo/host", () => {
   const downloadUrl = (_endpoint: unknown, threadId: string, kind: string, options: Record<string, unknown> = {}) => {

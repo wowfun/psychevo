@@ -40,7 +40,7 @@ def main() -> int:
             "--new",
             "--model",
             args.model,
-            "--dir",
+            "--cd",
             args.cwd,
         ]
         os.execvpe(args.pevo, argv, os.environ.copy())

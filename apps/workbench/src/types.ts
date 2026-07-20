@@ -13,8 +13,7 @@ import type {
   ThreadTraceResult,
   ThreadBrowserCursor,
   UsageReadResult,
-  WorkspaceDiffResult,
-  WorkspaceFileReadResult
+  WorkspaceDiffResult
 } from "@psychevo/protocol";
 
 export type ContextUsageCategory = ContextReadResult["categories"][number];
@@ -145,7 +144,6 @@ export type RightWorkspaceTab = {
   path?: string | null;
   fileTreeOpen?: boolean;
   diff?: WorkspaceDiffResult | null;
-  file?: WorkspaceFileReadResult | null;
   browser?: RightWorkspaceBrowserState;
   preview?: RightWorkspacePreview | null;
   message?: string | null;

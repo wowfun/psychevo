@@ -180,7 +180,7 @@ function spawnPevoWeb(options: {
         "open",
         "--no-browser",
         "--print-url",
-        "--dir",
+        "--cd",
         options.cwd
       ]
     : [
@@ -192,7 +192,7 @@ function spawnPevoWeb(options: {
         "open",
         "--no-browser",
         "--print-url",
-        "--dir",
+        "--cd",
         options.cwd
       ];
 

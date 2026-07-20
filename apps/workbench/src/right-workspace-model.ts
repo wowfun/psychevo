@@ -1,11 +1,5 @@
 import type { RightWorkspaceTab, RightWorkspaceTabKind } from "./types";
 
-const UNSUPPORTED_PREVIEW_EXTENSIONS = new Set([
-  "7z", "avif", "bin", "bmp", "bz2", "dylib", "exe", "gif", "gz", "ico",
-  "jpeg", "jpg", "mov", "mp3", "mp4", "o", "parquet", "pdf", "png", "rar",
-  "so", "tar", "tgz", "wasm", "webp", "xz", "zip", "zst"
-]);
-
 export function createRightTabId(kind: RightWorkspaceTabKind): string {
   return `${kind}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
 }
@@ -13,11 +7,6 @@ export function createRightTabId(kind: RightWorkspaceTabKind): string {
 export function fileBasename(path: string): string {
   const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   return normalized.split("/").pop() || normalized || "workspace";
-}
-
-export function isUnsupportedPreviewFile(path: string): boolean {
-  const extension = path.split(/[\\/]/).pop()?.split(".").pop()?.toLowerCase();
-  return Boolean(extension && UNSUPPORTED_PREVIEW_EXTENSIONS.has(extension));
 }
 
 export function rightWorkspaceDefaultTitle(kind: RightWorkspaceTabKind): string {
