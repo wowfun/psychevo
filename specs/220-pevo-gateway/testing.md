@@ -33,6 +33,9 @@ Define acceptance expectations and validation scenarios for the managed
   the verified process group or Windows Job Object as fallback, and proves both
   the managed server and an exercised fake ACP Agent child have exited before
   reporting success.
+- Windows Job inspection retains sufficient rights to wait for the verified
+  tree. Managed Web lifecycle coverage asserts the first stop succeeds and
+  clears state, while a second idempotent stop reports no running server.
 
 ## Current Implementation Slice
 
@@ -64,8 +67,8 @@ Manual real-provider validation is not required for this lifecycle topic.
 - Managed startup failure leaves stdout unpolluted and reports both the bounded
   current-attempt child output and the full `server.log` path on stderr without
   replaying earlier appended log entries.
-- Default bind fallback and explicit bind strictness are observable in
-  lifecycle responses.
+- Default bind fallback, explicit nonzero bind strictness, and explicit port-0
+  ephemeral assignment are observable in lifecycle responses.
 - `-C/--cd`, `--default-workspace`, `--print-url`, and `--no-browser` produce a
   launch entry with clean browser recovery behavior.
 - Managed Web and Gateway-open argument parsing reject the removed `--dir`

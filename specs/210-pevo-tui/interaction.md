@@ -150,7 +150,17 @@ Approval panels use terminal list-selection behavior with Up/Down or `j`/`k`,
 `Enter` to accept the highlighted option, `Esc` to cancel/deny, and direct
 action shortcuts where the current approval type exposes them. Mouse clicks on
 approval option rows select and immediately resolve the clicked option through
-the same decision path as keyboard confirmation.
+the same decision path as keyboard confirmation. When filesystem directory
+scopes expand beyond the panel viewport, keyboard navigation scrolls the panel
+just enough to keep the highlighted scope visible before `Enter` can approve
+it; the user must never confirm an off-screen directory selection.
+
+Filesystem approval panels use one compact information hierarchy: the heading
+names the tool and source, the policy reason appears once, and requested plus
+canonical resolved paths appear once as a path-identity rail. They omit the
+generic action and suggested-grant rows when those rows only repeat the same
+filesystem paths. Non-filesystem approvals retain their action, matched-rule,
+and persistent-grant context where those details change the decision.
 
 The `/approve` and `/deny` slash commands resolve the current pending approval
 or the most recent smart-review denial override. `/approve` accepts `once`,

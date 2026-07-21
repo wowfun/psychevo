@@ -143,6 +143,16 @@ secondary, `Always allow` is cautionary and explains persistence, and `Deny` is
 a neutral exit. Submitting one decision makes the whole decision group pending
 until the runtime response settles.
 
+Across TUI and GUI surfaces, filesystem approval requests use one compact
+information hierarchy: the heading identifies the tool and source, the policy
+reason appears once, and each requested path plus any distinct canonical
+resolved path appears once as a path-identity rail. Generic action and
+suggested-grant rows are omitted when they repeat the same filesystem target.
+Non-filesystem approvals retain action, matched-rule, and persistent-grant
+context when those details add information needed for the decision. Supporting
+authorization-lifetime text appears only when it distinguishes session or
+persistent scope; it does not restate the visible allow-once action.
+
 When a running turn is interrupted or a surface exits while requests are
 pending, the UI releases pending permission or clarify state so suspended work
 can settle observably instead of leaving orphaned live rows or background work.

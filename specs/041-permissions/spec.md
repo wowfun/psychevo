@@ -16,6 +16,7 @@ dangerous-action policy.
 - relationship between runtime mode, tool visibility, permission profiles,
   approval policy, and approval reviewer
 - structured permission profiles for filesystem, network, and tool families
+- canonical filesystem identity shared by policy, approval, and execution
 - exec policy rule language and precedence
 - hard/protected denies, protected reads, dangerous exec command policy, and
   fail-closed behavior
@@ -54,9 +55,11 @@ the current runtime-mode ceiling.
 Permission profiles define the baseline capability boundary. Built-in profiles
 are `:read-only`, `:workspace`, and `:danger-full-access`; project profiles may
 extend another profile and add filesystem paths, network hosts/domains, and
-tool-family grants. Profiles are policy gates, not OS sandboxes. Filesystem
-profile entries may grant paths outside the current cwd, so a cross-project
-read can be approved without changing the session cwd.
+tool-family grants. Profiles are policy gates, not OS sandboxes. `:read-only`
+and `:workspace` may read any host path unless an explicit or protected read
+deny wins. `:workspace` may write inside the canonical cwd and asks before
+writing outside it. Filesystem profile entries may grant paths outside the
+current cwd without changing the session cwd.
 
 `approval_policy` controls whether an action that needs consent may ask:
 
@@ -68,7 +71,7 @@ read can be approved without changing the session cwd.
   prompt fail closed.
 - `granular`: uses `[approval.granular]` booleans to enable or disable approval
   prompts per family. The table must explicitly set `filesystem`, `network`,
-  `exec`, `mcp`, `skill`, and `request_permissions`.
+  `exec`, `mcp`, and `skill`.
 
 `on-failure` is not supported because Psychevo does not provide a sandboxed
 retry mechanism for it.
@@ -100,7 +103,6 @@ network = true
 exec = true
 mcp = true
 skill = true
-request_permissions = false
 
 [auto_review]
 model = "provider/model"
@@ -150,10 +152,12 @@ Profile and policy precedence is:
 6. default policy
 
 Project config overrides global config through TOML deep merge. Persistent
-user approval writes through a capability-specific adapter:
+policy changes write through an explicit capability-specific configuration or
+rule-management adapter:
 
-- filesystem and network grants write the current project's `local` profile;
-  if missing, Psychevo creates it and sets `default_permissions = "local"`.
+- filesystem profile edits write the current project's `local` profile; if
+  missing, Psychevo creates it and sets `default_permissions = "local"`.
+- network approvals may persist through the current project's `local` profile.
 - exec grants append de-duplicated `[[exec_policy.rules]]` entries using
   parsed command prefixes rather than whitespace fragments from the raw shell
   text.
@@ -172,9 +176,12 @@ specialization.
 ## Policy
 
 Hard/protected denies cannot be bypassed by `dontAsk`, `bypassPermissions`,
-`allow always`, session grants, or configured allow rules. They cover sensitive
-write targets such as SSH, cloud credentials, shell rc files, `.env`, system
-account/service files, and the project permissions configuration surface.
+session grants, or configured allow rules. Filesystem hard denies are minimal:
+they protect the active Psychevo permission configuration and other runtime
+state whose mutation would let a model widen its own authority. Credential
+files, SSH and cloud configuration, shell rc files, `.env`, and ordinary system
+configuration are not blanket hard denies. They follow the same canonical
+workspace, explicit rule, and external-write consent policy as other files.
 System shutdown/reboot hard denies match executable command positions, including
 common wrappers such as `sudo`, `env`, `exec`, `nohup`, and `setsid`; ordinary
 arguments or quoted literals that merely contain words such as `shutdown`,
@@ -184,15 +191,32 @@ Protected reads are intentionally narrow. Internal Psychevo cache/index paths
 that could inject stale or untrusted runtime material may be denied.
 
 Filesystem reads, writes, and edits are evaluated against the active profile.
-The current cwd is no longer the hard boundary for file tools; it is the
-default workspace root used by built-in profiles. A profile grant may authorize
-an absolute path outside the cwd, while protected denies still win.
+The current cwd is not a hard boundary for file tools; it is the default
+auto-write root used by built-in profiles. External writes are capabilities the
+user may grant at runtime, not security violations by definition.
+
+Permission policy and tool execution use one canonical host path identity. For
+an existing path the identity follows symlinks or junctions. For a missing
+target it canonicalizes the deepest existing ancestor and appends the remaining
+normalized path. The canonical cwd and configured roots use the same resolver.
+Containment, protected-path checks, grant matching, approval display, sandbox
+roots, and final tool access must not use conflicting lexical identities.
+
+The runtime re-resolves a filesystem target immediately before mutation. If
+the identity no longer equals the reviewed target or falls outside the granted
+root, the operation fails with an observable `path_identity_changed` error and
+must not mutate either location.
 
 Relative filesystem profile entries are human path strings relative to the
 current cwd. They use `/` separators after host normalization and must not
 require file-URI percent encoding for ordinary path characters such as spaces.
-Absolute filesystem entries may use canonical host path identity for
-containment matching.
+Matching compares the canonical target expressed relative to the canonical
+cwd, so an external sibling remains addressable as `../sibling/...` instead of
+silently changing to an absolute rule identity. Targets on a host root that
+cannot be expressed relative to cwd require an absolute entry.
+Absolute filesystem entries use canonical host path identity for containment
+matching. A lexical path inside cwd that resolves outside cwd is external; a
+lexical path outside cwd that resolves inside it receives the inside-cwd policy.
 
 Exec commands are evaluated in three layers:
 
@@ -254,24 +278,43 @@ final allow, deny, or defer decision.
 
 ## Approval
 
-Approval choices are:
+Ordinary approval choices are allow once, allow session, allow always, and
+deny. Filesystem mutation asks instead use a harness-owned scope contract:
 
-- allow once
-- allow session
-- allow always
+- allow the exact operation once
+- allow a selected canonical directory for the current turn
+- allow a selected canonical directory for the current session
 - deny
 
-The original tool call is suspended while approval is pending. Allow decisions
-resume the original call; deny decisions return an explicit permission-denied
-error instructing the model not to retry the same operation.
+Filesystem directory approval is not persistent. Durable writable roots remain
+an explicit profile or sandbox configuration change rather than an incidental
+tool-call prompt.
 
-For direct file-mutation tools, a permission approval may also be the user
-decision that [045 Sandbox](../045-sandbox/spec.md) consumes to create a
-bounded in-memory sandbox write grant. This bridge is runtime-local: it does
-not persist sandbox writer roots and does not let permission grants bypass
-hard sandbox policy. When a file approval would require sandbox widening,
-permanent approval must not be offered unless a separate sandbox configuration
-change is being made explicitly.
+The original tool call is suspended while approval is pending. The harness,
+not the model, creates the approval request. Allow decisions resume the
+original call; deny decisions return an explicit permission-denied error. No
+model-visible `request_permissions` tool is part of this contract.
+
+A filesystem approval request contains the operation, every requested path,
+every canonical resolved path, and selectable canonical ancestor directories.
+When requested and resolved paths differ, review surfaces show both. Scope
+selection is collapsed by default so the common path is one-step exact
+approval. Multi-target operations offer directory scope only through canonical
+ancestors common to every mutation target. A client may submit only a scope
+offered by the runtime. Its reason explains the policy boundary without
+repeating target paths already carried by the structured filesystem payload.
+
+For direct file-mutation tools, a permission approval is also the decision that
+[045 Sandbox](../045-sandbox/spec.md) consumes to create an exact-operation,
+turn, or session in-memory writable root. The same root applies to built-in
+writers and later sandboxed shell children; it never auto-approves an exec
+command and cannot bypass hard sandbox mode.
+
+For a multi-target mutation, authorization is composed per canonical target.
+Each target must be allowed either by the base permission profile or by a
+matching in-memory filesystem scope; a cwd target must not invalidate a scope
+that covers a different external target in the same operation. Any hard or
+explicit deny on any target still denies the whole operation.
 
 The runtime keeps an in-process FIFO of pending approval requests. Approval
 request and response hooks may observe a request before it is shown and after
@@ -282,8 +325,11 @@ calls. [035 Event Stream](../035-event-stream/spec.md) defines the shared
 blocking-action projection lifecycle used by public streams.
 tool calls.
 
-Session grants are scoped to one runtime session. `allow always` persists
-through the relevant adapter only when the action supports persistent grants.
+Turn grants are shared by permission runtimes participating in the active root
+turn, including child agents, and are cleared when that turn completes or is
+interrupted. Session grants are scoped to one runtime session and are cleared
+on session cleanup. `allow always` persists through the relevant adapter only
+for non-filesystem actions that support persistent grants.
 Ordinary deny is one-shot for filesystem, exec, MCP, and skill. Network
 prompts may also offer a persistent host/domain deny.
 
@@ -307,7 +353,8 @@ recent smart denial with `/approve once|session|always`.
 - Hard/protected denies win over configured allow, profile grants, session
   grants, and approval reviewer outcomes.
 - Legacy global permission fields are rejected with migration diagnostics.
-- `granular` requires all current family booleans to be explicit.
+- `granular` requires all current family booleans to be explicit and has no
+  unused `request_permissions` family.
 - Bash dangerous-command detection covers representative recursive delete,
   shell-pipe installer, destructive git, process kill, service, permission,
   and SQL destructive commands.
@@ -319,7 +366,15 @@ recent smart denial with `/approve once|session|always`.
   reads without prompting; unrecognized inline behavior prompts.
 - `exec_policy.rules` support token alternatives, `justification`,
   `match`/`not_match` self-tests, and host executable path resolution.
-- Filesystem grants match canonical paths inside or outside the cwd.
+- `:read-only` and `:workspace` allow external reads unless an explicit or
+  protected deny wins; `:workspace` asks before canonical external writes.
+- Filesystem policy catches cwd-internal symlink or junction escapes and allows
+  external aliases that canonically resolve inside an allowed root.
+- Missing write targets use their deepest existing canonical ancestor, so a
+  missing child below a symlink cannot bypass policy.
+- Exact, turn-directory, and session-directory grants match canonical paths,
+  expire at their documented lifecycle, and cannot authorize an unoffered root.
+- A target whose canonical identity changes after review is not mutated.
 - No-handler approval paths fail closed.
 - `approval_policy = "never"` denies prompt-level actions without showing UI.
 - `allow always` writes project-local TOML through the correct adapter and

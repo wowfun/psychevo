@@ -624,6 +624,12 @@ Unknown notifications are tolerated and retained only as bounded diagnostics.
 Available command, mode, config, usage, and session information updates must
 update the corresponding typed product state when supported.
 
+Tests distinguish response-ordered facts from notifications that an Agent
+intentionally sends after the response barrier. The former are asserted on the
+response snapshot; the latter are awaited through their observable typed
+projection with a bounded deadline instead of assuming the next instantaneous
+cached read has already reduced them.
+
 ### Capability Packs
 
 Standard ACP is the default implementation. Versioned capability packs may

@@ -58,13 +58,17 @@ cwd and never write TOML defaults. If a user wants a saved default, they must
 use Settings > Models, `pevo model set`, or another explicit default-saving
 command.
 
-Every GUI and TUI model-selection surface uses the configured model `name` as
-its primary visible label when that non-empty display name is available. The
-provider-qualified model id remains the stable selection value and searchable
-identity, and may remain available as secondary or hover/detail text, but it
-must not replace an available display name in the closed composer control or a
-picker row. Fetched catalog entries without a configured name continue to use
-their model id.
+Every GUI and TUI model-selection surface uses the model `name` as its primary
+visible label when that non-empty display name is available. An explicit
+configured name has precedence; otherwise a non-empty name from the resolved
+cached model metadata is used. The provider-qualified model id remains the
+stable selection value and searchable identity, and may remain available as
+secondary or hover/detail text, but it must not replace an available display
+name in the closed composer control or a picker row. Model entries without
+either name continue to use their model id. The authoritative initial Thread
+Context carries that presentation for Native and ACP model controls, so opening
+Settings > Models or expanding a provider editor is never required to replace
+an already known model id with its display name.
 
 `model-state.json` stores only bounded model-selection state: per-cwd
 provider-qualified model, optional reasoning effort, update timestamp, and

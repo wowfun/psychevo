@@ -45,9 +45,10 @@ When the right workspace is revealed without an active tab, its home is a
 navigation and status page. It shows connection, current session or draft
 state, cwd, context usage, and changed-file summary, then offers bordered
 icon-and-label rows to open Review, Terminal, Files, and, for non-draft
-sessions, `Side chat` tabs. Rows do not carry right-side explanatory copy. Once
-any tab is open, the tab strip includes a `+` menu for creating more tabs of
-those types. Browser is exposed as a right-workspace peer when the Browser
+sessions, `Side chat` tabs. Each row keeps its icon and label left-aligned;
+rows do not carry right-side explanatory copy. Once any tab is open, the tab
+strip includes a `+` menu for creating more tabs of those types. Browser is
+exposed as a right-workspace peer when the Browser
 plugin is enabled, with one independently identified and stateful Browser pane
 per thread. Switching threads hides the previous thread's Browser tab without
 sharing its URL, and returning restores that thread's navigation state. Web/PWA
@@ -339,6 +340,10 @@ with clickable chat mode, model, variant, context usage ring, project path, Git
 branch, and permission. A detached draft centers the Composer in the empty conversation
 surface; binding the first accepted prompt moves the same Composer to its
 ordinary bottom dock with a reduced-motion-aware positional transition.
+Responsive footer layout follows the Composer dock's available inline size,
+not only the browser viewport. When side workspaces narrow a running Composer,
+its environment controls wrap before the elapsed indicator can clip the model
+and reasoning label.
 Context usage is graphical by
 default; detailed text appears on hover or in the same graphical popover used
 by the right `Status` context panel. Tokenizer and context-scope details are

@@ -20,7 +20,9 @@ point-fork requests.
 
 Workbench tests must cover inline editor state, exact and best-effort drafts,
 Text/Image changes, unchanged no-op, staged admission failure, Restore, point
-fork navigation/prefill, full fork, and unavailable provenance.
+fork navigation/prefill, full fork, unavailable provenance, and two successive
+successful `Update & run` cycles on the replacement message after each Turn
+settles.
 
 TUI tests must cover mouse and transcript-focus keyboard activation, message
 actions, image-capable editing, staged recovery, child navigation/prefill, and

@@ -2,9 +2,17 @@
 
 ## 2026-07-21
 
+- Hardened cross-platform Desktop and Gateway startup/build paths, including
+  native-runtime dependency isolation and reliable Windows `pevo web stop`.
 - Unified confirmation receipts and cancellation behavior across Workbench and
   Desktop, including stable Composer controls during initial Thread binding.
 - Hardened self-hosted Excalidraw assets against Windows cross-volume escapes.
+- Stabilized Composer model and history interactions, deterministic Workbench
+  gateways, visual journeys, and responsive voice/control feedback.
+- Unified filesystem identity and external-write approvals across runtime,
+  Gateway, ACP, CLI, TUI, and Workbench with clearer target-level UI.
+- Hardened request token estimation and ACP draft projection, and kept passing
+  CI output-capture summaries free of synthetic fixture noise.
 
 ## 2026-07-20
 

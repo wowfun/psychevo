@@ -93,13 +93,16 @@ model's configured default reasoning effort. `settings/update` accepts
 active catalog, and writes either concrete main-agent metadata or an explicit
 session default marker. It does not write project-local Agent defaults.
 The composer model control presents model and reasoning effort as one grouped
-selector. Its closed state shows the selected model id plus the current
-reasoning label separated by a space, never the provider prefix, and uses the
+selector. Its closed state shows the explicit configured model name when
+available, otherwise the resolved cached metadata name, otherwise the selected
+model id, plus the current reasoning label separated by a space. It never shows
+the provider prefix as the primary label and uses the
 provider-qualified model only in hover/title affordances. Visible model-row
-content shows only the model id plus compact state badges such as a muted green
-`Free` badge when catalog metadata marks the model as free; provider identity is
-rendered as compact group headings above contiguous visible model rows from the
-same provider.
+content follows the same configured-name fallback and may add compact state
+badges such as a muted green `Free` badge when catalog metadata marks the model
+as free; provider identity is rendered as compact group headings above
+contiguous visible model rows from the same provider. The source-of-truth label
+precedence is defined by [125 Model Config](../125-model-config/spec.md).
 `Select model` is an empty-state label, not an option and must not be submitted
 as a model selection. The selector lists concrete models from `settings/read`,
 including provider catalog rows fetched in Settings > Models, with recently used
@@ -289,9 +292,12 @@ request's thread or activity context, but it must not depend on source-default
 `thread/resume` while a draft/source-started turn is still unbound to its
 materialized session.
 Workbench renders permission requests with once, session, deny, and only the
-supported persistent option. It displays the request summary/reason/rule details
-as decision context and submits responses using the request's thread/activity
-context before falling back to the visible snapshot thread.
+supported persistent option. Filesystem requests use the shared compact
+tool/source, reason, and requested-to-resolved path hierarchy without repeating
+the same target in summary or suggested-rule rows. Non-filesystem requests keep
+summary, reason, and rule details when they add decision context. Responses use
+the request's thread/activity context before falling back to the visible
+snapshot thread.
 Workbench renders clarify requests from their structured question/options
 payload instead of raw JSON. It supports the protocol's normal options,
 Other/freeform answers, submit, and cancel paths, and routes responses with the

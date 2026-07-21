@@ -93,7 +93,11 @@ available after refresh or restart. The caller can retry the turn or choose
 
 An admitted Native turn uses the existing cleanup-before-run boundary to delete
 the hidden suffix before appending the replacement message. A later provider
-failure does not resurrect the deleted suffix.
+failure does not resurrect the deleted suffix. The replacement user message
+keeps the same editable-input contract as an ordinary newly sent message. Once
+the replacement turn settles and the Thread is eligible again, the user can
+select that message and perform another `Update & run`; successful history
+editing is not a one-shot capability.
 
 `Restore history` clears a conversation-revert boundary without touching the
 workspace and returns the edited draft to the composer. `/redo` remains the

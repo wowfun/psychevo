@@ -144,6 +144,12 @@ subcategories, so those subcategories are not added again. Category totals
 remain tokenizer estimates of the request/input side and do not redefine the
 provider total.
 
+Local request estimation uses the tokenizer's count-only operation and must not
+materialize a token-id vector when only the count is retained. The supported
+tokenizer path must remain stable for growing, ASCII-heavy serialized tool
+transcripts while preserving count equivalence for representative ASCII and
+Unicode input.
+
 Structured context projections identify whether the headline is provider
 reported, derived from provider input/output, locally estimated, partial, or
 unavailable. They also identify whether the basis is the latest provider turn,

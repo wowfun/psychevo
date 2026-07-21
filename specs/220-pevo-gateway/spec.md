@@ -93,12 +93,18 @@ survive as orphans. If the managed child still
 does not exit after the complete bounded cleanup window, `stop` forcibly
 terminates that exact managed Unix process group or platform-equivalent process
 tree, then reports an error if it cannot prove the managed pid exited. It never
-uses a name- or command-pattern kill.
+uses a name- or command-pattern kill. The first `gateway stop` or `web stop`
+invocation against an owned running server completes the shutdown and state
+cleanup on every supported host; Windows callers must not need to repeat the
+command after an access-denied wait on the verified Job Object.
 When no `--bind` is provided, managed commands prefer `127.0.0.1:58080` and may
 fall back through `127.0.0.1:58099` when a lower port is already in use. The
 actual bound address is persisted in `server.json` and reported through
-`baseUrl`/`readyzUrl`. An explicit `--bind` disables fallback and must either
-reuse a matching managed server or start exactly on the requested address.
+`baseUrl`/`readyzUrl`. An explicit nonzero `--bind` disables fallback and must
+either reuse a matching managed server or start exactly on the requested
+address. Port `0` requests an operating-system-assigned ephemeral port on the
+specified interface; reuse compares the interface while accepting the persisted
+nonzero assigned port.
 
 Managed server reuse must prove that the running process is the same owned
 instance, local build, and asset set that the caller would start now. Every new
@@ -115,7 +121,9 @@ range. Explicit-bind callers may reuse only a server whose recorded address
 matches the requested address.
 On Windows, ownership additionally requires a live process handle and membership
 in the named Job Object `Local\\PsychevoGateway-<instanceId>`; the handle remains
-open through inspection and termination so PID reuse cannot redirect a signal.
+open and wait-capable through inspection, shutdown, and termination so PID
+reuse cannot redirect a signal and exit can be proven without a second
+lifecycle command.
 The managed child creates that Job Object, enables
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and assigns itself before binding. Failure
 to create or join the Job is a startup failure, never a fallback to `taskkill`.

@@ -25,6 +25,11 @@ behavior.
   masked by the current project `.psychevo/config.toml`.
 - Composer model pickers in GUI and TUI write `model-state.json` for the
   canonical cwd and do not write TOML defaults.
+- A cold Workbench render shows the explicit configured name, or the resolved
+  cached metadata name when no explicit name exists, for the effective Native
+  or ACP model before Settings > Models is opened. Opening a provider editor
+  does not change that already-correct label. ACP choices with no exact
+  configured-model match retain the Agent-provided label.
 - Provider save flows write durable secrets only through Gateway/runtime `.env`
   handling and never persist raw keys in frontend storage or TOML.
 - Explicit fake catalog fetches update assignment controls and composer model

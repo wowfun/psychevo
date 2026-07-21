@@ -43,21 +43,21 @@ untrusted-safe. The only v1 hard guarantees are:
 - sandbox-enabled shell execution fails closed if the backend cannot enforce
   the requested policy
 
-Configured sandbox policy is the baseline. For direct model-visible file
-mutation tools, an interactive approval may create a bounded, in-memory
-sandbox write grant for the approved target paths when the effective sandbox
-mode is `workspace-write` and the only sandbox violation is writing outside
-the configured writer roots. `allow once` applies only to the current tool
-call. `allow session` applies only to the current runtime session and the same
-filesystem authorization key. `allow always` must not persist sandbox writer
-roots; permanent sandbox widening requires explicitly editing
+Configured sandbox policy is the baseline. A harness-owned filesystem approval
+may create a bounded in-memory writable root when effective mode is
+`workspace-write` and the only sandbox violation is writing outside configured
+roots. Exact-operation approval applies only to the suspended tool call. A
+directory approval applies to the active root turn or runtime session and uses
+the same canonical root as permission policy. Filesystem prompts never persist
+sandbox roots; permanent widening requires explicitly editing
 `[sandbox].writable_roots`.
 
 Hard policy still fails closed without widening. Approval policy `never`,
 granular filesystem approval disabled, `dontAsk`/`bypassPermissions`, protected
 permission denies, read-only effective sandbox mode, and product plan-only
 runtime constraints must not create sandbox write grants. `bypassPermissions`
-bypasses permission prompts only; it does not bypass sandbox enforcement.
+bypasses permission prompts only; it does not create implicit writable roots or
+bypass sandbox enforcement.
 
 `plan` remains a read-only runtime mode. It may still expose read-only shell
 exploration through `exec_command`, but effective sandbox mode is read-only:
@@ -109,9 +109,11 @@ compatibility sinks for commands that open standard sink devices with write or
 read-write flags; they must not add `/dev` as a writable root and must not
 expand model-visible `write` or `edit`.
 
-Effective write roots are canonicalized with deepest-existing-ancestor
-resolution. This prevents `..`, symlink, and sibling-prefix escapes, while still
-allowing missing file tails for create operations.
+Effective write roots and targets use the shared filesystem identity from
+[041 Permissions](../041-permissions/spec.md): existing targets follow
+symlinks/junctions, while missing targets canonicalize the deepest existing
+ancestor and append the normalized tail. This prevents `..`, symlink, junction,
+and sibling-prefix escapes while allowing create operations.
 
 ## Enforcement
 
@@ -121,12 +123,12 @@ destination path that will be modified. A denial must not create, delete, move,
 or rewrite files. When a writer target is under a shell-only extra root such as
 a temporary or cache root, the denial should explain that the root is writable
 only for sandboxed shell children and does not expand model-visible writers.
-When a permission approval creates a sandbox write grant,
-writer enforcement may allow exactly the approved canonical target paths for
-the approved tool call, or for subsequent calls with the same session grant.
-The grant also permits creating missing parent directories needed to materialize
-that exact target, but it must not allow sibling paths or broaden global writer
-roots.
+When a permission approval creates a sandbox write grant, writer enforcement
+allows exactly the approved canonical targets for that call or descendants of
+an approved turn/session directory. Turn and session roots also join the
+effective writable roots used to build each later sandboxed shell-child policy;
+the exec command still passes independent permission review. Grants permit
+creating missing descendants but do not broaden global configured roots.
 
 Shell enforcement is selected by platform:
 
@@ -192,6 +194,9 @@ surface; v1 does not add new RPC request fields.
 - Built-in writers allow writes inside effective writer roots and deny writes
   outside them, including parent escape, symlink escape, sibling prefix
   collision, missing target tail, and patch move source/destination cases.
+- Exact-operation, turn-directory, and session-directory grants use the same
+  canonical identity as permission review, expire at the correct lifecycle,
+  and affect both built-in writers and subsequently launched shell children.
 - Built-in writer denial for shell-only temp/cache roots clearly says the path
   is shell-only and does not imply that `bypassPermissions` can bypass sandbox
   enforcement.

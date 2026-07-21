@@ -29,10 +29,14 @@ Out of scope:
 All coding-core tools use strict required-field and type validation. Unknown input
 fields are ignored.
 
-Path inputs may be relative or absolute. Runtime resolves them against the
-accepted working directory, canonicalizes filesystem access, and denies any
-target that escapes the working directory, including symlink escape. Model-
-visible paths in successful results are working-directory relative.
+Path inputs may be relative or absolute. Runtime resolves relative inputs
+against the accepted working directory and uses the canonical filesystem
+identity defined by [041 Permissions](../041-permissions/spec.md). Existing
+targets follow symlinks/junctions; missing targets canonicalize the deepest
+existing ancestor. Reads may address any permitted host path. Writes outside
+the canonical workspace are suspended for harness approval rather than treated
+as malformed. Model-visible result paths are working-directory relative when
+the canonical target is inside cwd and absolute otherwise.
 
 All failures return a JSON object with a non-empty top-level `error` field.
 Tool failures become failed tool outcomes but do not automatically fail the
@@ -83,9 +87,10 @@ Parameters:
 - `path`: string, required
 - `content`: string, required
 
-`write` creates missing parent directories when contained in the working
-directory and completely replaces the target UTF-8 text file. It should be
-used instead of shell redirection for complete-file writes.
+`write` creates missing parent directories when authorized by the active
+workspace, profile, or temporary directory grant and completely replaces the
+target UTF-8 text file. It should be used instead of shell redirection for
+complete-file writes.
 
 Successful result fields:
 
@@ -136,10 +141,10 @@ For `patch`:
 
 Patch mode accepts V4A patch text with `*** Begin Patch`, `*** Update File`,
 `*** Add File`, `*** Delete File`, `*** Move File`, and `*** End Patch`
-markers. It may update, create, delete, or move multiple files. Runtime validates
-all operations before applying them. Update hunks apply through the same fuzzy
-matching chain used by replace mode. Paths outside the working directory are
-rejected.
+markers. It may update, create, delete, or move multiple files. Runtime
+validates all operations before applying them. Update hunks apply through the
+same fuzzy matching chain used by replace mode. Canonical external mutation
+targets require the same harness approval as `write` and replace mode.
 
 Successful result fields:
 

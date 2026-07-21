@@ -50,6 +50,11 @@ summary. A failure whose captured output was already fully mirrored does not
 repeat the log tail. Empty or unreadable logs do not replace the original step
 failure.
 
+Runner tests for terminal mirroring use an isolated output sink. Synthetic
+warning and error fixture lines remain assertable by the test but must not leak
+into the parent Cargo test stderr or a successful profile summary. A passing
+profile therefore shows only diagnostics emitted by its real child steps.
+
 All commands accept `--json` for machine-readable output. JSON output must
 include profile ids, profile descriptions, step ids, command arrays, live
 flags, artifact roots when available, and per-step status for executed runs.
@@ -220,6 +225,12 @@ Workbench deterministic visual screenshots belong under the CI artifact root,
 not only under `.local/playwright`. The runner must provide a screenshot root
 to Playwright visual specs so `cargo xtask ci run --profile visual` produces
 reviewable TUI and Workbench visual artifacts in one run directory.
+
+Each deterministic Workbench browser fixture binds its isolated managed
+Gateway to an operating-system-assigned loopback port. Visual runs therefore
+remain independent of the user-facing managed fallback range and of stale test
+instances left by an interrupted earlier worker. Fixture teardown propagates a
+failed managed stop instead of reporting successful cleanup.
 
 Cross-surface profiling artifacts belong under
 `profile/surface-comparison/`. The runner provides the comparison root, sample

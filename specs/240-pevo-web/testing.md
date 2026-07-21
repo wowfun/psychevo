@@ -28,6 +28,8 @@ product surface and frontend platform.
   assertions keep the location strip background transparent while preserving
   the editable path field. Workspace-create tests address its name field by the
   stable `Workspace name` accessibility contract rather than placeholder text.
+- Right-workspace Home visual assertions keep each icon-and-label navigation
+  row left-aligned rather than inheriting centered shared-button content.
 - Agent-session import browser coverage uses a short viewport and enough
   discovered sessions to require internal dialog scrolling while keeping the
   dialog header, footer, and document shell fixed. It imports deterministic
@@ -56,7 +58,11 @@ host storage, and component rendering.
 
 Browser tests use Playwright against the built Workbench served by
 `pevo gateway open --no-browser --print-url`, with isolated config, SQLite
-state, and cwd by default.
+state, cwd, and an operating-system-assigned loopback port by default. Isolated
+test instances must not share the bounded user-facing managed port range, so a
+stale server from an interrupted run cannot exhaust later test launches. The
+harness treats a nonzero `gateway stop` exit as a cleanup failure and retains
+that test root for diagnosis instead of silently deleting its ownership state.
 
 Live model, live skill, GUI automation, and ACP peer validation are opt-in and
 selected through `cargo xtask live`. They may use the repo-local development
@@ -73,6 +79,9 @@ required. They must not print tokens or secrets.
   functional after reconnect. Shared Attention fixtures assert Runtime Profile
   provenance, public parent/child origin, exact authorization lifetime, and the
   absence of undeclared Session or Always actions.
+- Browser helpers address stable accessible labels and assert toggle state via
+  `aria-expanded` or `aria-checked`; they do not depend on obsolete dynamic
+  names such as `Show ...`, `Disable ...`, or renamed button copy.
 - Runtime-child transcript fixtures cover reconnect tab registration and lazy
   history reads for Full, Summary, and Partial fidelity. Visual assertions keep
   the compact Summary/Partial gap notice legible without horizontal overflow.
@@ -140,6 +149,15 @@ required. They must not print tokens or secrets.
   closed control model-plus-reasoning display, longest-visible-option popover
   width adaptation, full-width popover rows without unused right gutters, and
   switching models without submitting an invalid `Select model` value.
+- Composer integration tests cover explicit and cached-metadata name hydration
+  for Native and ACP cold startup before Settings is opened. They retain Model
+  plus Reasoning while an accepted first Turn is waiting for its authoritative
+  bound context and assert that a running existing Thread still fits the full
+  label when side workspaces narrow the Composer independently of the viewport.
+- Composer permission tests cover the compact filesystem request hierarchy:
+  tool and source remain visible, policy reason appears once, requested and
+  distinct resolved paths each appear once, and duplicated summary or
+  suggested-rule rows are absent without changing submitted scope decisions.
 - Composer runtime-control tests cover the visible `Permission mode` control
   after Workspace and Git branch, its absence from the Agent target popover,
   and its descriptor-backed effective value after a control receipt. They also cover
@@ -203,6 +221,9 @@ required. They must not print tokens or secrets.
   selectors, exact message-input-width alignment for completion, truncated
   labels with full titles, and right-aligned switches. Runtime Mode and
   Permission tests explicitly reject native `select` elements.
+- Composer visual tests prove Mic and Send/Interrupt retain the same circular
+  footprint, including the shared minimum hit target under coarse-pointer
+  mobile emulation.
 - Pending-send tests prove only an active Composer readiness token can expose
   `Preparing`; a deferred context read or control mutation keeps Send disabled.
 - Transport tests use barriers rather than timing sleeps: a held `initialize`

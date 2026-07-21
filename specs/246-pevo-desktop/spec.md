@@ -241,6 +241,11 @@ or compositor support is unavailable. Psychevo workbench, floating, and picker
 windows must be filtered from active-app and screenshot context before
 model-visible capture is created.
 
+Linux capture implementation dependencies must be declared as Linux-target
+Cargo dependencies. Enabling the shared `native-runtime` feature on Windows or
+macOS must not activate those Linux capture dependency edges, and Linux-only
+portal or X11 crates must be absent from those platform build graphs.
+
 ## Workbench Reuse
 
 Workbench must remain host-aware. Browser Workbench creates a browser host and
@@ -308,6 +313,9 @@ Default validation is deterministic and local:
   to select a file in Explorer
 - native Windows Tauri build validation exercises the configured ICO candidate
   through resource generation instead of accepting a Linux-only PNG check
+- target-filtered Desktop Cargo dependency validation proves that Windows and
+  macOS `native-runtime` graphs exclude Linux capture implementation crates
+  while the Linux graph retains them
 - deterministic Desktop/Floating visual smoke with screenshot artifacts
 - native Desktop/Floating WebdriverIO smoke uses the embedded Tauri driver
   under the test-only `wdio-test` Cargo feature; production Desktop builds must
