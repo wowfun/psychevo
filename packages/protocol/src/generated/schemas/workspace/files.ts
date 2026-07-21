@@ -241,12 +241,19 @@ export const workspaceFileSchemas = {
     },
     "root": {
       "type": "string"
+    },
+    "roots": {
+      "items": {
+        "$ref": "#/definitions/WorkspaceFolderEntry"
+      },
+      "type": "array"
     }
   },
   "required": [
     "current",
     "folders",
-    "root"
+    "root",
+    "roots"
   ],
   "title": "WorkspaceFolderListResult",
   "type": "object"

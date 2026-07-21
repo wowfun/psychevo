@@ -375,6 +375,7 @@ pub struct WorkspaceFolderListParams {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceFolderListResult {
     pub root: String,
+    pub roots: Vec<WorkspaceFolderEntry>,
     pub current: String,
     #[serde(default)]
     pub parent: Option<String>,

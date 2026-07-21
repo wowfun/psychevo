@@ -680,7 +680,7 @@ export type WorkspaceFolderEntry = { name: string, path: string, };
 
 export type WorkspaceFolderListParams = { scope: GatewayRequestScope, path: string | null, };
 
-export type WorkspaceFolderListResult = { root: string, current: string, parent: string | null, folders: Array<WorkspaceFolderEntry>, };
+export type WorkspaceFolderListResult = { root: string, roots: Array<WorkspaceFolderEntry>, current: string, parent: string | null, folders: Array<WorkspaceFolderEntry>, };
 
 export type WorkspaceGitBranchesParams = { scope: GatewayRequestScope, };
 

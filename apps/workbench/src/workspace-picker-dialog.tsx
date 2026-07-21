@@ -25,15 +25,20 @@ export function WorkspacePickerDialog({
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [location, setLocation] = useState("");
   const initialReadFolders = useRef(onReadFolders);
   const trimmedName = name.trim();
+  const trimmedLocation = location.trim();
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     void initialReadFolders.current(null).then((result) => {
-      if (!cancelled) setState(result);
+      if (!cancelled) {
+        setState(result);
+        setLocation(result.current);
+      }
     }).catch((cause: unknown) => {
       if (!cancelled) setError(errorMessage(cause));
     }).finally(() => {
@@ -45,11 +50,15 @@ export function WorkspacePickerDialog({
   }, []);
 
   async function navigate(path: string) {
+    const requestedPath = path.trim();
+    if (!requestedPath) return;
     setLoading(true);
     setError(null);
     setCreating(false);
     try {
-      setState(await onReadFolders(path));
+      const result = await onReadFolders(requestedPath);
+      setState(result);
+      setLocation(result.current);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -58,11 +67,18 @@ export function WorkspacePickerDialog({
   }
 
   async function openWorkspace() {
-    if (!state) return;
+    if (!state || !trimmedLocation) return;
     setPending(true);
     setError(null);
     try {
-      await onOpen(state.current);
+      let current = state.current;
+      if (trimmedLocation !== current) {
+        const result = await onReadFolders(trimmedLocation);
+        setState(result);
+        setLocation(result.current);
+        current = result.current;
+      }
+      await onOpen(current);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -85,13 +101,25 @@ export function WorkspacePickerDialog({
 
   const interactionDisabled = disabled || loading || pending;
   return (
-    <div className="modalBackdrop" onMouseDown={(event) => event.target === event.currentTarget && !pending && onCancel()} role="presentation">
+    <div className="modalBackdrop" role="presentation">
       <div aria-label={ariaLabel} className="workspaceDialog composerFolderDialog" role="dialog">
         <header>
           <div className="workspaceDialogTitle"><FolderOpen size={18} /><h2>{title}</h2></div>
           <button aria-label="Close folder picker" disabled={pending} onClick={onCancel} type="button"><X size={16} /></button>
         </header>
         <div className="composerFolderLocation">
+          {state && state.roots.length > 1 ? (
+            <select
+              aria-label="Drive"
+              className="pevo-fieldControl pevo-fieldControl--compact"
+              disabled={interactionDisabled}
+              onChange={(event) => void navigate(event.target.value)}
+              title="Drive"
+              value={state.root}
+            >
+              {state.roots.map((root) => <option key={root.path} value={root.path}>{root.name}</option>)}
+            </select>
+          ) : null}
           <button
             aria-label="Parent folder"
             disabled={interactionDisabled || !state?.parent}
@@ -101,7 +129,23 @@ export function WorkspacePickerDialog({
           >
             <ArrowUp size={15} />
           </button>
-          <span title={state?.current ?? ""}>{state?.current ?? "Loading..."}</span>
+          <input
+            aria-label="Folder path"
+            autoCapitalize="none"
+            autoComplete="off"
+            className="pevo-fieldControl pevo-fieldControl--compact"
+            disabled={interactionDisabled || creating}
+            onChange={(event) => setLocation(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              if (!interactionDisabled && trimmedLocation) void navigate(trimmedLocation);
+            }}
+            placeholder={loading ? "Loading..." : "Folder path"}
+            spellCheck={false}
+            title="Paste or enter a folder path, then press Enter"
+            value={location}
+          />
         </div>
         <div className="composerFolderList" aria-busy={loading}>
           {state?.folders.map((folder) => (
@@ -124,7 +168,9 @@ export function WorkspacePickerDialog({
             <label>
               New workspace in <span title={state?.current}>{state?.current}</span>
               <input
+                aria-label="Workspace name"
                 autoFocus
+                className="pevo-fieldControl"
                 disabled={disabled || pending}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Workspace name"
@@ -144,7 +190,7 @@ export function WorkspacePickerDialog({
             </button>
           ) : null}
           <button
-            disabled={disabled || pending || (creating ? !trimmedName : loading || !state)}
+            disabled={disabled || pending || (creating ? !trimmedName : loading || !state || !trimmedLocation)}
             onClick={() => void (creating ? createWorkspace() : openWorkspace())}
             type="submit"
           >

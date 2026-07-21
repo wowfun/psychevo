@@ -14,6 +14,19 @@ fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
     );
 }
 
+#[test]
+fn workspace_drive_roots_follow_the_windows_logical_drive_mask() {
+    let roots = workspace::windows_drive_roots_from_mask((1 << 2) | (1 << 3) | (1 << 25));
+
+    assert_eq!(
+        roots
+            .iter()
+            .map(|root| (root.name.as_str(), root.path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("C:", "C:\\"), ("D:", "D:\\"), ("Z:", "Z:\\")]
+    );
+}
+
 #[tokio::test]
 async fn workspace_external_actions_rpc_classifies_regular_files_without_launching_apps() {
     let (_temp, state) = web_state();
@@ -327,6 +340,7 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
         root_result["parent"].as_str(),
         Some(temp.path().to_string_lossy().as_ref())
     );
+    assert_eq!(root_result["roots"][0]["path"], json!("/"));
     let root_folders = root_result["folders"].as_array().expect("folder array");
     assert!(root_folders.iter().any(|folder| folder["name"] == ".local"));
     assert!(root_folders.iter().any(|folder| folder["name"] == "alpha"));

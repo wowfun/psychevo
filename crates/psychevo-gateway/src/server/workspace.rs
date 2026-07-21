@@ -314,6 +314,7 @@ pub(super) fn workspace_folder_list_value(
         .last()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| current.clone());
+    let roots = host_filesystem_roots(&root);
     let mut folders = std::fs::read_dir(&current)?
         .flatten()
         .filter_map(|entry| {
@@ -340,10 +341,56 @@ pub(super) fn workspace_folder_list_value(
         .map(|parent| parent.display().to_string());
     Ok(serde_json::to_value(wire::WorkspaceFolderListResult {
         root: root.display().to_string(),
+        roots,
         current: current.display().to_string(),
         parent,
         folders,
     })?)
+}
+
+fn host_filesystem_roots(current_root: &Path) -> Vec<wire::WorkspaceFolderEntry> {
+    #[cfg(windows)]
+    let mut roots = windows_drive_roots_from_mask(unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetLogicalDrives()
+    });
+    #[cfg(not(windows))]
+    let mut roots: Vec<wire::WorkspaceFolderEntry> = Vec::new();
+
+    if !roots
+        .iter()
+        .any(|candidate| filesystem_roots_match(&candidate.path, current_root))
+    {
+        roots.push(wire::WorkspaceFolderEntry {
+            name: current_root.display().to_string(),
+            path: current_root.display().to_string(),
+        });
+    }
+    roots
+}
+
+#[cfg(any(windows, test))]
+pub(super) fn windows_drive_roots_from_mask(mask: u32) -> Vec<wire::WorkspaceFolderEntry> {
+    (0..26)
+        .filter(|index| mask & (1 << index) != 0)
+        .map(|index| {
+            let name = format!("{}:", char::from(b'A' + index as u8));
+            wire::WorkspaceFolderEntry {
+                path: format!("{name}\\"),
+                name,
+            }
+        })
+        .collect()
+}
+
+fn filesystem_roots_match(candidate: &str, current_root: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        candidate.eq_ignore_ascii_case(&current_root.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        Path::new(candidate) == current_root
+    }
 }
 
 pub(super) fn workspace_git_branches_value(
