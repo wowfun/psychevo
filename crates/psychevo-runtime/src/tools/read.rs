@@ -14,7 +14,7 @@ impl ToolBinding for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read UTF-8 text files inside the working directory. Use read instead of shell cat/head/tail/sed for file contents. Output is bounded to 50KB or 2000 lines; use offset and limit to continue through large files."
+        "Read an authorized UTF-8 text file from the host filesystem. Relative paths resolve from the working directory. Use read instead of shell cat/head/tail/sed for file contents. Output is bounded to 50KB or 2000 lines; use offset and limit to continue through large files."
     }
 
     fn parameters(&self) -> Value {
@@ -24,7 +24,7 @@ impl ToolBinding for ReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the UTF-8 text file to read, relative to the working directory or absolute inside it"
+                    "description": "Authorized UTF-8 text file path; relative paths resolve from the working directory"
                 },
                 "offset": {
                     "type": "integer",

@@ -100,6 +100,8 @@ pub(crate) struct SandboxWriteGrants {
 struct SandboxWriteGrantState {
     once: BTreeMap<String, Vec<PathBuf>>,
     session: BTreeMap<String, Vec<PathBuf>>,
+    turn_roots: Vec<PathBuf>,
+    session_roots: Vec<PathBuf>,
 }
 
 impl SandboxWriteGrants {
@@ -145,8 +147,80 @@ impl SandboxWriteGrants {
         true
     }
 
+    pub(crate) fn grant_scope(&self, scope: &crate::types::FilesystemApprovalScope) -> Result<()> {
+        let requested_root = PathBuf::from(&scope.directory);
+        let root = crate::filesystem_identity::canonicalize_deepest_existing(&requested_root)?;
+        if root != requested_root {
+            return Err(Error::Message(
+                "path_identity_changed: approved directory identity changed before grant"
+                    .to_string(),
+            ));
+        }
+        if let Ok(mut state) = self.inner.lock() {
+            match scope.lifetime {
+                crate::types::FilesystemApprovalLifetime::Turn => {
+                    push_unique(&mut state.turn_roots, root)
+                }
+                crate::types::FilesystemApprovalLifetime::Session => {
+                    push_unique(&mut state.session_roots, root)
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn grant_call_from_scopes(
+        &self,
+        tool_call_id: &str,
+        paths: &[PathBuf],
+    ) -> Result<bool> {
+        let paths = canonicalize_grant_paths(paths)?;
+        let Ok(mut state) = self.inner.lock() else {
+            return Ok(false);
+        };
+        let allowed = paths.iter().all(|path| {
+            state
+                .turn_roots
+                .iter()
+                .chain(state.session_roots.iter())
+                .any(|root| crate::filesystem_identity::is_within(root, path))
+        });
+        if allowed {
+            merge_paths(
+                state.once.entry(tool_call_id.to_string()).or_default(),
+                paths,
+            );
+        }
+        Ok(allowed)
+    }
+
+    pub(crate) fn scoped_roots(&self) -> Vec<PathBuf> {
+        let Ok(state) = self.inner.lock() else {
+            return Vec::new();
+        };
+        let mut roots = Vec::new();
+        for root in state.turn_roots.iter().chain(state.session_roots.iter()) {
+            push_unique(&mut roots, root.clone());
+        }
+        roots
+    }
+
+    pub(crate) fn clear_turn_scopes(&self) {
+        if let Ok(mut state) = self.inner.lock() {
+            state.turn_roots.clear();
+        }
+    }
+
+    pub(crate) fn clear_session_scopes(&self) {
+        if let Ok(mut state) = self.inner.lock() {
+            state.turn_roots.clear();
+            state.session_roots.clear();
+            state.session.clear();
+        }
+    }
+
     pub(crate) fn allows_once(&self, tool_call_id: &str, path: &Path) -> Result<bool> {
-        let path = canonicalize_deepest_existing(path)?;
+        let path = crate::filesystem_identity::canonicalize_deepest_existing(path)?;
         Ok(self.inner.lock().is_ok_and(|state| {
             state
                 .once
@@ -195,7 +269,7 @@ impl SandboxPolicy {
             push_unique(&mut writable_roots, cwd.clone());
             for root in &config.writable_roots {
                 let root = path_from_config(root, cwd.as_path());
-                let root = canonicalize_deepest_existing(&root)?;
+                let root = crate::filesystem_identity::canonicalize_deepest_existing(&root)?;
                 push_unique(&mut writable_roots, root);
             }
         }
@@ -228,6 +302,15 @@ impl SandboxPolicy {
         })
     }
 
+    pub(crate) fn with_approval_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        if self.enabled && matches!(self.effective_mode, SandboxMode::WorkspaceWrite) {
+            for root in roots {
+                push_unique(&mut self.writable_roots, root);
+            }
+        }
+        self
+    }
+
     pub(crate) fn ensure_shell_supported(&self) -> Result<()> {
         if self.enabled && matches!(self.backend, SandboxBackend::Unsupported) {
             return Err(sandbox_denied(format!(
@@ -242,7 +325,7 @@ impl SandboxPolicy {
         if !self.enabled {
             return Ok(SandboxWriteDecision::Allowed);
         }
-        let path = canonicalize_deepest_existing(path)?;
+        let path = crate::filesystem_identity::canonicalize_deepest_existing(path)?;
         if matches!(self.effective_mode, SandboxMode::ReadOnly) {
             return Ok(SandboxWriteDecision::Denied {
                 reason: format!(
@@ -265,18 +348,14 @@ impl SandboxPolicy {
         {
             return Ok(SandboxWriteDecision::Grantable {
                 reason: format!(
-                    "write to {} is outside configured writable roots; {} is a shell-only writable root for sandboxed shell children and does not expand write/edit",
-                    path.display(),
+                    "write is outside configured writable roots; {} is a shell-only writable root for sandboxed shell children and does not expand write/edit",
                     root.display()
                 ),
                 path,
             });
         }
         Ok(SandboxWriteDecision::Grantable {
-            reason: format!(
-                "write to {} is outside configured writable roots",
-                path.display()
-            ),
+            reason: "write is outside configured writable roots".to_string(),
             path,
         })
     }
@@ -284,8 +363,11 @@ impl SandboxPolicy {
     pub(crate) fn ensure_write_allowed(&self, path: &Path) -> Result<()> {
         match self.write_decision(path)? {
             SandboxWriteDecision::Allowed => Ok(()),
-            SandboxWriteDecision::Grantable { reason, .. }
-            | SandboxWriteDecision::Denied { reason } => Err(sandbox_denied(reason)),
+            SandboxWriteDecision::Grantable { path, reason } => Err(sandbox_denied(format!(
+                "write to {} is denied: {reason}",
+                path.display()
+            ))),
+            SandboxWriteDecision::Denied { reason } => Err(sandbox_denied(reason)),
         }
     }
 
@@ -371,7 +453,10 @@ impl SandboxPolicy {
 fn canonicalize_grant_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     for path in paths {
-        push_unique(&mut out, canonicalize_deepest_existing(path)?);
+        push_unique(
+            &mut out,
+            crate::filesystem_identity::canonicalize_deepest_existing(path)?,
+        );
     }
     Ok(out)
 }
@@ -398,41 +483,6 @@ pub fn sandbox_status_text(options: &RunOptions, mode: RunMode) -> Result<String
 
 pub(crate) fn sandbox_denied(message: impl Into<String>) -> Error {
     Error::Message(format!("denied by sandbox policy: {}", message.into()))
-}
-
-pub(crate) fn canonicalize_deepest_existing(path: &Path) -> Result<PathBuf> {
-    if path.as_os_str().is_empty() {
-        return Err(Error::Message("empty sandbox path".to_string()));
-    }
-
-    let mut current = path.to_path_buf();
-    let mut tail = PathBuf::new();
-    loop {
-        if current.exists() {
-            let mut resolved = current.canonicalize()?;
-            if !tail.as_os_str().is_empty() {
-                resolved.push(tail);
-            }
-            return Ok(resolved);
-        }
-        let Some(name) = current.file_name().map(|name| name.to_os_string()) else {
-            return Err(Error::Message(format!(
-                "no existing ancestor for sandbox path {}",
-                path.display()
-            )));
-        };
-        let mut next_tail = PathBuf::from(name);
-        if !tail.as_os_str().is_empty() {
-            next_tail.push(tail);
-        }
-        tail = next_tail;
-        if !current.pop() {
-            return Err(Error::Message(format!(
-                "no existing ancestor for sandbox path {}",
-                path.display()
-            )));
-        }
-    }
 }
 
 #[cfg(target_os = "linux")]

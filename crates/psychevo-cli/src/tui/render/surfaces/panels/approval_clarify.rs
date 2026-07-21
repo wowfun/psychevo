@@ -156,7 +156,10 @@ pub(crate) fn render_permission_approval_panel(
     entries.push((
         None,
         Line::from(Span::styled(
-            format!("Permission required  source: {source}"),
+            format!(
+                "Permission required · {} · source: {source}",
+                panel.request.tool_name
+            ),
             theme.accent_style().add_modifier(Modifier::BOLD),
         )),
     ));
@@ -164,38 +167,58 @@ pub(crate) fn render_permission_approval_panel(
         None,
         Line::from(Span::styled(panel.request.reason.clone(), Style::default())),
     ));
-    entries.push((
-        None,
-        Line::from(Span::styled(
-            format!(
-                "tool: {}  action: {}",
-                panel.request.tool_name, panel.request.summary
-            ),
-            theme.dim_style(),
-        )),
-    ));
-    if let Some(rule) = &panel.request.matched_rule {
+    if let Some(filesystem) = &panel.request.filesystem {
+        for target in &filesystem.targets {
+            entries.push((
+                None,
+                Line::from(Span::styled(
+                    format!("requested: {}", target.requested_path),
+                    theme.dim_style(),
+                )),
+            ));
+            if target.requested_path != target.resolved_path {
+                entries.push((
+                    None,
+                    Line::from(Span::styled(
+                        format!("resolved:  {}", target.resolved_path),
+                        theme.dim_style(),
+                    )),
+                ));
+            }
+        }
+    } else {
         entries.push((
             None,
-            Line::from(Span::styled(format!("matched: {rule}"), theme.dim_style())),
+            Line::from(Span::styled(
+                format!("action: {}", panel.request.summary),
+                theme.dim_style(),
+            )),
         ));
-    }
-    if let Some(rule) = &panel.request.suggested_rule {
-        entries.push((
-            None,
-            Line::from(Span::styled(format!("grant: {rule}"), theme.dim_style())),
-        ));
+        if let Some(rule) = &panel.request.matched_rule {
+            entries.push((
+                None,
+                Line::from(Span::styled(format!("matched: {rule}"), theme.dim_style())),
+            ));
+        }
+        if let Some(rule) = &panel.request.suggested_rule {
+            entries.push((
+                None,
+                Line::from(Span::styled(format!("grant: {rule}"), theme.dim_style())),
+            ));
+        }
     }
     entries.push((None, Line::from("")));
 
     for (index, (_outcome, label, description)) in panel.options().iter().enumerate() {
         let selected = index == panel.selected;
         let marker = if selected { "›" } else { " " };
-        let key = match *label {
+        let key = match label.as_str() {
             "Allow once" => "y",
             "Allow session" => "a",
             "Allow permanent" => "p",
-            _ => "d",
+            "Deny" => "d",
+            "Choose directory scope…" | "Hide directory scopes" => "a",
+            _ => " ",
         };
         let style = if selected {
             theme.accent_style().add_modifier(Modifier::BOLD)
@@ -206,9 +229,9 @@ pub(crate) fn render_permission_approval_panel(
             Some(index),
             Line::from(vec![
                 Span::styled(format!("{marker} [{key}] "), theme.dim_style()),
-                Span::styled((*label).to_string(), style),
+                Span::styled(label.clone(), style),
                 Span::styled("  ", theme.dim_style()),
-                Span::styled((*description).to_string(), theme.dim_style()),
+                Span::styled(description.clone(), theme.dim_style()),
             ]),
         ));
     }
@@ -223,17 +246,37 @@ pub(crate) fn render_permission_approval_panel(
     entries.push((
         None,
         Line::from(Span::styled(
-            "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny",
+            if panel.request.filesystem.is_some() {
+                "↑/↓ or j/k select | enter confirm | y once | a directory scopes | d/esc deny"
+            } else {
+                "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny"
+            },
             theme.dim_style(),
         )),
     ));
 
     let mut visual_y = 0u16;
-    let total_height = entries.iter().fold(0u16, |height, (_index, line)| {
-        height.saturating_add(line_wrapped_height(line, inner.width))
+    let mut selected_bounds = None;
+    let total_height = entries.iter().fold(0u16, |height, (index, line)| {
+        let row_height = line_wrapped_height(line, inner.width);
+        if index.is_some_and(|index| index == panel.selected) {
+            selected_bounds = Some((height, height.saturating_add(row_height)));
+        }
+        height.saturating_add(row_height)
     });
     let max_scroll = total_height.saturating_sub(inner.height);
     panel.scroll = panel.scroll.min(max_scroll);
+    if panel.ensure_selected_visible {
+        if let Some((selected_start, selected_end)) = selected_bounds {
+            if selected_start < panel.scroll {
+                panel.scroll = selected_start;
+            } else if selected_end > panel.scroll.saturating_add(inner.height) {
+                panel.scroll = selected_end.saturating_sub(inner.height);
+            }
+            panel.scroll = panel.scroll.min(max_scroll);
+        }
+        panel.ensure_selected_visible = false;
+    }
     for (index, line) in &entries {
         let row_height = line_wrapped_height(line, inner.width);
         if let Some(index) = index

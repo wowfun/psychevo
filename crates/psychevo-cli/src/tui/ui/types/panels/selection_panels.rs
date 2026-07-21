@@ -330,66 +330,118 @@ impl PermissionApprovalPanel {
             session_id,
             request,
             selected: 0,
+            scope_expanded: false,
             scroll: 0,
+            ensure_selected_visible: false,
             previous_panel: previous_panel.map(Box::new),
             notice: None,
         }
     }
 
-    pub(crate) fn options(&self) -> Vec<(PermissionApprovalOutcome, &'static str, &'static str)> {
-        let mut options = vec![
-            (
-                PermissionApprovalOutcome::AllowOnce,
-                "Allow once",
-                "Run this operation one time",
-            ),
-            (
-                PermissionApprovalOutcome::AllowSession,
-                "Allow session",
-                "Remember this operation for the current session",
-            ),
-        ];
+    pub(crate) fn options(&self) -> Vec<(PermissionApprovalChoice, String, String)> {
+        let mut options = vec![(
+            PermissionApprovalChoice::Decision(PermissionApprovalDecision::allow_once()),
+            "Allow once".to_string(),
+            "Run this exact operation one time".to_string(),
+        )];
+        if let Some(filesystem) = &self.request.filesystem {
+            if self.scope_expanded {
+                for directory in &filesystem.scope_candidates {
+                    options.push((
+                        PermissionApprovalChoice::Decision(
+                            PermissionApprovalDecision::allow_filesystem_turn(directory.clone()),
+                        ),
+                        format!("Allow turn · {directory}"),
+                        "Allow writes below this directory for the current turn".to_string(),
+                    ));
+                    options.push((
+                        PermissionApprovalChoice::Decision(
+                            PermissionApprovalDecision::allow_filesystem_session(
+                                directory.clone(),
+                            ),
+                        ),
+                        format!("Allow session · {directory}"),
+                        "Allow writes below this directory for the current session".to_string(),
+                    ));
+                }
+                options.push((
+                    PermissionApprovalChoice::CollapseScopes,
+                    "Hide directory scopes".to_string(),
+                    "Return to the compact approval choices".to_string(),
+                ));
+            } else if !filesystem.scope_candidates.is_empty() {
+                options.push((
+                    PermissionApprovalChoice::ExpandScopes,
+                    "Choose directory scope…".to_string(),
+                    "Review canonical turn and session directory grants".to_string(),
+                ));
+            }
+        } else {
+            options.push((
+                PermissionApprovalChoice::Decision(PermissionApprovalDecision::allow_session()),
+                "Allow session".to_string(),
+                "Remember this operation for the current session".to_string(),
+            ));
+        }
         if self.request.allow_always {
             options.push((
-                PermissionApprovalOutcome::AllowAlways,
-                "Allow permanent",
-                "Write a project-local permission grant",
+                PermissionApprovalChoice::Decision(PermissionApprovalDecision::allow_always()),
+                "Allow permanent".to_string(),
+                "Write a project-local permission grant".to_string(),
             ));
         }
         options.push((
-            PermissionApprovalOutcome::Deny,
-            "Deny",
-            "Reject this operation",
+            PermissionApprovalChoice::Decision(PermissionApprovalDecision::deny()),
+            "Deny".to_string(),
+            "Reject this operation".to_string(),
         ));
         options
     }
 
     pub(crate) fn desired_height(&self, width: u16) -> u16 {
         let inner_width = width.saturating_sub(4).max(1);
-        let wrapped_rows = [
+        let mut rows = vec![
             format!(
-                "Permission required  source: {}",
+                "Permission required · {} · source: {}",
+                self.request.tool_name,
                 self.session_id.as_deref().unwrap_or("current")
             ),
             self.request.reason.clone(),
-            format!(
-                "tool: {}  action: {}",
-                self.request.tool_name, self.request.summary
-            ),
-            self.request
-                .matched_rule
-                .as_ref()
-                .map(|rule| format!("matched: {rule}"))
-                .unwrap_or_default(),
-            self.request
-                .suggested_rule
-                .as_ref()
-                .map(|rule| format!("grant: {rule}"))
-                .unwrap_or_default(),
-            self.notice.clone().unwrap_or_default(),
-            "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny"
-                .to_string(),
-        ]
+        ];
+        if let Some(filesystem) = &self.request.filesystem {
+            for target in &filesystem.targets {
+                rows.push(format!("requested: {}", target.requested_path));
+                if target.requested_path != target.resolved_path {
+                    rows.push(format!("resolved:  {}", target.resolved_path));
+                }
+            }
+            rows.push(
+                "↑/↓ or j/k select | enter confirm | y once | a directory scopes | d/esc deny"
+                    .to_string(),
+            );
+        } else {
+            rows.push(format!("action: {}", self.request.summary));
+            rows.push(
+                self.request
+                    .matched_rule
+                    .as_ref()
+                    .map(|rule| format!("matched: {rule}"))
+                    .unwrap_or_default(),
+            );
+            rows.push(
+                self.request
+                    .suggested_rule
+                    .as_ref()
+                    .map(|rule| format!("grant: {rule}"))
+                    .unwrap_or_default(),
+            );
+            rows.push(
+                "↑/↓ or j/k select | enter confirm | y once | a session | p permanent | d/esc deny"
+                    .to_string(),
+            );
+        }
+        rows.push(self.notice.clone().unwrap_or_default());
+        let wrapped_rows = rows
         .into_iter()
         .filter(|line| !line.is_empty())
         .map(|line| wrapped_height(&line, inner_width))
@@ -398,6 +450,7 @@ impl PermissionApprovalPanel {
     }
 
     pub(crate) fn scroll_by(&mut self, amount: isize) {
+        self.ensure_selected_visible = false;
         if amount.is_negative() {
             self.scroll = self.scroll.saturating_sub(amount.unsigned_abs() as u16);
         } else {
@@ -407,19 +460,39 @@ impl PermissionApprovalPanel {
 
     pub(crate) fn move_selection(&mut self, delta: isize) {
         let max = self.options().len().saturating_sub(1) as isize;
-        self.selected = (self.selected as isize + delta).clamp(0, max) as usize;
+        let selected = (self.selected as isize + delta).clamp(0, max) as usize;
+        if selected != self.selected {
+            self.selected = selected;
+            self.ensure_selected_visible = true;
+        }
     }
 
-    pub(crate) fn select_outcome(&self) -> PermissionApprovalOutcome {
+    pub(crate) fn set_scope_expanded(&mut self, expanded: bool) {
+        self.scope_expanded = expanded;
+        self.selected = 0;
+        self.scroll = 0;
+        self.ensure_selected_visible = true;
+    }
+
+    pub(crate) fn selected_choice(&self) -> PermissionApprovalChoice {
         self.options()
             .get(self.selected)
-            .map(|(outcome, _, _)| *outcome)
-            .unwrap_or(PermissionApprovalOutcome::Deny)
+            .map(|(choice, _, _)| choice.clone())
+            .unwrap_or_else(|| {
+                PermissionApprovalChoice::Decision(PermissionApprovalDecision::deny())
+            })
     }
 
     pub(crate) fn restore_panel(self) -> Option<BottomPanel> {
         self.previous_panel.map(|panel| *panel)
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PermissionApprovalChoice {
+    Decision(PermissionApprovalDecision),
+    ExpandScopes,
+    CollapseScopes,
 }
 
 pub(crate) fn wrapped_height(text: &str, width: u16) -> u16 {

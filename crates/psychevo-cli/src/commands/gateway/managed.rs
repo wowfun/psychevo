@@ -127,6 +127,9 @@ impl ManagedBindPolicy {
     }
 
     pub(super) fn allows_bound_addr(self, addr: SocketAddr) -> bool {
+        if self.bind_addr.port() == 0 {
+            return addr.ip() == self.bind_addr.ip() && addr.port() != 0;
+        }
         if self.fallback_ports == 0 {
             return addr == self.bind_addr;
         }

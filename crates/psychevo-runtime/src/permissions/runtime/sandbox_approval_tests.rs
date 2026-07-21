@@ -42,6 +42,30 @@ mod sandbox_approval_tests {
         }
     }
 
+    #[cfg(unix)]
+    #[derive(Debug)]
+    struct SwappingApprovalHandler {
+        link: PathBuf,
+        replacement: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl crate::types::ApprovalHandler for SwappingApprovalHandler {
+        fn timeout_secs(&self) -> u64 {
+            0
+        }
+
+        fn request_permission(
+            &self,
+            _request: PermissionApprovalRequest,
+        ) -> BoxFuture<'static, crate::types::PermissionApprovalDecision> {
+            std::fs::remove_file(&self.link).expect("remove old symlink");
+            std::os::unix::fs::symlink(&self.replacement, &self.link)
+                .expect("replace symlink");
+            Box::pin(async { crate::types::PermissionApprovalDecision::allow_once() })
+        }
+    }
+
     fn abort_signal() -> AbortSignal {
         let (_tx, rx) = tokio::sync::watch::channel(false);
         AbortSignal::new(rx)
@@ -153,6 +177,117 @@ mod sandbox_approval_tests {
             .expect("edit tool")
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn workspace_write_through_symlink_to_external_requires_approval() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        std::os::unix::fs::symlink(outside.path(), work.path().join("linked-outside"))
+            .expect("symlink");
+        let target = outside.path().join("nested/escaped.txt");
+        let policy = crate::sandbox::SandboxPolicy::disabled();
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(Vec::new());
+        let runtime =
+            permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let output = write
+            .execute(
+                "call-symlink-escape".to_string(),
+                json!({
+                    "path": "linked-outside/nested/escaped.txt",
+                    "content": "must be approved\n"
+                }),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(output.is_error, "{:?}", output.json);
+        assert!(!target.exists());
+        let requests = handler.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].reason.contains("outside the working directory"));
+        let filesystem = requests[0].filesystem.as_ref().expect("filesystem scope");
+        assert_eq!(filesystem.targets[0].requested_path, "linked-outside/nested/escaped.txt");
+        assert_eq!(
+            filesystem.targets[0].resolved_path,
+            target.display().to_string()
+        );
+        assert!(
+            filesystem
+                .scope_candidates
+                .contains(&outside.path().join("nested").display().to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_fails_when_symlink_identity_changes_during_approval() {
+        let work = tempfile::tempdir().expect("work");
+        let before = tempfile::tempdir().expect("before");
+        let after = tempfile::tempdir().expect("after");
+        let link = work.path().join("linked-outside");
+        std::os::unix::fs::symlink(before.path(), &link).expect("symlink");
+        let handler = Arc::new(SwappingApprovalHandler {
+            link,
+            replacement: after.path().to_path_buf(),
+        });
+        let policy = crate::sandbox::SandboxPolicy::disabled();
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let runtime = PermissionRuntime::new(
+            work.path().to_path_buf(),
+            work.path().join(".psychevo"),
+            PermissionConfig::default(),
+            PermissionMode::Default,
+            ApprovalMode::Manual,
+            Some(handler),
+            None,
+        )
+        .with_sandbox(policy.clone(), grants.clone());
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let output = write
+            .execute(
+                "call-symlink-swap".to_string(),
+                json!({"path": "linked-outside/escaped.txt", "content": "no\n"}),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(output.is_error, "{:?}", output.json);
+        assert!(
+            output.json["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("path_identity_changed")
+        );
+        assert!(!before.path().join("escaped.txt").exists());
+        assert!(!after.path().join("escaped.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn active_permission_config_remains_protected_through_a_symlink() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        std::os::unix::fs::symlink(outside.path(), work.path().join(".psychevo"))
+            .expect("symlink");
+        let runtime = PermissionRuntime::new(
+            work.path().to_path_buf(),
+            work.path().join(".psychevo"),
+            PermissionConfig::default(),
+            PermissionMode::BypassPermissions,
+            ApprovalMode::Manual,
+            None,
+            None,
+        );
+
+        let decision = runtime.evaluate("write", &json!({"path": ".psychevo/config.toml"}));
+
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
     #[tokio::test]
     async fn allow_once_grants_current_write_call_only() {
         let work = tempfile::tempdir().expect("work");
@@ -194,15 +329,19 @@ mod sandbox_approval_tests {
     }
 
     #[tokio::test]
-    async fn allow_session_reuses_same_file_key_but_not_sibling() {
+    async fn allow_session_directory_reuses_scope_for_sibling_but_not_other_directory() {
         let work = tempfile::tempdir().expect("work");
         let outside = tempfile::tempdir().expect("outside");
+        let other = tempfile::tempdir().expect("other");
         let target = outside.path().join("session.txt");
         let sibling = outside.path().join("sibling.txt");
+        let other_target = other.path().join("other.txt");
         let policy = sandbox_policy(work.path(), crate::sandbox::SandboxMode::WorkspaceWrite);
         let grants = crate::sandbox::SandboxWriteGrants::default();
         let handler = RecordingApprovalHandler::new(vec![
-            crate::types::PermissionApprovalDecision::allow_session(),
+            crate::types::PermissionApprovalDecision::allow_filesystem_session(
+                outside.path().display().to_string(),
+            ),
         ]);
         let runtime =
             permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
@@ -230,13 +369,54 @@ mod sandbox_approval_tests {
         let sibling_result = write
             .execute(
                 "call-session-sibling".to_string(),
-                json!({"path": sibling.display().to_string(), "content": "bad\n"}),
+                json!({"path": sibling.display().to_string(), "content": "sibling\n"}),
                 abort_signal(),
             )
             .await;
-        assert!(sibling_result.is_error, "{:?}", sibling_result.json);
-        assert!(!sibling.exists());
+        assert!(!sibling_result.is_error, "{:?}", sibling_result.json);
+        assert_eq!(std::fs::read_to_string(&sibling).expect("sibling"), "sibling\n");
+        assert_eq!(handler.requests().len(), 1);
+
+        let other_result = write
+            .execute(
+                "call-session-other".to_string(),
+                json!({"path": other_target.display().to_string(), "content": "bad\n"}),
+                abort_signal(),
+            )
+            .await;
+        assert!(other_result.is_error, "{:?}", other_result.json);
+        assert!(!other_target.exists());
         assert_eq!(handler.requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn unoffered_filesystem_scope_fails_closed() {
+        let work = tempfile::tempdir().expect("work");
+        let outside = tempfile::tempdir().expect("outside");
+        let unrelated = tempfile::tempdir().expect("unrelated");
+        let target = outside.path().join("blocked.txt");
+        let policy = crate::sandbox::SandboxPolicy::disabled();
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_filesystem_session(
+                unrelated.path().display().to_string(),
+            ),
+        ]);
+        let runtime =
+            permission_runtime(work.path(), policy.clone(), grants.clone(), handler.clone());
+        let write = wrapped_write(work.path(), policy, grants, &runtime);
+
+        let output = write
+            .execute(
+                "call-unoffered-scope".to_string(),
+                json!({"path": target.display().to_string(), "content": "no\n"}),
+                abort_signal(),
+            )
+            .await;
+
+        assert!(output.is_error, "{:?}", output.json);
+        assert!(!target.exists());
+        assert_eq!(handler.requests().len(), 1);
     }
 
     #[tokio::test]
@@ -343,11 +523,9 @@ mod sandbox_approval_tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests[0].reason,
-            format!(
-                "sandbox approval required: write to {} is outside configured writable roots",
-                target.display()
-            )
+            "sandbox approval required: write is outside configured writable roots"
         );
+        assert!(!requests[0].reason.contains(&target.display().to_string()));
         assert!(!requests[0].allow_always);
     }
 

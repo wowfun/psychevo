@@ -14,7 +14,7 @@ impl ToolBinding for WriteTool {
     }
 
     fn description(&self) -> &str {
-        "Create or completely replace a UTF-8 text file inside configured writer roots, normally the working directory. Use write instead of shell redirection when writing project files; shell-only temp roots are for exec_command artifacts. Creates missing parent directories when allowed, then returns lint and LSP diagnostics when available."
+        "Create or completely replace an authorized UTF-8 text file. Relative paths resolve from the working directory; writes outside it pause for harness approval unless already covered by policy or a scoped grant. Use write instead of shell redirection when writing project files. Creates missing parent directories when allowed, then returns lint and LSP diagnostics when available."
     }
 
     fn parameters(&self) -> Value {
@@ -24,7 +24,7 @@ impl ToolBinding for WriteTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to create or completely replace, relative to the working directory or absolute inside it"
+                    "description": "Authorized file path to create or replace; relative paths resolve from the working directory"
                 },
                 "content": {
                     "type": "string",

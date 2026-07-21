@@ -869,13 +869,39 @@ async fn native_thread_context_reports_effective_permission_and_reasoning_values
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
-        r#"model = "deepseek/deepseek-chat"
+        r#"[provider."xiaomi-token-plan"]
+name = "Xiaomi Token Plan"
+api = "https://token-plan-cn.xiaomimimo.com/v1"
 
-[provider.deepseek.models."deepseek-chat"]
+[provider."xiaomi-token-plan".models."mimo-v2.5-pro"]
 reasoning_effort = "high"
 "#,
     )
     .expect("model config");
+    std::fs::write(
+        state.inner.home.join("models_dev_cache.json"),
+        r#"{
+  "xiaomi-token-plan-cn": {
+    "api": "https://token-plan-cn.xiaomimimo.com/v1",
+    "models": {
+      "mimo-v2.5-pro": {
+        "id": "mimo-v2.5-pro",
+        "name": "MiMo V2.5 Pro",
+        "reasoning": true
+      }
+    }
+  }
+}"#,
+    )
+    .expect("models.dev cache");
+    let project_config = state.inner.cwd.join(".psychevo/config.toml");
+    std::fs::create_dir_all(project_config.parent().expect("project config dir"))
+        .expect("project config dir");
+    std::fs::write(
+        &project_config,
+        "model = \"xiaomi-token-plan/mimo-v2.5-pro\"\n",
+    )
+    .expect("project model selection");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let context = handle_rpc(
         state.clone(),
@@ -906,6 +932,15 @@ reasoning_effort = "high"
         .find(|control| control["id"] == "reasoning")
         .expect("reasoning control");
     assert_eq!(reasoning["effectiveValue"], "high");
+    let model = controls
+        .iter()
+        .find(|control| control["id"] == "model")
+        .expect("model control");
+    assert_eq!(
+        model["effectiveValue"],
+        "xiaomi-token-plan/mimo-v2.5-pro"
+    );
+    assert_eq!(model["choices"][0]["label"], "MiMo V2.5 Pro");
 
     let updated = handle_rpc(
         state,
@@ -2601,6 +2636,14 @@ async fn thread_draft_prepare_projects_opencode_controls_before_first_prompt() {
         })
         .expect("Python is required by the ACP fixture");
     let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        r#"[provider.test.models.default]
+name = "Configured default"
+"#,
+    )
+    .expect("configured model labels");
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("draft-prepare.jsonl");
@@ -2677,6 +2720,8 @@ async fn thread_draft_prepare_projects_opencode_controls_before_first_prompt() {
         .expect("model control");
     assert_eq!(model["effectiveValue"], "test/default");
     assert_eq!(model["choices"].as_array().map(Vec::len), Some(2));
+    assert_eq!(model["choices"][0]["label"], "Configured default");
+    assert_eq!(model["choices"][1]["label"], "Second model");
     let mode = controls
         .iter()
         .find(|control| control["surfaceRole"] == "mode")
@@ -2692,28 +2737,38 @@ async fn thread_draft_prepare_projects_opencode_controls_before_first_prompt() {
         vec!["build", "plan"]
     );
 
-    let refreshed = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("context-after-delayed-command")),
-            method: "thread/context/read".to_string(),
-            params: Some(json!({
-                "threadId": null,
-                "target": {"agentRef": "opencode", "runtimeProfileRef": "opencode"},
-                "scope": scope
-            })),
-        },
-    )
+    let refreshed = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let context = handle_rpc(
+                state.clone(),
+                AuthContext::Bearer,
+                tx.clone(),
+                RpcRequest {
+                    jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                    id: Some(json!("context-after-delayed-command")),
+                    method: "thread/context/read".to_string(),
+                    params: Some(json!({
+                        "threadId": null,
+                        "target": {"agentRef": "opencode", "runtimeProfileRef": "opencode"},
+                        "scope": scope
+                    })),
+                },
+            )
+            .await
+            .expect("context after delayed available_commands_update");
+            if context["capabilities"]
+                .as_array()
+                .expect("refreshed capabilities")
+                .iter()
+                .any(|capability| capability["id"] == "command:fixture_status")
+            {
+                break context;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
     .await
-    .expect("context after delayed available_commands_update");
-    assert!(refreshed["capabilities"]
-        .as_array()
-        .expect("refreshed capabilities")
-        .iter()
-        .any(|capability| capability["id"] == "command:fixture_status"));
+    .expect("delayed available_commands_update projection");
     assert_eq!(
         refreshed["contextRevision"], prepared["context"]["contextRevision"],
         "display-only command updates must not invalidate admission freshness"
@@ -2955,6 +3010,14 @@ async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
         })
         .expect("Python is required by the ACP fixture");
     let (_temp, state) = web_state();
+    std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(
+        state.inner.home.join("config.toml"),
+        r#"[provider.test.models.default]
+name = "Configured default"
+"#,
+    )
+    .expect("configured model labels");
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("legacy-model-draft.jsonl");
@@ -3030,6 +3093,8 @@ async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
         .expect("legacy model control");
     assert_eq!(model["effectiveValue"], "test/default");
     assert_eq!(model["choices"].as_array().map(Vec::len), Some(2));
+    assert_eq!(model["choices"][0]["label"], "Configured default");
+    assert_eq!(model["choices"][1]["label"], "Second model");
 
     let changed = handle_rpc(
         state.clone(),
@@ -3060,7 +3125,7 @@ async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
     let accepted = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
-        tx,
+        tx.clone(),
         RpcRequest {
             jsonrpc: wire::JSONRPC_VERSION.to_string(),
             id: Some(json!("turn-with-legacy-model")),
@@ -3094,6 +3159,30 @@ async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
     })
     .await
     .expect("legacy prompt");
+    let bound = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("bound-legacy-model-context")),
+            method: "thread/context/read".to_string(),
+            params: Some(json!({
+                "threadId": accepted["threadId"],
+                "scope": scope
+            })),
+        },
+    )
+    .await
+    .expect("bound legacy model context");
+    let bound_model = bound["controls"]
+        .as_array()
+        .expect("bound controls")
+        .iter()
+        .find(|control| control["surfaceRole"] == "model")
+        .expect("bound model control");
+    assert_eq!(bound_model["choices"][0]["label"], "Configured default");
+    assert_eq!(bound_model["choices"][1]["label"], "Second model");
     let entries = std::fs::read_to_string(&log)
         .expect("legacy fixture log")
         .lines()

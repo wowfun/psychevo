@@ -413,6 +413,7 @@ pub(crate) fn reconstructed_tool_declarations(
             approval_handler: None,
             state: StateRuntime::from_store(PathBuf::new(), store.clone()),
             config_path: None,
+            protected_config_paths: Vec::new(),
             parent_session_id: summary.id.clone(),
             parent_context_snapshot: Vec::new(),
             catalog: AgentCatalog::default(),

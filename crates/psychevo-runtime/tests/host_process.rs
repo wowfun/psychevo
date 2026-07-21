@@ -166,6 +166,11 @@ fn windows_job_membership_and_tree_termination_are_exact() {
     let descendant =
         ManagedProcess::inspect(descendant_pid, &instance_id).expect("descendant owned");
 
+    assert!(
+        !helper_process
+            .wait_for_tree_exit(Duration::ZERO)
+            .expect("wait for live Job Object")
+    );
     helper_process
         .terminate_tree(1)
         .expect("terminate Job Object");

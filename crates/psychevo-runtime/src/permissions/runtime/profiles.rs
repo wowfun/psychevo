@@ -76,7 +76,7 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
         PermissionAction::File {
             paths, mutating, ..
         } => {
-            if paths.iter().all(|target| target.within_cwd) {
+            if !mutating || paths.iter().all(|target| target.within_cwd) {
                 return ActionPolicyEvaluation::Allow;
             }
             let outside = paths
@@ -86,10 +86,7 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
                 .collect::<Vec<_>>()
                 .join(", ");
             ActionPolicyEvaluation::Ask {
-                reason: format!(
-                    "{} outside cwd requires approval: {outside}",
-                    if *mutating { "file write" } else { "file read" }
-                ),
+                reason: "file write outside the working directory requires approval".to_string(),
                 matched_rule: None,
                 suggested_rule: Some(format!("filesystem:{outside}")),
                 persistent_grants: action.persistent_grants(),
@@ -138,14 +135,10 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
 pub(crate) fn read_only_profile_decision(action: &PermissionAction) -> ActionPolicyEvaluation {
     match action {
         PermissionAction::File {
-            paths,
-            mutating: false,
-            ..
-        } if paths.iter().all(|target| target.within_cwd) => ActionPolicyEvaluation::Allow,
+            mutating: false, ..
+        } => ActionPolicyEvaluation::Allow,
         PermissionAction::File { .. } => ActionPolicyEvaluation::Ask {
-            reason:
-                "read-only permissions require approval for file writes or outside-cwd reads"
-                    .to_string(),
+            reason: "read-only permissions require approval for file writes".to_string(),
             matched_rule: None,
             suggested_rule: action.suggested_rule(),
             persistent_grants: action.persistent_grants(),
@@ -317,7 +310,11 @@ pub(crate) fn matching_filesystem_access<'a>(
 pub(crate) fn filesystem_rule_matches(rule: &str, target: &FileTarget) -> bool {
     let rule_path = Path::new(rule);
     if rule_path.is_absolute() {
-        let normalized = lexical_normalize(rule_path);
+        let Ok(normalized) =
+            crate::filesystem_identity::canonicalize_deepest_existing(rule_path)
+        else {
+            return false;
+        };
         let rule_ref = crate::host_paths::path_ref_for_native_path(&normalized);
         return path_uri_contains(&rule_ref.uri, &target.uri);
     }
@@ -378,7 +375,7 @@ mod profile_filesystem_tests {
         let cwd = temp.path();
         let path = cwd.join("a b.txt");
         let path_ref = crate::host_paths::path_ref_for_native_path(&path);
-        let target = file_target(cwd, &path_ref.uri);
+        let target = file_target(cwd, &path_ref.uri).expect("target");
 
         assert!(filesystem_rule_matches("a b.txt", &target));
         assert!(!filesystem_rule_matches("a%20b.txt", &target));

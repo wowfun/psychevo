@@ -137,25 +137,33 @@ impl TuiApp {
                 ui.resolve_permission_approval(panel, PermissionApprovalDecision::deny());
             }
             KeyCode::Enter => {
-                let decision = match panel.select_outcome() {
-                    PermissionApprovalOutcome::AllowOnce => {
-                        PermissionApprovalDecision::allow_once()
+                match panel.selected_choice() {
+                    PermissionApprovalChoice::Decision(decision) => {
+                        ui.resolve_permission_approval(panel, decision);
                     }
-                    PermissionApprovalOutcome::AllowSession => {
-                        PermissionApprovalDecision::allow_session()
+                    PermissionApprovalChoice::ExpandScopes => {
+                        panel.set_scope_expanded(true);
+                        ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
                     }
-                    PermissionApprovalOutcome::AllowAlways => {
-                        PermissionApprovalDecision::allow_always()
+                    PermissionApprovalChoice::CollapseScopes => {
+                        panel.set_scope_expanded(false);
+                        ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
                     }
-                    PermissionApprovalOutcome::Deny => PermissionApprovalDecision::deny(),
-                };
-                ui.resolve_permission_approval(panel, decision);
+                }
             }
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_once());
             }
             KeyCode::Char('a') | KeyCode::Char('A') => {
-                ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_session());
+                if panel.request.filesystem.is_some() {
+                    panel.set_scope_expanded(true);
+                    ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+                } else {
+                    ui.resolve_permission_approval(
+                        panel,
+                        PermissionApprovalDecision::allow_session(),
+                    );
+                }
             }
             KeyCode::Char('p') | KeyCode::Char('P') if panel.request.allow_always => {
                 ui.resolve_permission_approval(panel, PermissionApprovalDecision::allow_always());
@@ -184,13 +192,19 @@ impl TuiApp {
             return Ok(());
         };
         panel.selected = index.min(panel.options().len().saturating_sub(1));
-        let decision = match panel.select_outcome() {
-            PermissionApprovalOutcome::AllowOnce => PermissionApprovalDecision::allow_once(),
-            PermissionApprovalOutcome::AllowSession => PermissionApprovalDecision::allow_session(),
-            PermissionApprovalOutcome::AllowAlways => PermissionApprovalDecision::allow_always(),
-            PermissionApprovalOutcome::Deny => PermissionApprovalDecision::deny(),
-        };
-        ui.resolve_permission_approval(panel, decision);
+        match panel.selected_choice() {
+            PermissionApprovalChoice::Decision(decision) => {
+                ui.resolve_permission_approval(panel, decision)
+            }
+            PermissionApprovalChoice::ExpandScopes => {
+                panel.set_scope_expanded(true);
+                ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            }
+            PermissionApprovalChoice::CollapseScopes => {
+                panel.set_scope_expanded(false);
+                ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            }
+        }
         Ok(())
     }
 

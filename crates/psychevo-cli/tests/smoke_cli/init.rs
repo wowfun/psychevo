@@ -616,6 +616,22 @@ pub(crate) fn cli_web_lifecycle_aliases_stop_and_restart_managed_server() {
     assert_eq!(final_stop_json["ok"], true);
     assert_eq!(final_stop_json["stopped"], true);
     assert!(!psychevo_home.join("gateway/server.json").exists());
+
+    let idempotent_stop = pevo_cmd(temp.path())
+        .env("PSYCHEVO_HOME", &psychevo_home)
+        .current_dir(&cwd)
+        .args(["web", "stop"])
+        .output()
+        .expect("pevo web idempotent stop");
+    assert!(
+        idempotent_stop.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&idempotent_stop.stderr)
+    );
+    let idempotent_stop_json: Value =
+        serde_json::from_slice(&idempotent_stop.stdout).expect("idempotent stop json");
+    assert_eq!(idempotent_stop_json["ok"], true);
+    assert_eq!(idempotent_stop_json["stopped"], false);
 }
 
 #[test]

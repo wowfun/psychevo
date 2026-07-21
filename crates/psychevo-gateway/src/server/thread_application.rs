@@ -756,7 +756,10 @@ pub(super) fn respond_to_routed_interaction_for_selector(
     let (accepted, outcome) = match (expected_kind, response) {
         (
             GatewayActionKind::Permission,
-            wire::ThreadInteractionResponse::Permission { decision },
+            wire::ThreadInteractionResponse::Permission {
+                decision,
+                directory,
+            },
         ) => {
             let outcome = if decision == PermissionDecision::Deny {
                 GatewayActionOutcome::Rejected
@@ -767,7 +770,7 @@ pub(super) fn respond_to_routed_interaction_for_selector(
                 state.inner.gateway.submit_permission(
                     selector,
                     interaction_id,
-                    permission_decision(decision),
+                    permission_decision(decision, directory),
                 ),
                 outcome,
             )

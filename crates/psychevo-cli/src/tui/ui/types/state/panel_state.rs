@@ -337,7 +337,9 @@ pub(crate) struct PermissionApprovalPanel {
     pub(crate) session_id: Option<String>,
     pub(crate) request: PermissionApprovalRequest,
     pub(crate) selected: usize,
+    pub(crate) scope_expanded: bool,
     pub(crate) scroll: u16,
+    pub(crate) ensure_selected_visible: bool,
     pub(crate) previous_panel: Option<Box<BottomPanel>>,
     pub(crate) notice: Option<String>,
 }

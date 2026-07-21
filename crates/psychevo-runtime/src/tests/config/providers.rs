@@ -296,11 +296,16 @@ pub(crate) fn models_dev_cache_enriches_configured_model_by_base_url() {
             "models": {
               "mimo-v2.5-pro": {
                 "id": "mimo-v2.5-pro",
+                "name": "MiMo V2.5 Pro",
                 "reasoning": true,
                 "tool_call": true,
                 "cost": { "input": 0, "output": 0 },
                 "limit": { "context": 1048576, "output": 65536 },
                 "modalities": { "input": ["text"], "output": ["text"] }
+              },
+              "other": {
+                "id": "other",
+                "name": "Cached other"
               }
             }
           }
@@ -311,11 +316,14 @@ pub(crate) fn models_dev_cache_enriches_configured_model_by_base_url() {
     write_config(
         config_dir.join("config.toml"),
         r#"
+model = "xiaomi-token-plan/mimo-v2.5-pro"
+
 [provider."xiaomi-token-plan"]
 name = "Xiaomi Token Plan"
 api = "https://token-plan-cn.xiaomimimo.com/v1"
 
-[provider."xiaomi-token-plan".models."mimo-v2.5-pro"]
+[provider."xiaomi-token-plan".models.other]
+name = "Explicit other"
 "#,
     )
     .expect("config");
@@ -325,6 +333,7 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
         .iter()
         .find(|model| model.provider == "xiaomi-token-plan")
         .expect("token plan model");
+    assert_eq!(model.model_name.as_deref(), Some("MiMo V2.5 Pro"));
     assert_eq!(model.context_limit, Some(1_048_576));
     assert_eq!(model.metadata.limits.output, Some(65_536));
     assert_eq!(model.metadata.capabilities.tool_call, Some(true));
@@ -332,6 +341,11 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
         model.metadata.cost.as_ref().and_then(|cost| cost.input),
         Some(0.0)
     );
+    let explicit = models
+        .iter()
+        .find(|model| model.model == "other")
+        .expect("explicit model");
+    assert_eq!(explicit.model_name.as_deref(), Some("Explicit other"));
 }
 
 #[test]

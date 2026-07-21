@@ -550,6 +550,149 @@ pub(crate) async fn permission_approval_panel_mouse_click_resolves_each_option()
     assert_permission_click_outcome(3, PermissionApprovalOutcome::Deny).await;
 }
 
+#[tokio::test]
+pub(crate) async fn filesystem_approval_expands_before_selecting_a_canonical_scope() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let (response, decision) = oneshot::channel();
+    ui.active_permission_approval = Some(response);
+    ui.bottom_panel = Some(BottomPanel::PermissionApproval(
+        PermissionApprovalPanel::new(
+            app.current_session.clone(),
+            PermissionApprovalRequest {
+                tool_call_id: "call_write".to_string(),
+                tool_name: "write".to_string(),
+                summary: "Write linked/result.txt".to_string(),
+                reason: "file write outside the working directory requires approval".to_string(),
+                matched_rule: None,
+                suggested_rule: Some("filesystem:linked/result.txt".to_string()),
+                allow_always: false,
+                filesystem: Some(psychevo_runtime::FilesystemApprovalRequest {
+                    targets: vec![psychevo_runtime::FilesystemApprovalTarget {
+                        requested_path: "linked/result.txt".to_string(),
+                        resolved_path: "/tmp/shared/result.txt".to_string(),
+                    }],
+                    scope_candidates: vec!["/tmp/shared".to_string(), "/tmp".to_string()],
+                }),
+                timeout_secs: 0,
+            },
+            None,
+        ),
+    ));
+
+    let buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 30);
+    let text = buffer_text(&buffer);
+    assert!(text.contains("Permission required · write · source:"));
+    assert_eq!(text.matches("linked/result.txt").count(), 1);
+    assert_eq!(text.matches("/tmp/shared/result.txt").count(), 1);
+    assert!(!text.contains("tool: write"));
+    assert!(!text.contains("grant: filesystem:"));
+    let expand_area = ui
+        .last_bottom_panel_areas
+        .iter()
+        .find(|(index, _)| *index == 1)
+        .map(|(_, area)| *area)
+        .expect("expand row");
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: expand_area.x.saturating_add(2),
+            row: expand_area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("expand scopes");
+    assert!(ui.active_permission_approval.is_some());
+
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 100, 30);
+    let session_area = ui
+        .last_bottom_panel_areas
+        .iter()
+        .find(|(index, _)| *index == 2)
+        .map(|(_, area)| *area)
+        .expect("session scope row");
+    app.handle_fullscreen_mouse(
+        &mut ui,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: session_area.x.saturating_add(2),
+            row: session_area.y,
+            modifiers: KeyModifiers::NONE,
+        },
+    )
+    .await
+    .expect("select scope");
+
+    let decision = decision.await.expect("approval decision");
+    assert_eq!(decision.outcome, PermissionApprovalOutcome::AllowSession);
+    assert_eq!(
+        decision
+            .filesystem_scope
+            .expect("filesystem scope")
+            .directory,
+        "/tmp/shared"
+    );
+}
+
+#[test]
+pub(crate) fn filesystem_scope_keyboard_navigation_keeps_selection_visible() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp);
+    let mut ui = FullscreenUi::new(&app);
+    let mut panel = PermissionApprovalPanel::new(
+        app.current_session.clone(),
+        PermissionApprovalRequest {
+            tool_call_id: "call_deep_write".to_string(),
+            tool_name: "write".to_string(),
+            summary: "Write a deeply nested external file".to_string(),
+            reason: "file write outside the working directory requires approval".to_string(),
+            matched_rule: None,
+            suggested_rule: None,
+            allow_always: false,
+            filesystem: Some(psychevo_runtime::FilesystemApprovalRequest {
+                targets: vec![psychevo_runtime::FilesystemApprovalTarget {
+                    requested_path: "linked/result.txt".to_string(),
+                    resolved_path: "/tmp/a/b/c/d/e/f/result.txt".to_string(),
+                }],
+                scope_candidates: vec![
+                    "/tmp/a/b/c/d/e/f".to_string(),
+                    "/tmp/a/b/c/d/e".to_string(),
+                    "/tmp/a/b/c/d".to_string(),
+                    "/tmp/a/b/c".to_string(),
+                    "/tmp/a/b".to_string(),
+                    "/tmp/a".to_string(),
+                    "/tmp".to_string(),
+                    "/".to_string(),
+                ],
+            }),
+            timeout_secs: 0,
+        },
+        None,
+    );
+    panel.set_scope_expanded(true);
+    ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+
+    for _ in 0..12 {
+        app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .expect("move scope selection");
+    }
+    let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 18);
+    let selected = match ui.bottom_panel.as_ref() {
+        Some(BottomPanel::PermissionApproval(panel)) => panel.selected,
+        _ => panic!("permission panel"),
+    };
+
+    assert!(
+        ui.last_bottom_panel_areas
+            .iter()
+            .any(|(index, _)| *index == selected),
+        "selected scope {selected} must remain inside the rendered viewport"
+    );
+}
+
 #[test]
 pub(crate) fn permission_approval_panel_wraps_details_without_hiding_options() {
     let temp = tempdir().expect("temp");
@@ -566,6 +709,7 @@ pub(crate) fn permission_approval_panel_wraps_details_without_hiding_options() {
                 matched_rule: None,
                 suggested_rule: Some("exec:python3 -c \"import json; with open('/tmp/hn_stories_data.json', 'r') as f: data = json.load(f); print(data)\"".to_string()),
                 allow_always: true,
+                filesystem: None,
                 timeout_secs: 0,
             },
             None,
@@ -598,6 +742,7 @@ async fn assert_permission_click_outcome(index: usize, expected: PermissionAppro
                 matched_rule: None,
                 suggested_rule: Some("WebFetch(https://example.com/*)".to_string()),
                 allow_always: true,
+                filesystem: None,
                 timeout_secs: 0,
             },
             None,

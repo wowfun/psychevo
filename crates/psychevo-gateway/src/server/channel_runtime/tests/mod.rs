@@ -1,7 +1,7 @@
 use super::*;
 use crate::im::FakeImAdapter;
 use futures::future::BoxFuture;
-use psychevo_runtime::{Outcome, RunResult, StateRuntime};
+use psychevo_runtime::{Outcome, PermissionApprovalOutcome, RunResult, StateRuntime};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -108,6 +108,7 @@ impl crate::GatewayBackend for TestBackend {
                         matched_rule: None,
                         suggested_rule: None,
                         allow_always: false,
+                        filesystem: None,
                         timeout_secs: 300,
                     })
                     .await;

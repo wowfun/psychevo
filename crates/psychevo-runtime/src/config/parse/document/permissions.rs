@@ -32,7 +32,7 @@ pub(crate) fn parse_permission_config(
     }
     if matches!(config.approval_policy, ApprovalPolicy::Granular) && config.granular.is_none() {
         return Err(Error::Config(
-            "approval_policy = \"granular\" requires [approval.granular] with filesystem, network, exec, mcp, skill, and request_permissions"
+            "approval_policy = \"granular\" requires [approval.granular] with filesystem, network, exec, mcp, and skill"
                 .to_string(),
         ));
     }
@@ -115,17 +115,18 @@ pub(crate) fn parse_approval_config(value: &Value) -> Result<Option<GranularAppr
     let granular = granular
         .as_object()
         .ok_or_else(|| Error::Config("approval.granular must be an object".to_string()))?;
+    if granular.contains_key("request_permissions") {
+        return Err(Error::Config(
+            "approval.granular.request_permissions was removed; filesystem approvals are created transparently by the runtime harness"
+                .to_string(),
+        ));
+    }
     Ok(Some(GranularApprovalConfig {
         filesystem: required_bool_field(granular, "filesystem", "approval.granular.filesystem")?,
         network: required_bool_field(granular, "network", "approval.granular.network")?,
         exec: required_bool_field(granular, "exec", "approval.granular.exec")?,
         mcp: required_bool_field(granular, "mcp", "approval.granular.mcp")?,
         skill: required_bool_field(granular, "skill", "approval.granular.skill")?,
-        request_permissions: required_bool_field(
-            granular,
-            "request_permissions",
-            "approval.granular.request_permissions",
-        )?,
     }))
 }
 

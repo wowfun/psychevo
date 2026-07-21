@@ -358,7 +358,8 @@ pub(crate) fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer
 
     assert!(
         output.status.success(),
-        "stdout: {}\nstderr: {}",
+        "status: {}\nstdout: {}\nstderr: {}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

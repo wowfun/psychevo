@@ -140,6 +140,7 @@ fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
 fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> PermissionDecision {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce => PermissionDecision::AllowOnce,
+        PermissionApprovalOutcome::AllowTurn => PermissionDecision::AllowTurn,
         PermissionApprovalOutcome::AllowSession => PermissionDecision::AllowSession,
         PermissionApprovalOutcome::AllowAlways => PermissionDecision::AllowAlways,
         PermissionApprovalOutcome::Deny => PermissionDecision::Deny,
@@ -149,6 +150,7 @@ fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> Pe
 fn permission_action_outcome(decision: &PermissionApprovalDecision) -> GatewayActionOutcome {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce
+        | PermissionApprovalOutcome::AllowTurn
         | PermissionApprovalOutcome::AllowSession
         | PermissionApprovalOutcome::AllowAlways => GatewayActionOutcome::Accepted,
         PermissionApprovalOutcome::Deny => GatewayActionOutcome::Rejected,

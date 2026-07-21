@@ -546,7 +546,6 @@ pub struct GranularApprovalConfig {
     pub exec: bool,
     pub mcp: bool,
     pub skill: bool,
-    pub request_permissions: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -749,12 +748,42 @@ pub struct PermissionApprovalRequest {
     pub matched_rule: Option<String>,
     pub suggested_rule: Option<String>,
     pub allow_always: bool,
+    pub filesystem: Option<FilesystemApprovalRequest>,
     pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemApprovalTarget {
+    pub requested_path: String,
+    pub resolved_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemApprovalRequest {
+    pub targets: Vec<FilesystemApprovalTarget>,
+    pub scope_candidates: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FilesystemApprovalLifetime {
+    Turn,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesystemApprovalScope {
+    pub directory: String,
+    pub lifetime: FilesystemApprovalLifetime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionApprovalOutcome {
     AllowOnce,
+    AllowTurn,
     AllowSession,
     AllowAlways,
     Deny,
@@ -763,30 +792,55 @@ pub enum PermissionApprovalOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionApprovalDecision {
     pub outcome: PermissionApprovalOutcome,
+    pub filesystem_scope: Option<FilesystemApprovalScope>,
 }
 
 impl PermissionApprovalDecision {
     pub fn allow_once() -> Self {
         Self {
             outcome: PermissionApprovalOutcome::AllowOnce,
+            filesystem_scope: None,
+        }
+    }
+
+    pub fn allow_filesystem_turn(directory: impl Into<String>) -> Self {
+        Self {
+            outcome: PermissionApprovalOutcome::AllowTurn,
+            filesystem_scope: Some(FilesystemApprovalScope {
+                directory: directory.into(),
+                lifetime: FilesystemApprovalLifetime::Turn,
+            }),
+        }
+    }
+
+    pub fn allow_filesystem_session(directory: impl Into<String>) -> Self {
+        Self {
+            outcome: PermissionApprovalOutcome::AllowSession,
+            filesystem_scope: Some(FilesystemApprovalScope {
+                directory: directory.into(),
+                lifetime: FilesystemApprovalLifetime::Session,
+            }),
         }
     }
 
     pub fn allow_session() -> Self {
         Self {
             outcome: PermissionApprovalOutcome::AllowSession,
+            filesystem_scope: None,
         }
     }
 
     pub fn allow_always() -> Self {
         Self {
             outcome: PermissionApprovalOutcome::AllowAlways,
+            filesystem_scope: None,
         }
     }
 
     pub fn deny() -> Self {
         Self {
             outcome: PermissionApprovalOutcome::Deny,
+            filesystem_scope: None,
         }
     }
 }

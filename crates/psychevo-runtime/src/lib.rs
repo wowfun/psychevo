@@ -12,6 +12,7 @@ pub(crate) mod contribution_projection;
 pub(crate) mod error;
 pub(crate) mod events;
 pub mod extensions;
+pub(crate) mod filesystem_identity;
 pub mod hooks;
 mod host_paths;
 pub mod host_process;
@@ -231,20 +232,22 @@ pub use types::{
     ClarifyInteractionOutcome, ClarifyQuestion, ClarifyQuestionOption, ClarifyRequestEvent,
     ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse, ClarifyResult, ConfigScope,
     ConfiguredModel, CustomProviderInput, CustomProviderResult, EDITABLE_INPUT_METADATA_KEY,
-    ExternalAgentDelegate, ExternalAgentDelegateRequest, ExternalAgentDelegateResult, ImageInput,
-    McpServerInput, McpServerPolicy, McpTransportInput, ModelCatalogEntry, ModelCatalogProvider,
-    ModelMetadataCacheTarget, PermissionApprovalDecision, PermissionApprovalOutcome,
-    PermissionApprovalRequest, PermissionConfig, PermissionMode, ProjectContextInstructionMode,
-    PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions, ReloadContextResult,
-    ResolvedMcpServerInput, RunControl, RunControlHandle, RunMode, RunOptions, RunResult,
-    RunSandboxMode, RunSandboxOverride, RunStreamEvent, RunStreamSink, RunTerminalError,
-    RunWarning, RuntimeTool, SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent,
-    SessionExportMessageSummary, SessionRedoResult, SessionSummary, SessionUndoOptions,
-    SessionUndoResult, SessionUsageOptions, SessionUsageSummary, SmokeControl, StatsOptions,
-    StoredEditableInputEnvelope, StoredEditableInputPart, TUI_DISPLAY_METADATA_KEY,
-    TuiMessageSummary, USER_SHELL_METADATA_KEY, UsageActivity, UsageActivityDay, UsageReadOptions,
-    UsageReadResult, UsageWindowSummary, UserShellContextOptions, UserShellOptions,
-    UserShellResult, WorkspaceMutation, WorkspaceMutationSink, run_control,
+    ExternalAgentDelegate, ExternalAgentDelegateRequest, ExternalAgentDelegateResult,
+    FilesystemApprovalLifetime, FilesystemApprovalRequest, FilesystemApprovalScope,
+    FilesystemApprovalTarget, ImageInput, McpServerInput, McpServerPolicy, McpTransportInput,
+    ModelCatalogEntry, ModelCatalogProvider, ModelMetadataCacheTarget, PermissionApprovalDecision,
+    PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig, PermissionMode,
+    ProjectContextInstructionMode, PromptAttachmentDisplay, PromptDisplayMetadata,
+    ReloadContextOptions, ReloadContextResult, ResolvedMcpServerInput, RunControl,
+    RunControlHandle, RunMode, RunOptions, RunResult, RunSandboxMode, RunSandboxOverride,
+    RunStreamEvent, RunStreamSink, RunTerminalError, RunWarning, RuntimeTool,
+    SanitizedMessageSummary, ScopedCustomProviderInput, SelectedAgent, SessionExportMessageSummary,
+    SessionRedoResult, SessionSummary, SessionUndoOptions, SessionUndoResult, SessionUsageOptions,
+    SessionUsageSummary, SmokeControl, StatsOptions, StoredEditableInputEnvelope,
+    StoredEditableInputPart, TUI_DISPLAY_METADATA_KEY, TuiMessageSummary, USER_SHELL_METADATA_KEY,
+    UsageActivity, UsageActivityDay, UsageReadOptions, UsageReadResult, UsageWindowSummary,
+    UserShellContextOptions, UserShellOptions, UserShellResult, WorkspaceMutation,
+    WorkspaceMutationSink, run_control,
 };
 pub use undo::{redo_session, undo_session};
 pub use user_shell::run_user_shell_command_streaming_controlled;

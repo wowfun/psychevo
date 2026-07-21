@@ -27,14 +27,20 @@ impl RpcRequest {
     }
 }
 
-fn permission_decision(decision: PermissionDecision) -> PermissionApprovalDecision {
-    PermissionApprovalDecision {
-        outcome: match decision {
-            PermissionDecision::AllowOnce => PermissionApprovalOutcome::AllowOnce,
-            PermissionDecision::AllowSession => PermissionApprovalOutcome::AllowSession,
-            PermissionDecision::AllowAlways => PermissionApprovalOutcome::AllowAlways,
-            PermissionDecision::Deny => PermissionApprovalOutcome::Deny,
-        },
+fn permission_decision(
+    decision: PermissionDecision,
+    directory: Option<String>,
+) -> PermissionApprovalDecision {
+    match decision {
+        PermissionDecision::AllowOnce => PermissionApprovalDecision::allow_once(),
+        PermissionDecision::AllowTurn => directory
+            .map(PermissionApprovalDecision::allow_filesystem_turn)
+            .unwrap_or_else(PermissionApprovalDecision::deny),
+        PermissionDecision::AllowSession => directory
+            .map(PermissionApprovalDecision::allow_filesystem_session)
+            .unwrap_or_else(PermissionApprovalDecision::allow_session),
+        PermissionDecision::AllowAlways => PermissionApprovalDecision::allow_always(),
+        PermissionDecision::Deny => PermissionApprovalDecision::deny(),
     }
 }
 

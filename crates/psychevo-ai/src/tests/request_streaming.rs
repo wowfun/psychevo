@@ -281,6 +281,31 @@ pub(crate) fn openai_chat_token_count_splits_context_categories() {
 }
 
 #[test]
+pub(crate) fn token_count_stays_equivalent_for_growing_serialized_transcripts() {
+    let enc = tiktoken::get_encoding("o200k_base").expect("o200k encoding");
+    let mut transcript = String::new();
+    for index in 0..256 {
+        transcript.push_str(&format!(
+            "{{\"role\":\"tool\",\"call_id\":\"call_read_{index}\",\"content\":\"fixture content {index}\\n\"}}\n"
+        ));
+    }
+    let expected = enc.encode(&transcript).len() as u64;
+
+    thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                for _ in 0..32 {
+                    assert_eq!(count_text(enc, &transcript), expected);
+                }
+            });
+        }
+    });
+
+    let unicode = format!("{transcript}中文工具结果 — 完成");
+    assert_eq!(count_text(enc, &unicode), enc.encode(&unicode).len() as u64);
+}
+
+#[test]
 pub(crate) fn chat_request_maps_developer_role_only_when_capability_enabled() {
     let mut request = GenerationRequest {
         model: ModelTarget {

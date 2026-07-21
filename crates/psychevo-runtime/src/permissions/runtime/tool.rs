@@ -56,11 +56,46 @@ impl ToolBinding for PermissionTool {
         let runtime = self.runtime.clone();
         let tool = Arc::clone(&self.tool);
         Box::pin(async move {
+            let approved_identity = match PermissionAction::from_tool_call(
+                &runtime.inner.cwd,
+                tool.name(),
+                &args,
+            ) {
+                Ok(action) => action.and_then(|action| action.filesystem_identity_snapshot()),
+                Err(err) => {
+                    return ToolOutput::error(format!(
+                        "filesystem identity resolution failed: {err}"
+                    ));
+                }
+            };
             if let Err(output) = runtime
-                .authorize_with_abort(&tool_call_id, tool.name(), &args, abort.clone())
+                .authorize_with_expected_identity(
+                    &tool_call_id,
+                    tool.name(),
+                    &args,
+                    abort.clone(),
+                    &approved_identity,
+                )
                 .await
             {
                 return output;
+            }
+            let current_identity = match PermissionAction::from_tool_call(
+                &runtime.inner.cwd,
+                tool.name(),
+                &args,
+            ) {
+                Ok(action) => action.and_then(|action| action.filesystem_identity_snapshot()),
+                Err(err) => {
+                    return ToolOutput::error(format!(
+                        "path_identity_changed: filesystem identity could not be revalidated: {err}"
+                    ));
+                }
+            };
+            if current_identity != approved_identity {
+                return ToolOutput::error(
+                    "path_identity_changed: filesystem identity changed after permission evaluation",
+                );
             }
             tool.execute(tool_call_id, args, abort).await
         })

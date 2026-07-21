@@ -1,18 +1,39 @@
 impl PermissionRuntime {
+    #[allow(dead_code)]
     pub(crate) fn evaluate(&self, tool_name: &str, args: &Value) -> PermissionDecision {
-        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args);
+        let action = match PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args) {
+            Ok(action) => action,
+            Err(err) => {
+                return PermissionDecision::Deny {
+                    reason: format!("filesystem identity resolution failed: {err}"),
+                    matched_rule: None,
+                };
+            }
+        };
+        self.evaluate_resolved_action(action.as_ref())
+    }
+
+    pub(crate) fn evaluate_resolved_action(
+        &self,
+        action: Option<&PermissionAction>,
+    ) -> PermissionDecision {
         let Some(action) = action else {
             return PermissionDecision::Allow;
         };
 
-        if let Some(reason) = hardline_deny(&action) {
+        if let Some(reason) = protected_permission_config_reason(
+            action,
+            &self.inner.protected_config_paths,
+        )
+        .or_else(|| hardline_deny(action))
+        {
             return PermissionDecision::Deny {
                 reason,
                 matched_rule: None,
             };
         }
 
-        let evaluation = self.evaluate_action_policy(&action);
+        let evaluation = self.evaluate_action_policy(action);
         if let ActionPolicyEvaluation::Deny {
             reason,
             matched_rule,
@@ -26,12 +47,13 @@ impl PermissionRuntime {
 
         let session_key = action.session_key();
         if self.has_session_grant(&session_key)
+            || self.has_filesystem_scope_grant(action)
             || self.inner.mode == PermissionMode::BypassPermissions
         {
             return PermissionDecision::Allow;
         }
 
-        self.evaluation_to_permission_decision(&action, session_key, evaluation)
+        self.evaluation_to_permission_decision(action, session_key, evaluation)
     }
 
     #[allow(dead_code)]
@@ -195,7 +217,10 @@ impl PermissionRuntime {
         let targets = paths
             .iter()
             .map(|path| file_target(&self.inner.cwd, path))
-            .collect::<Vec<_>>();
+            .collect::<crate::error::Result<Vec<_>>>();
+        let Ok(targets) = targets else {
+            return false;
+        };
         if targets
             .iter()
             .any(|target| protected_read_reason(target).is_some())

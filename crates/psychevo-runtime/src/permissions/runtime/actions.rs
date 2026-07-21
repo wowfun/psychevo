@@ -33,6 +33,7 @@ pub(crate) enum PermissionAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileTarget {
     pub(crate) raw: String,
+    pub(crate) requested_absolute: PathBuf,
     pub(crate) absolute: PathBuf,
     pub(crate) uri: String,
     pub(crate) relative: String,
@@ -40,32 +41,37 @@ pub(crate) struct FileTarget {
 }
 
 impl PermissionAction {
-    pub(crate) fn from_tool_call(cwd: &Path, tool_name: &str, args: &Value) -> Option<Self> {
-        match tool_name {
+    pub(crate) fn from_tool_call(
+        cwd: &Path,
+        tool_name: &str,
+        args: &Value,
+    ) -> crate::error::Result<Option<Self>> {
+        let action = match tool_name {
             "exec_command" => {
-                args.get("cmd")
-                    .and_then(Value::as_str)
-                    .map(|command| Self::ExecCommand {
+                let Some(command) = args.get("cmd").and_then(Value::as_str) else {
+                    return Ok(None);
+                };
+                Some(Self::ExecCommand {
                         command: command.to_string(),
                         normalized: normalize_command(command),
-                        cwd: args
-                            .get("cwd")
-                            .and_then(Value::as_str)
-                            .map(|path| file_target(cwd, path)),
+                        cwd: match args.get("cwd").and_then(Value::as_str) {
+                            Some(path) => Some(file_target(cwd, path)?),
+                            None => None,
+                        },
                     })
             }
-            "read" => file_paths_from_args(cwd, args, &["path"]).map(|paths| Self::File {
+            "read" => file_paths_from_args(cwd, args, &["path"])?.map(|paths| Self::File {
                 tool: "read".to_string(),
                 paths,
                 mutating: false,
             }),
-            "write" => file_paths_from_args(cwd, args, &["path"]).map(|paths| Self::File {
+            "write" => file_paths_from_args(cwd, args, &["path"])?.map(|paths| Self::File {
                 tool: "write".to_string(),
                 paths,
                 mutating: true,
             }),
             "edit" => {
-                let paths = edit_paths_from_args(cwd, args);
+                let paths = edit_paths_from_args(cwd, args)?;
                 (!paths.is_empty()).then(|| Self::File {
                     tool: "edit".to_string(),
                     paths,
@@ -130,7 +136,8 @@ impl PermissionAction {
                         .map(|(server, tool)| (server.to_string(), tool.to_string()))
                 })
                 .map(|(server, tool)| Self::Mcp { server, tool }),
-        }
+        };
+        Ok(action)
     }
 
     #[allow(dead_code)]
@@ -180,7 +187,7 @@ impl PermissionAction {
                 "{tool}:{}",
                 paths
                     .iter()
-                    .map(|target| target.relative.clone())
+                    .map(|target| target.absolute.to_string_lossy().to_string())
                     .collect::<Vec<_>>()
                     .join(",")
             ),
@@ -233,22 +240,7 @@ impl PermissionAction {
                     .into_iter()
                     .collect()
             }
-            Self::File {
-                paths, mutating, ..
-            } => {
-                let access = if *mutating {
-                    PermissionAccess::Write
-                } else {
-                    PermissionAccess::Read
-                };
-                paths
-                    .iter()
-                    .map(|target| PersistentPermissionGrant::Filesystem {
-                        path: target.absolute.to_string_lossy().to_string(),
-                        access,
-                    })
-                    .collect()
-            }
+            Self::File { .. } => Vec::new(),
             Self::Skill { tool, action } => vec![PersistentPermissionGrant::Skill {
                 key: format!("{tool}/{action}"),
                 access: PermissionAccess::Allow,
@@ -276,6 +268,39 @@ impl PermissionAction {
         }
     }
 
+    pub(crate) fn filesystem_identity_snapshot(&self) -> Option<Vec<PathBuf>> {
+        match self {
+            Self::File { paths, .. } => {
+                Some(paths.iter().map(|target| target.absolute.clone()).collect())
+            }
+            Self::ExecCommand { cwd: Some(cwd), .. } => Some(vec![cwd.absolute.clone()]),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn filesystem_approval_request(&self) -> Option<FilesystemApprovalRequest> {
+        let Self::File {
+            paths,
+            mutating: true,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let targets = paths
+            .iter()
+            .map(|target| FilesystemApprovalTarget {
+                requested_path: target.raw.clone(),
+                resolved_path: target.absolute.to_string_lossy().to_string(),
+            })
+            .collect();
+        let scope_candidates = common_scope_candidates(paths);
+        Some(FilesystemApprovalRequest {
+            targets,
+            scope_candidates,
+        })
+    }
+
     pub(crate) fn category(&self) -> &'static str {
         match self {
             Self::ExecCommand { .. } => "exec",
@@ -299,22 +324,49 @@ impl PermissionAction {
     }
 }
 
+fn common_scope_candidates(paths: &[FileTarget]) -> Vec<String> {
+    let Some(mut candidate) = paths
+        .first()
+        .and_then(|target| target.absolute.parent())
+        .map(Path::to_path_buf)
+    else {
+        return Vec::new();
+    };
+    let mut candidates = Vec::new();
+    loop {
+        if paths
+            .iter()
+            .all(|target| crate::filesystem_identity::is_within(&candidate, &target.absolute))
+        {
+            candidates.push(candidate.to_string_lossy().to_string());
+        }
+        let Some(parent) = candidate.parent().map(Path::to_path_buf) else {
+            break;
+        };
+        candidate = parent;
+    }
+    candidates
+}
+
 pub(crate) fn file_paths_from_args(
     cwd: &Path,
     args: &Value,
     keys: &[&str],
-) -> Option<Vec<FileTarget>> {
+) -> crate::error::Result<Option<Vec<FileTarget>>> {
     let paths = keys
         .iter()
         .filter_map(|key| args.get(*key).and_then(Value::as_str))
         .map(|path| file_target(cwd, path))
-        .collect::<Vec<_>>();
-    (!paths.is_empty()).then_some(paths)
+        .collect::<crate::error::Result<Vec<_>>>()?;
+    Ok((!paths.is_empty()).then_some(paths))
 }
 
-pub(crate) fn edit_paths_from_args(cwd: &Path, args: &Value) -> Vec<FileTarget> {
-    if let Some(paths) = file_paths_from_args(cwd, args, &["path"]) {
-        return paths;
+pub(crate) fn edit_paths_from_args(
+    cwd: &Path,
+    args: &Value,
+) -> crate::error::Result<Vec<FileTarget>> {
+    if let Some(paths) = file_paths_from_args(cwd, args, &["path"])? {
+        return Ok(paths);
     }
     args.get("patch")
         .and_then(Value::as_str)
@@ -323,9 +375,9 @@ pub(crate) fn edit_paths_from_args(cwd: &Path, args: &Value) -> Vec<FileTarget> 
                 .lines()
                 .flat_map(patch_file_paths)
                 .map(|path| file_target(cwd, &path))
-                .collect()
+                .collect::<crate::error::Result<Vec<_>>>()
         })
-        .unwrap_or_default()
+        .unwrap_or_else(|| Ok(Vec::new()))
 }
 
 pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
@@ -349,59 +401,51 @@ pub(crate) fn patch_file_paths(line: &str) -> Vec<String> {
     Vec::new()
 }
 
-pub(crate) fn file_target(cwd: &Path, raw: &str) -> FileTarget {
-    let path_ref = crate::host_paths::resolve_host_path(
-        raw,
-        cwd,
-        &crate::host_paths::PathResolveOptions::current(),
-    )
-    .unwrap_or_else(|_| {
-        let path = Path::new(raw);
-        let absolute = if path.is_absolute() {
-            lexical_normalize(path)
-        } else {
-            lexical_normalize(&cwd.join(path))
-        };
-        crate::host_paths::path_ref_for_native_path(&absolute)
-    });
-    let absolute = PathBuf::from(&path_ref.native);
-    let cwd_path = crate::host_paths::path_ref_for_native_path(cwd);
-    let (relative, within_cwd) = relative_to_cwd(&path_ref.native, &cwd_path)
-        .map(|relative| (relative, true))
-        .unwrap_or_else(|| (raw.replace('\\', "/"), false));
-    FileTarget {
+pub(crate) fn file_target(cwd: &Path, raw: &str) -> crate::error::Result<FileTarget> {
+    let identity = crate::filesystem_identity::resolve(raw, cwd)?;
+    let cwd = crate::filesystem_identity::canonicalize_deepest_existing(cwd)?;
+    let within_cwd = crate::filesystem_identity::is_within(&cwd, &identity.resolved);
+    let relative = relative_path_from(&cwd, &identity.resolved)
+        .unwrap_or_else(|| identity.resolved.clone())
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(FileTarget {
         raw: raw.to_string(),
-        absolute,
-        uri: path_ref.uri,
+        requested_absolute: identity.requested_absolute,
+        absolute: identity.resolved,
+        uri: identity.uri,
         relative,
         within_cwd,
-    }
+    })
 }
 
-fn relative_to_cwd(native: &str, cwd: &crate::host_paths::PathRef) -> Option<String> {
-    if native == cwd.native {
-        return Some(String::new());
-    }
-    let cwd_native = cwd.native.trim_end_matches(['\\', '/']);
-    let native_prefix = format!("{cwd_native}\\");
-    native
-        .strip_prefix(&native_prefix)
-        .or_else(|| native.strip_prefix(&format!("{cwd_native}/")))
-        .map(|rest| rest.replace('\\', "/"))
-}
-
-pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
+fn relative_path_from(base: &Path, target: &Path) -> Option<PathBuf> {
+    let base = base.components().collect::<Vec<_>>();
+    let target = target.components().collect::<Vec<_>>();
+    let common = base
+        .iter()
+        .zip(&target)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = PathBuf::new();
+    for component in &base[common..] {
         match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
+            std::path::Component::Normal(_) | std::path::Component::ParentDir => {
+                relative.push("..")
             }
-            other => out.push(other.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => return None,
         }
     }
-    out
+    for component in &target[common..] {
+        match component {
+            std::path::Component::Normal(value) => relative.push(value),
+            std::path::Component::ParentDir => relative.push(".."),
+            std::path::Component::CurDir => {}
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => return None,
+        }
+    }
+    Some(relative)
 }
 
 #[cfg(test)]
@@ -413,7 +457,7 @@ mod action_path_tests {
         let temp = tempfile::tempdir().expect("temp");
         let cwd = temp.path();
 
-        let target = file_target(cwd, "a b.txt");
+        let target = file_target(cwd, "a b.txt").expect("target");
 
         assert_eq!(target.relative, "a b.txt");
         assert!(target.within_cwd);
@@ -426,7 +470,7 @@ mod action_path_tests {
         let path = cwd.join("a b.txt");
         let path_ref = crate::host_paths::path_ref_for_native_path(&path);
 
-        let target = file_target(cwd, &path_ref.uri);
+        let target = file_target(cwd, &path_ref.uri).expect("target");
 
         assert_eq!(target.relative, "a b.txt");
         assert!(target.within_cwd);

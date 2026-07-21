@@ -430,6 +430,18 @@ pub(super) fn thread_context_read_result(
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
 ) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+    thread_context_read_result_with_configured_models(state, scope, params)
+        .map(|(context, _)| context)
+}
+
+fn thread_context_read_result_with_configured_models(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadContextReadParams,
+) -> psychevo_runtime::Result<(
+    wire::ThreadContextReadResult,
+    Vec<psychevo_runtime::ConfiguredModel>,
+)> {
     let requested_target = params.target.clone();
     let thread_id = match params.thread_id {
         Some(thread_id) => Some(thread_id),
@@ -440,6 +452,8 @@ pub(super) fn thread_context_read_result(
         .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten();
+    let run_options = state.run_options(scope.cwd.clone(), thread_id.clone());
+    let configured = configured_models(&run_options).unwrap_or_default();
     if let Some(binding) = binding.as_ref()
         && binding.status == GatewayRuntimeBindingStatus::Unresolved
     {
@@ -627,7 +641,9 @@ pub(super) fn thread_context_read_result(
         })
         .unwrap_or_default();
     if selected_record.is_some_and(|record| record.config.runtime == RuntimeProfileKind::Native) {
-        populate_native_control_catalog(state, scope, thread_id.as_deref(), &mut surface.controls);
+        populate_native_control_catalog(&run_options, &configured, &mut surface.controls);
+    } else {
+        decorate_configured_model_control_labels(&configured, &mut surface.controls);
     }
     apply_control_state_precedence(
         &mut surface.controls,
@@ -788,29 +804,32 @@ pub(super) fn thread_context_read_result(
         (true, None, None)
     };
     let projected_target_id = selected_target.target_id;
-    Ok(wire::ThreadContextReadResult {
-        selected_target_id: explicit_selection.then(|| projected_target_id.clone()),
-        suggested_target_id: (!explicit_selection).then_some(projected_target_id),
-        runtime_profile_ref: runtime_ref,
-        selection_state,
-        profiles,
-        binding: binding_view,
-        controls: surface.controls,
-        stability,
-        capabilities: surface.capabilities,
-        compatible_targets,
-        input_capabilities: surface.input_capabilities,
-        actions,
-        sendability: wire::ThreadSendabilityView {
-            allowed: sendable,
-            reason: sendability_reason,
-            recovery_action,
+    Ok((
+        wire::ThreadContextReadResult {
+            selected_target_id: explicit_selection.then(|| projected_target_id.clone()),
+            suggested_target_id: (!explicit_selection).then_some(projected_target_id),
+            runtime_profile_ref: runtime_ref,
+            selection_state,
+            profiles,
+            binding: binding_view,
+            controls: surface.controls,
+            stability,
+            capabilities: surface.capabilities,
+            compatible_targets,
+            input_capabilities: surface.input_capabilities,
+            actions,
+            sendability: wire::ThreadSendabilityView {
+                allowed: sendable,
+                reason: sendability_reason,
+                recovery_action,
+            },
+            history,
+            pending_interactions,
+            context_revision,
+            control_revision,
         },
-        history,
-        pending_interactions,
-        context_revision,
-        control_revision,
-    })
+        configured,
+    ))
 }
 
 pub(super) async fn thread_context_read_result_live(
@@ -822,7 +841,8 @@ pub(super) async fn thread_context_read_result_live(
         Some(thread_id) => Some(thread_id),
         None => state.inner.gateway.resolve_source_thread(&scope.source)?,
     };
-    let mut context = thread_context_read_result(state, scope, params)?;
+    let (mut context, configured) =
+        thread_context_read_result_with_configured_models(state, scope, params)?;
     let Some(thread_id) = thread_id else {
         let source_key = scope.source.source_key();
         if let Some(target_id) = context.selected_target_id.as_deref()
@@ -832,7 +852,7 @@ pub(super) async fn thread_context_read_result_live(
                 .inspect_prepared_agent_session(&source_key.0, target_id)
                 .await?
         {
-            apply_prepared_acp_snapshot(state, scope, &mut context, &snapshot)?;
+            apply_prepared_acp_snapshot(state, scope, &configured, &mut context, &snapshot)?;
         }
         return Ok(context);
     };
@@ -874,6 +894,7 @@ pub(super) async fn thread_context_read_result_live(
     let capability_revision =
         combined_thread_revision(&[&profile_capability_revision, &snapshot.control_revision]);
     let mut surface = acp_session_agent_surface_descriptor(&snapshot, capability_revision);
+    decorate_configured_model_control_labels(&configured, &mut surface.controls);
     apply_control_state_precedence(&mut surface.controls, Some(&binding), None);
     context.controls = surface.controls;
     context.input_capabilities = surface.input_capabilities;
@@ -923,6 +944,7 @@ pub(super) async fn thread_context_read_result_live(
 fn apply_prepared_acp_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
+    configured: &[psychevo_runtime::ConfiguredModel],
     context: &mut wire::ThreadContextReadResult,
     snapshot: &crate::acp_peer::AcpSessionSnapshot,
 ) -> psychevo_runtime::Result<()> {
@@ -935,6 +957,7 @@ fn apply_prepared_acp_snapshot(
     let capability_revision =
         combined_thread_revision(&[&profile_capability_revision, &snapshot.control_revision]);
     let mut surface = acp_session_agent_surface_descriptor(snapshot, capability_revision);
+    decorate_configured_model_control_labels(configured, &mut surface.controls);
     let source_lane = state
         .inner
         .state
@@ -1032,7 +1055,7 @@ pub(super) async fn thread_draft_prepare_result(
     state.inner.gateway.bump_source_generation_key(&source_key);
 
     let target_input = runnable_target_input(&target);
-    let mut context = thread_context_read_result(
+    let (mut context, configured) = thread_context_read_result_with_configured_models(
         state,
         scope,
         wire::ThreadContextReadParams {
@@ -1088,7 +1111,9 @@ pub(super) async fn thread_draft_prepare_result(
         }
         .await;
         match preparation {
-            Ok(snapshot) => apply_prepared_acp_snapshot(state, scope, &mut context, &snapshot)?,
+            Ok(snapshot) => {
+                apply_prepared_acp_snapshot(state, scope, &configured, &mut context, &snapshot)?
+            }
             Err(error) => {
                 let problem = runtime_problem_view(&error);
                 persist_source_lane_preparation_problem(
@@ -1458,7 +1483,7 @@ pub(super) async fn thread_control_set_result(
                 lineage: Some(json!({"reason": "thread_application_control"})),
             })?;
         state.inner.gateway.bump_source_generation_key(&source_key);
-        let mut after_context = thread_context_read_result(
+        let (mut after_context, configured) = thread_context_read_result_with_configured_models(
             state,
             &effective_scope,
             wire::ThreadContextReadParams {
@@ -1468,7 +1493,13 @@ pub(super) async fn thread_control_set_result(
             },
         )?;
         if let Some(snapshot) = prepared_snapshot.as_ref() {
-            apply_prepared_acp_snapshot(state, &effective_scope, &mut after_context, snapshot)?;
+            apply_prepared_acp_snapshot(
+                state,
+                &effective_scope,
+                &configured,
+                &mut after_context,
+                snapshot,
+            )?;
         }
         let after = after_context
             .controls
@@ -3590,17 +3621,11 @@ fn apply_control_state_precedence(
 }
 
 fn populate_native_control_catalog(
-    state: &WebState,
-    scope: &ResolvedScope,
-    thread_id: Option<&str>,
+    options: &RunOptions,
+    configured: &[psychevo_runtime::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
-    let options = state.run_options(
-        scope.cwd.clone(),
-        thread_id.map(std::string::ToString::to_string),
-    );
     if let Some(model_control) = controls.iter_mut().find(|control| control.id == "model") {
-        let configured = configured_models(&options).unwrap_or_default();
         model_control.choices = configured
             .iter()
             .map(|model| {
@@ -3613,7 +3638,7 @@ fn populate_native_control_catalog(
             })
             .collect();
         if model_control.effective_value.is_none()
-            && let Ok(Some(model)) = selected_configured_model(&options)
+            && let Ok(Some(model)) = selected_configured_model(options)
         {
             model_control.effective_value =
                 Some(Value::String(format!("{}/{}", model.provider, model.model)));
@@ -3625,7 +3650,7 @@ fn populate_native_control_catalog(
         .find(|control| control.id == "reasoning")
         && reasoning_control.effective_value.is_none()
         && let Some(reasoning) = options.reasoning_effort.clone().or_else(|| {
-            selected_configured_model(&options)
+            selected_configured_model(options)
                 .ok()
                 .flatten()
                 .and_then(|model| model.reasoning_effort)
@@ -3633,6 +3658,30 @@ fn populate_native_control_catalog(
     {
         reasoning_control.effective_value = Some(Value::String(reasoning));
         reasoning_control.effective_source = wire::ThreadControlEffectiveSourceView::RuntimeDefault;
+    }
+}
+
+fn decorate_configured_model_control_labels(
+    configured: &[psychevo_runtime::ConfiguredModel],
+    controls: &mut [wire::ThreadControlDescriptorView],
+) {
+    let Some(model_control) = controls
+        .iter_mut()
+        .find(|control| control.surface_role == wire::ThreadControlSurfaceRoleView::Model)
+    else {
+        return;
+    };
+    for choice in &mut model_control.choices {
+        let Value::String(value) = &choice.value else {
+            continue;
+        };
+        if let Some(name) = configured.iter().find_map(|model| {
+            (format!("{}/{}", model.provider, model.model) == *value)
+                .then(|| model.model_name.clone())
+                .flatten()
+        }) {
+            choice.label = name;
+        }
     }
 }
 
@@ -3897,6 +3946,51 @@ mod runtime_session_ownership_tests {
         state.invalidate_runnable_target_catalog();
         let refreshed = RunnableTargetCatalog::load(&state, &scope).expect("refreshed catalog");
         assert!(!Arc::ptr_eq(&first, &refreshed));
+    }
+
+    #[test]
+    fn prospective_acp_context_uses_configured_name_for_raw_model_choice() {
+        let (_temp, state) = ephemeral_web_state();
+        std::fs::create_dir_all(&state.inner.home).expect("home");
+        std::fs::write(
+            state.inner.home.join("config.toml"),
+            r#"[provider.test.models.default]
+name = "Configured default"
+
+[agents.backends.fixture]
+kind = "acp"
+command = "fixture-agent"
+entrypoints = ["peer", "subagent"]
+
+[runtime_profiles.fixture]
+runtime = "acp"
+backend_ref = "fixture"
+default_model = "test/default"
+"#,
+        )
+        .expect("config");
+        let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+
+        let context = thread_context_read_result(
+            &state,
+            &scope,
+            wire::ThreadContextReadParams {
+                thread_id: None,
+                target: Some(wire::RunnableTargetInput {
+                    agent_ref: Some("fixture".to_string()),
+                    runtime_profile_ref: "fixture".to_string(),
+                }),
+                scope: Some(scope.to_wire_scope()),
+            },
+        )
+        .expect("prospective ACP Thread Context");
+        let model = context
+            .controls
+            .iter()
+            .find(|control| control.surface_role == wire::ThreadControlSurfaceRoleView::Model)
+            .expect("model control");
+        assert_eq!(model.effective_value, Some(json!("test/default")));
+        assert_eq!(model.choices[0].label, "Configured default");
     }
 
     #[cfg(unix)]

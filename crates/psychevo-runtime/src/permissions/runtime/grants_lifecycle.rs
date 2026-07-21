@@ -27,7 +27,9 @@ impl PermissionRuntime {
                 crate::sandbox::SandboxWriteDecision::Allowed => {}
                 crate::sandbox::SandboxWriteDecision::Grantable { path, reason } => {
                     grant_paths.push(path);
-                    reasons.push(reason);
+                    if !reasons.contains(&reason) {
+                        reasons.push(reason);
+                    }
                 }
                 crate::sandbox::SandboxWriteDecision::Denied { reason } => {
                     return Err(ToolOutput::error(format!(
@@ -112,6 +114,48 @@ impl PermissionRuntime {
         if let Ok(mut grants) = self.inner.session_grants.lock() {
             grants.insert(key);
         }
+    }
+
+    pub(crate) fn remember_filesystem_scope(
+        &self,
+        scope: &FilesystemApprovalScope,
+    ) -> crate::error::Result<()> {
+        self.inner.sandbox_grants.grant_scope(scope)
+    }
+
+    pub(crate) fn has_filesystem_scope_grant(&self, action: &PermissionAction) -> bool {
+        let PermissionAction::File {
+            tool,
+            paths,
+            mutating: true,
+        } = action
+        else {
+            return false;
+        };
+        let grants = self.inner.sandbox_grants.scoped_roots();
+        let mut used_scope = false;
+        for target in paths {
+            let target_action = PermissionAction::File {
+                tool: tool.clone(),
+                paths: vec![target.clone()],
+                mutating: true,
+            };
+            let base_evaluation = self.evaluate_action_policy(&target_action);
+            if matches!(base_evaluation, ActionPolicyEvaluation::Deny { .. }) {
+                return false;
+            }
+            if grants
+                .iter()
+                .any(|root| crate::filesystem_identity::is_within(root, &target.absolute))
+            {
+                used_scope = true;
+                continue;
+            }
+            if !matches!(base_evaluation, ActionPolicyEvaluation::Allow) {
+                return false;
+            }
+        }
+        used_scope
     }
 
     pub(crate) fn start_pending_approval(

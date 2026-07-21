@@ -945,6 +945,7 @@ impl Gateway {
             json!({
                 "requestId": request_id,
                 "decision": permission_decision_label(&decision),
+                "filesystemScope": decision.filesystem_scope,
             }),
         )
     }

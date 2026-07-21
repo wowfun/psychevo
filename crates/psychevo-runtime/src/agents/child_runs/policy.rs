@@ -108,7 +108,10 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     child_agent_tool_context.parent_context_snapshot = previous_messages.clone();
     child_agent_tool_context.required_agent_names = Vec::new();
     child_agent_tool_context.spawn_depth_remaining = Some(child.spawn_depth_remaining);
-    let sandbox_grants = crate::sandbox::SandboxWriteGrants::default();
+    let sandbox_grants = child
+        .context
+        .state
+        .filesystem_grants(&child.context.parent_session_id);
     let permission_mode =
         narrow_permission_mode_for_agent(child.context.permission_mode, Some(&child.agent));
     let permission_runtime = PermissionRuntime::new(
@@ -120,6 +123,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         child.context.approval_handler.clone(),
         None,
     );
+    let permission_runtime = permission_runtime
+        .with_protected_config_paths(child.context.protected_config_paths.clone());
     let permission_runtime = match hook_runtime.clone() {
         Some(runtime) => permission_runtime.with_hook_runtime(runtime),
         None => permission_runtime,

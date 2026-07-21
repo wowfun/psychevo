@@ -6,6 +6,24 @@ use sha2::{Digest, Sha256};
 pub const PROVIDER_MODELS_CACHE_FILE: &str = "provider_models_cache.json";
 pub const PROVIDER_MODELS_CACHE_VERSION: u32 = 1;
 
+fn configured_model_name(
+    model_config: Option<&ConfigModelEntry>,
+    metadata: &ModelMetadata,
+) -> Option<String> {
+    model_config
+        .and_then(|entry| entry.name.as_deref())
+        .or_else(|| {
+            metadata
+                .raw
+                .as_ref()
+                .and_then(|raw| raw.get("name"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct ProviderModelsCacheFile {
     version: u32,
@@ -68,7 +86,7 @@ pub fn configured_models(options: &RunOptions) -> Result<Vec<ConfiguredModel>> {
             provider: provider.clone(),
             provider_label: provider_label(&provider, loaded.config.provider.get(&provider)),
             model,
-            model_name: model_config.and_then(|entry| entry.name.clone()),
+            model_name: configured_model_name(model_config, &metadata),
             reasoning_effort,
             context_limit: metadata.context_limit(),
             metadata,
@@ -481,7 +499,7 @@ pub(crate) fn selected_configured_model_for_provider(
         provider: provider.clone(),
         provider_label: provider_label(&provider, config_entry),
         model,
-        model_name: model_config.and_then(|entry| entry.name.clone()),
+        model_name: configured_model_name(model_config, &metadata),
         reasoning_effort,
         context_limit: metadata.context_limit(),
         metadata,

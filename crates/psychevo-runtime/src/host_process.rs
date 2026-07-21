@@ -320,6 +320,7 @@ impl ManagedProcess {
         use windows_sys::Win32::Foundation::{
             ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT,
         };
+        use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
         use windows_sys::Win32::System::JobObjects::{IsProcessInJob, OpenJobObjectW};
         use windows_sys::Win32::System::SystemServices::{JOB_OBJECT_QUERY, JOB_OBJECT_TERMINATE};
         use windows_sys::Win32::System::Threading::{
@@ -347,8 +348,13 @@ impl ManagedProcess {
             _ => return Err(ProcessIdentityError::Unavailable(io::Error::last_os_error())),
         }
         let name = wide_job_name(instance_id);
-        let job =
-            unsafe { OpenJobObjectW(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, 0, name.as_ptr()) };
+        let job = unsafe {
+            OpenJobObjectW(
+                JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE | SYNCHRONIZE,
+                0,
+                name.as_ptr(),
+            )
+        };
         let job = OwnedHandle::new(job).map_err(ProcessIdentityError::Unavailable)?;
         let mut in_job = 0;
         if unsafe { IsProcessInJob(process.0, job.0, &mut in_job) } == 0 {

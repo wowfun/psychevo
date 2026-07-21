@@ -241,6 +241,7 @@ async fn write_text_file_content(
                 matched_rule: None,
                 suggested_rule: None,
                 allow_always: false,
+                filesystem: None,
                 timeout_secs: handler.timeout_secs(),
             })
             .await
@@ -284,6 +285,7 @@ async fn request_permission(
                     .options
                     .iter()
                     .any(|option| option.kind == PermissionOptionKind::AllowAlways),
+                filesystem: None,
                 timeout_secs: handler.timeout_secs(),
             })
             .await
@@ -306,7 +308,9 @@ fn permission_option_id(
 ) -> Option<String> {
     let preferred = match outcome {
         PermissionApprovalOutcome::AllowAlways => PermissionOptionKind::AllowAlways,
-        PermissionApprovalOutcome::AllowOnce | PermissionApprovalOutcome::AllowSession => {
+        PermissionApprovalOutcome::AllowOnce
+        | PermissionApprovalOutcome::AllowTurn
+        | PermissionApprovalOutcome::AllowSession => {
             PermissionOptionKind::AllowOnce
         }
         PermissionApprovalOutcome::Deny => PermissionOptionKind::RejectOnce,
@@ -320,6 +324,7 @@ fn permission_option_id(
                     (outcome, option.kind),
                     (
                         PermissionApprovalOutcome::AllowOnce
+                            | PermissionApprovalOutcome::AllowTurn
                             | PermissionApprovalOutcome::AllowSession
                             | PermissionApprovalOutcome::AllowAlways,
                         PermissionOptionKind::AllowOnce | PermissionOptionKind::AllowAlways

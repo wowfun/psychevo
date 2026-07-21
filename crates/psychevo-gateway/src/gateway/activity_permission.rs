@@ -139,6 +139,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
                 );
             }
             let allow_always = request.allow_always;
+            let filesystem = request.filesystem.clone();
             event_sink(GatewayEvent::ActionRequested {
                 action: PendingActionView {
                     action_id: request_id.clone(),
@@ -157,6 +158,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
                         "suggestedRule": request.suggested_rule,
                         "allowSession": session_authorization_lifetime.is_some(),
                         "allowAlways": allow_always,
+                        "filesystem": filesystem,
                         "authorizationLifetime": session_authorization_lifetime,
                         "alwaysAuthorizationLifetime": allow_always.then_some("permanent"),
                         "timeoutSecs": request.timeout_secs,
@@ -186,6 +188,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
                 outcome: permission_action_outcome(&decision),
                 payload: json!({
                     "decision": permission_decision_from_runtime(&decision),
+                    "filesystemScope": decision.filesystem_scope,
                 }),
             });
             decision

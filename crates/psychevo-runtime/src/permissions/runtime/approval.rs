@@ -4,19 +4,20 @@ impl PermissionRuntime {
         tool_call_id: &str,
         tool_name: &str,
         args: &Value,
-        session_key: String,
         grant: SandboxWriteGrantRequest,
         abort: Option<AbortSignal>,
     ) -> std::result::Result<(), ToolOutput> {
+        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args)
+            .map_err(|err| ToolOutput::error(err.to_string()))?;
         if self.inner.mode.bypasses_prompt_asks() {
             return Err(ToolOutput::error(format!(
                 "denied by sandbox policy: {}; bypassPermissions does not bypass sandbox enforcement",
                 grant.reason
             )));
         }
-        if let Some(action) = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args)
+        if let Some(action) = action.as_ref()
             && matches!(self.inner.config.approval_policy, ApprovalPolicy::Granular)
-            && !self.granular_allows_prompt(&action)
+            && !self.granular_allows_prompt(action)
         {
             return Err(permission_error(
                 "denied",
@@ -37,12 +38,16 @@ impl PermissionRuntime {
                 matched_rule: None,
                 suggested_rule: None,
                 allow_always: false,
+                filesystem: action
+                    .as_ref()
+                    .and_then(PermissionAction::filesystem_approval_request),
                 abort,
             })
             .await?;
         if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
             return match decision.outcome {
                 PermissionApprovalOutcome::AllowOnce
+                | PermissionApprovalOutcome::AllowTurn
                 | PermissionApprovalOutcome::AllowSession
                 | PermissionApprovalOutcome::AllowAlways => {
                     self.inner
@@ -66,17 +71,24 @@ impl PermissionRuntime {
                     .map_err(|err| ToolOutput::error(err.to_string()))?;
                 Ok(())
             }
-            PermissionApprovalOutcome::AllowSession | PermissionApprovalOutcome::AllowAlways => {
+            PermissionApprovalOutcome::AllowTurn | PermissionApprovalOutcome::AllowSession => {
+                let scope = decision
+                    .filesystem_scope
+                    .as_ref()
+                    .expect("validated filesystem scope");
+                self.remember_filesystem_scope(scope)
+                    .map_err(|err| ToolOutput::error(err.to_string()))?;
                 self.inner
                     .sandbox_grants
                     .grant_once(tool_call_id, &grant.paths)
                     .map_err(|err| ToolOutput::error(err.to_string()))?;
-                self.inner
-                    .sandbox_grants
-                    .grant_session(&session_key, &grant.paths)
-                    .map_err(|err| ToolOutput::error(err.to_string()))?;
                 Ok(())
             }
+            PermissionApprovalOutcome::AllowAlways => Err(permission_error(
+                "denied",
+                "filesystem approval cannot be persisted from a tool-call prompt",
+                None,
+            )),
             PermissionApprovalOutcome::Deny => Err(permission_error(
                 "denied",
                 &format!("user denied permission; do not retry the same operation: {reason}"),
@@ -97,6 +109,7 @@ impl PermissionRuntime {
             matched_rule,
             suggested_rule,
             allow_always,
+            filesystem,
             abort,
         } = request;
         if self.inner.mode == PermissionMode::DontAsk {
@@ -123,6 +136,7 @@ impl PermissionRuntime {
                     "matched_rule": matched_rule,
                     "suggested_rule": suggested_rule,
                     "allow_always": false,
+                    "filesystem": filesystem.clone(),
                 }),
             );
             if let Some(decision) = hook_outcome.approval_decision() {
@@ -172,6 +186,7 @@ impl PermissionRuntime {
             matched_rule: matched_rule.map(str::to_string),
             suggested_rule,
             allow_always,
+            filesystem,
             timeout_secs,
         };
         let mut pending_approval = self.start_pending_approval(&request);
@@ -180,7 +195,7 @@ impl PermissionRuntime {
                 tokio::select! {
                     biased;
                     _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
-                    decision = handler.request_permission(request) => decision,
+                    decision = handler.request_permission(request.clone()) => decision,
                 }
             }
             Some(mut abort) => {
@@ -189,21 +204,69 @@ impl PermissionRuntime {
                     _ = abort.wait_for_abort() => return Err(ToolOutput::error("aborted")),
                     decision = time::timeout(
                         Duration::from_secs(timeout_secs),
-                        handler.request_permission(request),
+                        handler.request_permission(request.clone()),
                     ) => {
                         decision.unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny())
                     }
                 }
             }
-            None if timeout_secs == 0 => handler.request_permission(request).await,
+            None if timeout_secs == 0 => handler.request_permission(request.clone()).await,
             None => time::timeout(
                 Duration::from_secs(timeout_secs),
-                handler.request_permission(request),
+                handler.request_permission(request.clone()),
             )
             .await
             .unwrap_or_else(|_| crate::types::PermissionApprovalDecision::deny()),
         };
+        let decision = validate_approval_decision(&request, decision);
         pending_approval.finish(decision.outcome);
         Ok(decision)
+    }
+}
+
+fn validate_approval_decision(
+    request: &PermissionApprovalRequest,
+    decision: crate::types::PermissionApprovalDecision,
+) -> crate::types::PermissionApprovalDecision {
+    let Some(filesystem) = &request.filesystem else {
+        return if decision.outcome == PermissionApprovalOutcome::AllowTurn
+            || decision.filesystem_scope.is_some()
+        {
+            crate::types::PermissionApprovalDecision::deny()
+        } else {
+            decision
+        };
+    };
+    match decision.outcome {
+        PermissionApprovalOutcome::AllowOnce | PermissionApprovalOutcome::Deny => {
+            if decision.filesystem_scope.is_none() {
+                decision
+            } else {
+                crate::types::PermissionApprovalDecision::deny()
+            }
+        }
+        PermissionApprovalOutcome::AllowTurn | PermissionApprovalOutcome::AllowSession => {
+            let Some(scope) = decision.filesystem_scope.as_ref() else {
+                return crate::types::PermissionApprovalDecision::deny();
+            };
+            let lifetime_matches = matches!(
+                (decision.outcome, scope.lifetime),
+                (
+                    PermissionApprovalOutcome::AllowTurn,
+                    FilesystemApprovalLifetime::Turn
+                ) | (
+                    PermissionApprovalOutcome::AllowSession,
+                    FilesystemApprovalLifetime::Session
+                )
+            );
+            if lifetime_matches && filesystem.scope_candidates.contains(&scope.directory) {
+                decision
+            } else {
+                crate::types::PermissionApprovalDecision::deny()
+            }
+        }
+        PermissionApprovalOutcome::AllowAlways => {
+            crate::types::PermissionApprovalDecision::deny()
+        }
     }
 }

@@ -153,6 +153,90 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn ordinary_sensitive_named_files_follow_normal_path_policy() {
+        let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        assert_eq!(
+            runtime.evaluate("write", &json!({"path": ".env"})),
+            PermissionDecision::Allow
+        );
+        assert_eq!(
+            runtime.evaluate("write", &json!({"path": ".ssh/config"})),
+            PermissionDecision::Allow
+        );
+    }
+
+    #[test]
+    fn cwd_relative_filesystem_rule_matches_a_canonical_sibling_target() {
+        let root = tempfile::tempdir().expect("root");
+        let cwd = root.path().join("repo");
+        let shared = root.path().join("shared");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        std::fs::create_dir_all(&shared).expect("shared");
+        let mut profiles = BTreeMap::new();
+        profiles.insert(
+            "local".to_string(),
+            PermissionProfileConfig {
+                extends: Some(":workspace".to_string()),
+                filesystem: BTreeMap::from([(
+                    "../shared".to_string(),
+                    PermissionAccess::Write,
+                )]),
+                ..Default::default()
+            },
+        );
+        let runtime = PermissionRuntime::new(
+            cwd.clone(),
+            cwd.join(".psychevo"),
+            PermissionConfig {
+                default_permissions: "local".to_string(),
+                profiles,
+                ..Default::default()
+            },
+            PermissionMode::Default,
+            ApprovalMode::Manual,
+            None,
+            None,
+        );
+
+        assert_eq!(
+            runtime.evaluate("write", &json!({"path": "../shared/a.txt"})),
+            PermissionDecision::Allow
+        );
+    }
+
+    #[test]
+    fn filesystem_scope_combines_with_workspace_access_per_target() {
+        let cwd = tempfile::tempdir().expect("cwd");
+        let outside = tempfile::tempdir().expect("outside");
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        grants
+            .grant_scope(&FilesystemApprovalScope {
+                directory: outside.path().display().to_string(),
+                lifetime: FilesystemApprovalLifetime::Session,
+            })
+            .expect("session scope");
+        let runtime = PermissionRuntime::new(
+            cwd.path().to_path_buf(),
+            cwd.path().join(".psychevo"),
+            PermissionConfig::default(),
+            PermissionMode::Default,
+            ApprovalMode::Manual,
+            None,
+            None,
+        )
+        .with_sandbox(crate::sandbox::SandboxPolicy::disabled(), grants);
+        let patch = format!(
+            "*** Begin Patch\n*** Update File: inside.txt\n*** Update File: {}\n*** End Patch",
+            outside.path().join("outside.txt").display()
+        );
+
+        assert_eq!(
+            runtime.evaluate("edit", &json!({"mode": "patch", "patch": patch})),
+            PermissionDecision::Allow
+        );
+    }
+
+    #[test]
     fn v4a_patch_paths_are_extracted_for_permissions() {
         let mut profiles = BTreeMap::new();
         profiles.insert(
@@ -441,24 +525,52 @@ print(len(data))""#;
     }
 
     #[tokio::test]
-    async fn missing_approval_handler_fails_closed() {
+    async fn workspace_profile_allows_outside_cwd_reads_without_a_handler() {
         let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
-        let output = runtime
+        runtime
             .authorize(
                 "call-1",
                 "read",
                 &json!({"path": "/tmp/outside-cwd.txt"}),
             )
             .await
-            .expect_err("outside cwd read should need a handler");
-        assert!(output.is_error);
-        assert_eq!(output.json["permission"]["decision"], "denied");
-        assert!(
-            output.json["permission"]["reason"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("failing closed")
+            .expect("workspace reads use full-disk read policy");
+    }
+
+    #[test]
+    fn workspace_external_write_reason_does_not_repeat_structured_target_path() {
+        let runtime = runtime(PermissionConfig::default(), PermissionMode::Default);
+        let target = "/tmp/permission-reason-target.txt";
+        let PermissionDecision::Ask { reason, .. } =
+            runtime.evaluate("write", &json!({"path": target}))
+        else {
+            panic!("external workspace write should ask");
+        };
+
+        assert_eq!(
+            reason,
+            "file write outside the working directory requires approval"
         );
+        assert!(!reason.contains(target));
+    }
+
+    #[test]
+    fn read_only_profile_allows_external_reads_but_still_prompts_for_writes() {
+        let runtime = runtime(
+            PermissionConfig {
+                default_permissions: ":read-only".to_string(),
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        );
+        assert_eq!(
+            runtime.evaluate("read", &json!({"path": "/tmp/reference.txt"})),
+            PermissionDecision::Allow
+        );
+        assert!(matches!(
+            runtime.evaluate("write", &json!({"path": "notes.txt"})),
+            PermissionDecision::Ask { .. }
+        ));
     }
 
     #[tokio::test]
@@ -556,6 +668,39 @@ print(len(data))""#;
         );
         runtime.remember_session_grant("read:secret.txt".to_string());
         let decision = runtime.evaluate("read", &json!({"path": "secret.txt"}));
+        assert!(matches!(decision, PermissionDecision::Deny { .. }));
+    }
+
+    #[test]
+    fn profile_deny_wins_over_filesystem_scope_grant() {
+        let mut profiles = BTreeMap::new();
+        profiles.insert(
+            "local".to_string(),
+            PermissionProfileConfig {
+                extends: Some(":workspace".to_string()),
+                filesystem: BTreeMap::from([("secret.txt".to_string(), PermissionAccess::Deny)]),
+                ..Default::default()
+            },
+        );
+        let grants = crate::sandbox::SandboxWriteGrants::default();
+        grants
+            .grant_scope(&FilesystemApprovalScope {
+                directory: "/repo".to_string(),
+                lifetime: FilesystemApprovalLifetime::Session,
+            })
+            .expect("filesystem scope");
+        let runtime = runtime(
+            PermissionConfig {
+                default_permissions: "local".to_string(),
+                profiles,
+                ..Default::default()
+            },
+            PermissionMode::Default,
+        )
+        .with_sandbox(crate::sandbox::SandboxPolicy::disabled(), grants);
+
+        let decision = runtime.evaluate("write", &json!({"path": "secret.txt"}));
+
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
 }

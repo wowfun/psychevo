@@ -387,6 +387,7 @@ impl ApprovalHandler for AcpApprovalHandler {
         let session_id = self.session_id.clone();
         let cx = self.cx.clone();
         Box::pin(async move {
+            let filesystem = request.filesystem.clone();
             let title = format!("Permission: {}", request.tool_name);
             let tool_call = ToolCallUpdate::new(request.tool_call_id.clone())
                 .title(title.clone())
@@ -396,17 +397,34 @@ impl ApprovalHandler for AcpApprovalHandler {
                     "reason": request.reason,
                     "matched_rule": request.matched_rule,
                     "suggested_rule": request.suggested_rule,
+                    "filesystem": filesystem,
                 }));
-            let mut options = vec![
-                PermissionOption::new("allow_once", "Allow once", PermissionOptionKind::AllowOnce),
-                PermissionOption::new(
+            let mut options = vec![PermissionOption::new(
+                "allow_once",
+                "Allow once",
+                PermissionOptionKind::AllowOnce,
+            )];
+            if let Some(filesystem) = &filesystem {
+                for (index, directory) in filesystem.scope_candidates.iter().enumerate() {
+                    options.push(PermissionOption::new(
+                        format!("allow_turn_{index}"),
+                        format!("Allow for turn · {directory}"),
+                        PermissionOptionKind::AllowAlways,
+                    ));
+                    options.push(PermissionOption::new(
+                        format!("allow_session_{index}"),
+                        format!("Allow for session · {directory}"),
+                        PermissionOptionKind::AllowAlways,
+                    ));
+                }
+            } else {
+                options.push(PermissionOption::new(
                     "allow_session",
                     "Allow for session",
                     PermissionOptionKind::AllowAlways,
-                ),
-                PermissionOption::new("deny", "Deny", PermissionOptionKind::RejectOnce),
-            ];
-            if request.allow_always {
+                ));
+            }
+            if request.allow_always && filesystem.is_none() {
                 options.insert(
                     2,
                     PermissionOption::new(
@@ -416,6 +434,11 @@ impl ApprovalHandler for AcpApprovalHandler {
                     ),
                 );
             }
+            options.push(PermissionOption::new(
+                "deny",
+                "Deny",
+                PermissionOptionKind::RejectOnce,
+            ));
             match cx
                 .send_request(
                     RequestPermissionRequest::new(session_id, title, options)
@@ -428,11 +451,34 @@ impl ApprovalHandler for AcpApprovalHandler {
                 Ok(response) => match response.outcome {
                     RequestPermissionOutcome::Cancelled => PermissionApprovalDecision::deny(),
                     RequestPermissionOutcome::Selected(selected) => {
-                        match selected.option_id.to_string().as_str() {
+                        let option_id = selected.option_id.to_string();
+                        match option_id.as_str() {
                             "allow_once" => PermissionApprovalDecision::allow_once(),
                             "allow_session" => PermissionApprovalDecision::allow_session(),
                             "allow_always" => PermissionApprovalDecision::allow_always(),
-                            _ => PermissionApprovalDecision::deny(),
+                            _ => filesystem
+                                .as_ref()
+                                .and_then(|filesystem| {
+                                    option_id
+                                        .strip_prefix("allow_turn_")
+                                        .and_then(|index| index.parse::<usize>().ok())
+                                        .and_then(|index| filesystem.scope_candidates.get(index))
+                                        .cloned()
+                                        .map(PermissionApprovalDecision::allow_filesystem_turn)
+                                        .or_else(|| {
+                                            option_id
+                                                .strip_prefix("allow_session_")
+                                                .and_then(|index| index.parse::<usize>().ok())
+                                                .and_then(|index| {
+                                                    filesystem.scope_candidates.get(index)
+                                                })
+                                                .cloned()
+                                                .map(
+                                                    PermissionApprovalDecision::allow_filesystem_session,
+                                                )
+                                        })
+                                })
+                                .unwrap_or_else(PermissionApprovalDecision::deny),
                         }
                     }
                     _ => PermissionApprovalDecision::deny(),

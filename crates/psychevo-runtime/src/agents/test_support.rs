@@ -114,6 +114,7 @@ mod tests {
             approval_handler: None,
             state: StateRuntime::from_store(db_path, store),
             config_path: None,
+            protected_config_paths: Vec::new(),
             parent_session_id: parent,
             parent_context_snapshot: Vec::new(),
             catalog,

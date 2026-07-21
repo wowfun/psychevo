@@ -637,7 +637,15 @@ impl Gateway {
         let Some(decision) = payload
             .get("decision")
             .and_then(Value::as_str)
-            .and_then(permission_decision_from_label)
+            .and_then(|label| {
+                permission_decision_from_label(
+                    label,
+                    payload
+                        .get("filesystemScope")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok()),
+                )
+            })
         else {
             return false;
         };
@@ -820,16 +828,31 @@ fn gateway_live_snapshot_entry(event: &GatewayEvent) -> Option<(&'static str, &T
 fn permission_decision_label(decision: &PermissionApprovalDecision) -> &'static str {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce => "allow_once",
+        PermissionApprovalOutcome::AllowTurn => "allow_turn",
         PermissionApprovalOutcome::AllowSession => "allow_session",
         PermissionApprovalOutcome::AllowAlways => "allow_always",
         PermissionApprovalOutcome::Deny => "deny",
     }
 }
 
-fn permission_decision_from_label(label: &str) -> Option<PermissionApprovalDecision> {
+fn permission_decision_from_label(
+    label: &str,
+    filesystem_scope: Option<psychevo_runtime::FilesystemApprovalScope>,
+) -> Option<PermissionApprovalDecision> {
     match label {
         "allow_once" => Some(PermissionApprovalDecision::allow_once()),
-        "allow_session" => Some(PermissionApprovalDecision::allow_session()),
+        "allow_turn" => filesystem_scope
+            .map(|scope| PermissionApprovalDecision {
+                outcome: PermissionApprovalOutcome::AllowTurn,
+                filesystem_scope: Some(scope),
+            }),
+        "allow_session" => Some(match filesystem_scope {
+            Some(scope) => PermissionApprovalDecision {
+                outcome: PermissionApprovalOutcome::AllowSession,
+                filesystem_scope: Some(scope),
+            },
+            None => PermissionApprovalDecision::allow_session(),
+        }),
         "allow_always" => Some(PermissionApprovalDecision::allow_always()),
         "deny" => Some(PermissionApprovalDecision::deny()),
         _ => None,

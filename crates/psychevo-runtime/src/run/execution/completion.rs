@@ -173,6 +173,7 @@ pub(crate) async fn smart_review_permission(
             "reason": request.reason,
             "matched_rule": request.matched_rule,
             "suggested_rule": request.suggested_rule,
+            "filesystem": request.filesystem,
         }
     });
     let generation = GenerationRequest {
@@ -310,6 +311,7 @@ mod smart_reviewer_tests {
             matched_rule: None,
             suggested_rule: Some("filesystem:/etc/hosts".to_string()),
             allow_always: true,
+            filesystem: None,
             timeout_secs: 90,
         }
     }

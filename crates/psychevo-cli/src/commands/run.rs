@@ -317,12 +317,22 @@ pub(crate) fn prompt_for_permission(
     if let Some(rule) = &request.matched_rule {
         let _ = writeln!(stderr, "matched rule: {rule}");
     }
+    if let Some(filesystem) = &request.filesystem {
+        for target in &filesystem.targets {
+            let _ = writeln!(stderr, "requested path: {}", target.requested_path);
+            if target.requested_path != target.resolved_path {
+                let _ = writeln!(stderr, "resolved path:  {}", target.resolved_path);
+            }
+        }
+    }
     if request.allow_always
         && let Some(rule) = &request.suggested_rule
     {
         let _ = writeln!(stderr, "suggested always rule: {rule}");
     }
-    let prompt = if request.allow_always {
+    let prompt = if request.filesystem.is_some() {
+        "Allow? [o]nce, [t]urn directory, [s]ession directory, [d]eny: "
+    } else if request.allow_always {
         "Allow? [o]nce, [s]ession, [a]lways, [d]eny: "
     } else {
         "Allow? [o]nce, [s]ession, [d]eny: "
@@ -333,7 +343,43 @@ pub(crate) fn prompt_for_permission(
     if io::stdin().read_line(&mut line).is_err() {
         return PermissionApprovalDecision::deny();
     }
-    match line.trim().to_ascii_lowercase().as_str() {
+    let choice = line.trim().to_ascii_lowercase();
+    if matches!(choice.as_str(), "t" | "turn" | "s" | "session")
+        && let Some(filesystem) = &request.filesystem
+    {
+        if filesystem.scope_candidates.is_empty() {
+            return PermissionApprovalDecision::deny();
+        }
+        for (index, directory) in filesystem.scope_candidates.iter().enumerate() {
+            let _ = writeln!(stderr, "  {}. {}", index + 1, directory);
+        }
+        let _ = write!(
+            stderr,
+            "Directory [1-{}]: ",
+            filesystem.scope_candidates.len()
+        );
+        let _ = stderr.flush();
+        let mut directory = String::new();
+        if io::stdin().read_line(&mut directory).is_err() {
+            return PermissionApprovalDecision::deny();
+        }
+        let Some(directory) = directory
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| index.checked_sub(1))
+            .and_then(|index| filesystem.scope_candidates.get(index))
+            .cloned()
+        else {
+            return PermissionApprovalDecision::deny();
+        };
+        return if matches!(choice.as_str(), "t" | "turn") {
+            PermissionApprovalDecision::allow_filesystem_turn(directory)
+        } else {
+            PermissionApprovalDecision::allow_filesystem_session(directory)
+        };
+    }
+    match choice.as_str() {
         "o" | "once" | "y" | "yes" => PermissionApprovalDecision::allow_once(),
         "s" | "session" => PermissionApprovalDecision::allow_session(),
         "a" | "always" if request.allow_always => PermissionApprovalDecision::allow_always(),

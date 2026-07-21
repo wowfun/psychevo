@@ -187,6 +187,7 @@
                             matched_rule: None,
                             suggested_rule: None,
                             allow_always: true,
+                            filesystem: None,
                             timeout_secs: 300,
                         })
                         .await;

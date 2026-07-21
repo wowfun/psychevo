@@ -185,7 +185,10 @@ fn channel_permission_reply(
     ) else {
         return Ok("No matching permission request token.".to_string());
     };
-    let response = wire::ThreadInteractionResponse::Permission { decision };
+    let response = wire::ThreadInteractionResponse::Permission {
+        decision,
+        directory: None,
+    };
     match submit_channel_interaction(
         state,
         source,

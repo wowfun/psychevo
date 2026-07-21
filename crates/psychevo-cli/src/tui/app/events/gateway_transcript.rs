@@ -130,6 +130,10 @@ impl TuiApp {
                         .get("allowAlways")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
+                    filesystem: payload
+                        .get("filesystem")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok()),
                     timeout_secs: payload
                         .get("timeoutSecs")
                         .and_then(Value::as_u64)

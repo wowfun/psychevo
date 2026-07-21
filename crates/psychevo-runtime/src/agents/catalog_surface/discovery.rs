@@ -130,6 +130,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub(crate) state: StateRuntime,
     pub(crate) config_path: Option<PathBuf>,
+    pub(crate) protected_config_paths: Vec<PathBuf>,
     pub(crate) parent_session_id: String,
     pub(crate) parent_context_snapshot: Vec<Message>,
     pub(crate) catalog: AgentCatalog,

@@ -361,7 +361,7 @@ pub(crate) fn count_value(enc: &tiktoken::CoreBpe, value: &Value) -> u64 {
 }
 
 pub(crate) fn count_text(enc: &tiktoken::CoreBpe, text: &str) -> u64 {
-    enc.encode(text).len() as u64
+    enc.count(text) as u64
 }
 
 pub(crate) fn skill_entry_token_counts(

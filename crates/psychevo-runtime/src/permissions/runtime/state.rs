@@ -6,6 +6,7 @@ pub(crate) struct PermissionRuntime {
 pub(crate) struct PermissionRuntimeInner {
     pub(crate) cwd: PathBuf,
     pub(crate) project_config_dir: PathBuf,
+    pub(crate) protected_config_paths: Vec<PathBuf>,
     pub(crate) mode: PermissionMode,
     pub(crate) config: PermissionConfig,
     pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
@@ -96,6 +97,7 @@ struct ApprovalDecisionRequest<'a> {
     matched_rule: Option<&'a str>,
     suggested_rule: Option<String>,
     allow_always: bool,
+    filesystem: Option<FilesystemApprovalRequest>,
     abort: Option<AbortSignal>,
 }
 

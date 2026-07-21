@@ -93,6 +93,16 @@ fn explicit_managed_bind_policy_is_strict() {
 }
 
 #[test]
+fn explicit_ephemeral_bind_accepts_the_assigned_loopback_port() {
+    let policy = ManagedBindPolicy::new(Some("127.0.0.1:0".parse().expect("addr")));
+
+    assert_eq!(policy.fallback_ports(), 0);
+    assert!(policy.allows_bound_addr("127.0.0.1:49152".parse().expect("addr")));
+    assert!(!policy.allows_bound_addr("127.0.0.2:49152".parse().expect("addr")));
+    assert!(!policy.allows_bound_addr("127.0.0.1:0".parse().expect("addr")));
+}
+
+#[test]
 fn managed_state_outside_default_bind_range_is_stale() {
     let executable = test_fingerprint("/current/pevo", 20, 200, Some(2));
     let mut state = test_state(executable.clone(), "/static");

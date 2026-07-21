@@ -416,7 +416,10 @@ pub(crate) async fn run_live_internal(
         options.mode,
         &loaded.env,
     )?;
-    let sandbox_grants = crate::sandbox::SandboxWriteGrants::default();
+    let sandbox_grants = options.state.filesystem_grants(&session_id);
+    let _turn_filesystem_grant_guard = options
+        .state
+        .turn_filesystem_grant_guard(session_id.clone());
     let agent_tools = if !options.no_agents {
         Some(AgentToolContext {
             provider: Arc::clone(&provider),
@@ -438,6 +441,7 @@ pub(crate) async fn run_live_internal(
             approval_handler: options.approval_handler.clone(),
             state: options.state.clone(),
             config_path: options.config_path.clone(),
+            protected_config_paths: loaded.sources.clone(),
             parent_session_id: session_id.clone(),
             parent_context_snapshot: previous_messages.clone(),
             catalog: agent_catalog.clone(),
@@ -489,8 +493,9 @@ pub(crate) async fn run_live_internal(
             generation_metadata.clone(),
         ),
     );
-    let permission_runtime =
-        permission_runtime.with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
+    let permission_runtime = permission_runtime
+        .with_protected_config_paths(loaded.sources.clone())
+        .with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let mcp_server_inputs = extension_assembly.registry.mcp_servers();
     let mut mcp_manager = crate::mcp::McpConnectionManager::default();
     let mcp_snapshot = mcp_manager

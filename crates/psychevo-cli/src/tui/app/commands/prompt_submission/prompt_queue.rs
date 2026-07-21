@@ -108,6 +108,22 @@ impl TuiApp {
             );
             return Ok(());
         };
+        if panel.request.filesystem.is_some()
+            && !matches!(
+                decision.outcome,
+                PermissionApprovalOutcome::AllowOnce | PermissionApprovalOutcome::Deny
+            )
+        {
+            ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));
+            ui.push_command_result(
+                command_echo.to_string(),
+                None,
+                "filesystem turn/session approval requires selecting a canonical directory in the approval panel"
+                    .to_string(),
+                true,
+            );
+            return Ok(());
+        }
         if decision.outcome == PermissionApprovalOutcome::AllowAlways && !panel.request.allow_always
         {
             ui.bottom_panel = Some(BottomPanel::PermissionApproval(panel));

@@ -1,5 +1,5 @@
 pub(crate) use std::collections::{BTreeSet, HashSet, VecDeque};
-pub(crate) use std::path::{Component, Path, PathBuf};
+pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::Duration;
 
@@ -15,8 +15,9 @@ pub(crate) use crate::config::{
 };
 pub(crate) use crate::types::{
     ApprovalMode, ApprovalPolicy, ApprovalsReviewer, ExecPolicyDecision, ExecPolicyPatternToken,
-    PermissionAccess, PermissionApprovalOutcome, PermissionApprovalRequest, PermissionConfig,
-    PermissionMode, PermissionProfileConfig,
+    FilesystemApprovalLifetime, FilesystemApprovalRequest, FilesystemApprovalScope,
+    FilesystemApprovalTarget, PermissionAccess, PermissionApprovalOutcome,
+    PermissionApprovalRequest, PermissionConfig, PermissionMode, PermissionProfileConfig,
 };
 
 #[allow(unused_imports)]

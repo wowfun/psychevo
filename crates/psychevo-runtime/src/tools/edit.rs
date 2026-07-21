@@ -14,7 +14,7 @@ impl ToolBinding for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Apply targeted file edits inside the working directory. Use edit instead of sed/awk for replacements. Replace mode uses fuzzy matching and returns a Git-style patch diff. Patch mode accepts V4A multi-file patches with Update/Add/Delete/Move operations."
+        "Apply targeted edits to authorized host files. Relative paths resolve from the working directory; edits outside it pause for harness approval unless already covered by policy or a scoped grant. Replace mode uses fuzzy matching and returns a Git-style patch diff. Patch mode accepts V4A multi-file patches with Update/Add/Delete/Move operations."
     }
 
     fn parameters(&self) -> Value {
@@ -29,7 +29,7 @@ impl ToolBinding for EditTool {
                 },
                 "path": {
                     "type": "string",
-                    "description": "Required when mode='replace'. File path to edit, relative to the working directory or absolute inside it."
+                    "description": "Required when mode='replace'. Authorized file path; relative paths resolve from the working directory."
                 },
                 "old_string": {
                     "type": "string",

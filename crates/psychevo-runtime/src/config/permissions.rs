@@ -85,7 +85,6 @@ pub(crate) fn permission_config_value(config: &PermissionConfig) -> Value {
             "exec": granular.exec,
             "mcp": granular.mcp,
             "skill": granular.skill,
-            "request_permissions": granular.request_permissions,
         })),
         "auto_review": {
             "model": config.auto_review.model,
@@ -670,7 +669,6 @@ pub(crate) mod permission_rule_tests {
                     "exec": true,
                     "mcp": true,
                     "skill": true,
-                    "request_permissions": false,
                 }
             },
             "auto_review": {
@@ -754,6 +752,20 @@ pub(crate) mod permission_rule_tests {
         }))
         .expect_err("granular without matrix should fail");
         assert!(err.to_string().contains("requires [approval.granular]"));
+
+        let err = parse_run_config(json!({
+            "approval_policy": "granular",
+            "approval": {"granular": {
+                "filesystem": true,
+                "network": true,
+                "exec": true,
+                "mcp": true,
+                "skill": true,
+                "request_permissions": true,
+            }}
+        }))
+        .expect_err("removed request_permissions family should fail");
+        assert!(err.to_string().contains("request_permissions was removed"));
     }
 
     #[test]

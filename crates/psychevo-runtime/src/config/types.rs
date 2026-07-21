@@ -630,6 +630,7 @@ pub(crate) struct ResolvedCompressionConfig {
 pub(crate) struct LoadedRunConfig {
     pub(crate) config: RunConfig,
     pub(crate) env: BTreeMap<String, String>,
+    pub(crate) sources: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -749,6 +750,7 @@ pub(crate) fn load_run_config(options: &RunOptions, cwd: &Path) -> Result<Loaded
     Ok(LoadedRunConfig {
         config,
         env: loaded.env,
+        sources: loaded.sources,
     })
 }
 

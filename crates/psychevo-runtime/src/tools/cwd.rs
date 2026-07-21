@@ -33,25 +33,22 @@ impl CwdTool {
     }
 
     pub(crate) fn resolve_existing(&self, raw: &str) -> Result<PathBuf> {
-        let target = self.resolve_raw(raw)?;
-        Ok(target.canonicalize()?)
+        let target = crate::filesystem_identity::resolve(raw, &self.cwd)?;
+        if !target.resolved.exists() {
+            std::fs::metadata(&target.resolved)?;
+        }
+        Ok(target.resolved)
     }
 
     pub(crate) fn resolve_write_target(&self, raw: &str) -> Result<(PathBuf, bool)> {
-        let target = self.resolve_raw(raw)?;
+        let target = crate::filesystem_identity::resolve(raw, &self.cwd)?.resolved;
         if target.exists() {
-            return Ok((target.canonicalize()?, false));
+            return Ok((target, false));
         }
         let parent = target
             .parent()
             .ok_or_else(|| Error::Message("target has no parent".to_string()))?
             .to_path_buf();
-        let mut existing = parent.as_path();
-        while !existing.exists() {
-            existing = existing
-                .parent()
-                .ok_or_else(|| Error::Message("no existing parent for target".to_string()))?;
-        }
         let dirs_created = !parent.exists();
         Ok((target, dirs_created))
     }
@@ -61,7 +58,9 @@ impl CwdTool {
     }
 
     pub(crate) fn ensure_contained(&self, path: &Path) -> Result<()> {
-        if path == self.cwd || path.starts_with(&self.cwd) {
+        let cwd = crate::filesystem_identity::canonicalize_deepest_existing(&self.cwd)?;
+        let path = crate::filesystem_identity::canonicalize_deepest_existing(path)?;
+        if crate::filesystem_identity::is_within(&cwd, &path) {
             Ok(())
         } else {
             Err(Error::Message(format!(
@@ -93,7 +92,9 @@ impl CwdTool {
     }
 
     pub(crate) fn relative(&self, path: &Path) -> String {
-        path.strip_prefix(&self.cwd)
+        let cwd = crate::filesystem_identity::canonicalize_deepest_existing(&self.cwd)
+            .unwrap_or_else(|_| self.cwd.clone());
+        path.strip_prefix(&cwd)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/")

@@ -234,6 +234,10 @@ pub(crate) async fn exec_command_tool_impl_with_context(
     );
     let max_output_tokens = output_token_limit(optional_i64(&args, "max_output_tokens")?)?;
     let workspace_mutations = context.workspace_mutations.clone();
+    let sandbox_policy = context
+        .sandbox_policy
+        .clone()
+        .with_approval_roots(context.sandbox_grants.scoped_roots());
     let invocation = ExecInvocation {
         cmd,
         cwd,
@@ -242,7 +246,7 @@ pub(crate) async fn exec_command_tool_impl_with_context(
         tty,
         env: context.env.clone(),
         path_prefixes: context.path_prefixes.clone(),
-        sandbox_policy: context.sandbox_policy.clone(),
+        sandbox_policy,
     };
     let session = spawn_exec_session(
         invocation,

@@ -8,10 +8,16 @@ impl PermissionRuntime {
         approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
         smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
     ) -> Self {
+        let protected_config_paths = crate::filesystem_identity::canonicalize_deepest_existing(
+            &project_config_dir.join("config.toml"),
+        )
+        .into_iter()
+        .collect();
         Self {
             inner: Arc::new(PermissionRuntimeInner {
                 cwd,
                 project_config_dir,
+                protected_config_paths,
                 mode,
                 config,
                 sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
@@ -24,6 +30,23 @@ impl PermissionRuntime {
                 hook_runtime: None,
             }),
         }
+    }
+
+    pub(crate) fn with_protected_config_paths(
+        mut self,
+        paths: impl IntoIterator<Item = PathBuf>,
+    ) -> Self {
+        let inner = Arc::get_mut(&mut self.inner)
+            .expect("protected paths must be attached before PermissionRuntime is cloned");
+        for path in paths {
+            if let Ok(path) =
+                crate::filesystem_identity::canonicalize_deepest_existing(&path)
+                && !inner.protected_config_paths.contains(&path)
+            {
+                inner.protected_config_paths.push(path);
+            }
+        }
+        self
     }
 
     pub(crate) fn with_hook_runtime(mut self, hook_runtime: crate::hooks::HookRuntime) -> Self {
@@ -84,10 +107,11 @@ impl PermissionRuntime {
         tool_name: &str,
         args: &Value,
     ) -> std::result::Result<(), ToolOutput> {
-        self.authorize_inner(tool_call_id, tool_name, args, None)
+        self.authorize_inner(tool_call_id, tool_name, args, None, None)
             .await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn authorize_with_abort(
         &self,
         tool_call_id: &str,
@@ -95,8 +119,26 @@ impl PermissionRuntime {
         args: &Value,
         abort: AbortSignal,
     ) -> std::result::Result<(), ToolOutput> {
-        self.authorize_inner(tool_call_id, tool_name, args, Some(abort))
+        self.authorize_inner(tool_call_id, tool_name, args, Some(abort), None)
             .await
+    }
+
+    pub(crate) async fn authorize_with_expected_identity(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &Value,
+        abort: AbortSignal,
+        expected_identity: &Option<Vec<PathBuf>>,
+    ) -> std::result::Result<(), ToolOutput> {
+        self.authorize_inner(
+            tool_call_id,
+            tool_name,
+            args,
+            Some(abort),
+            Some(expected_identity),
+        )
+        .await
     }
 
     pub(crate) async fn authorize_inner(
@@ -105,12 +147,30 @@ impl PermissionRuntime {
         tool_name: &str,
         args: &Value,
         abort: Option<AbortSignal>,
+        expected_identity: Option<&Option<Vec<PathBuf>>>,
     ) -> std::result::Result<(), ToolOutput> {
         if abort.as_ref().is_some_and(AbortSignal::aborted) {
             return Err(ToolOutput::error("aborted"));
         }
-        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args);
-        match self.evaluate(tool_name, args) {
+        let action = PermissionAction::from_tool_call(&self.inner.cwd, tool_name, args)
+            .map_err(|err| {
+                permission_error(
+                    "denied",
+                    &format!("filesystem identity resolution failed: {err}"),
+                    None,
+                )
+            })?;
+        if let Some(expected_identity) = expected_identity
+            && action
+                .as_ref()
+                .and_then(PermissionAction::filesystem_identity_snapshot)
+                != *expected_identity
+        {
+            return Err(ToolOutput::error(
+                "path_identity_changed: filesystem identity changed before permission evaluation",
+            ));
+        }
+        match self.evaluate_resolved_action(action.as_ref()) {
             PermissionDecision::Allow => {
                 let sandbox_grant = match action.as_ref() {
                     Some(action) => self.sandbox_write_grant_request(action)?,
@@ -130,12 +190,19 @@ impl PermissionRuntime {
                     {
                         return Ok(());
                     }
+                    if self
+                        .inner
+                        .sandbox_grants
+                        .grant_call_from_scopes(tool_call_id, &grant.paths)
+                        .map_err(|err| ToolOutput::error(err.to_string()))?
+                    {
+                        return Ok(());
+                    }
                     return self
                         .authorize_sandbox_write_grant(
                             tool_call_id,
                             tool_name,
                             args,
-                            session_key,
                             grant,
                             abort,
                         )
@@ -182,12 +249,16 @@ impl PermissionRuntime {
                         matched_rule: matched_rule.as_deref(),
                         suggested_rule: suggested_rule.clone(),
                         allow_always: allow_always && sandbox_grant.is_none(),
+                        filesystem: action
+                            .as_ref()
+                            .and_then(PermissionAction::filesystem_approval_request),
                         abort,
                     })
                     .await?;
                 if self.inner.config.approvals_reviewer == ApprovalsReviewer::Smart {
                     return match decision.outcome {
                         PermissionApprovalOutcome::AllowOnce
+                        | PermissionApprovalOutcome::AllowTurn
                         | PermissionApprovalOutcome::AllowSession
                         | PermissionApprovalOutcome::AllowAlways => {
                             if let Some(grant) = &sandbox_grant {
@@ -215,17 +286,39 @@ impl PermissionRuntime {
                         }
                         Ok(())
                     }
-                    PermissionApprovalOutcome::AllowSession => {
-                        self.remember_session_grant(session_key.clone());
+                    PermissionApprovalOutcome::AllowTurn => {
+                        let scope = decision
+                            .filesystem_scope
+                            .as_ref()
+                            .expect("validated filesystem turn scope");
+                        self.remember_filesystem_scope(scope)
+                            .map_err(|err| ToolOutput::error(err.to_string()))?;
                         if let Some(grant) = &sandbox_grant {
                             self.inner
                                 .sandbox_grants
                                 .grant_once(tool_call_id, &grant.paths)
                                 .map_err(|err| ToolOutput::error(err.to_string()))?;
+                        }
+                        Ok(())
+                    }
+                    PermissionApprovalOutcome::AllowSession => {
+                        if let Some(scope) = &decision.filesystem_scope {
+                            self.remember_filesystem_scope(scope)
+                                .map_err(|err| ToolOutput::error(err.to_string()))?;
+                        } else {
+                            self.remember_session_grant(session_key.clone());
+                        }
+                        if let Some(grant) = &sandbox_grant {
                             self.inner
                                 .sandbox_grants
-                                .grant_session(&session_key, &grant.paths)
+                                .grant_once(tool_call_id, &grant.paths)
                                 .map_err(|err| ToolOutput::error(err.to_string()))?;
+                            if decision.filesystem_scope.is_none() {
+                                self.inner
+                                    .sandbox_grants
+                                    .grant_session(&session_key, &grant.paths)
+                                    .map_err(|err| ToolOutput::error(err.to_string()))?;
+                            }
                         }
                         Ok(())
                     }
