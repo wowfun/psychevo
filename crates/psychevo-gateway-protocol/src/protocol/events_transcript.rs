@@ -98,6 +98,7 @@ pub struct GatewaySelectedSkill {
 #[serde(rename_all = "camelCase")]
 pub enum PermissionDecision {
     AllowOnce,
+    AllowTurn,
     AllowSession,
     AllowAlways,
     Deny,

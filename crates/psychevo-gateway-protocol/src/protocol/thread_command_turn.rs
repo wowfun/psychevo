@@ -608,7 +608,12 @@ pub enum ThreadActionRunResult {
     rename_all_fields = "camelCase"
 )]
 pub enum ThreadInteractionResponse {
-    Permission { decision: PermissionDecision },
+    Permission {
+        decision: PermissionDecision,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        directory: Option<String>,
+    },
     Clarify { answers: Vec<Vec<String>> },
     CancelClarify,
 }

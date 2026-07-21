@@ -40,7 +40,7 @@ export type GatewaySelectedSkill = { name: string, path: string, };
 
 export type GatewayEvent = { "type": "turnStarted", threadId: string | null, turnId: string, selectedSkills: Array<GatewaySelectedSkill>, } | { "type": "turnQueued", threadId: string | null, turnId: string, queuePosition: number, } | { "type": "turnCompleted", threadId: string | null, turnId: string, turn: GatewayTurn, committedEntries: Array<TranscriptEntry>, } | { "type": "entryStarted", turnId: string, entry: TranscriptEntry, } | { "type": "entryUpdated", turnId: string, entry: TranscriptEntry, } | { "type": "entryCompleted", turnId: string, entry: TranscriptEntry, } | { "type": "actionRequested", action: PendingActionView, } | { "type": "actionUpdated", action: PendingActionView, } | { "type": "actionResolved", actionId: string, kind: GatewayActionKind, outcome: GatewayActionOutcome, payload: unknown, } | { "type": "actionCancelled", actionId: string, kind: GatewayActionKind, reason: string, } | { "type": "warning", kind: string, message: string, sourcePath: string | null, suggestion: string | null, } | { "type": "activityChanged", threadId: string | null, activity: GatewayActivityView, } | { "type": "titleChanged", threadId: string, title: string | null, displayTitle: string | null, };
 
-export type PermissionDecision = "allowOnce" | "allowSession" | "allowAlways" | "deny";
+export type PermissionDecision = "allowOnce" | "allowTurn" | "allowSession" | "allowAlways" | "deny";
 
 export type GatewayActionKind = "permission" | "clarify" | "customTool" | "userInput";
 
@@ -408,7 +408,7 @@ export type ThreadActionInput = { "kind": "interrupt" } | { "kind": "steer", exp
 
 export type ThreadActionRunResult = { "kind": "interrupt", threadId: string, interrupted: boolean, cleared: number, } | { "kind": "steer", threadId: string, accepted: boolean, } | { "kind": "compact", threadId: string, result: ThreadCompactionResult, } | { "kind": "fork", sourceThreadId: string, snapshot: ThreadSnapshot, } | { "kind": "forkBefore", sourceThreadId: string, snapshot: ThreadSnapshot, } | { "kind": "revertConversation", threadId: string, staged: boolean, noOp: boolean, snapshot: ThreadSnapshot, } | { "kind": "unrevertConversation", threadId: string, draft: ThreadEditableDraft, snapshot: ThreadSnapshot, };
 
-export type ThreadInteractionResponse = { "kind": "permission", decision: PermissionDecision, } | { "kind": "clarify", answers: Array<Array<string>>, } | { "kind": "cancelClarify" };
+export type ThreadInteractionResponse = { "kind": "permission", decision: PermissionDecision, directory?: string, } | { "kind": "clarify", answers: Array<Array<string>>, } | { "kind": "cancelClarify" };
 
 export type ThreadInteractionRespondResult = { accepted: boolean, interactionId: string, outcome: GatewayActionOutcome, };
 

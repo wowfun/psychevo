@@ -4,6 +4,7 @@
     "PermissionDecision": {
       "enum": [
         "allowOnce",
+        "allowTurn",
         "allowSession",
         "allowAlways",
         "deny"
@@ -16,6 +17,12 @@
       "properties": {
         "decision": {
           "$ref": "#/definitions/PermissionDecision"
+        },
+        "directory": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "enum": [

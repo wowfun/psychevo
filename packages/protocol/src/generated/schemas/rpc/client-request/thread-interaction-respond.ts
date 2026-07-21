@@ -69,6 +69,7 @@ export const clientRequestThreadInteractionRespondSchema = {
     "PermissionDecision": {
       "enum": [
         "allowOnce",
+        "allowTurn",
         "allowSession",
         "allowAlways",
         "deny"
@@ -104,6 +105,12 @@ export const clientRequestThreadInteractionRespondSchema = {
           "properties": {
             "decision": {
               "$ref": "#/definitions/PermissionDecision"
+            },
+            "directory": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "kind": {
               "enum": [

@@ -253,10 +253,39 @@ mod thread_application_contract_tests {
             interaction,
             ClientRequest::ThreadInteractionRespond(ThreadInteractionRespondParams {
                 response: ThreadInteractionResponse::Permission {
-                    decision: PermissionDecision::AllowOnce
+                    decision: PermissionDecision::AllowOnce,
+                    directory: None,
                 },
                 ..
             })
+        ));
+
+        let scoped_interaction: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "thread/interaction/respond",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "thread-test" }
+                },
+                "threadId": "thread-1",
+                "interactionId": "permission-2",
+                "response": {
+                    "kind": "permission",
+                    "decision": "allowTurn",
+                    "directory": "/tmp/shared"
+                }
+            }
+        }))
+        .expect("typed scoped permission response");
+        assert!(matches!(
+            scoped_interaction,
+            ClientRequest::ThreadInteractionRespond(ThreadInteractionRespondParams {
+                response: ThreadInteractionResponse::Permission {
+                    decision: PermissionDecision::AllowTurn,
+                    directory: Some(directory),
+                },
+                ..
+            }) if directory == "/tmp/shared"
         ));
 
         let history: ClientRequest = serde_json::from_value(serde_json::json!({

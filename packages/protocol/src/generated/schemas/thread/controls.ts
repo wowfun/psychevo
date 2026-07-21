@@ -1380,6 +1380,7 @@ export const threadControlSchemas = {
     "PermissionDecision": {
       "enum": [
         "allowOnce",
+        "allowTurn",
         "allowSession",
         "allowAlways",
         "deny"
@@ -1392,6 +1393,12 @@ export const threadControlSchemas = {
           "properties": {
             "decision": {
               "$ref": "#/definitions/PermissionDecision"
+            },
+            "directory": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "kind": {
               "enum": [
@@ -3718,6 +3725,7 @@ export const threadControlSchemas = {
     "PermissionDecision": {
       "enum": [
         "allowOnce",
+        "allowTurn",
         "allowSession",
         "allowAlways",
         "deny"
@@ -3730,6 +3738,12 @@ export const threadControlSchemas = {
       "properties": {
         "decision": {
           "$ref": "#/definitions/PermissionDecision"
+        },
+        "directory": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "kind": {
           "enum": [
