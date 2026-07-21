@@ -1,8 +1,16 @@
 import react from "@vitejs/plugin-react";
 import { fileViewerRenderers } from "@file-viewer/vite-plugin";
+import { createRequire } from "node:module";
 import { configDefaults, defineConfig } from "vitest/config";
+import { excalidrawAssets } from "../excalidraw-assets-vite-plugin";
 
-const CHUNK_SIZE_WARNING_LIMIT_KB = 700;
+// Preview parsers are loaded behind renderer-specific dynamic imports. RTFJS is
+// an upstream single-module bundle, so Rolldown cannot split it further without
+// forking the renderer. Keep this just above the largest pinned 2.2.2 parser;
+// the preview E2E suite separately guards that these chunks stay off startup.
+const CHUNK_SIZE_WARNING_LIMIT_KB = 2_300;
+const configRequire = createRequire(import.meta.url);
+const jszipBrowserEntry = configRequire.resolve("jszip/dist/jszip.min.js");
 
 function packageSegment(packageName: string): string {
   return packageName.replace("/", "+");
@@ -103,6 +111,9 @@ function isMermaidRendererVendor(id: string): boolean {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: [{ find: /^jszip$/, replacement: jszipBrowserEntry }]
+  },
   plugins: [
     react(),
     fileViewerRenderers({
@@ -116,6 +127,9 @@ export default defineConfig({
       ],
       inject: false,
       chunkStrategy: "none"
+    }),
+    excalidrawAssets({
+      packageEntry: configRequire.resolve("@excalidraw/excalidraw")
     })
   ],
   build: {

@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Bot, Bug, FileText, FolderTree, GitPullRequest, Globe2, Home, MessageSquare, Plus, RefreshCw, TerminalSquare, Users, X } from "lucide-react";
-import { DismissibleDetails, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
+import { ActionButton, DismissibleDetails, IconButton, type TranscriptAgentSession, type WorkspaceFileLinkContext } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   ContextReadResult,
@@ -329,11 +329,13 @@ function RightWorkspaceTabs({
     menuItems.push({ icon: <Users size={14} />, kind: "team", label: "Team" });
   }
   return (
-    <div className="rightWorkspaceTabs" aria-label="Right workspace tabs">
+    <div className="rightWorkspaceTabs" aria-label="Right workspace tabs" role="tablist">
       <button
         aria-label="Workspace home"
+        aria-selected={activeTabId === null}
         className={activeTabId === null ? "is-selected" : ""}
         onClick={onShowHome}
+        role="tab"
         title="Workspace home"
         type="button"
       >
@@ -341,13 +343,11 @@ function RightWorkspaceTabs({
       </button>
       {tabs.map((tab) => (
         <div className={`rightWorkspaceTab ${tab.id === activeTabId ? "is-selected" : ""}`} key={tab.id}>
-          <button onClick={() => onActivate(tab.id)} title={tab.title} type="button">
+          <button aria-selected={tab.id === activeTabId} onClick={() => onActivate(tab.id)} role="tab" title={tab.title} type="button">
             {rightWorkspaceTabIcon(tab.kind)}
             <span>{tab.title}</span>
           </button>
-          <button aria-label={`Close ${tab.title}`} onClick={() => onClose(tab.id)} title="Close" type="button">
-            <X size={12} />
-          </button>
+          <IconButton icon={<X size={12} />} label={`Close ${tab.title}`} onClick={() => onClose(tab.id)} size="compact" />
         </div>
       ))}
       <DismissibleDetails
@@ -402,9 +402,7 @@ function RightWorkspaceHome({
           <h2>Status</h2>
           <p className="rightWorkspaceSessionId" title={sessionId ?? undefined}>{sessionId ?? "draft"}</p>
         </div>
-        <button aria-label="Refresh workspace" onClick={onRefresh} title="Refresh" type="button">
-          <RefreshCw size={15} />
-        </button>
+        <IconButton icon={<RefreshCw size={15} />} label="Refresh workspace" onClick={onRefresh} size="compact" />
       </header>
       <SessionObservability
         context={context}
@@ -413,35 +411,17 @@ function RightWorkspaceHome({
         showCategories
       />
       <nav className="rightHomeNav" aria-label="Open workspace tab">
-        <button onClick={() => onOpenKind("review")} type="button">
-          <GitPullRequest size={16} />
-          <span>Review</span>
-        </button>
-        <button onClick={() => onOpenKind("terminal")} type="button">
-          <TerminalSquare size={16} />
-          <span>Terminal</span>
-        </button>
-        <button onClick={() => onOpenKind("files")} type="button">
-          <FolderTree size={16} />
-          <span>Files</span>
-        </button>
+        <ActionButton block icon={<GitPullRequest size={16} />} onClick={() => onOpenKind("review")} type="button" variant="ghost">Review</ActionButton>
+        <ActionButton block icon={<TerminalSquare size={16} />} onClick={() => onOpenKind("terminal")} type="button" variant="ghost">Terminal</ActionButton>
+        <ActionButton block icon={<FolderTree size={16} />} onClick={() => onOpenKind("files")} type="button" variant="ghost">Files</ActionButton>
         {sessionId && (
-          <button onClick={() => onOpenKind("browser")} type="button">
-            <Globe2 size={16} />
-            <span>Browser</span>
-          </button>
+          <ActionButton block icon={<Globe2 size={16} />} onClick={() => onOpenKind("browser")} type="button" variant="ghost">Browser</ActionButton>
         )}
         {sessionId && (
-          <button onClick={() => onOpenKind("sideConversation")} type="button">
-            <MessageSquare size={16} />
-            <span>Side chat</span>
-          </button>
+          <ActionButton block icon={<MessageSquare size={16} />} onClick={() => onOpenKind("sideConversation")} type="button" variant="ghost">Side chat</ActionButton>
         )}
         {sessionId && (
-          <button onClick={() => onOpenKind("team")} type="button">
-            <Users size={16} />
-            <span>Team</span>
-          </button>
+          <ActionButton block icon={<Users size={16} />} onClick={() => onOpenKind("team")} type="button" variant="ghost">Team</ActionButton>
         )}
       </nav>
       <div className="rightChangedFiles">

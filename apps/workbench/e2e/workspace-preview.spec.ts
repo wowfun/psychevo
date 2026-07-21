@@ -17,6 +17,7 @@ test("renders generated workspace preview fixtures without external document req
   const browserErrors: string[] = [];
   let allowedOrigin: string | null = null;
   const fileViewerResponses: { status: number; url: string }[] = [];
+  const excalidrawFontResponses: { status: number; url: string }[] = [];
   const parseWorkerResponses: { status: number; url: string }[] = [];
   const previewRequests: { range: string | undefined; url: string }[] = [];
   await page.addInitScript(() => {
@@ -34,6 +35,9 @@ test("renders generated workspace preview fixtures without external document req
   page.on("response", (response) => {
     if (response.url().includes("/file-viewer/")) {
       fileViewerResponses.push({ status: response.status(), url: response.url() });
+    }
+    if (response.url().includes("/excalidraw/fonts/")) {
+      excalidrawFontResponses.push({ status: response.status(), url: response.url() });
     }
     if (response.url().includes("workspace-file-parse.worker-")) {
       parseWorkerResponses.push({ status: response.status(), url: response.url() });
@@ -53,7 +57,7 @@ test("renders generated workspace preview fixtures without external document req
         entry instanceof PerformanceResourceTiming && new URL(entry.name).pathname.endsWith(".js")
       ))
       .map((entry) => new URL(entry.name).pathname));
-    expect(initialScripts.filter((name) => /(?:workspace-file-|_virtual_file-viewer|file-viewer-renderer)/i.test(name))).toEqual([]);
+    expect(initialScripts.filter((name) => /(?:workspace-file-|_virtual_file-viewer|file-viewer-renderer|excalidraw)/i.test(name))).toEqual([]);
     await openPanel(page, false, "Status");
     const status = page.getByRole("region", { name: "Workspace status" });
     await status.getByRole("button", { name: "Refresh workspace" }).click();
@@ -87,6 +91,9 @@ test("renders generated workspace preview fixtures without external document req
     const drawing = files.getByRole("img", { name: "Preview fixture.excalidraw" });
     await expect(drawing).toBeVisible();
     await expect(drawing).toContainText("Excalidraw fixture visible");
+    await expect(drawing.locator("image")).toHaveCount(1);
+    await expect.poll(() => excalidrawFontResponses.length).toBeGreaterThan(0);
+    expect(excalidrawFontResponses.every((response) => response.status < 400)).toBe(true);
 
     await files.getByRole("treeitem", { name: /hostile\.zip/ }).click();
     const zip = files.getByRole("region", { name: "Preview hostile.zip", exact: true });

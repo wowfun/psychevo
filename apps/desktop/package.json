@@ -26,6 +26,7 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
     "@file-viewer/renderer-image": "2.2.2",
     "@file-viewer/renderer-ofd": "2.2.2",
     "@file-viewer/renderer-pdf": "2.2.2",

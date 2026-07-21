@@ -99,6 +99,29 @@ describe("WorkspaceFileContextMenu", () => {
     anchor.remove();
   });
 
+  it("closes on Escape even when focus has moved outside the menu", () => {
+    const anchor = document.createElement("button");
+    const outside = document.createElement("button");
+    document.body.append(anchor, outside);
+    const onClose = vi.fn();
+    render(
+      <WorkspaceFileContextMenu
+        anchor={{ element: anchor, x: 20, y: 20 }}
+        ariaLabel="File actions"
+        items={[{ id: "reveal", label: "Show in File Manager" }]}
+        loading={false}
+        onClose={onClose}
+        onSelect={vi.fn()}
+      />
+    );
+
+    outside.focus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    anchor.remove();
+    outside.remove();
+  });
+
   it("focuses the first action when application detection completes", () => {
     const anchor = document.createElement("button");
     document.body.append(anchor);

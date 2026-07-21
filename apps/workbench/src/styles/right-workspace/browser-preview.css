@@ -152,9 +152,9 @@
 .browserEmpty button {
   min-height: 28px;
   padding: 0 10px;
-  color: var(--pevo-bg);
-  background: var(--pevo-accent);
-  border: 0;
+  color: var(--pevo-control-primary-ink);
+  background: var(--pevo-control-primary-bg);
+  border: 1px solid var(--pevo-control-primary-border);
   border-radius: var(--pevo-radius-sm);
   cursor: pointer;
 }

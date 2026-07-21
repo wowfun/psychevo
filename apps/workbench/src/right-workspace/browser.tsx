@@ -61,6 +61,7 @@ export function BrowserPanel({
         >
           <input
             aria-label="Browser address"
+            className="pevo-fieldControl pevo-fieldControl--compact"
             onChange={(event) => onStateChange({ ...state, address: event.currentTarget.value })}
             placeholder="https://example.com"
             value={address}
@@ -99,6 +100,7 @@ export function BrowserPanel({
             >
               <input
                 aria-label="Open URL"
+                className="pevo-fieldControl"
                 onChange={(event) => onStateChange({ ...state, address: event.currentTarget.value })}
                 placeholder="https://example.com"
                 value={address}

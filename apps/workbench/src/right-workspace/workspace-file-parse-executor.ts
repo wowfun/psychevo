@@ -1,5 +1,5 @@
 import { parseDelimitedText } from "./workspace-file-delimited";
-import { readExcalidrawDocument } from "./workspace-file-excalidraw-data";
+import { readExcalidrawScene } from "./workspace-file-excalidraw-data";
 import { sanitizeOfficePreview } from "./workspace-file-office";
 import type {
   WorkspaceFileParseResult,
@@ -29,9 +29,9 @@ export async function executeWorkspaceFileParseTask(
       return { entries, kind: "zip" };
     }
     case "excalidraw": {
-      const document = readExcalidrawDocument(task.bytes);
+      const scene = readExcalidrawScene(task.bytes);
       throwIfAborted(signal);
-      return { document, kind: "excalidraw" };
+      return { kind: "excalidraw", scene };
     }
   }
 }

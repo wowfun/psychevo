@@ -8,19 +8,28 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from "react";
 import {
   AlertTriangle,
+  AppWindow,
+  Check,
+  ChevronDown,
   ChevronRight,
+  Code2,
+  Copy,
   Edit3,
   ExternalLink,
   FileText,
+  Folder,
+  PanelRightClose,
+  PanelRightOpen,
   Save,
   Search,
   X
 } from "lucide-react";
-import { MarkdownText } from "@psychevo/components";
+import { ActionButton, IconButton, MarkdownText, ToggleButton, useConfirmAction } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   GatewayRequestScope,
@@ -29,11 +38,17 @@ import type {
   WorkspaceFilePreviewOpenResult
 } from "@psychevo/protocol";
 import { highlightToHtml, languageForPath } from "../highlight";
+import {
+  workspaceExternalActionLabel,
+  workspaceExternalActionMenuItems
+} from "./file-external-actions";
+import { WorkspaceFileContextMenu } from "./file-context-menu";
 import { HtmlStaticPreview } from "./preview";
 import { useWorkspaceFileGatewayAdapter } from "./workspace-file-gateway-adapter";
 import type { DelimitedTableLimits } from "./workspace-file-delimited";
-import type { ExcalidrawDocument } from "./workspace-file-excalidraw";
+import type { WorkspaceExcalidrawScene } from "./workspace-file-excalidraw";
 import type { ZipDirectoryEntry } from "./workspace-file-zip";
+import type { WorkspaceFileTreeItem } from "../types";
 
 const WHOLE_FILE_LIMIT_BYTES = 32 * 1024 * 1024;
 const EXCALIDRAW_LIMIT_BYTES = 5 * 1024 * 1024;
@@ -82,6 +97,15 @@ export type WorkspaceFileSurfaceProps = {
   textEditing: "enabled" | "disabled";
   onDirtyChange(dirty: boolean): void;
   onCompare(path: string): void;
+  workspaceRoot?: string | undefined;
+  fileTree?: {
+    content: ReactNode;
+    items: WorkspaceFileTreeItem[];
+    open: boolean;
+    onOpen(path: string): void;
+    onOpenChange(open: boolean): void;
+    onReveal(path: string): void;
+  } | undefined;
 };
 
 export function WorkspaceFileSurface({
@@ -89,7 +113,9 @@ export function WorkspaceFileSurface({
   active,
   textEditing,
   onDirtyChange,
-  onCompare
+  onCompare,
+  workspaceRoot,
+  fileTree
 }: WorkspaceFileSurfaceProps) {
   const dependencies = useWorkspaceFileGatewayAdapter();
   const [lease, setLease] = useState<WorkspaceFilePreviewOpenResult | null>(null);
@@ -112,9 +138,23 @@ export function WorkspaceFileSurface({
   const [editorError, setEditorError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [vendorReady, setVendorReady] = useState(false);
-  const [externalAction, setExternalAction] = useState<WorkspaceExternalFileAction | null>(null);
+  const [viewingSource, setViewingSource] = useState(false);
+  const [externalActions, setExternalActions] = useState<WorkspaceFileExternalActionsResult | null>(null);
+  const [externalActionsLoading, setExternalActionsLoading] = useState(false);
+  const [externalActionError, setExternalActionError] = useState<string | null>(null);
+  const [pendingExternalAction, setPendingExternalAction] = useState<WorkspaceExternalFileAction | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const confirmAction = useConfirmAction();
+  const [externalMenu, setExternalMenu] = useState<{
+    anchor: HTMLButtonElement;
+    x: number;
+    y: number;
+  } | null>(null);
   const generationRef = useRef(0);
+  const externalActionRequestRef = useRef(0);
   const saveRequestRef = useRef(0);
+  const copiedTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const expirationRetryRef = useRef({ key: "", count: 0 });
   const onDirtyChangeRef = useRef(onDirtyChange);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -133,6 +173,25 @@ export function WorkspaceFileSurface({
       && !lease.binary
       && !lease.truncated
   );
+  const canViewSource = Boolean(
+    lease
+      && previewContent !== null
+      && !lease.binary
+      && !lease.truncated
+      && materialized
+      && materialized.kind !== "text"
+      && materialized.kind !== "unsupported"
+  );
+  const copyable = Boolean(
+    dependencies.onCopyText
+      && lease
+      && previewContent !== null
+      && !lease.binary
+      && !lease.truncated
+  );
+  const preferredExternalAction = externalActions
+    ? selectExternalOpenAction(externalActions)
+    : null;
   const handlePreviewStateChange = useCallback((ready: boolean, error: unknown | null) => {
     if (error) {
       const client = dependencies.client;
@@ -190,7 +249,19 @@ export function WorkspaceFileSurface({
   useEffect(() => {
     expirationRetryRef.current = { key: targetKey, count: 0 };
     setReopenNonce(0);
+    setCopying(false);
+    setCopied(false);
+    if (copiedTimeoutRef.current) {
+      globalThis.clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = null;
+    }
   }, [targetKey]);
+
+  useEffect(() => () => {
+    if (copiedTimeoutRef.current) {
+      globalThis.clearTimeout(copiedTimeoutRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const client = dependencies.client;
@@ -204,8 +275,8 @@ export function WorkspaceFileSurface({
     setMaterialized(null);
     setProgress(null);
     setFailure(null);
-    setExternalAction(null);
     setVendorReady(false);
+    setViewingSource(false);
     setEditing(false);
     setDraft("");
     setSavedText("");
@@ -254,9 +325,14 @@ export function WorkspaceFileSurface({
 
   useEffect(() => {
     const client = dependencies.client;
+    externalActionRequestRef.current += 1;
     let disposed = false;
-    setExternalAction(null);
-    if (phase !== "error" || !client || !target) {
+    setExternalActions(null);
+    setExternalActionError(null);
+    setPendingExternalAction(null);
+    setExternalMenu(null);
+    setExternalActionsLoading(Boolean(client && target));
+    if (!client || !target) {
       return () => {
         disposed = true;
       };
@@ -264,19 +340,22 @@ export function WorkspaceFileSurface({
     void workspaceFileExternalActions(client, target).then(
       (actions) => {
         if (!disposed) {
-          setExternalAction(selectExternalOpenAction(actions));
+          setExternalActions(actions);
+          setExternalActionsLoading(false);
         }
       },
-      () => {
+      (error) => {
         if (!disposed) {
-          setExternalAction(null);
+          setExternalActions(null);
+          setExternalActionsLoading(false);
+          setExternalActionError(errorMessage(error, "External actions are unavailable."));
         }
       }
     );
     return () => {
       disposed = true;
     };
-  }, [dependencies.client, phase, targetKey]);
+  }, [dependencies.client, targetKey]);
 
   useEffect(() => {
     if (!lease) {
@@ -392,8 +471,13 @@ export function WorkspaceFileSurface({
     }
   }
 
-  function exitEditMode() {
-    if (dirty && !window.confirm("Discard unsaved file edits?")) {
+  async function exitEditMode() {
+    if (dirty && !await confirmAction({
+      confirmLabel: "Discard edits",
+      description: "The unsaved file changes will be lost.",
+      title: "Discard unsaved file edits?",
+      tone: "caution"
+    })) {
       return;
     }
     setEditing(false);
@@ -456,222 +540,545 @@ export function WorkspaceFileSurface({
     updateCursorFromText(draft, index, setCursor);
   }
 
-  async function openExternally() {
-    if (!target || !dependencies.client || !externalAction) {
+  async function openExternally(action: WorkspaceExternalFileAction) {
+    if (
+      !target
+      || !dependencies.client
+      || !externalActions?.availableActions.includes(action)
+      || pendingExternalAction
+    ) {
       return;
     }
+    setExternalActionError(null);
+    setPendingExternalAction(action);
+    const requestId = externalActionRequestRef.current + 1;
+    externalActionRequestRef.current = requestId;
     try {
-      await workspaceFileOpenExternal(dependencies.client, target, externalAction);
+      await workspaceFileOpenExternal(dependencies.client, target, action);
+      if (externalActionRequestRef.current === requestId) {
+        setExternalMenu(null);
+      }
     } catch (error) {
-      setFailure(errorMessage(error, "The file could not be opened externally."));
-      setPhase("error");
+      if (externalActionRequestRef.current === requestId) {
+        setExternalActionError(errorMessage(error, "The file could not be opened externally."));
+      }
+    } finally {
+      if (externalActionRequestRef.current === requestId) {
+        setPendingExternalAction(null);
+      }
     }
   }
 
-  if (!target) {
-    return <p>Select a file to preview.</p>;
+  async function copyFileContent() {
+    if (!dependencies.onCopyText || !copyable || previewContent === null || copying) {
+      return;
+    }
+    const copyTargetKey = targetKey;
+    setCopying(true);
+    setCopied(false);
+    if (copiedTimeoutRef.current) {
+      globalThis.clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = null;
+    }
+    try {
+      await dependencies.onCopyText(previewContent);
+      if (copyTargetKey !== previewIdentityRef.current.targetKey) {
+        return;
+      }
+      setCopied(true);
+      copiedTimeoutRef.current = globalThis.setTimeout(() => {
+        setCopied(false);
+        copiedTimeoutRef.current = null;
+      }, 1_200);
+    } catch {
+      setCopied(false);
+    } finally {
+      if (copyTargetKey === previewIdentityRef.current.targetKey) {
+        setCopying(false);
+      }
+    }
   }
 
-  const pathLabel = absoluteWorkspacePath(target.scope.cwd, target.path);
+  const displayRoot = workspaceRoot ?? target?.scope.cwd ?? "";
   const productPreviewState = phase === "ready"
-    && materialized?.kind === "vendor"
+    && (materialized?.kind === "vendor" || materialized?.kind === "excalidraw")
     && !vendorReady
     ? "loading"
     : phase;
+  const externalActionLabel = preferredExternalAction && externalActions
+    ? workspaceExternalActionLabel(
+      preferredExternalAction,
+      externalActions.category,
+      externalActions.platform
+    )
+    : null;
   return (
     <section
-      className="workspaceFileSurface"
-      aria-label={`File preview ${target.path}`}
-      data-preview-format={extensionForPath(lease?.path ?? target.path) || "unknown"}
+      className={`workspaceFileSurface ${fileTree?.open ? "has-fileTree" : ""}`}
+      aria-label={target ? `File preview ${target.path}` : "Workspace file preview"}
+      data-preview-format={extensionForPath(lease?.path ?? target?.path ?? "") || "unknown"}
       data-preview-state={editing ? "editing" : productPreviewState}
     >
-      <div className="rightSectionLabel filePreviewPath">
-        <span>{pathLabel}</span>
-        {lease?.truncated && <b>truncated</b>}
-        {dirty && <b>unsaved</b>}
-        {lease && previewContent !== null && !editing && (
-          <div className="filePreviewActions">
-            {isHtmlFile(lease.path) && dependencies.onOpenHtmlPreview && (
-              <button
-                aria-label={`Open HTML preview for ${lease.path}`}
-                onClick={() => dependencies.onOpenHtmlPreview?.(lease.path, previewContent)}
-                title="Open HTML preview"
-                type="button"
-              >
-                <ExternalLink size={13} />
-              </button>
-            )}
-            <button
-              aria-label={`Edit ${lease.path}`}
-              disabled={!editable}
-              onClick={() => {
-                setDraft(previewContent);
-                setSavedText(previewContent);
-                setBaseRevision(lease.revision ?? null);
-                setEditing(true);
-                requestAnimationFrame(() => textareaRef.current?.focus());
-              }}
-              title={editable ? "Edit" : lease.editableReason ?? "This file cannot be edited"}
-              type="button"
-            >
-              <Edit3 size={13} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {editing ? (
-        <div className="fileEditor">
-          <div className="fileEditorToolbar">
-            <label>
-              <Search size={13} aria-hidden />
-              <input
-                aria-label="Find in file"
-                onChange={(event) => setFindText(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    findInDraft();
-                  }
-                }}
-                placeholder="Find"
-                type="search"
-                value={findText}
-              />
-            </label>
-            <button aria-label="Find next" onClick={findInDraft} title="Find next" type="button">
-              <Search size={13} />
-            </button>
-            <label>
-              <span>:</span>
-              <input
-                aria-label="Go to line"
-                inputMode="numeric"
-                onChange={(event) => setGoLine(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    jumpToLine();
-                  }
-                }}
-                placeholder="Line"
-                value={goLine}
-              />
-            </label>
-            <button aria-label="Go to line" onClick={jumpToLine} title="Go to line" type="button">
-              <ChevronRight size={13} />
-            </button>
-            <button
-              aria-label="Toggle word wrap"
-              aria-pressed={wrap}
-              onClick={() => setWrap((value) => !value)}
-              title="Toggle word wrap"
-              type="button"
-            >
-              <FileText size={13} />
-            </button>
-            <span>{cursor.line}:{cursor.column}</span>
-            <button
-              aria-label="Save file"
-              disabled={!dirty || saving}
-              onClick={() => void saveDraft(false)}
-              title="Save"
-              type="button"
-            >
-              <Save size={13} />
-            </button>
-            <button
-              aria-label="Exit edit mode"
-              onClick={exitEditMode}
-              title="Exit edit mode"
-              type="button"
-            >
-              <X size={13} />
-            </button>
-          </div>
-          <div className={`fileEditorBody ${wrap ? "is-wrapped" : "is-unwrapped"}`}>
-            <pre className="fileEditorLines" aria-hidden ref={lineNumbersRef}>
-              {Array.from({ length: lineCount }, (_, index) => index + 1).join("\n")}
-            </pre>
-            <textarea
-              ref={textareaRef}
-              aria-label={`Edit ${target.path}`}
-              onChange={(event) => {
-                setDraft(event.currentTarget.value);
-                updateCursorFromText(event.currentTarget.value, event.currentTarget.selectionStart, setCursor);
-              }}
-              onClick={(event) => updateCursorFromText(draft, event.currentTarget.selectionStart, setCursor)}
-              onKeyDown={handleTextareaKeyDown}
-              onKeyUp={(event) => updateCursorFromText(draft, event.currentTarget.selectionStart, setCursor)}
-              onScroll={(event) => {
-                if (lineNumbersRef.current) {
-                  lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop;
-                }
-              }}
-              spellCheck={false}
-              value={draft}
-              wrap={wrap ? "soft" : "off"}
-            />
-          </div>
-          {(editorError || conflict) && (
-            <div className="fileEditorNotice">
-              <AlertTriangle size={14} />
-              <span>{conflict ?? editorError}</span>
-              {conflict && (
-                <>
-                  <button onClick={() => onCompare(target.path)} type="button">Compare</button>
-                  <button
-                    onClick={() => {
-                      setEditing(false);
-                      setReopenNonce((value) => value + 1);
-                    }}
-                    type="button"
-                  >Reload</button>
-                  <button onClick={() => void saveDraft(true)} type="button">Force</button>
-                </>
+      <header className="workspaceFileToolbar">
+        <div className="workspaceFileBreadcrumbRow">
+          <WorkspaceFileBreadcrumb
+            items={fileTree?.items ?? []}
+            onNavigate={fileTree?.onReveal}
+            onOpen={fileTree?.onOpen}
+            path={target?.path ?? null}
+            root={displayRoot}
+          />
+          {lease?.truncated && <b>truncated</b>}
+          {dirty && <b>unsaved</b>}
+        </div>
+        <div className="workspaceFileToolbarActions">
+          {lease && previewContent !== null && !editing && (
+            <>
+              {canViewSource && (
+                <ToggleButton
+                  className="workspaceFileTextAction"
+                  icon={<FileText size={14} />}
+                  label={`Source view for ${lease.path}`}
+                  onPressedChange={setViewingSource}
+                  pressed={viewingSource}
+                  size="compact"
+                >
+                  {viewingSource ? "View preview" : "View source"}
+                </ToggleButton>
               )}
+              {isHtmlFile(lease.path) && dependencies.onOpenHtmlPreview && (
+                <IconButton
+                  icon={<ExternalLink size={14} />}
+                  label={`Open HTML preview for ${lease.path}`}
+                  onClick={() => dependencies.onOpenHtmlPreview?.(lease.path, previewContent)}
+                  size="compact"
+                />
+              )}
+              <ActionButton
+                aria-label={`Edit ${lease.path}`}
+                className="workspaceFileTextAction"
+                disabled={!editable}
+                icon={<Edit3 size={14} />}
+                onClick={() => {
+                  setViewingSource(false);
+                  setDraft(previewContent);
+                  setSavedText(previewContent);
+                  setBaseRevision(lease.revision ?? null);
+                  setEditing(true);
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                }}
+                title={editable ? "Edit" : lease.editableReason ?? "This file cannot be edited"}
+                type="button"
+                size="compact"
+                variant="ghost"
+              >
+                Edit
+              </ActionButton>
+            </>
+          )}
+          {copyable && lease && !editing && (
+            <>
+              <span aria-live="polite" className="pevo-srOnly" role="status">
+                {copied ? `${lease.path} copied` : ""}
+              </span>
+              <IconButton
+                disabled={copying}
+                icon={copied ? <Check size={14} /> : <Copy size={14} />}
+                label={`Copy ${lease.path}`}
+                onClick={() => void copyFileContent()}
+                size="compact"
+              />
+            </>
+          )}
+          {externalActionsLoading && target && (
+            <div className="workspaceFileOpenControl pevo-controlGroup is-loading" aria-label="Detecting external applications">
+              <ActionButton icon={<AppWindow size={14} />} pending size="compact" type="button">Open</ActionButton>
             </div>
+          )}
+          {!externalActionsLoading && externalActions && preferredExternalAction && externalActionLabel && (
+            <div className="workspaceFileOpenControl pevo-controlGroup">
+              <ActionButton
+                aria-label={externalActionLabel}
+                disabled={pendingExternalAction !== null}
+                icon={preferredExternalAction === "vscode" ? <Code2 size={14} /> : <AppWindow size={14} />}
+                onClick={() => void openExternally(preferredExternalAction)}
+                title={externalActionLabel}
+                type="button"
+                size="compact"
+                variant="secondary"
+              >
+                Open
+              </ActionButton>
+              <IconButton
+                aria-expanded={externalMenu !== null}
+                aria-haspopup="menu"
+                disabled={pendingExternalAction !== null}
+                icon={<ChevronDown size={14} />}
+                label="Choose external application"
+                onClick={(event) => {
+                  if (externalMenu) {
+                    setExternalMenu(null);
+                    return;
+                  }
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  setExternalMenu({
+                    anchor: event.currentTarget,
+                    x: Math.max(8, bounds.right - 220),
+                    y: bounds.bottom + 4
+                  });
+                }}
+                size="compact"
+                type="button"
+              />
+            </div>
+          )}
+          {!externalActionsLoading && externalActionError && !externalActions && target && (
+            <ActionButton
+              className="workspaceFileTextAction"
+              disabled
+              icon={<AppWindow size={14} />}
+              title={externalActionError}
+              type="button"
+              size="compact"
+            >
+              Open unavailable
+            </ActionButton>
+          )}
+          {externalActionError && externalActions && (
+            <span className="workspaceFileToolbarError" role="alert" title={externalActionError}>
+              Open failed
+            </span>
+          )}
+          {fileTree && (
+            <ToggleButton
+              className={`filesTreeToggle ${fileTree.open ? "is-pressed" : ""}`}
+              icon={fileTree.open ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+              label="File tree"
+              onPressedChange={fileTree.onOpenChange}
+              pressed={fileTree.open}
+              size="compact"
+            />
           )}
         </div>
-      ) : (
-        <>
-          {phase === "loading" && (
-            <p className="workspaceFilePreviewStatus" role="status">
-              {progress
-                ? `Loading preview… ${formatProgress(progress.loaded, progress.total)}`
-                : "Loading preview…"}
-            </p>
-          )}
-          {phase === "error" && (
-            <div className="workspaceFilePreviewError" role="alert">
-              <AlertTriangle size={16} />
-              <p>{failure ?? "Preview is not available for this file."}</p>
-              <button onClick={() => setReopenNonce((value) => value + 1)} type="button">Retry</button>
-              {externalAction && (
-                <button onClick={() => void openExternally()} type="button">Open externally</button>
+      </header>
+
+      <div className="workspaceFileSurfaceSplit">
+        <div className="workspaceFileContent">
+          {!target ? (
+            <p className="workspaceFilePreviewStatus">Select a file to preview.</p>
+          ) : editing ? (
+            <div className="fileEditor">
+              <div className="fileEditorToolbar">
+                <label className="pevo-searchField">
+                  <Search size={13} aria-hidden />
+                  <input
+                    aria-label="Find in file"
+                    className="pevo-fieldControl pevo-fieldControl--search pevo-fieldControl--compact"
+                    onChange={(event) => setFindText(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        findInDraft();
+                      }
+                    }}
+                    placeholder="Find"
+                    type="search"
+                    value={findText}
+                  />
+                </label>
+                <IconButton icon={<Search size={13} />} label="Find next" onClick={findInDraft} size="compact" />
+                <label>
+                  <span>:</span>
+                  <input
+                    aria-label="Go to line"
+                    className="pevo-fieldControl pevo-fieldControl--compact"
+                    inputMode="numeric"
+                    onChange={(event) => setGoLine(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        jumpToLine();
+                      }
+                    }}
+                    placeholder="Line"
+                    value={goLine}
+                  />
+                </label>
+                <IconButton icon={<ChevronRight size={13} />} label="Go to line" onClick={jumpToLine} size="compact" />
+                <ToggleButton icon={<FileText size={13} />} label="Word wrap" onPressedChange={setWrap} pressed={wrap} size="compact" />
+                <span>{cursor.line}:{cursor.column}</span>
+                <IconButton
+                  disabled={!dirty || saving}
+                  icon={<Save size={13} />}
+                  label="Save file"
+                  onClick={() => void saveDraft(false)}
+                  pending={saving}
+                  size="compact"
+                />
+                <IconButton
+                  icon={<X size={13} />}
+                  label="Exit edit mode"
+                  onClick={() => void exitEditMode()}
+                  size="compact"
+                />
+              </div>
+              <div className={`fileEditorBody ${wrap ? "is-wrapped" : "is-unwrapped"}`}>
+                <pre className="fileEditorLines" aria-hidden ref={lineNumbersRef}>
+                  {Array.from({ length: lineCount }, (_, index) => index + 1).join("\n")}
+                </pre>
+                <textarea
+                  ref={textareaRef}
+                  aria-label={`Edit ${target.path}`}
+                  onChange={(event) => {
+                    setDraft(event.currentTarget.value);
+                    updateCursorFromText(event.currentTarget.value, event.currentTarget.selectionStart, setCursor);
+                  }}
+                  onClick={(event) => updateCursorFromText(draft, event.currentTarget.selectionStart, setCursor)}
+                  onKeyDown={handleTextareaKeyDown}
+                  onKeyUp={(event) => updateCursorFromText(draft, event.currentTarget.selectionStart, setCursor)}
+                  onScroll={(event) => {
+                    if (lineNumbersRef.current) {
+                      lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop;
+                    }
+                  }}
+                  spellCheck={false}
+                  value={draft}
+                  wrap={wrap ? "soft" : "off"}
+                />
+              </div>
+              {(editorError || conflict) && (
+                <div className="fileEditorNotice">
+                  <AlertTriangle size={14} />
+                  <span>{conflict ?? editorError}</span>
+                  {conflict && (
+                    <>
+                      <ActionButton onClick={() => onCompare(target.path)} size="compact" type="button" variant="ghost">Compare</ActionButton>
+                      <ActionButton
+                        onClick={() => {
+                          setEditing(false);
+                          setReopenNonce((value) => value + 1);
+                        }}
+                        size="compact"
+                        type="button"
+                        variant="ghost"
+                      >Reload</ActionButton>
+                      <ActionButton onClick={() => void saveDraft(true)} size="compact" type="button" variant="danger">Force</ActionButton>
+                    </>
+                  )}
+                </div>
               )}
             </div>
+          ) : (
+            <>
+              {phase === "loading" && (
+                <p className="workspaceFilePreviewStatus" role="status">
+                  {progress
+                    ? `Loading preview… ${formatProgress(progress.loaded, progress.total)}`
+                    : "Loading preview…"}
+                </p>
+              )}
+              {phase === "error" && (
+                <div className="workspaceFilePreviewError" role="alert">
+                  <AlertTriangle size={16} />
+                  <p>{failure ?? "Preview is not available for this file."}</p>
+                  <ActionButton onClick={() => setReopenNonce((value) => value + 1)} size="compact" type="button">Retry</ActionButton>
+                </div>
+              )}
+              {phase === "ready" && materialized && (
+                <PreviewErrorBoundary
+                  key={materialized.resourceId}
+                  onError={(error) => handlePreviewStateChange(false, error)}
+                >
+                  {viewingSource && canViewSource ? (
+                    <HighlightedCodePreview content={previewContent ?? ""} path={lease?.path ?? target.path} />
+                  ) : (
+                    <PreviewBody
+                      active={active}
+                      content={previewContent}
+                      materialized={materialized}
+                      onPreviewStateChange={handlePreviewStateChange}
+                      path={lease?.path ?? target.path}
+                      vendorReady={vendorReady}
+                    />
+                  )}
+                </PreviewErrorBoundary>
+              )}
+            </>
           )}
-          {phase === "ready" && materialized && (
-            <PreviewErrorBoundary
-              key={materialized.resourceId}
-              onError={(error) => handlePreviewStateChange(false, error)}
-            >
-              <PreviewBody
-                active={active}
-                content={previewContent}
-                materialized={materialized}
-                onCopyText={dependencies.onCopyText}
-                onPreviewStateChange={handlePreviewStateChange}
-                path={lease?.path ?? target.path}
-                vendorReady={vendorReady}
-              />
-            </PreviewErrorBoundary>
-          )}
-        </>
+        </div>
+        {fileTree?.open && fileTree.content}
+      </div>
+      {externalMenu && externalActions && (
+        <WorkspaceFileContextMenu
+          anchor={{ element: externalMenu.anchor, x: externalMenu.x, y: externalMenu.y }}
+          ariaLabel={`External actions for ${target?.path ?? externalActions.path}`}
+          error={externalActionError}
+          items={workspaceExternalActionMenuItems(externalActions, pendingExternalAction !== null)}
+          loading={false}
+          onClose={() => {
+            if (!pendingExternalAction) {
+              setExternalMenu(null);
+            }
+          }}
+          onSelect={(action) => void openExternally(action)}
+        />
       )}
     </section>
   );
+}
+
+function WorkspaceFileBreadcrumb({
+  items,
+  onNavigate,
+  onOpen,
+  path,
+  root
+}: {
+  items: WorkspaceFileTreeItem[];
+  onNavigate?: ((path: string) => void) | undefined;
+  onOpen?: ((path: string) => void) | undefined;
+  path: string | null;
+  root: string;
+}) {
+  const [menu, setMenu] = useState<{
+    anchor: HTMLButtonElement;
+    nodeLabel: string;
+    nodePath: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const rootLabel = workspaceRootLabel(root);
+  const segments = normalizedWorkspaceSegments(path);
+  const current = segments.at(-1) ?? null;
+  const directories = segments.slice(0, -1);
+  const nodes = [
+    { label: rootLabel, path: "" },
+    ...directories.map((label, index) => ({
+      label,
+      path: directories.slice(0, index + 1).join("/")
+    }))
+  ];
+  const menuItems = menu ? immediateWorkspaceChildren(items, menu.nodePath) : [];
+
+  useEffect(() => setMenu(null), [path]);
+
+  function openChildMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    nodeLabel: string,
+    nodePath: string
+  ) {
+    if (menu?.nodePath === nodePath) {
+      setMenu(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setMenu({
+      anchor: event.currentTarget,
+      nodeLabel,
+      nodePath,
+      x: bounds.left,
+      y: bounds.bottom + 4
+    });
+  }
+
+  return (
+    <>
+      <nav aria-label="File breadcrumb" className="workspaceFileBreadcrumb">
+        {nodes.map((node, index) => {
+          const children = immediateWorkspaceChildren(items, node.path);
+          return (
+            <span className="workspaceFileBreadcrumbNode" key={node.path || "workspace-root"}>
+              <span className="workspaceFileBreadcrumbSegment">
+                {path && onNavigate ? (
+                  <button
+                    onClick={() => onNavigate(node.path)}
+                    title={node.path ? `Show ${node.path} in file tree` : "Show workspace root in file tree"}
+                    type="button"
+                  >
+                    {node.label}
+                  </button>
+                ) : (
+                  <span aria-current={!path ? "page" : undefined}>{node.label}</span>
+                )}
+              </span>
+              {path && children.length > 0 && onNavigate && onOpen ? (
+                <button
+                  aria-expanded={menu?.nodePath === node.path}
+                  aria-haspopup="menu"
+                  aria-label={`Show children of ${node.label}`}
+                  className="workspaceFileBreadcrumbDisclosure"
+                  onClick={(event) => openChildMenu(event, node.label, node.path)}
+                  title={`Show children of ${node.label}`}
+                  type="button"
+                >
+                  <ChevronRight aria-hidden size={13} />
+                </button>
+              ) : index < nodes.length - 1 || current ? (
+                <ChevronRight aria-hidden className="workspaceFileBreadcrumbSeparator" size={13} />
+              ) : null}
+            </span>
+          );
+        })}
+        {current && (
+          <span className="workspaceFileBreadcrumbSegment">
+            <span aria-current="page" title={path ?? undefined}>{current}</span>
+          </span>
+        )}
+      </nav>
+      {menu && onNavigate && onOpen && (
+        <WorkspaceFileContextMenu
+          anchor={{ element: menu.anchor, x: menu.x, y: menu.y }}
+          ariaLabel={`Children of ${menu.nodeLabel}`}
+          items={menuItems.map((item) => ({
+            icon: item.kind === "directory"
+              ? <Folder aria-hidden size={14} />
+              : <FileText aria-hidden size={14} />,
+            id: item.path,
+            label: item.name
+          }))}
+          loading={false}
+          onClose={() => setMenu(null)}
+          onSelect={(selectedPath) => {
+            const selected = menuItems.find((item) => item.path === selectedPath);
+            setMenu(null);
+            if (selected?.kind === "directory") {
+              onNavigate(selected.path);
+            } else if (selected) {
+              onOpen(selected.path);
+            }
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function immediateWorkspaceChildren(
+  items: WorkspaceFileTreeItem[],
+  parentPath: string
+): WorkspaceFileTreeItem[] {
+  const normalizedParent = normalizedWorkspaceSegments(parentPath).join("/");
+  return items
+    .filter((item) => workspaceParentPath(item.path) === normalizedParent)
+    .sort((left, right) => (
+      left.kind === right.kind
+        ? left.name.localeCompare(right.name)
+        : left.kind === "directory" ? -1 : 1
+    ));
+}
+
+function workspaceParentPath(path: string): string {
+  const segments = normalizedWorkspaceSegments(path);
+  return segments.slice(0, -1).join("/");
+}
+
+function normalizedWorkspaceSegments(path: string | null): string[] {
+  return (path ?? "").replace(/\\/g, "/").split("/").filter(Boolean);
+}
+
+function workspaceRootLabel(root: string): string {
+  const segments = root.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? "Workspace";
 }
 
 class PreviewErrorBoundary extends Component<{
@@ -699,7 +1106,6 @@ function PreviewBody({
   active,
   content,
   materialized,
-  onCopyText,
   onPreviewStateChange,
   path,
   vendorReady
@@ -707,7 +1113,6 @@ function PreviewBody({
   active: boolean;
   content: string | null;
   materialized: MaterializedPreview;
-  onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onPreviewStateChange(ready: boolean, error: unknown | null): void;
   path: string;
   vendorReady: boolean;
@@ -774,16 +1179,18 @@ function PreviewBody({
     case "excalidraw":
       return (
         <Suspense fallback={<p role="status">Loading drawing…</p>}>
-          <ExcalidrawPreview document={materialized.document} path={path} />
+          <ExcalidrawPreview
+            active={active}
+            onStateChange={onPreviewStateChange}
+            path={path}
+            scene={materialized.scene}
+          />
         </Suspense>
       );
     case "markdown":
       return (
         <div className="fileMarkdownPreview">
           <MarkdownText
-            copyLabel="Copy Markdown file"
-            copyText={content ?? ""}
-            onCopyText={onCopyText}
             text={content ?? ""}
           />
         </div>
@@ -940,7 +1347,7 @@ type MaterializedPreviewData =
     truncated: boolean;
   }
   | { kind: "zip"; entries: ZipDirectoryEntry[] }
-  | { kind: "excalidraw"; document: ExcalidrawDocument }
+  | { kind: "excalidraw"; scene: WorkspaceExcalidrawScene }
   | { kind: "markdown" | "html" | "text" | "unsupported" }
 ;
 
@@ -1016,7 +1423,7 @@ async function materializePreview({
       const result = await import("./workspace-file-parse").then(({ runWorkspaceFileParseTask }) => (
         runWorkspaceFileParseTask({ bytes, kind: "excalidraw" }, signal)
       ));
-      return { kind: "excalidraw", document: result.document };
+      return { kind: "excalidraw", scene: result.scene };
     }
     case "markdown":
     case "html":
@@ -1143,13 +1550,6 @@ function isHtmlFile(path: string): boolean {
 
 function workspaceScopeKey(scope: GatewayRequestScope): string {
   return JSON.stringify(scope);
-}
-
-function absoluteWorkspacePath(root: string, path: string): string {
-  const separator = root.includes("\\") && !root.includes("/") ? "\\" : "/";
-  const cleanRoot = root.replace(/[\\/]+$/, "");
-  const cleanPath = path.replace(/^[\\/]+/, "").replace(/[\\/]/g, separator);
-  return cleanRoot ? `${cleanRoot}${separator}${cleanPath}` : cleanPath;
 }
 
 function previewResourceUrl(client: GatewayClient | null, resourcePath: string): string {

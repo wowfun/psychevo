@@ -4,7 +4,6 @@
   padding: 4px 0 12px;
 }
 
-.rightHomeNav button,
 .rightChangedFiles button {
   display: grid;
   align-items: center;
@@ -18,23 +17,12 @@
   cursor: pointer;
 }
 
-.rightHomeNav button {
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 10px;
-  background: color-mix(in oklch, var(--pevo-panel), transparent 36%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 24%);
-  border-radius: var(--pevo-radius-sm);
-}
-
 .rightChangedFiles button {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   padding: 0 4px;
 }
 
-.rightHomeNav button:hover,
 .rightChangedFiles button:hover,
 .fileTree button.is-selected {
   background: color-mix(in oklch, var(--pevo-panel-muted), transparent 62%);

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronDown, ChevronRight, FileText, FolderTree, Search } from "lucide-react";
 import type { WorkspaceDiffResult } from "@psychevo/protocol";
 import { fileBasename } from "../right-workspace-model";
@@ -9,6 +9,7 @@ export function WorkspaceFileTree({
   filterLabel,
   filterPlaceholder,
   items,
+  revealRequest,
   selectedPath,
   onOpen,
   onFileContextMenu
@@ -17,13 +18,17 @@ export function WorkspaceFileTree({
   filterLabel: string;
   filterPlaceholder: string;
   items: WorkspaceFileTreeItem[];
+  revealRequest?: { id: number; path: string } | null | undefined;
   selectedPath: string | null;
   onOpen(path: string): void;
   onFileContextMenu?: ((request: WorkspaceFileContextMenuRequest) => void) | undefined;
 }) {
   const previewUnavailableDescriptionId = useId();
+  const filterRef = useRef<HTMLInputElement | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(() => new Set());
   const [filter, setFilter] = useState("");
+  const [pendingRevealPath, setPendingRevealPath] = useState<string | null>(null);
   const directoryPaths = useMemo(
     () => new Set(items.filter((item) => item.kind === "directory").map((item) => item.path)),
     [items]
@@ -39,6 +44,36 @@ export function WorkspaceFileTree({
       return next.size === current.size ? current : next;
     });
   }, [directoryPaths]);
+
+  useEffect(() => {
+    if (!revealRequest) {
+      return;
+    }
+    setFilter("");
+    setCollapsedDirs((current) => {
+      const next = new Set(current);
+      for (const directory of [...ancestorDirectoryPaths(revealRequest.path), revealRequest.path]) {
+        next.delete(directory);
+      }
+      return next;
+    });
+    setPendingRevealPath(revealRequest.path);
+  }, [revealRequest]);
+
+  useLayoutEffect(() => {
+    if (pendingRevealPath === null) {
+      return;
+    }
+    const target = pendingRevealPath
+      ? itemRefs.current.get(pendingRevealPath) ?? null
+      : filterRef.current;
+    if (!target) {
+      return;
+    }
+    target.focus();
+    target.scrollIntoView?.({ block: "nearest" });
+    setPendingRevealPath(null);
+  }, [pendingRevealPath, visibleItems]);
 
   function toggleDirectory(path: string) {
     setCollapsedDirs((current) => {
@@ -97,12 +132,14 @@ export function WorkspaceFileTree({
 
   return (
     <div className="workspaceFileTree">
-      <label className="workspaceFileTreeFilter">
+      <label className="workspaceFileTreeFilter pevo-searchField">
         <Search size={14} aria-hidden />
         <input
           aria-label={filterLabel}
+          className="pevo-fieldControl pevo-fieldControl--search"
           onChange={(event) => setFilter(event.currentTarget.value)}
           placeholder={filterPlaceholder}
+          ref={filterRef}
           type="search"
           value={filter}
         />
@@ -137,6 +174,13 @@ export function WorkspaceFileTree({
               }}
               onContextMenu={(event) => handleContextMenu(event, item)}
               onKeyDown={(event) => handleTreeItemKeyDown(event, item)}
+              ref={(node) => {
+                if (node) {
+                  itemRefs.current.set(item.path, node);
+                } else {
+                  itemRefs.current.delete(item.path);
+                }
+              }}
               role="treeitem"
               style={{ "--depth": item.depth } as CSSProperties}
               title={item.path}

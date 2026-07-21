@@ -41,7 +41,10 @@
   },
   "bundle": {
     "active": true,
-    "icon": ["../../../assets/psychevo-logo-square.png"],
+    "icon": [
+      "../../../assets/psychevo-logo-square.png",
+      "../../../assets/psychevo-logo-square.ico"
+    ],
     "targets": "all"
   }
 }

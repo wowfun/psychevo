@@ -85,4 +85,26 @@ describe("WorkspaceFileTree context menu", () => {
       path: "README.md"
     });
   });
+
+  it("expands and focuses breadcrumb reveal requests, including the workspace root", () => {
+    const props = {
+      emptyLabel: "No files",
+      filterLabel: "Filter files",
+      filterPlaceholder: "Filter...",
+      items: ITEMS,
+      onOpen: vi.fn(),
+      selectedPath: null
+    };
+    const view = render(<WorkspaceFileTree {...props} revealRequest={null} />);
+    const assets = screen.getByRole("treeitem", { name: /assets/ });
+    fireEvent.click(assets);
+    expect(screen.queryByRole("treeitem", { name: /photo\.png/ })).toBeNull();
+
+    view.rerender(<WorkspaceFileTree {...props} revealRequest={{ id: 1, path: "assets" }} />);
+    expect(screen.getByRole("treeitem", { name: /photo\.png/ })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("treeitem", { name: /assets/ }));
+
+    view.rerender(<WorkspaceFileTree {...props} revealRequest={{ id: 2, path: "" }} />);
+    expect(document.activeElement).toBe(screen.getByRole("searchbox", { name: "Filter files" }));
+  });
 });

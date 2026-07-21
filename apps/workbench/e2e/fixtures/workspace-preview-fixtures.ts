@@ -180,36 +180,108 @@ function generatedPdf(): Uint8Array {
 }
 
 function excalidrawDocument(): string {
+  const element = (
+    id: string,
+    type: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    extra: Record<string, unknown> = {}
+  ) => ({
+    angle: 0,
+    backgroundColor: "transparent",
+    boundElements: null,
+    fillStyle: "solid",
+    frameId: "fixture-frame",
+    groupIds: [],
+    height,
+    id,
+    index: null,
+    isDeleted: false,
+    link: null,
+    locked: false,
+    opacity: 100,
+    roughness: 1,
+    roundness: null,
+    seed: id.length * 997,
+    strokeColor: "#0f172a",
+    strokeStyle: "solid",
+    strokeWidth: 2,
+    type,
+    updated: 1,
+    version: 1,
+    versionNonce: id.length * 101,
+    width,
+    x,
+    y,
+    ...extra
+  });
+  const imageData = `data:image/png;base64,${Buffer.from(generatedPng()).toString("base64")}`;
   return JSON.stringify({
+    appState: {
+      exportBackground: true,
+      theme: "light",
+      viewBackgroundColor: "#ffffff"
+    },
     type: "excalidraw",
     version: 2,
     elements: [
-      {
-        id: "fixture-box",
-        type: "rectangle",
-        x: 40,
-        y: 40,
-        width: 280,
-        height: 120,
-        angle: 0,
-        strokeColor: "#0f172a",
+      element("fixture-frame", "frame", 20, 20, 620, 310, {
+        frameId: null,
+        name: "Official renderer fixture"
+      }),
+      element("fixture-box", "rectangle", 55, 65, 290, 110, {
         backgroundColor: "#bae6fd",
-        isDeleted: false
-      },
-      {
-        id: "fixture-label",
-        type: "text",
-        x: 70,
-        y: 82,
-        width: 220,
-        height: 32,
-        angle: 0,
-        strokeColor: "#0f172a",
-        backgroundColor: "transparent",
+        boundElements: [{ id: "fixture-label", type: "text" }],
+        link: "https://preview-security.invalid/excalidraw-link",
+        roundness: { type: 3 }
+      }),
+      element("fixture-label", "text", 75, 92, 250, 55, {
+        autoResize: false,
+        containerId: "fixture-box",
+        fontFamily: 1,
+        fontSize: 24,
+        lineHeight: 1.25,
+        originalText: "Excalidraw fixture visible",
         text: "Excalidraw fixture visible",
-        isDeleted: false
+        textAlign: "center",
+        verticalAlign: "middle"
+      }),
+      element("fixture-arrow", "arrow", 375, 80, 185, 75, {
+        elbowed: false,
+        endArrowhead: "arrow",
+        endBinding: null,
+        lastCommittedPoint: null,
+        points: [[0, 0], [95, 20], [185, 75]],
+        startArrowhead: null,
+        startBinding: null
+      }),
+      element("fixture-stroke", "freedraw", 390, 190, 115, 60, {
+        lastCommittedPoint: null,
+        points: [[0, 28], [20, 5], [45, 45], [75, 10], [115, 32]],
+        pressures: [],
+        simulatePressure: true
+      }),
+      element("fixture-image", "image", 70, 215, 72, 72, {
+        crop: null,
+        fileId: "fixture-image-file",
+        scale: [1, 1],
+        status: "saved"
+      }),
+      element("fixture-embed", "embeddable", 500, 205, 100, 70, {
+        link: "https://preview-security.invalid/excalidraw-embed"
+      })
+    ],
+    files: {
+      "fixture-image-file": {
+        created: 1,
+        dataURL: imageData,
+        id: "fixture-image-file",
+        lastRetrieved: 1,
+        mimeType: "image/png"
       }
-    ]
+    }
   });
 }
 

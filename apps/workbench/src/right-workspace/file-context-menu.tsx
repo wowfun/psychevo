@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 
 export type WorkspaceFileMenuItem<Id extends string = string> = {
   disabled?: boolean;
+  icon?: ReactNode;
   id: Id;
   label: string;
   separatorBefore?: boolean;
@@ -69,14 +70,22 @@ export function WorkspaceFileContextMenu<Id extends string>({
         onClose();
       }
     }
+    function handleDocumentKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    }
     function close() {
       onClose();
     }
     document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleDocumentKeyDown);
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, true);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, true);
     };
@@ -84,8 +93,6 @@ export function WorkspaceFileContextMenu<Id extends string>({
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
       return;
     }
     if (!(["ArrowDown", "ArrowUp", "Home", "End"] as string[]).includes(event.key)) {
@@ -122,7 +129,8 @@ export function WorkspaceFileContextMenu<Id extends string>({
           role="menuitem"
           type="button"
         >
-          {item.label}
+          {item.icon}
+          <span>{item.label}</span>
         </button>
       </div>
     ));

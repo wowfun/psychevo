@@ -1,4 +1,4 @@
-import type { ExcalidrawDocument } from "./workspace-file-excalidraw-data";
+import type { WorkspaceExcalidrawScene } from "./workspace-file-excalidraw-data";
 import type { DelimitedTableLimits } from "./workspace-file-delimited";
 import type { ZipDirectoryEntry } from "./workspace-file-zip";
 
@@ -32,8 +32,8 @@ export type WorkspaceFileTableParseResult = {
 };
 export type WorkspaceFileZipParseResult = { entries: ZipDirectoryEntry[]; kind: "zip" };
 export type WorkspaceFileExcalidrawParseResult = {
-  document: ExcalidrawDocument;
   kind: "excalidraw";
+  scene: WorkspaceExcalidrawScene;
 };
 
 export type WorkspaceFileParseResult =

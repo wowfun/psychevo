@@ -16,9 +16,9 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
     "@file-viewer/core": "2.2.2",
     "@file-viewer/react": "2.2.2",
-    "@file-viewer/renderer-drawing": "2.2.2",
     "@file-viewer/renderer-image": "2.2.2",
     "@file-viewer/renderer-ofd": "2.2.2",
     "@file-viewer/renderer-pdf": "2.2.2",

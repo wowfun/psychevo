@@ -1,9 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  FolderTree,
-  PanelRightClose,
-  PanelRightOpen
-} from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { GatewayClient } from "@psychevo/client";
 import type {
   GatewayRequestScope,
@@ -52,6 +47,7 @@ export function FilesPanel({
   const treeItems = useMemo(() => workspaceFileTreeItems(files), [files]);
   const fileMenuRequestRef = useRef(0);
   const [fileMenu, setFileMenu] = useState<WorkspaceFileMenuState | null>(null);
+  const [treeRevealRequest, setTreeRevealRequest] = useState<{ id: number; path: string } | null>(null);
   const fileMenuScopeKey = workspaceScopeIdentity(scope);
   const fileMenuContextRef = useRef({ client, root, scopeKey: fileMenuScopeKey });
 
@@ -63,6 +59,12 @@ export function FilesPanel({
       setFileMenu(null);
     }
   }, [client, fileMenuScopeKey, root]);
+
+  useEffect(() => {
+    if (!fileTreeOpen) {
+      setTreeRevealRequest(null);
+    }
+  }, [fileTreeOpen]);
 
   function closeFileMenu() {
     fileMenuRequestRef.current += 1;
@@ -140,51 +142,43 @@ export function FilesPanel({
     }
   }
 
+  function revealBreadcrumbInTree(path: string) {
+    onFileTreeOpenChange(true);
+    setTreeRevealRequest((current) => ({ id: (current?.id ?? 0) + 1, path }));
+  }
+
   return (
     <section className={`filesPanel ${fileTreeOpen ? "has-fileTree" : ""}`} aria-label="Workspace files">
-      <header>
-        <div className="filesPanelTitle">
-          <FolderTree size={17} />
-          <h2>Files</h2>
-        </div>
-        <div className="rightPanelActions">
-          <button
-            aria-label={fileTreeOpen ? "Hide file tree" : "Show file tree"}
-            aria-pressed={fileTreeOpen}
-            className={`filesTreeToggle ${fileTreeOpen ? "is-pressed" : ""}`}
-            onClick={() => onFileTreeOpenChange(!fileTreeOpen)}
-            title={fileTreeOpen ? "Hide file tree" : "Show file tree"}
-            type="button"
-          >
-            {fileTreeOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-          </button>
-        </div>
-      </header>
-      <div className="filesSplit">
-        <div className="filePreview">
-          <WorkspaceFileSurface
-            active={htmlExecutionActive}
-            onCompare={onCompare}
-            onDirtyChange={(nextDirty) => onDirtyChange(tabId, nextDirty)}
-            target={scope && selectedPath ? { path: selectedPath, scope } : null}
-            textEditing="enabled"
-          />
-        </div>
-        {fileTreeOpen && (
-          <aside className="filesTreePane" aria-label="Workspace file tree">
-            <WorkspaceFileTree
-              emptyLabel="No workspace files."
-              filterLabel="Filter workspace files"
-              filterPlaceholder="Filter files..."
-              items={treeItems}
-              selectedPath={selectedPath}
-              onFileContextMenu={openFileMenu}
-              onOpen={onOpen}
-            />
-            {truncated && <footer>File tree truncated.</footer>}
-          </aside>
-        )}
-      </div>
+      <WorkspaceFileSurface
+        active={htmlExecutionActive}
+        fileTree={{
+          content: (
+            <aside className="filesTreePane" aria-label="Workspace file tree">
+              <WorkspaceFileTree
+                emptyLabel="No workspace files."
+                filterLabel="Filter workspace files"
+                filterPlaceholder="Filter files..."
+                items={treeItems}
+                revealRequest={treeRevealRequest}
+                selectedPath={selectedPath}
+                onFileContextMenu={openFileMenu}
+                onOpen={onOpen}
+              />
+              {truncated && <footer>File tree truncated.</footer>}
+            </aside>
+          ),
+          items: treeItems,
+          onOpen,
+          onOpenChange: onFileTreeOpenChange,
+          onReveal: revealBreadcrumbInTree,
+          open: fileTreeOpen
+        }}
+        onCompare={onCompare}
+        onDirtyChange={(nextDirty) => onDirtyChange(tabId, nextDirty)}
+        target={scope && selectedPath ? { path: selectedPath, scope } : null}
+        textEditing="enabled"
+        workspaceRoot={root || scope?.cwd || ""}
+      />
       {fileMenu && (
         <WorkspaceFileContextMenu
           anchor={{ element: fileMenu.anchor, x: fileMenu.x, y: fileMenu.y }}

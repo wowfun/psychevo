@@ -150,7 +150,7 @@ describe("WorkspaceFileSurface", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "The preview renderer could not open this file."
     );
-    expect(await screen.findByRole("button", { name: "Open externally" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open with Default Application" })).toBeTruthy();
   });
 
   it("reopens a native streaming lease once after a 410 response", async () => {
@@ -336,7 +336,10 @@ describe("WorkspaceFileSurface", () => {
 
     expect(screen.getByRole("searchbox", { name: "Find in file" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "Go to line" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Toggle word wrap" })).toBeTruthy();
+    const wordWrap = screen.getByRole("button", { name: "Word wrap" });
+    expect(wordWrap.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(wordWrap);
+    expect(wordWrap.getAttribute("aria-pressed")).toBe("false");
 
     const editor = screen.getByRole("textbox", { name: "Edit notes.txt" });
     fireEvent.change(editor, { target: { value: "first\nchanged\n" } });
@@ -387,7 +390,7 @@ describe("WorkspaceFileSurface", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Preview is not available for this file type."
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Open externally" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open with Default Application" }));
     await waitFor(() => {
       expect(requests).toContainEqual({
         method: "workspace/file/openExternal",
@@ -434,8 +437,177 @@ describe("WorkspaceFileSurface", () => {
 
     expect(await screen.findByRole("alert")).toBeTruthy();
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Open externally" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Open with Default Application" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Choose external application" })).toBeNull();
     });
+  });
+
+  it("uses the preferred external action as an icon-only primary control and keeps alternates in the menu", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const client = previewClient(async (method, params) => {
+      requests.push({ method, params });
+      if (method === "workspace/file/preview/open") {
+        return previewResult("notes.md", "text/markdown", "notes-open", {
+          binary: false,
+          content: "# Notes",
+          editable: true,
+          editableReason: null
+        });
+      }
+      if (method === "workspace/file/externalActions") {
+        return {
+          availableActions: ["vscode", "systemDefault", "reveal"],
+          category: "text",
+          path: "notes.md",
+          platform: "linux",
+          preferredAction: "vscode",
+          textLike: true
+        };
+      }
+      if (method === "workspace/file/openExternal") {
+        return { action: (params as { action: string }).action, path: "notes.md" };
+      }
+      return { released: true };
+    });
+
+    renderSurface(client, "notes.md");
+
+    const preferred = await screen.findByRole("button", { name: "Open in VS Code" });
+    expect(preferred.textContent).toBe("Open");
+    fireEvent.click(preferred);
+    await waitFor(() => {
+      expect(requests).toContainEqual({
+        method: "workspace/file/openExternal",
+        params: { action: "vscode", path: "notes.md", scope }
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose external application" }));
+    const menu = await screen.findByRole("menu", { name: "External actions for notes.md" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open with Default Application" }));
+    await waitFor(() => {
+      expect(requests).toContainEqual({
+        method: "workspace/file/openExternal",
+        params: { action: "systemDefault", path: "notes.md", scope }
+      });
+    });
+    expect(menu.isConnected).toBe(false);
+  });
+
+  it("shows a workspace-relative breadcrumb and toggles rich preview source without entering edit mode", async () => {
+    const reveal = vi.fn();
+    const open = vi.fn();
+    const client = previewClient(async (method) => {
+      if (method === "workspace/file/preview/open") {
+        return previewResult("docs/guide.md", "text/markdown", "guide", {
+          binary: false,
+          content: "# Guide\n\nSource body",
+          editable: true,
+          editableReason: null
+        });
+      }
+      return { released: true };
+    });
+
+    const view = render(
+      <WorkspaceFileGatewayAdapterProvider client={client}>
+        <WorkspaceFileSurface
+          active
+          fileTree={{
+            content: <aside aria-label="Test tree" />,
+            items: [
+              { depth: 0, kind: "directory", name: "docs", path: "docs" },
+              { depth: 1, kind: "directory", name: "api", path: "docs/api" },
+              { depth: 1, kind: "file", name: "guide.md", path: "docs/guide.md" },
+              { depth: 0, kind: "file", name: "README.md", path: "README.md" }
+            ],
+            onOpen: open,
+            onOpenChange: () => undefined,
+            onReveal: reveal,
+            open: true
+          }}
+          onCompare={() => undefined}
+          onDirtyChange={() => undefined}
+          target={{ path: "docs/guide.md", scope }}
+          textEditing="enabled"
+          workspaceRoot="/workspace/my-project"
+        />
+      </WorkspaceFileGatewayAdapterProvider>
+    );
+
+    const breadcrumb = await screen.findByRole("navigation", { name: "File breadcrumb" });
+    expect(breadcrumb.textContent).toBe("my-projectdocsguide.md");
+    expect(view.container.textContent).not.toContain("/workspace/my-project/docs/guide.md");
+    fireEvent.click(screen.getByRole("button", { name: "docs" }));
+    expect(reveal).toHaveBeenCalledWith("docs");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show children of my-project" }));
+    const rootMenu = await screen.findByRole("menu", { name: "Children of my-project" });
+    expect([...rootMenu.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      "docs",
+      "README.md"
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "README.md" }));
+    expect(open).toHaveBeenCalledWith("README.md");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show children of docs" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "api" }));
+    expect(reveal).toHaveBeenLastCalledWith("docs/api");
+
+    const sourceView = await screen.findByRole("button", { name: "Source view for docs/guide.md" });
+    expect(sourceView.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(sourceView);
+    expect(sourceView.getAttribute("aria-pressed")).toBe("true");
+    expect(view.container.querySelector(".rightCodePreview")?.textContent).toContain("# Guide");
+    expect(screen.queryByRole("heading", { name: "Guide" })).toBeNull();
+    fireEvent.click(sourceView);
+    expect(sourceView.getAttribute("aria-pressed")).toBe("false");
+    expect(await screen.findByRole("heading", { name: "Guide" })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Edit docs/guide.md" })).toBeNull();
+  });
+
+  it("places one file-level source copy immediately before external Open", async () => {
+    const copyText = vi.fn().mockResolvedValue(undefined);
+    const source = "# Notes\n\nCanonical source";
+    const client = previewClient(async (method) => {
+      if (method === "workspace/file/preview/open") {
+        return previewResult("notes.md", "text/markdown", "notes-copy", {
+          binary: false,
+          content: source,
+          editable: true,
+          editableReason: null,
+          sizeBytes: source.length
+        });
+      }
+      if (method === "workspace/file/externalActions") {
+        return externalActions("notes.md", ["systemDefault", "reveal"]);
+      }
+      return { released: true };
+    });
+
+    const view = render(
+      <WorkspaceFileGatewayAdapterProvider client={client} onCopyText={copyText}>
+        <WorkspaceFileSurface
+          active
+          onCompare={() => undefined}
+          onDirtyChange={() => undefined}
+          target={{ path: "notes.md", scope }}
+          textEditing="enabled"
+        />
+      </WorkspaceFileGatewayAdapterProvider>
+    );
+
+    const copy = await screen.findByRole("button", { name: "Copy notes.md" });
+    const open = await screen.findByRole("button", { name: "Open with Default Application" });
+    expect(copy.textContent).toBe("");
+    expect(copy.nextElementSibling).toBe(open.closest(".workspaceFileOpenControl"));
+    expect(screen.queryByRole("button", { name: "Copy Markdown file" })).toBeNull();
+
+    fireEvent.click(copy);
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(source));
+    expect(screen.getByRole("button", { name: "Copy notes.md" })).toBe(copy);
+    expect((await screen.findByRole("status")).textContent).toContain("notes.md copied");
+    expect(view.container.querySelector(".pevo-markdownCopy")).toBeNull();
   });
 
   it("contains lazy renderer crashes inside the file Surface", async () => {
