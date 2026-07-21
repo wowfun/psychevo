@@ -20,6 +20,7 @@ const TUI_CAPTURE_SCREENSHOTS: &[&str] = &[
     "19-diff-overlay.png",
     "20-inline-edit-diff.png",
     "21-permission-approval.png",
+    "23-permission-directory-scopes.png",
     "02-running-thinking.png",
     "03-final-ledger.png",
     "04-shell-mode.png",
@@ -130,6 +131,7 @@ pub(crate) fn run_tui_vhs_demo(
             had_suppressed_output,
         });
     }
+    let permission_target = prepare_permission_approval_fixture(artifact_root, &workdir_path)?;
 
     let port_file = out_dir.join("mock-provider.port");
     let request_log = out_dir.join("mock-provider-requests.ndjson");
@@ -138,7 +140,8 @@ pub(crate) fn run_tui_vhs_demo(
         .arg("-u")
         .arg(&mock_provider)
         .arg(&port_file)
-        .arg(&request_log);
+        .arg(&request_log)
+        .arg(&permission_target);
     let mut mock_provider =
         LoggedChild::spawn("TUI mock provider", provider_command, Arc::clone(&log))?;
     wait_for_file(&port_file, 100, Duration::from_millis(50))
@@ -335,6 +338,44 @@ fn prepare_fixture_workdir(
         mirrored_diagnostics,
         had_suppressed_output,
     })
+}
+
+fn prepare_permission_approval_fixture(
+    artifact_root: &Path,
+    workdir_path: &Path,
+) -> Result<String> {
+    let external_dir = artifact_root.join("visual").join("tui-permission-external");
+    if external_dir.exists() {
+        fs::remove_dir_all(&external_dir).with_context(|| {
+            format!(
+                "remove stale TUI permission fixture dir {}",
+                external_dir.display()
+            )
+        })?;
+    }
+    fs::create_dir_all(&external_dir)
+        .with_context(|| format!("create {}", external_dir.display()))?;
+
+    let link = workdir_path.join("permission-external");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&external_dir, &link).with_context(|| {
+            format!(
+                "link TUI permission fixture {} -> {}",
+                link.display(),
+                external_dir.display()
+            )
+        })?;
+        return Ok("permission-external/permission-approved.txt".to_string());
+    }
+
+    #[cfg(windows)]
+    if std::os::windows::fs::symlink_dir(&external_dir, &link).is_ok() {
+        return Ok("permission-external/permission-approved.txt".to_string());
+    }
+
+    #[allow(unreachable_code)]
+    Ok(path_arg(&external_dir.join("permission-approved.txt")))
 }
 
 fn failed_tui_capture(log: Arc<Mutex<fs::File>>, lines: &[String]) -> Result<ProcessOutcome> {

@@ -6,6 +6,7 @@ from pathlib import Path
 
 port_file = Path(sys.argv[1])
 request_log = Path(sys.argv[2])
+permission_target = sys.argv[3]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -338,8 +339,13 @@ class Handler(BaseHTTPRequestHandler):
                                         "index": 0,
                                         "id": "call_permission_approval_vhs",
                                         "function": {
-                                            "name": "read",
-                                            "arguments": "{\"path\":\"/etc/hosts\"}",
+                                            "name": "write",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "path": permission_target,
+                                                    "content": "TUI permission approval fixture\n",
+                                                }
+                                            ),
                                         },
                                     }
                                 ]

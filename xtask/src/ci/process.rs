@@ -95,6 +95,19 @@ fn capture_stream<R>(
 where
     R: Read,
 {
+    capture_stream_with_mirror(reader, log, stream, mirror_terminal_diagnostic)
+}
+
+fn capture_stream_with_mirror<R, F>(
+    reader: R,
+    log: Arc<Mutex<fs::File>>,
+    stream: OutputStream,
+    mut mirror: F,
+) -> Result<CaptureStats>
+where
+    R: Read,
+    F: FnMut(&[u8]) -> Result<()>,
+{
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
     let mut stats = CaptureStats::default();
@@ -113,17 +126,21 @@ where
         }
 
         if should_mirror_to_terminal(stream, &line) {
-            let mut stderr = std::io::stderr().lock();
-            stderr
-                .write_all(&line)
-                .context("write terminal diagnostic")?;
-            stderr.flush().context("flush terminal diagnostic")?;
+            mirror(&line)?;
             stats.mirrored_lines += 1;
         } else {
             stats.had_suppressed_output = true;
         }
     }
     Ok(stats)
+}
+
+fn mirror_terminal_diagnostic(line: &[u8]) -> Result<()> {
+    let mut stderr = std::io::stderr().lock();
+    stderr
+        .write_all(line)
+        .context("write terminal diagnostic")?;
+    stderr.flush().context("flush terminal diagnostic")
 }
 
 pub(crate) fn join_capture_stream(
@@ -254,17 +271,21 @@ mod tests {
 
     static NEXT_TEST_LOG: AtomicUsize = AtomicUsize::new(0);
 
-    fn capture_stats(input: &[u8], stream: OutputStream) -> CaptureStats {
+    fn capture_output(input: &[u8], stream: OutputStream) -> (CaptureStats, Vec<u8>) {
         let id = NEXT_TEST_LOG.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "psychevo-xtask-process-{}-{id}.log",
             std::process::id()
         ));
         let log = create_step_log(&path).expect("create capture test log");
-        let stats =
-            capture_stream(Cursor::new(input.to_vec()), log, stream).expect("capture test output");
+        let mut mirrored = Vec::new();
+        let stats = capture_stream_with_mirror(Cursor::new(input.to_vec()), log, stream, |line| {
+            mirrored.extend_from_slice(line);
+            Ok(())
+        })
+        .expect("capture test output");
         fs::remove_file(path).expect("remove capture test log");
-        stats
+        (stats, mirrored)
     }
 
     #[test]
@@ -306,29 +327,38 @@ mod tests {
     #[test]
     fn normal_stdout_marks_suppressed_output() {
         assert_eq!(
-            capture_stats(b"assertion failed: left == right\n", OutputStream::Stdout),
-            CaptureStats {
-                mirrored_lines: 0,
-                had_suppressed_output: true,
-            }
+            capture_output(b"assertion failed: left == right\n", OutputStream::Stdout),
+            (
+                CaptureStats {
+                    mirrored_lines: 0,
+                    had_suppressed_output: true,
+                },
+                Vec::new(),
+            )
         );
     }
 
     #[test]
     fn stdout_warning_and_stderr_do_not_mark_suppressed_output() {
         assert_eq!(
-            capture_stats(b"warning: unused import\n", OutputStream::Stdout),
-            CaptureStats {
-                mirrored_lines: 1,
-                had_suppressed_output: false,
-            }
+            capture_output(b"warning: unused import\n", OutputStream::Stdout),
+            (
+                CaptureStats {
+                    mirrored_lines: 1,
+                    had_suppressed_output: false,
+                },
+                b"warning: unused import\n".to_vec(),
+            )
         );
         assert_eq!(
-            capture_stats(b"error: test failed\n", OutputStream::Stderr),
-            CaptureStats {
-                mirrored_lines: 1,
-                had_suppressed_output: false,
-            }
+            capture_output(b"error: test failed\n", OutputStream::Stderr),
+            (
+                CaptureStats {
+                    mirrored_lines: 1,
+                    had_suppressed_output: false,
+                },
+                b"error: test failed\n".to_vec(),
+            )
         );
     }
 

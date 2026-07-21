@@ -45,9 +45,18 @@ Sleep 100 ms
 Type "Permission approval VHS fixture"
 Enter
 Wait+Screen /Permission required/
-Wait+Screen /\/etc\/hosts/
+Wait+Screen /requested:/
+Wait+Screen /permission-approved\.txt/
+Wait+Screen /Choose directory scope/
 Sleep 300 ms
 Screenshot "21-permission-approval.png"
+Sleep 300 ms
+Type "a"
+Wait+Screen /Allow turn/
+Wait+Screen /Allow session/
+Sleep 300 ms
+Screenshot "23-permission-directory-scopes.png"
+Sleep 300 ms
 Type "y"
 Wait+Screen /PERMISSION_APPROVAL_FINAL/
 Type "/new"
