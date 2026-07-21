@@ -4,6 +4,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "@playwrigh
 import { repoRoot, startPevoWeb } from "./harness";
 import { prepareDeterministicAcpAgent } from "./runtime-live.support";
 import { visualScreenshotRoot } from "./visualArtifacts";
+import { ensureRightInspectorOpen } from "./workbench.support";
 
 const screenshotDir = visualScreenshotRoot("acp-peer-visual");
 
@@ -19,7 +20,7 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
 
       if (isMobile) await openPanel(page, isMobile, "History");
       let agentsPanel = await openCapabilityBackendPanel(page);
-      await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
+      await agentsPanel.getByRole("button", { name: "Add backend" }).click();
 
       const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
       await expect(form).toBeVisible();
@@ -39,7 +40,9 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       await expect(form).toBeHidden({ timeout: 30_000 });
 
       agentsPanel = await openCapabilityBackendPanel(page);
-      await expect(agentsPanel.getByRole("switch", { name: "Disable visual-acp" })).toBeVisible();
+      const backendSwitch = agentsPanel.getByRole("switch", { name: "visual-acp enabled" });
+      await expect(backendSwitch).toBeVisible();
+      await expect(backendSwitch).toBeChecked();
       await expect(agentsPanel.getByLabel("visual-acp peer entrypoint")).toBeChecked();
       await expect(agentsPanel.getByLabel("visual-acp subagent entrypoint")).toBeChecked();
       await capture(page, testInfo, `02-stable-v1-backend-configured-${projectSuffix(isMobile)}`);
@@ -118,13 +121,7 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {
   if (name === "Status") {
     if (isMobile) await page.getByRole("button", { name: "Transcript" }).click();
-    const expandInspector = page.getByRole("button", { name: "Show right inspector" });
-    const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
-    if (await collapseInspector.count() === 0) {
-      await expect(expandInspector).toBeVisible();
-      await expandInspector.click();
-      await expect(collapseInspector).toBeVisible();
-    }
+    await ensureRightInspectorOpen(page);
   }
   if (isMobile) await page.getByRole("button", { name, exact: true }).click();
   if (name === "Status") {

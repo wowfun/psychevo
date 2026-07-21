@@ -52,6 +52,14 @@ import {
 } from "./composer-session-coordinator";
 
 const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
+const TURN_SETTLEMENT_CONTEXT_ACTIONS = new Set([
+  "interrupt",
+  "steer",
+  "fork",
+  "forkBefore",
+  "revertConversation",
+  "unrevertConversation"
+]);
 
 let terminalEventSeq = 0;
 
@@ -380,9 +388,12 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             }
             const refreshAcpContext = context?.binding?.backendKind === "acp"
               || context?.history.owner === "agent";
+            const refreshTurnSensitiveActions = context?.actions.some((action) => (
+              TURN_SETTLEMENT_CONTEXT_ACTIONS.has(action.id)
+            )) ?? false;
             if (
               threadId === params.selectedThreadIdRef.current
-              && (refreshFirstTurnContext || refreshAcpContext)
+              && (refreshFirstTurnContext || refreshAcpContext || refreshTurnSensitiveActions)
             ) {
               params.refreshRuntimeContext();
             }

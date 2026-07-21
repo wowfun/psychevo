@@ -60,6 +60,50 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
+.composerPermissionPaths,
+.composerPermissionScope {
+  display: grid;
+  gap: 6px;
+  padding: 7px 8px;
+  background: var(--pevo-code-bg);
+  border-left: 2px solid var(--accent-strong);
+}
+
+.composerPermissionPath {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.composerPermissionPath code {
+  overflow-wrap: anywhere;
+  color: var(--pevo-code-ink);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.composerPermissionPath span,
+.composerPermissionScope label > span {
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.composerPermissionScope label {
+  display: grid;
+  gap: 4px;
+}
+
+.composerPermissionScope select {
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-family: var(--pevo-mono);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
 .composerRequestLink {
   color: var(--accent-strong);
   font-size: 0.78rem;

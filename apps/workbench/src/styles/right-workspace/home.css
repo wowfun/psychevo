@@ -4,6 +4,10 @@
   padding: 4px 0 12px;
 }
 
+.rightHomeNav .pevo-actionButton {
+  justify-content: flex-start;
+}
+
 .rightChangedFiles button {
   display: grid;
   align-items: center;

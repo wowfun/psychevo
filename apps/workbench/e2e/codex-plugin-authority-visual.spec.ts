@@ -60,17 +60,16 @@ test.describe("Codex plugin authority visual contract", () => {
       await expect(card).toContainText("disabled · unavailable");
       await captureAuthority(page, testInfo, "codex-plugin-authority-disabled");
 
-      await toggleAuthority(card, "Enable Codex plugins");
-      await expect(card.getByRole("switch", { name: "Disable Codex plugins" })).toBeVisible();
+      await setAuthorityEnabled(card, true);
       await refreshAuthority(card);
       await expect(card).toContainText("ready · available");
       await expect(card).toContainText(/Ready · generation/);
       await captureAuthority(page, testInfo, "codex-plugin-authority-ready");
 
       unlinkSync(globalAuth);
-      await toggleAuthority(card, "Disable Codex plugins");
+      await setAuthorityEnabled(card, false);
       await expect(card).toContainText("disabled · unavailable");
-      await toggleAuthority(card, "Enable Codex plugins");
+      await setAuthorityEnabled(card, true);
       await refreshAuthority(card);
       await expect(card).toContainText("ready · unavailable");
       await captureAuthority(page, testInfo, "codex-plugin-authority-needs-auth");
@@ -135,13 +134,13 @@ async function refreshAuthority(card: Locator) {
   await expect(refresh).toBeEnabled();
 }
 
-async function toggleAuthority(card: Locator, name: "Enable Codex plugins" | "Disable Codex plugins") {
-  const toggle = card.getByRole("switch", { name });
+async function setAuthorityEnabled(card: Locator, enabled: boolean) {
+  const toggle = card.getByRole("switch", { name: "Codex plugin compatibility" });
   await expect(toggle).toBeEnabled();
-  await toggle.evaluate((element) => (element as HTMLButtonElement).click());
-  await expect(card.getByRole("switch", {
-    name: name === "Enable Codex plugins" ? "Disable Codex plugins" : "Enable Codex plugins"
-  })).toBeEnabled();
+  if ((await toggle.getAttribute("aria-checked")) !== String(enabled)) {
+    await toggle.click();
+  }
+  await expect(toggle).toHaveAttribute("aria-checked", String(enabled));
 }
 
 function writeState(statePath: string, state: CodexFixtureState) {

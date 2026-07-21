@@ -1,9 +1,20 @@
 .composerDock {
+  container: composer-dock / inline-size;
   display: grid;
   justify-self: center;
   width: min(var(--workbench-reading-column), calc(100% - 16px));
   max-width: 100%;
   gap: 6px;
+}
+
+@container composer-dock (max-width: 620px) {
+  .pevo-composer.is-running .pevo-composerFooter {
+    flex-wrap: wrap;
+  }
+
+  .pevo-composer.is-running .pevo-composerLeftControls {
+    flex-basis: 100%;
+  }
 }
 
 .historyEditingStrip {
@@ -383,18 +394,9 @@
 
 .composerDictationButton {
   position: relative;
-  display: inline-grid;
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  place-items: center;
-  padding: 0;
   color: var(--pevo-muted);
   background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border-strong);
-  border-radius: 999px;
-  cursor: pointer;
+  border-color: var(--pevo-border-strong);
   transition-duration: 140ms;
   transition-property: background-color, border-color, color, transform;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);

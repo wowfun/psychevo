@@ -386,6 +386,7 @@ describe("Workbench public Thread Application interactions", () => {
 
     render(<App />);
     await resumeSession();
+    expect(screen.queryByText("Once · this request only")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Once" }));
 
     await waitFor(() => {
@@ -401,6 +402,65 @@ describe("Workbench public Thread Application interactions", () => {
     });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "permission/respond")).toBe(false);
     expect(await screen.findByText("Permission response accepted.")).toBeTruthy();
+  });
+
+  it("keeps filesystem scope collapsed and submits an offered canonical directory", async () => {
+    gatewayMock.snapshot.pendingActions = [{
+      actionId: "permission-fs-1",
+      kind: "permission",
+      title: "Write file",
+      summary: "Write linked-outside/result.txt",
+      payload: {
+        toolName: "write",
+        summary: "Write linked-outside/result.txt",
+        reason: "file write outside the working directory requires approval",
+        suggestedRule: "filesystem:linked-outside/result.txt",
+        filesystem: {
+          targets: [{
+            requestedPath: "linked-outside/result.txt",
+            resolvedPath: "/tmp/shared/result.txt"
+          }],
+          scopeCandidates: ["/tmp/shared", "/tmp"]
+        }
+      },
+      threadId: "thread-1",
+      turnId: "turn-1"
+    }];
+
+    render(<App />);
+    await resumeSession();
+    const requestHeading = await screen.findByText("Permission · write");
+    const requestCard = requestHeading.closest(".composerRequest");
+    expect(requestCard).not.toBeNull();
+    const requestText = requestCard?.textContent ?? "";
+    expect(requestText.match(/linked-outside\/result\.txt/g)).toHaveLength(1);
+    expect(requestText.match(/\/tmp\/shared\/result\.txt/g)).toHaveLength(1);
+    expect(within(requestCard as HTMLElement).queryByText("Write linked-outside/result.txt")).toBeNull();
+    expect(within(requestCard as HTMLElement).queryByText("filesystem:linked-outside/result.txt")).toBeNull();
+    expect(within(requestCard as HTMLElement).getByText("source: thread-1")).toBeTruthy();
+    expect(screen.queryByLabelText("Canonical directory")).toBeNull();
+    expect(await screen.findByText("/tmp/shared/result.txt")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Directory scope" }));
+    fireEvent.change(await screen.findByLabelText("Canonical directory"), {
+      target: { value: "/tmp" }
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Current session" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/interaction/respond",
+        params: {
+          scope: gatewayMock.scope,
+          threadId: "thread-1",
+          interactionId: "permission-fs-1",
+          response: {
+            kind: "permission",
+            decision: "allowSession",
+            directory: "/tmp"
+          }
+        }
+      });
+    });
   });
 
   it("submits clarification answers through the sealed Thread interaction union", async () => {

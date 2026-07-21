@@ -465,13 +465,7 @@ export async function openPanel(page: Page, isMobile: boolean, name: "History" |
     if (isMobile) {
       await page.getByRole("button", { name: "Transcript" }).click();
     }
-    const expandInspector = page.getByRole("button", { name: "Show right inspector" });
-    const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
-    if (await collapseInspector.count() === 0) {
-      await expect(expandInspector).toBeVisible();
-      await expandInspector.click();
-      await expect(collapseInspector).toBeVisible();
-    }
+    await ensureRightInspectorOpen(page);
   }
   if (isMobile) {
     await page.getByRole("button", { name, exact: true }).click();
@@ -479,6 +473,15 @@ export async function openPanel(page: Page, isMobile: boolean, name: "History" |
   if (name === "Status") {
     await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();
   }
+}
+
+export async function ensureRightInspectorOpen(page: Page) {
+  const inspector = page.getByRole("button", { name: "Right inspector" });
+  await expect(inspector).toBeVisible();
+  if ((await inspector.getAttribute("aria-expanded")) !== "true") {
+    await inspector.click();
+  }
+  await expect(inspector).toHaveAttribute("aria-expanded", "true");
 }
 
 export async function injectStructuredToolRows(page: Page) {

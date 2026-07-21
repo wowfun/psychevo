@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
 import { liveContextFor, screenshotRoot } from "./liveContext";
+import { ensureRightInspectorOpen } from "./workbench.support";
 
 let screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/opencode-acp-live");
 
@@ -31,7 +32,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
         await expectElementInsideViewport(page, agentsPanel);
         await capture(page, testInfo, "01-agents-without-opencode");
 
-        await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
+        await agentsPanel.getByRole("button", { name: "Add backend" }).click();
         const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
         await expect(form).toBeVisible();
         await expect(form.getByLabel("ID")).toHaveValue("");
@@ -57,7 +58,9 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await ensureOpenCodeBackend(agentsPanel);
       const backendRow = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
       await expect(backendRow.getByText(/^opencode \(ACP\)$/i)).toBeVisible();
-      await expect(agentsPanel.getByRole("switch", { name: "Disable opencode" })).toBeVisible();
+      const backendSwitch = agentsPanel.getByRole("switch", { name: "opencode enabled" });
+      await expect(backendSwitch).toBeVisible();
+      await expect(backendSwitch).toBeChecked();
       await expect(agentsPanel.getByLabel("opencode peer entrypoint")).toBeChecked();
       await expect(agentsPanel.getByLabel("opencode subagent entrypoint")).toBeChecked();
       await assertBackendRowsFit(agentsPanel);
@@ -260,13 +263,7 @@ async function openPanel(page: Page, isMobile: boolean, name: "History" | "Statu
     if (isMobile) {
       await page.getByRole("button", { name: "Transcript" }).click();
     }
-    const expandInspector = page.getByRole("button", { name: "Show right inspector" });
-    const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
-    if (await collapseInspector.count() === 0) {
-      await expect(expandInspector).toBeVisible();
-      await expandInspector.click();
-      await expect(collapseInspector).toBeVisible();
-    }
+    await ensureRightInspectorOpen(page);
   }
   if (isMobile) {
     await page.getByRole("button", { name, exact: true }).click();
@@ -290,7 +287,7 @@ async function openCapabilityBackendPanel(page: Page): Promise<Locator> {
 async function ensureOpenCodeBackend(agentsPanel: Locator) {
   const existing = agentsPanel.locator(".agentBackendRow").filter({ hasText: /opencode \(ACP\)/i });
   if (!(await waitForOpenCodeBackend(existing))) {
-    await agentsPanel.getByRole("button", { name: "Add ACP backend" }).click();
+    await agentsPanel.getByRole("button", { name: "Add backend" }).click();
     const form = agentsPanel.getByRole("form", { name: "Profile ACP backend" });
     await expect(form).toBeVisible();
     await form.getByLabel("ID").fill("opencode");

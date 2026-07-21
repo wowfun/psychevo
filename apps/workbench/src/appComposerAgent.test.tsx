@@ -218,6 +218,109 @@ describe("Workbench layout and workspace panels", () => {
     });
   });
 
+  it("allows a completed replacement message to be updated and run again", async () => {
+    gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Repeat history edit")];
+    (gatewayMock.snapshot as { entries: TranscriptEntry[] }).entries = [userTextEntry("Original prompt")];
+    let editableText = "Original prompt";
+    let turnRunning = false;
+    let runningContextReads = 0;
+    const turnIds: string[] = [];
+
+    gatewayMock.runtimeContextRead = () => {
+      if (turnRunning) runningContextReads += 1;
+      return nativeHistoryEditingContext(!turnRunning);
+    };
+    gatewayMock.threadHistoryDraftRead = (params) => ({
+      threadId: "thread-1",
+      messageId: (params as { messageId: string }).messageId,
+      messageSeq: 1,
+      parts: [{ type: "text", text: editableText }],
+      fidelity: "exact",
+      warning: null,
+      unavailableReason: null
+    });
+    gatewayMock.threadActionRun = (params) => {
+      const action = (params as {
+        action: {
+          kind: "revertConversation";
+          messageId: string;
+          draft: { parts: Array<{ type: "text"; text: string }> };
+        };
+      }).action;
+      editableText = action.draft.parts.map((part) => part.text).join("\n");
+      return {
+        kind: "revertConversation",
+        threadId: "thread-1",
+        staged: true,
+        noOp: false,
+        snapshot: {
+          ...gatewayMock.snapshot,
+          entries: [],
+          historyEditing: {
+            kind: "conversationEdit",
+            boundaryMessageId: action.messageId,
+            hiddenEntryCount: 1,
+            replacementDraft: action.draft,
+            availableActions: ["restoreHistory"]
+          }
+        }
+      };
+    };
+    gatewayMock.turnStart = () => {
+      turnRunning = true;
+      const turnId = `turn:thread-1:${turnIds.length + 1}`;
+      turnIds.push(turnId);
+      return {
+        accepted: true,
+        threadId: "thread-1",
+        turnId,
+        thread: gatewayMock.snapshot.thread
+      };
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByText("Repeat history edit"));
+    await screen.findByText("Original prompt");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this message/ }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message text 1" }), {
+      target: { value: "First replacement" }
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Update this message and run in the same thread"
+    }));
+
+    await waitFor(() => expect(turnIds).toHaveLength(1));
+    await waitFor(() => expect(runningContextReads).toBeGreaterThan(0));
+    await emitGatewayEvent({
+      type: "turnStarted",
+      threadId: "thread-1",
+      turnId: turnIds[0],
+      selectedSkills: []
+    });
+    turnRunning = false;
+    await emitGatewayEvent(completedTurnEvent(
+      turnIds[0]!,
+      userTextEntryForTurn("First replacement", turnIds[0]!)
+    ));
+
+    expect(await screen.findByText("First replacement")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /Edit this message/ }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message text 1" }), {
+      target: { value: "Second replacement" }
+    });
+    fireEvent.click(screen.getByRole("button", {
+      name: "Update this message and run in the same thread"
+    }));
+
+    await waitFor(() => expect(turnIds).toHaveLength(2));
+    expect(gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/action/run"
+      && (entry.params as { action?: { kind?: string } }).action?.kind === "revertConversation"
+    ))).toHaveLength(2);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "turn/start")).toHaveLength(2);
+  });
+
   it("restores staged conversation history and keeps the ordered replacement draft in Composer", async () => {
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "History editing")];
     gatewayMock.snapshot.historyEditing = {
@@ -1612,5 +1715,95 @@ function userTextEntry(body: string): TranscriptEntry {
         body
       }
     ]
+  };
+}
+
+function userTextEntryForTurn(body: string, turnId: string): TranscriptEntry {
+  const entry = userTextEntry(body);
+  return {
+    ...entry,
+    turnId,
+    blocks: entry.blocks.map((block) => ({ ...block, body, detail: body, preview: body }))
+  };
+}
+
+function nativeHistoryEditingContext(historyActionsEnabled: boolean): Record<string, unknown> {
+  return {
+    runtimeProfileRef: "native",
+    selectionState: "default",
+    profiles: gatewayMock.runtimeProfileRecords,
+    binding: null,
+    controls: [],
+    stability: "stable",
+    capabilities: [{
+      id: "turn.start",
+      enabled: true,
+      stability: "stable",
+      unavailableReason: null
+    }],
+    compatibleTargets: [{
+      targetId: "target:default:native",
+      agentRef: null,
+      runtimeProfileRef: "native",
+      agentLabel: "Psychevo",
+      profileLabel: "Psychevo (Native)",
+      label: "Psychevo · Psychevo (Native)",
+      ready: true,
+      unavailableReason: null
+    }],
+    inputCapabilities: [
+      { kind: "text", enabled: true, unavailableReason: null },
+      { kind: "agentMention", enabled: true, unavailableReason: null }
+    ],
+    actions: [
+      {
+        id: "forkBefore",
+        label: "Fork before message",
+        enabled: historyActionsEnabled,
+        stability: "stable",
+        channelSafe: false,
+        unavailableReason: historyActionsEnabled ? null : "A running Thread cannot be forked."
+      },
+      {
+        id: "revertConversation",
+        label: "Edit message",
+        enabled: historyActionsEnabled,
+        stability: "stable",
+        channelSafe: false,
+        unavailableReason: historyActionsEnabled ? null : "A running Thread cannot be edited."
+      }
+    ],
+    sendability: { allowed: true, reason: null, recoveryAction: null },
+    history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+    pendingInteractions: [],
+    contextRevision: historyActionsEnabled ? "context-idle" : "context-running",
+    controlRevision: "controls-native"
+  };
+}
+
+async function emitGatewayEvent(params: Record<string, unknown>) {
+  await act(async () => {
+    for (const subscriber of gatewayMock.subscribers) {
+      subscriber({ method: "gateway/event", params });
+    }
+    await Promise.resolve();
+  });
+}
+
+function completedTurnEvent(turnId: string, entry: TranscriptEntry): Record<string, unknown> {
+  return {
+    type: "turnCompleted",
+    threadId: "thread-1",
+    turnId,
+    turn: {
+      id: turnId,
+      threadId: "thread-1",
+      status: "completed",
+      outcome: "normal",
+      error: null,
+      startedAtMs: 1,
+      completedAtMs: 2
+    },
+    committedEntries: [entry]
   };
 }

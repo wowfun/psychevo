@@ -826,7 +826,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     );
                     await refreshSnapshot(client, target.threadId, undefined, true);
                   })}
-                  onPermission={(request, decision) => void runAction(async () => {
+                  onPermission={(request, decision, directory) => void runAction(async () => {
                     const target = snapshotThreadApplicationTarget(snapshot, request.threadId);
                     if (!client || !target) {
                       setInteractionFeedback(setCommandFeedback, false, "Permission response does not belong to the active Thread.");
@@ -835,7 +835,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     const response = await client.request("thread/interaction/respond", {
                       ...target,
                       interactionId: request.actionId,
-                      response: { kind: "permission", decision }
+                      response: { kind: "permission", decision, ...(directory ? { directory } : {}) }
                     });
                     setInteractionFeedback(
                       setCommandFeedback,

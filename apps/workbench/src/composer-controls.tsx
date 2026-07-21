@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Check, ShieldCheck, ShieldPlus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ShieldCheck, ShieldPlus, X } from "lucide-react";
 import type {
   ContextReadResult,
   PendingActionView,
@@ -21,7 +21,7 @@ export function ComposerRequests({
   clarifies: PendingActionView[];
   permissions: PendingActionView[];
   onClarify(request: PendingActionView, answers: string[][] | null, cancel: boolean): void;
-  onPermission(request: PendingActionView, decision: PermissionDecision): void;
+  onPermission(request: PendingActionView, decision: PermissionDecision, directory?: string): void;
 }) {
   if (permissions.length === 0 && clarifies.length === 0) {
     return null;
@@ -29,11 +29,68 @@ export function ComposerRequests({
   return (
     <div className="composerRequests" aria-label="Pending requests">
       {permissions.map((permission) => (
-        <div className="composerRequest" key={permission.actionId}>
-          <div className="composerRequestHeader">
-            <strong>{permissionTitle(permission)}</strong>
-            {permissionTimeoutSecs(permission) ? <span>{permissionTimeoutSecs(permission)}s</span> : null}
+        <PermissionComposerRequest
+          key={permission.actionId}
+          permission={permission}
+          onPermission={onPermission}
+        />
+      ))}
+      {clarifies.map((clarify) => (
+        <ClarifyComposerRequest key={clarify.actionId} request={clarify} onSubmit={onClarify} />
+      ))}
+    </div>
+  );
+}
+
+function PermissionComposerRequest({
+  permission,
+  onPermission
+}: {
+  permission: PendingActionView;
+  onPermission(request: PendingActionView, decision: PermissionDecision, directory?: string): void;
+}) {
+  const filesystem = useMemo(
+    () => permissionFilesystem(permission),
+    [permission.actionId, permission.payload]
+  );
+  const defaultScopeDirectory = filesystem?.scopeCandidates[0] ?? "";
+  const [scopeExpanded, setScopeExpanded] = useState(false);
+  const [scopeDirectory, setScopeDirectory] = useState(defaultScopeDirectory);
+  const timeoutSecs = permissionTimeoutSecs(permission);
+
+  useEffect(() => {
+    setScopeExpanded(false);
+    setScopeDirectory(defaultScopeDirectory);
+  }, [defaultScopeDirectory, permission.actionId]);
+
+  return (
+    <div className="composerRequest">
+      <div className="composerRequestHeader">
+        <strong>{filesystem ? `Permission · ${permissionToolName(permission)}` : permissionTitle(permission)}</strong>
+        {filesystem ? (
+          <span>{`source: ${permissionSource(permission)}${timeoutSecs ? ` · ${timeoutSecs}s` : ""}`}</span>
+        ) : timeoutSecs ? <span>{timeoutSecs}s</span> : null}
+      </div>
+      {filesystem ? (
+        <>
+          {permissionReason(permission) ? <p>{permissionReason(permission)}</p> : null}
+          <div className="composerPermissionPaths">
+            {filesystem.targets.map((target, index) => (
+              <div className="composerPermissionPath" key={`${target.resolvedPath}-${index}`}>
+                <span>Requested</span>
+                <code>{target.requestedPath}</code>
+                {target.requestedPath !== target.resolvedPath ? (
+                  <>
+                    <span>Resolved</span>
+                    <code>{target.resolvedPath}</code>
+                  </>
+                ) : null}
+              </div>
+            ))}
           </div>
+        </>
+      ) : (
+        <>
           <AttentionProvenance request={permission} />
           <p>{permissionSummary(permission)}</p>
           {permissionReason(permission) && permissionSummary(permission) !== permissionReason(permission) ? (
@@ -45,33 +102,65 @@ export function ComposerRequests({
               {permissionSuggestedRule(permission) ? <code>{permissionSuggestedRule(permission)}</code> : null}
             </div>
           ) : null}
+        </>
+      )}
+      <div className="composerRequestActions">
+        <button onClick={() => onPermission(permission, "allowOnce")} type="button">
+          <Check size={14} />
+          <span>Once</span>
+        </button>
+        {filesystem && filesystem.scopeCandidates.length > 0 ? (
+          <button
+            aria-expanded={scopeExpanded}
+            onClick={() => setScopeExpanded((value) => !value)}
+            type="button"
+          >
+            {scopeExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            <span>Directory scope</span>
+          </button>
+        ) : permissionAllowSession(permission) ? (
+          <button onClick={() => onPermission(permission, "allowSession")} type="button">
+            <ShieldCheck size={14} />
+            <span>Session</span>
+          </button>
+        ) : null}
+        {permissionAllowAlways(permission) ? (
+          <button onClick={() => onPermission(permission, "allowAlways")} type="button">
+            <ShieldPlus size={14} />
+            <span>Always</span>
+          </button>
+        ) : null}
+        <button onClick={() => onPermission(permission, "deny")} type="button">
+          <X size={14} />
+          <span>Deny</span>
+        </button>
+      </div>
+      {filesystem && scopeExpanded && scopeDirectory ? (
+        <div className="composerPermissionScope">
+          <label>
+            <span>Canonical directory</span>
+            <select
+              aria-label="Canonical directory"
+              onChange={(event) => setScopeDirectory(event.target.value)}
+              value={scopeDirectory}
+            >
+              {filesystem.scopeCandidates.map((directory) => (
+                <option key={directory} value={directory}>{directory}</option>
+              ))}
+            </select>
+          </label>
           <div className="composerRequestActions">
-            <button onClick={() => onPermission(permission, "allowOnce")} type="button">
-              <Check size={14} />
-              <span>Once</span>
+            <button onClick={() => onPermission(permission, "allowTurn", scopeDirectory)} type="button">
+              <ShieldCheck size={14} />
+              <span>Current turn</span>
             </button>
-            {permissionAllowSession(permission) ? (
-              <button onClick={() => onPermission(permission, "allowSession")} type="button">
-                <ShieldCheck size={14} />
-                <span>Session</span>
-              </button>
-            ) : null}
-            {permissionAllowAlways(permission) ? (
-              <button onClick={() => onPermission(permission, "allowAlways")} type="button">
-                <ShieldPlus size={14} />
-                <span>Always</span>
-              </button>
-            ) : null}
-            <button onClick={() => onPermission(permission, "deny")} type="button">
-              <X size={14} />
-              <span>Deny</span>
+            <button onClick={() => onPermission(permission, "allowSession", scopeDirectory)} type="button">
+              <ShieldPlus size={14} />
+              <span>Current session</span>
             </button>
           </div>
         </div>
-      ))}
-      {clarifies.map((clarify) => (
-        <ClarifyComposerRequest key={clarify.actionId} request={clarify} onSubmit={onClarify} />
-      ))}
+      ) : null}
     </div>
   );
 }
@@ -373,6 +462,27 @@ function actionPayloadBool(action: PendingActionView, key: string): boolean {
   return actionPayload(action)[key] === true;
 }
 
+type PermissionFilesystem = {
+  targets: Array<{ requestedPath: string; resolvedPath: string }>;
+  scopeCandidates: string[];
+};
+
+function permissionFilesystem(action: PendingActionView): PermissionFilesystem | null {
+  const filesystem = asRecord(actionPayload(action).filesystem);
+  const targets = Array.isArray(filesystem.targets)
+    ? filesystem.targets.flatMap((value) => {
+      const target = asRecord(value);
+      return typeof target.requestedPath === "string" && typeof target.resolvedPath === "string"
+        ? [{ requestedPath: target.requestedPath, resolvedPath: target.resolvedPath }]
+        : [];
+    })
+    : [];
+  const scopeCandidates = Array.isArray(filesystem.scopeCandidates)
+    ? filesystem.scopeCandidates.filter((value): value is string => typeof value === "string")
+    : [];
+  return targets.length > 0 ? { targets, scopeCandidates } : null;
+}
+
 function actionPayloadRecord(action: PendingActionView, key: string): Record<string, unknown> {
   return asRecord(actionPayload(action)[key]);
 }
@@ -387,7 +497,9 @@ function AttentionProvenance({ request }: { request: PendingActionView }) {
   const sessionLifetime = actionPayloadString(request, "authorizationLifetime");
   const alwaysLifetime = actionPayloadString(request, "alwaysAuthorizationLifetime");
   const hasProvenance = Boolean(runtimeRef || runtimeKind || profileLabel || parentThreadId || childThreadId);
-  if (!hasProvenance && request.kind !== "permission") {
+  const hasAuthorizationContext = request.kind === "permission"
+    && (permissionAllowSession(request) || permissionAllowAlways(request));
+  if (!hasProvenance && !hasAuthorizationContext) {
     return null;
   }
   return (
@@ -398,7 +510,6 @@ function AttentionProvenance({ request }: { request: PendingActionView }) {
       {childThreadId ? (
         <span>{`Child ${childThreadId}${parentThreadId ? ` · Parent ${parentThreadId}` : ""}`}</span>
       ) : parentThreadId ? <span>{`Parent ${parentThreadId}`}</span> : null}
-      {request.kind === "permission" ? <span>Once · this request only</span> : null}
       {request.kind === "permission" && permissionAllowSession(request) ? (
         <span>{`Session · ${authorizationLifetimeLabel(sessionLifetime)}`}</span>
       ) : null}
@@ -429,6 +540,18 @@ function authorizationLifetimeLabel(value: string): string {
 
 function permissionTitle(permission: PendingActionView): string {
   return permission.title ?? (actionPayloadString(permission, "toolName") || "permission");
+}
+
+function permissionToolName(permission: PendingActionView): string {
+  return actionPayloadString(permission, "toolName") || "filesystem";
+}
+
+function permissionSource(permission: PendingActionView): string {
+  return permission.sourceKey
+    || permission.threadId
+    || actionPayloadString(permission, "profileLabel")
+    || actionPayloadString(permission, "runtimeRef")
+    || "current";
 }
 
 function permissionSummary(permission: PendingActionView): string {

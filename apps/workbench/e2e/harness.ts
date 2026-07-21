@@ -84,10 +84,14 @@ export async function startPevoWeb({
     processEnv
   });
   const env = gatewayEnv(resolvedConfigPath, dbPath, home, live, channelRuntime, processEnv);
-  const url = modelUrl(
-    await waitForServerUrl(child),
-    live ? model : undefined
-  );
+  let serverUrl: string;
+  try {
+    serverUrl = await waitForServerUrl(child);
+  } catch (error) {
+    await stopManagedGateway(env, pevoBin).catch(() => undefined);
+    throw error;
+  }
+  const url = modelUrl(serverUrl, live ? model : undefined);
 
   return {
     dbPath,
@@ -180,6 +184,8 @@ function spawnPevoWeb(options: {
         "open",
         "--no-browser",
         "--print-url",
+        "--bind",
+        "127.0.0.1:0",
         "--cd",
         options.cwd
       ]
@@ -192,6 +198,8 @@ function spawnPevoWeb(options: {
         "open",
         "--no-browser",
         "--print-url",
+        "--bind",
+        "127.0.0.1:0",
         "--cd",
         options.cwd
       ];
@@ -264,13 +272,27 @@ function gatewayEnv(
 }
 
 function stopManagedGateway(env: NodeJS.ProcessEnv, pevoBin?: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const command = pevoBin ?? "cargo";
     const args = pevoBin
       ? ["gateway", "stop"]
       : ["run", "-p", "psychevo-cli", "--", "gateway", "stop"];
-    const child = spawn(command, args, { cwd: repoRoot, env, stdio: "ignore" });
-    child.once("exit", () => resolve());
-    child.once("error", () => resolve());
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    const stderr: string[] = [];
+    child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk.toString("utf8")));
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(
+        `pevo gateway stop failed code=${code} signal=${signal}${stderr.length ? `\n${stderr.join("")}` : ""}`
+      ));
+    });
+    child.once("error", reject);
   });
 }

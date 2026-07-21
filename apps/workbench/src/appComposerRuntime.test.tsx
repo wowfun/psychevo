@@ -822,26 +822,22 @@ describe("Workbench first-class Agent runtime controls", () => {
   });
 
   it("keeps accepted first-turn controls when the pre-binding context is not yet effective", async () => {
+    const postStartContext = deferred<Record<string, unknown>>();
     gatewayMock.runtimeContextRead = (params) => {
       const threadId = (params as { threadId?: string | null } | null)?.threadId ?? null;
       return threadId === "thread-1"
-        ? firstClassContext("native", {
-            selectedTargetId: null,
-            suggestedTargetId: "target:default:native",
-            selectionState: "default",
-            binding: null,
-            sendability: {
-              allowed: false,
-              reason: "Select an Agent target before starting a turn.",
-              recoveryAction: null
-            }
-          })
+        ? postStartContext.promise
         : firstClassContext("native");
     };
     render(<App />);
 
     expect(await screen.findByRole("combobox", { name: "Mode" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
+    const modelAndReasoning = screen.getByRole("button", { name: "Model" });
+    const modelAndReasoningText = modelAndReasoning.textContent;
+    const modelAndReasoningTitle = modelAndReasoning.getAttribute("title");
+    expect(modelAndReasoningText).toBe("model-a Medium");
+    expect(modelAndReasoningTitle).toBe("native/model-a / Medium");
     fireEvent.change(screen.getByPlaceholderText("Ask Psychevo..."), {
       target: { value: "keep the Composer environment" }
     });
@@ -854,8 +850,29 @@ describe("Workbench first-class Agent runtime controls", () => {
       });
     });
     expect(screen.getByRole("button", { name: "Interrupt active turn" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Model" }).textContent).toBe(modelAndReasoningText);
+    expect(screen.getByRole("button", { name: "Model" }).getAttribute("title")).toBe(modelAndReasoningTitle);
+
+    await act(async () => {
+      postStartContext.resolve(firstClassContext("native", {
+        selectedTargetId: null,
+        suggestedTargetId: "target:default:native",
+        selectionState: "default",
+        binding: null,
+        sendability: {
+          allowed: false,
+          reason: "Select an Agent target before starting a turn.",
+          recoveryAction: null
+        }
+      }));
+      await postStartContext.promise;
+      await Promise.resolve();
+    });
+
     expect(screen.getByRole("combobox", { name: "Mode" }).textContent).toContain("Default");
     expect(screen.getByRole("combobox", { name: "Permission mode" }).textContent).toContain("Default");
+    expect(screen.getByRole("button", { name: "Model" }).textContent).toBe(modelAndReasoningText);
+    expect(screen.getByRole("button", { name: "Model" }).getAttribute("title")).toBe(modelAndReasoningTitle);
   });
 
   it("refreshes authoritative Thread context after shell catalog changes", async () => {

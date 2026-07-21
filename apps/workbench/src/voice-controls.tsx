@@ -1,5 +1,5 @@
 import { Mic, Radio, Volume2 } from "lucide-react";
-import { Switch } from "@psychevo/components";
+import { IconButton, Switch } from "@psychevo/components";
 
 export function ComposerDictationButton({
   disabled,
@@ -11,18 +11,20 @@ export function ComposerDictationButton({
   onToggle(): void;
 }) {
   return (
-    <button
-      aria-label={listening ? "Stop dictation" : "Start dictation"}
+    <IconButton
       aria-pressed={listening}
       className={`composerDictationButton ${listening ? "is-listening" : ""}`.trim()}
       disabled={disabled}
+      icon={(
+        <>
+          <span className="composerDictationPulse" aria-hidden />
+          <Mic size={16} aria-hidden />
+        </>
+      )}
+      label={listening ? "Stop dictation" : "Start dictation"}
       onClick={onToggle}
-      title={listening ? "Stop dictation" : "Start dictation"}
-      type="button"
-    >
-      <span className="composerDictationPulse" aria-hidden />
-      <Mic size={16} aria-hidden />
-    </button>
+      shape="circle"
+    />
   );
 }
 

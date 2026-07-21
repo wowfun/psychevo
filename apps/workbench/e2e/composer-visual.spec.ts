@@ -3,7 +3,9 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { startPevoWeb } from "./harness";
+import { startDeterministicNativeModel } from "./runtime-live.support";
 import { visualScreenshotRoot } from "./visualArtifacts";
+import { ensureRightInspectorOpen } from "./workbench.support";
 
 const screenshotDir = visualScreenshotRoot();
 const MANY_MODEL_CONFIG = `
@@ -23,6 +25,91 @@ cost = { input = 0, output = 0, cache_read = 0, cache_write = 0, request = 0 }
 `;
 
 test.describe("Workbench composer visual contract", () => {
+  test("keeps model and reasoning visible while an existing Thread turn runs", async ({ page, isMobile }) => {
+    test.skip(isMobile, "the running existing-Thread state only needs one browser viewport");
+    const fixture = await startDeterministicNativeModel({ journeyMode: "visual" });
+    const journey = fixture.journey;
+    if (!journey) throw new Error("the deterministic Native journey control is unavailable");
+    const server = await startPevoWeb({
+      configAppend: [
+        "[provider.journey-native]",
+        `api = ${JSON.stringify(fixture.baseUrl)}`,
+        "no_auth = true",
+        "",
+        "[provider.journey-native.models.default]",
+        ""
+      ].join("\n"),
+      live: false,
+      model: "journey-native/default"
+    });
+    try {
+      await page.setViewportSize({ width: 1024, height: 768 });
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const inspector = page.getByRole("button", { name: "Right inspector" });
+      await inspector.click();
+      await expect(inspector).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();
+      const model = page.getByRole("button", { name: "Model", exact: true });
+      await expect(model).toBeVisible();
+      await page.getByPlaceholder("Ask Psychevo...").fill("create the existing Thread");
+      await page.getByRole("button", { name: "Send message" }).click();
+      const firstRequest = await journey.waitFor(
+        "request_received",
+        { purpose: "main_turn", sequence: 1 },
+        60_000
+      );
+      journey.releaseFirstOutput(firstRequest.requestIndex);
+      await journey.waitFor("first_output_emitted", firstRequest.requestIndex, 60_000);
+      journey.releaseCompletion(firstRequest.requestIndex);
+      await journey.waitFor("completion_emitted", firstRequest.requestIndex, 60_000);
+      await expect(page.locator(".pevo-composer")).not.toHaveClass(/is-running/);
+
+      const modelText = await model.textContent();
+      const modelTitle = await model.getAttribute("title");
+      expect(modelText?.trim().length).toBeGreaterThan(0);
+      expect(modelTitle?.trim().length).toBeGreaterThan(0);
+      await page.getByPlaceholder("Ask Psychevo...").fill("keep the selected model visible");
+      await page.getByRole("button", { name: "Send message" }).click();
+      await journey.waitFor(
+        "request_received",
+        { purpose: "main_turn", sequence: 2 },
+        60_000
+      );
+      await expect(page.locator(".appShell")).toHaveAttribute("data-turn-state", "running");
+      await expect(page.getByRole("button", { name: "Interrupt active turn" })).toBeVisible();
+      await expect(model).toBeVisible();
+      await expect(model).toHaveText(modelText ?? "");
+      await expect(model).toHaveAttribute("title", modelTitle ?? "");
+      await expectTextFits(model.locator("span").first());
+    } finally {
+      await server.stop();
+      await fixture.stop();
+    }
+  });
+
+  test("left-aligns workspace home navigation labels", async ({ page, isMobile }) => {
+    test.skip(isMobile, "right-workspace Home navigation is validated in the desktop inspector");
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const inspector = page.getByRole("button", { name: "Right inspector" });
+      if (await inspector.getAttribute("aria-expanded") !== "true") {
+        await inspector.click();
+      }
+      await expect(page.getByRole("region", { name: "Workspace status" })).toBeVisible();
+
+      const navigation = page.getByRole("navigation", { name: "Open workspace tab" });
+      for (const label of ["Review", "Terminal", "Files"]) {
+        await expect(navigation.getByRole("button", { name: label, exact: true }))
+          .toHaveCSS("justify-content", "flex-start");
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("runs workspace HTML interactively without a trust prompt", async ({ page, isMobile }, testInfo) => {
     mkdirSync(screenshotDir, { recursive: true });
     const cwd = mkdtempSync(path.join(screenshotDir, "html-preview-cwd-"));
@@ -76,18 +163,19 @@ test.describe("Workbench composer visual contract", () => {
       await expect(inlinePreview.locator("#interaction-probe span")).toHaveText("1");
 
       const openPreviewAction = files.getByLabel("Open HTML preview for dynamic-preview.html");
-      const viewSourceAction = files.getByLabel("View source for dynamic-preview.html");
+      const viewSourceAction = files.getByLabel("Source view for dynamic-preview.html");
       const editAction = files.getByLabel("Edit dynamic-preview.html");
       const copyAction = files.getByLabel("Copy dynamic-preview.html");
       const externalPicker = files.getByLabel("Choose external application");
-      const hideFileTree = files.getByRole("button", { name: "Hide file tree" });
+      const fileTreeToggle = files.getByRole("button", { name: "File tree" });
+      await expect(fileTreeToggle).toHaveAttribute("aria-pressed", "true");
       const [viewSourceBox, openPreviewBox, editBox, copyBox, externalPickerBox, treeToggleBox, previewWithTreeBox] = await Promise.all([
         viewSourceAction.boundingBox(),
         openPreviewAction.boundingBox(),
         editAction.boundingBox(),
         copyAction.boundingBox(),
         externalPicker.boundingBox(),
-        hideFileTree.boundingBox(),
+        fileTreeToggle.boundingBox(),
         files.locator(".htmlStaticPreview").boundingBox()
       ]);
       if (!viewSourceBox || !openPreviewBox || !editBox || !copyBox || !externalPickerBox || !treeToggleBox || !previewWithTreeBox) {
@@ -120,7 +208,8 @@ test.describe("Workbench composer visual contract", () => {
       await page.keyboard.press("Escape");
       await expect(breadcrumbMenu).toHaveCount(0);
 
-      await hideFileTree.click();
+      await fileTreeToggle.click();
+      await expect(fileTreeToggle).toHaveAttribute("aria-pressed", "false");
       await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toHaveCount(0);
       await expect(files).not.toHaveClass(/has-fileTree/);
       const previewWithoutTreeBox = await files.locator(".htmlStaticPreview").boundingBox();
@@ -136,7 +225,8 @@ test.describe("Workbench composer visual contract", () => {
       await page.screenshot({
         path: path.join(screenshotDir, `html-files-tree-hidden-${testInfo.project.name}.png`)
       });
-      await files.getByRole("button", { name: "Show file tree" }).click();
+      await fileTreeToggle.click();
+      await expect(fileTreeToggle).toHaveAttribute("aria-pressed", "true");
       await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toBeVisible();
 
       if (!isMobile) {
@@ -149,7 +239,8 @@ test.describe("Workbench composer visual contract", () => {
         const markdownPane = files.locator(".fileMarkdownPreview");
         await expect(markdown).toBeVisible();
         const withTree = await markdown.boundingBox();
-        await files.getByRole("button", { name: "Hide file tree" }).click();
+        await fileTreeToggle.click();
+        await expect(fileTreeToggle).toHaveAttribute("aria-pressed", "false");
         await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toHaveCount(0);
         const [withoutTree, paneWithoutTree] = await Promise.all([
           markdown.boundingBox(),
@@ -160,7 +251,8 @@ test.describe("Workbench composer visual contract", () => {
         }
         expect(withoutTree.width).toBeGreaterThan(withTree.width * 1.3);
         expect(Math.abs(withoutTree.width - paneWithoutTree.width)).toBeLessThanOrEqual(2);
-        await files.getByRole("button", { name: "Show file tree" }).click();
+        await fileTreeToggle.click();
+        await expect(fileTreeToggle).toHaveAttribute("aria-pressed", "true");
         await files.getByRole("treeitem", { name: /dynamic-preview\.html/ }).click();
       }
 
@@ -963,13 +1055,7 @@ async function openStatusPanel(page: Page, isMobile: boolean) {
   if (isMobile) {
     await page.getByRole("button", { name: "Transcript" }).click();
   }
-  const expandInspector = page.getByRole("button", { name: "Show right inspector" });
-  const collapseInspector = page.getByRole("button", { name: "Collapse right inspector" });
-  if (await collapseInspector.count() === 0) {
-    await expect(expandInspector).toBeVisible();
-    await expandInspector.click();
-    await expect(collapseInspector).toBeVisible();
-  }
+  await ensureRightInspectorOpen(page);
   if (isMobile) {
     await page.getByRole("button", { name: "Status", exact: true }).click();
   }
