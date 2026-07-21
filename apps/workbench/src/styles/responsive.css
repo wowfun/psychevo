@@ -17,14 +17,23 @@
 }
 
 @container (max-width: 460px) {
-  .filesPanel.has-fileTree > header {
-    grid-template-columns: minmax(0, 1fr);
+  .workspaceFileToolbar {
+    gap: 5px;
   }
 
   .reviewPanel.has-fileTree .reviewSplit,
-  .filesPanel.has-fileTree .filesSplit {
+  .workspaceFileSurface.has-fileTree .workspaceFileSurfaceSplit {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(190px, 0.75fr);
+  }
+
+  .workspaceFileTextAction span {
+    display: none;
+  }
+
+  .workspaceFileToolbarActions > .workspaceFileTextAction {
+    width: 28px;
+    padding: 0;
   }
 
   .reviewFilesPane,

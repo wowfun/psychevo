@@ -22,7 +22,10 @@ describe("Workbench settings and backend controls", () => {
   it("unmounts hidden left sidebar sections when collapsed", async () => {
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Collapse left sidebar" }));
+    const sessionSidebar = await screen.findByRole("button", { name: "Session sidebar" });
+    expect(sessionSidebar.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(sessionSidebar);
+    expect(sessionSidebar.getAttribute("aria-expanded")).toBe("false");
 
     expect(screen.getByRole("button", { name: "New Session" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search" })).toBeTruthy();
@@ -154,9 +157,10 @@ describe("Workbench settings and backend controls", () => {
     expect(gatewayMock.requestLog.some((entry) => entry.method === "model/settings/read")).toBe(true);
 
     const zenRow = within(modelsPanel).getByText("OpenCode Zen").closest(".modelProviderRow") as HTMLElement;
-    fireEvent.click(within(zenRow).getByRole("button", { name: "Edit" }));
+    fireEvent.click(within(zenRow).getByRole("button", { name: "Edit OpenCode Zen" }));
     fireEvent.click(within(modelsPanel).getByRole("button", { name: "Fetch models" }));
-    expect(await within(modelsPanel).findByText("OpenCode Zen catalog updated")).toBeTruthy();
+    const catalogReceipt = await screen.findByText("OpenCode Zen catalog updated");
+    expect(catalogReceipt.closest('[role="status"]')).toBeTruthy();
     expect(gatewayMock.requestLog).toContainEqual({
       method: "model/provider/catalog",
       params: expect.objectContaining({
@@ -260,9 +264,10 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.click(within(settingsRegion).getByRole("button", { name: "Models" }));
     const modelsPanel = await within(settingsRegion).findByRole("region", { name: "Models" });
     const zenRow = within(modelsPanel).getByText("OpenCode Zen").closest(".modelProviderRow") as HTMLElement;
-    fireEvent.click(within(zenRow).getByRole("button", { name: "Edit" }));
+    fireEvent.click(within(zenRow).getByRole("button", { name: "Edit OpenCode Zen" }));
     fireEvent.click(within(modelsPanel).getByRole("button", { name: "Fetch models" }));
-    expect(await within(modelsPanel).findByText("OpenCode Zen catalog updated")).toBeTruthy();
+    const catalogReceipt = await screen.findByText("OpenCode Zen catalog updated");
+    expect(catalogReceipt.closest('[role="status"]')).toBeTruthy();
 
     const defaultRow = within(modelsPanel).getByText("Default model").closest(".modelAssignmentRow") as HTMLElement;
     fireEvent.click(within(defaultRow).getByRole("button", { name: "Default model" }));
@@ -392,7 +397,7 @@ describe("Workbench settings and backend controls", () => {
 
     expect(within(settingsRegion).queryByRole("button", { name: "Agents" })).toBeNull();
     expect(within(settingsRegion).queryByRole("region", { name: "Agents" })).toBeNull();
-    expect(within(settingsRegion).queryByRole("button", { name: "Add ACP backend" })).toBeNull();
+    expect(within(settingsRegion).queryByRole("button", { name: "Add backend" })).toBeNull();
     expect(within(settingsRegion).queryByText("Profile ACP Backends")).toBeNull();
     expect(within(settingsRegion).queryByText("Translate user messages")).toBeNull();
     expect(within(settingsRegion).queryByRole("combobox", { name: "Agent" })).toBeNull();
@@ -424,7 +429,10 @@ describe("Workbench settings and backend controls", () => {
     expect(within(channelsPanel).getAllByText("Credential present").length).toBeGreaterThan(0);
     expect(within(channelsPanel).getAllByText("Allowlist present").length).toBeGreaterThan(0);
 
-    fireEvent.click(within(channelsPanel).getByRole("switch", { name: "Disable release" }));
+    const releaseSwitch = within(channelsPanel).getByRole("switch", { name: "release enabled" });
+    expect(releaseSwitch.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(releaseSwitch);
+    await waitFor(() => expect(releaseSwitch.getAttribute("aria-checked")).toBe("false"));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "channel/enable",
@@ -459,8 +467,7 @@ describe("Workbench settings and backend controls", () => {
     expect(within(detailPage).getByText("Allowed callers")).toBeTruthy();
     expect(within(detailPage).queryByText("Connection identity")).toBeNull();
     expect(within(detailPage).queryByText("Connected Channels")).toBeNull();
-    expect(within(detailPage).queryByRole("switch", { name: "Enable release on save" })).toBeNull();
-    expect(within(detailPage).queryByRole("switch", { name: "Disable release on save" })).toBeNull();
+    expect(within(detailPage).queryByRole("switch", { name: "release enabled" })).toBeNull();
     expect(within(detailPage).queryByRole("button", { name: "Test release" })).toBeNull();
     expect(within(detailPage).queryByRole("button", { name: "Cancel" })).toBeNull();
     expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
@@ -567,7 +574,8 @@ describe("Workbench settings and backend controls", () => {
     await waitFor(() => {
       expect((within(detailPage).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     });
-    expect(within(detailPage).getByText("Next message will start in the new workspace.")).toBeTruthy();
+    const savedReceipt = await screen.findByText("Channel saved. Next message will start in the new workspace.");
+    expect(savedReceipt.closest('[role="status"]')).toBeTruthy();
 
     fireEvent.click(within(detailPage).getByRole("button", { name: "Remove channel" }));
     expect(within(detailPage).getByRole("button", { name: "Confirm remove" })).toBeTruthy();
@@ -741,7 +749,8 @@ describe("Workbench settings and backend controls", () => {
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => entry.method === "channel/update").length).toBe(1);
     });
-    expect(within(detailPage).getByText("Next message will start in the new workspace.")).toBeTruthy();
+    const savedReceipt = await screen.findByText("Channel saved. Next message will start in the new workspace.");
+    expect(savedReceipt.closest('[role="status"]')).toBeTruthy();
     expect(gatewayMock.requestLog.find((entry) => entry.method === "channel/update")?.params).toEqual(expect.objectContaining({
       id: "release",
       cwd: "/tmp/recent-ops"
@@ -1177,7 +1186,7 @@ describe("Workbench settings and backend controls", () => {
     fireEvent.click(await within(capabilitiesRegion).findByRole("tab", { name: "ACP Backends" }));
 
     const agentsPanel = await within(capabilitiesRegion).findByRole("region", { name: "Agents" });
-    const addButton = within(agentsPanel).getByRole("button", { name: "Add ACP backend" });
+    const addButton = within(agentsPanel).getByRole("button", { name: "Add backend" });
     expect(addButton.textContent).toContain("Add backend");
     fireEvent.click(addButton);
     const form = await within(agentsPanel).findByRole("form", { name: "Profile ACP backend" });
@@ -1318,7 +1327,10 @@ describe("Workbench settings and backend controls", () => {
     expect(within(agentsPanel).queryByText("Enabled")).toBeNull();
     expect(within(agentsPanel).queryByText("Disabled")).toBeNull();
 
-    fireEvent.click(await within(agentsPanel).findByRole("switch", { name: "Disable opencode" }));
+    const backendSwitch = await within(agentsPanel).findByRole("switch", { name: "opencode enabled" });
+    expect(backendSwitch.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(backendSwitch);
+    await waitFor(() => expect(backendSwitch.getAttribute("aria-checked")).toBe("false"));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "backend/write",

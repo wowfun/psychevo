@@ -5,7 +5,7 @@ import {
   ThreadController,
   type ThreadTurnControls
 } from "@psychevo/client";
-import { TranscriptPanel } from "@psychevo/components";
+import { ActionButton, IconButton, TranscriptPanel } from "@psychevo/components";
 import type { HostCapabilityResult } from "@psychevo/host";
 import type { GatewayEvent, GatewayRequestScope, ThreadContextReadResult, ThreadSnapshot } from "@psychevo/protocol";
 import { ArrowUp, Camera, FilePlus2, Languages, Maximize2, MessageCircle, Minus, RefreshCcw, Sparkles, Square, TextCursorInput, Wand2, X } from "lucide-react";
@@ -372,36 +372,28 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
         </span>
         <div className="pevo-floating-actionRail" aria-label="Floating actions" role="toolbar">
           {ACTIONS.map(({ action, icon: Icon, label }) => (
-            <button
+            <ActionButton
               className="pevo-floating-actionButton"
               disabled={!bridgeReady || state.running}
+              icon={<Icon size={15} />}
               key={action}
               onClick={() => void submit(action)}
+              size="compact"
               type="button"
+              variant="ghost"
             >
-              <Icon aria-hidden="true" size={15} />
-              <span>{label}</span>
-            </button>
+              {label}
+            </ActionButton>
           ))}
         </div>
         <div className="pevo-floating-toolbarDragRegion" aria-hidden="true" />
-        <button className="pevo-floating-iconButton" onClick={() => void rescanSelection()} title="Capture selection" type="button">
-          <RefreshCcw aria-hidden="true" size={15} />
-        </button>
-        <button className="pevo-floating-iconButton" onClick={() => void captureScreenshot()} title="Capture region" type="button">
-          <Camera aria-hidden="true" size={15} />
-        </button>
+        <IconButton className="pevo-floating-iconButton" icon={<RefreshCcw size={15} />} label="Capture selection" onClick={() => void rescanSelection()} shape="circle" size="compact" />
+        <IconButton className="pevo-floating-iconButton" icon={<Camera size={15} />} label="Capture region" onClick={() => void captureScreenshot()} shape="circle" size="compact" />
         {state.threadId && runtime.openThreadInWorkbench && (
-          <button aria-label="Open in main window" className="pevo-floating-iconButton" onClick={() => void openInWorkbench()} title="Open in main window" type="button">
-            <Maximize2 aria-hidden="true" size={15} />
-          </button>
+          <IconButton className="pevo-floating-iconButton" icon={<Maximize2 size={15} />} label="Open in main window" onClick={() => void openInWorkbench()} shape="circle" size="compact" />
         )}
-        <button className="pevo-floating-iconButton" onClick={() => dispatch({ type: "park" })} title="Park" type="button">
-          <Minus aria-hidden="true" size={15} />
-        </button>
-        <button className="pevo-floating-iconButton" onClick={() => void closeCapsule()} title="Close" type="button">
-          <X aria-hidden="true" size={15} />
-        </button>
+        <IconButton className="pevo-floating-iconButton" icon={<Minus size={15} />} label="Park" onClick={() => dispatch({ type: "park" })} shape="circle" size="compact" />
+        <IconButton className="pevo-floating-iconButton" icon={<X size={15} />} label="Close" onClick={() => void closeCapsule()} shape="circle" size="compact" />
       </header>
 
       {state.mode === "parked" ? (
@@ -419,7 +411,7 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
           {state.error && (
             <div className="pevo-floating-errorRow" role="alert">
               <span>{state.error}</span>
-              <button onClick={() => dispatch({ type: "clearError" })} type="button">Dismiss</button>
+              <ActionButton onClick={() => dispatch({ type: "clearError" })} size="compact" type="button" variant="ghost">Dismiss</ActionButton>
             </div>
           )}
 
@@ -452,13 +444,9 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
               value={state.draft}
             />
             {state.running ? (
-              <button className="pevo-floating-sendButton" onClick={() => void interrupt()} title="Interrupt" type="button">
-                <Square aria-hidden="true" size={13} />
-              </button>
+              <IconButton className="pevo-floating-sendButton" icon={<Square size={13} />} label="Interrupt" onClick={() => void interrupt()} shape="circle" size="compact" variant="interrupt" />
             ) : (
-              <button className="pevo-floating-sendButton" disabled={!bridgeReady} title="Ask" type="submit">
-                <ArrowUp aria-hidden="true" size={15} />
-              </button>
+              <IconButton className="pevo-floating-sendButton" disabled={!bridgeReady} icon={<ArrowUp size={15} />} label="Ask" shape="circle" size="compact" type="submit" variant="primary" />
             )}
           </form>
 
@@ -530,15 +518,12 @@ function AttachmentStrip({
             <img className="pevo-floating-attachmentThumb" src={attachment.dataUrl} alt="" />
           )}
           <span>{attachment.name}</span>
-          <button aria-label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)} type="button">
-            <X aria-hidden="true" size={12} />
-          </button>
+          <IconButton icon={<X size={12} />} label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)} size="compact" />
         </span>
       ))}
-      <button className="pevo-floating-attachButton" onClick={onAttach} type="button">
-        <FilePlus2 aria-hidden="true" size={14} />
+      <ActionButton className="pevo-floating-attachButton" icon={<FilePlus2 size={14} />} onClick={onAttach} size="compact" type="button" variant="ghost">
         Add file
-      </button>
+      </ActionButton>
     </div>
   );
 }

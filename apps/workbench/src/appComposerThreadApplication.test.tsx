@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ThreadController } from "@psychevo/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deferred, gatewayMock, sessionSummary } from "./appComposerAgent.fixture";
@@ -641,6 +641,7 @@ describe("Workbench public Thread Application interactions", () => {
     });
     emit("gateway/event", turnCompletedEvent("Turn failed before acceptance.", "failed"));
     expect((await screen.findAllByText("Turn failed before acceptance.")).length).toBeGreaterThan(0);
+    expect(document.querySelector(".errorBand")?.textContent).toContain("Turn failed before acceptance.");
     expect(applyGatewayEvent).toHaveBeenCalled();
 
     await act(async () => {
@@ -649,6 +650,27 @@ describe("Workbench public Thread Application interactions", () => {
     });
     await waitFor(() => expect(acceptTurnStart).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
+  });
+
+  it("keeps an interrupted Turn in the Transcript without showing a global error", async () => {
+    gatewayMock.turnStart = () => turnStartResult();
+
+    render(<App />);
+    await waitForDraftContext();
+    fireEvent.change(screen.getByPlaceholderText("Ask Psychevo..."), {
+      target: { value: "interrupt this turn" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "turn/start")).toBe(true);
+    });
+
+    emit("gateway/event", turnCompletedEvent("The turn was interrupted.", "interrupted"));
+
+    const transcript = screen.getByRole("region", { name: "Transcript" });
+    expect(await within(transcript).findByText("Turn interrupted")).toBeTruthy();
+    expect(within(transcript).getAllByText("The turn was interrupted.").length).toBeGreaterThan(0);
+    expect(document.querySelector(".errorBand")).toBeNull();
   });
 
   it("rolls back optimistic input and refreshes Thread Context after turn/start rejects", async () => {
@@ -741,7 +763,7 @@ function draftOpenResult(): Record<string, unknown> {
 
 function turnCompletedEvent(
   body: string,
-  status: "completed" | "failed" = "completed"
+  status: "completed" | "failed" | "interrupted" = "completed"
 ): Record<string, unknown> {
   return {
     type: "turnCompleted",
@@ -749,7 +771,7 @@ function turnCompletedEvent(
     turnId: "turn-first",
     turn: {
       completedAtMs: 2_000,
-      error: status === "failed" ? { message: body } : null,
+      error: status === "completed" ? null : { message: body },
       id: "turn-first",
       outcome: status,
       startedAtMs: 1_000,

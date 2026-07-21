@@ -297,7 +297,7 @@ function NewBranchDialog({
   const [name, setName] = useState("");
   const trimmed = name.trim();
   return (
-    <div className="modalBackdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()} role="presentation">
+    <div className="modalBackdrop" role="presentation">
       <form
         aria-label="New branch"
         className="workspaceDialog composerBranchDialog"
@@ -313,7 +313,7 @@ function NewBranchDialog({
         </header>
         <label>
           Branch name
-          <input autoFocus disabled={disabled} onChange={(event) => setName(event.target.value)} value={name} />
+          <input className="pevo-fieldControl" autoFocus disabled={disabled} onChange={(event) => setName(event.target.value)} value={name} />
         </label>
         {error ? <p className="composerDialogError" role="alert">{error}</p> : null}
         <footer>

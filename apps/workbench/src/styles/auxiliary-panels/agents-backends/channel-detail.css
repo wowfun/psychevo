@@ -64,12 +64,6 @@
   min-width: 0;
 }
 
-.channelDetailSave:not(:disabled) {
-  color: var(--pevo-accent-ink);
-  background: var(--pevo-accent);
-  border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
-}
-
 .channelDiscardNotice,
 .channelSavedNotice,
 .channelDetailError {

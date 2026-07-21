@@ -288,9 +288,9 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
 }
 
 .workspaceDialog > footer button[type="submit"] {
-  color: white;
-  background: var(--pevo-accent);
-  border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
+  color: var(--pevo-control-primary-ink);
+  background: var(--pevo-control-primary-bg);
+  border-color: var(--pevo-control-primary-border);
 }
 
 .workspaceDialog button:disabled,
@@ -394,27 +394,6 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   color: var(--pevo-nav-text);
 }
 
-.sidebarToggle,
-.rightInspectorToggle {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  color: var(--pevo-muted);
-  background: transparent;
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .sidebarToggle:hover {
-    color: var(--pevo-nav-text);
-    background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 42%);
-    border-color: color-mix(in oklch, var(--pevo-nav-muted), transparent 62%);
-  }
-}
-
 .sidebarToggleLogo {
   display: block;
   width: 22px;
@@ -431,7 +410,23 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   border-radius: 0;
 }
 
-.leftActions button,
+.leftActions .newSessionAction {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  padding: 0 8px 0 23px;
+  text-align: left;
+}
+
+.leftActions .newSessionAction .pevo-actionButtonIcon {
+  grid-column: 1;
+  justify-self: center;
+}
+
+.leftActions .newSessionAction .pevo-actionButtonLabel {
+  grid-column: 2;
+}
+
 .leftUtilityRail button {
   display: grid;
   grid-template-columns: var(--left-nav-icon-column, 20px) minmax(0, 1fr);
@@ -450,21 +445,11 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   cursor: pointer;
 }
 
-.leftActions button > svg,
-.leftActions .pevo-actionButtonIcon,
 .leftUtilityRail button > svg {
   justify-self: center;
 }
 
-.leftActions button.is-selected {
-  color: var(--pevo-ink);
-  background: var(--pevo-sidebar-active);
-  border-color: transparent;
-  box-shadow: var(--pevo-shadow-active);
-}
-
 @media (hover: hover) {
-  .leftActions button:hover,
   .leftUtilityRail button:hover {
     color: var(--pevo-ink);
     background: color-mix(in oklch, var(--pevo-sidebar-active), transparent 46%);
@@ -479,7 +464,6 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   box-shadow: var(--pevo-shadow-active);
 }
 
-.leftActions span,
 .leftUtilityRail span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -595,11 +579,6 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   display: none;
 }
 
-.historyColumn.is-collapsed .sidebarToggle {
-  width: 38px;
-  height: 38px;
-}
-
 .historyColumn.is-collapsed .sidebarToggleLogo {
   width: 25px;
   height: 25px;
@@ -610,7 +589,10 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   padding: 0;
 }
 
-.historyColumn.is-collapsed .leftActions button,
+.historyColumn.is-collapsed .leftActions {
+  justify-items: center;
+}
+
 .historyColumn.is-collapsed .leftUtilityRail button {
   grid-template-columns: 1fr;
   place-items: center;
@@ -621,7 +603,6 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   padding: 0;
 }
 
-.historyColumn.is-collapsed .leftActions span,
 .historyColumn.is-collapsed .leftUtilityRail span,
 .historyColumn.is-collapsed .leftPinnedPanel,
 .historyColumn.is-collapsed .pevo-history {
@@ -698,7 +679,7 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   color: var(--pevo-nav-muted);
   font-size: var(--pevo-font-size-xsmall);
   text-overflow: ellipsis;
-  background: transparent;
+  background-color: transparent;
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
 }
@@ -827,14 +808,6 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   min-height: 34px;
   align-items: start;
   justify-items: end;
-}
-
-.rightInspectorToggle {
-  width: 34px;
-  height: 34px;
-  color: var(--pevo-muted);
-  background: transparent;
-  border-color: transparent;
 }
 
 .centerWorkspace {

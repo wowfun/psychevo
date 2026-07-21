@@ -279,10 +279,16 @@ function canonicalMockThreadContext(value: unknown, params: unknown): unknown {
   const exactSelection = Boolean(targetInput)
     || Boolean(record.binding)
     || typeof (params as { threadId?: unknown } | null)?.threadId === "string";
+  const selectedTargetSpecified = Object.prototype.hasOwnProperty.call(record, "selectedTargetId");
+  const suggestedTargetSpecified = Object.prototype.hasOwnProperty.call(record, "suggestedTargetId");
   return {
     ...record,
-    selectedTargetId: exactSelection ? projectedTargetId : null,
-    suggestedTargetId: exactSelection ? null : projectedTargetId,
+    selectedTargetId: selectedTargetSpecified
+      ? typeof record.selectedTargetId === "string" ? record.selectedTargetId : null
+      : exactSelection ? projectedTargetId : null,
+    suggestedTargetId: suggestedTargetSpecified
+      ? typeof record.suggestedTargetId === "string" ? record.suggestedTargetId : null
+      : exactSelection ? null : projectedTargetId,
     sendability: exactSelection
       ? record.sendability
       : {
@@ -2491,6 +2497,7 @@ vi.mock("@psychevo/client", async () => {
         const current = record.path ?? "/tmp";
         return {
           root: "/tmp",
+          roots: [{ name: "/tmp", path: "/tmp" }],
           current,
           parent: current === "/tmp" ? null : "/tmp",
           folders: current === "/tmp" ? [

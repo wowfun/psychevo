@@ -45,6 +45,8 @@ test.describe("Workbench composer visual contract", () => {
       path.join(cwd, "wide-preview.md"),
       "# Wide preview\n\n| One | Two | Three |\n| --- | --- | --- |\n| alpha | beta | gamma |\n"
     );
+    mkdirSync(path.join(cwd, "docs"));
+    writeFileSync(path.join(cwd, "docs", "nested.md"), "# Nested breadcrumb file\n");
     const server = await startPevoWeb({ cwd, live: false });
     try {
       await page.goto(server.url);
@@ -74,25 +76,49 @@ test.describe("Workbench composer visual contract", () => {
       await expect(inlinePreview.locator("#interaction-probe span")).toHaveText("1");
 
       const openPreviewAction = files.getByLabel("Open HTML preview for dynamic-preview.html");
+      const viewSourceAction = files.getByLabel("View source for dynamic-preview.html");
       const editAction = files.getByLabel("Edit dynamic-preview.html");
+      const copyAction = files.getByLabel("Copy dynamic-preview.html");
+      const externalPicker = files.getByLabel("Choose external application");
       const hideFileTree = files.getByRole("button", { name: "Hide file tree" });
-      const [openPreviewBox, editBox, treeToggleBox, previewWithTreeBox] = await Promise.all([
+      const [viewSourceBox, openPreviewBox, editBox, copyBox, externalPickerBox, treeToggleBox, previewWithTreeBox] = await Promise.all([
+        viewSourceAction.boundingBox(),
         openPreviewAction.boundingBox(),
         editAction.boundingBox(),
+        copyAction.boundingBox(),
+        externalPicker.boundingBox(),
         hideFileTree.boundingBox(),
         files.locator(".htmlStaticPreview").boundingBox()
       ]);
-      if (!openPreviewBox || !editBox || !treeToggleBox || !previewWithTreeBox) {
+      if (!viewSourceBox || !openPreviewBox || !editBox || !copyBox || !externalPickerBox || !treeToggleBox || !previewWithTreeBox) {
         throw new Error("missing Files action geometry");
       }
+      expect(viewSourceBox.x).toBeLessThan(openPreviewBox.x);
       expect(openPreviewBox.x).toBeLessThan(editBox.x);
       expect(Math.abs(editBox.x - openPreviewBox.x - openPreviewBox.width - 5)).toBeLessThanOrEqual(1);
-      expect(Math.abs(openPreviewBox.y - editBox.y)).toBeLessThanOrEqual(1);
-      expect(treeToggleBox.y).toBeLessThan(editBox.y);
-      expect(Math.abs(treeToggleBox.x + treeToggleBox.width - editBox.x - editBox.width)).toBeLessThanOrEqual(6);
+      expect(editBox.x).toBeLessThan(copyBox.x);
+      expect(copyBox.x).toBeLessThan(externalPickerBox.x);
+      expect(externalPickerBox.x).toBeLessThan(treeToggleBox.x);
+      for (const actionBox of [viewSourceBox, openPreviewBox, copyBox, externalPickerBox, treeToggleBox]) {
+        expect(Math.abs(actionBox.y - editBox.y)).toBeLessThanOrEqual(1);
+      }
       await page.screenshot({
         path: path.join(screenshotDir, `html-files-controls-${testInfo.project.name}.png`)
       });
+
+      await files.locator(".workspaceFileBreadcrumbDisclosure").first().click();
+      const breadcrumbMenu = page.getByRole("menu", { name: /Children of/ });
+      await expect(breadcrumbMenu).toBeVisible();
+      await expect(breadcrumbMenu.getByRole("menuitem")).toHaveText([
+        "docs",
+        "dynamic-preview.html",
+        "wide-preview.md"
+      ]);
+      await page.screenshot({
+        path: path.join(screenshotDir, `html-files-breadcrumb-menu-${testInfo.project.name}.png`)
+      });
+      await page.keyboard.press("Escape");
+      await expect(breadcrumbMenu).toHaveCount(0);
 
       await hideFileTree.click();
       await expect(files.getByRole("complementary", { name: "Workspace file tree" })).toHaveCount(0);
@@ -315,7 +341,10 @@ test.describe("Workbench composer visual contract", () => {
       await workspaceMenu.getByRole("menuitem", { name: "Open workspace..." }).click();
       const folderPicker = page.getByRole("dialog", { name: "Choose workspace folder" });
       await expect(folderPicker.getByRole("button", { name: "Open folder" })).toBeEnabled();
-      await expect(folderPicker.getByRole("textbox")).toHaveCount(0);
+      await expect(folderPicker.getByRole("textbox", { name: "Folder path" })).toHaveValue(visualCwd);
+      const parentFolder = folderPicker.getByRole("button", { name: "Parent folder" });
+      await parentFolder.hover();
+      expect(await parentFolder.evaluate((element) => getComputedStyle(element).cursor)).toBe("pointer");
       await page.screenshot({
         path: path.join(screenshotDir, `composer-folder-picker-${testInfo.project.name}.png`)
       });
@@ -532,7 +561,7 @@ test.describe("Workbench composer visual contract", () => {
       await openPanel(page, isMobile, "History");
       const newSessionButton = page.getByRole("button", { name: "New Session" });
       const settingsButton = page.getByRole("button", { name: "Settings" });
-      await expectCssPropertyMatchesRootVar(newSessionButton, "color", "--pevo-nav-text");
+      await expectCssPropertyMatchesRootVar(newSessionButton, "color", "--pevo-ink");
       await expectCssPropertyMatchesRootVar(settingsButton, "color", "--pevo-nav-text");
       await newSessionButton.click();
       await openPanel(page, isMobile, "Transcript");

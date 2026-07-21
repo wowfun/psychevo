@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "@psychevo/components";
 import type { CompletionItem, CompletionListResult } from "@psychevo/protocol";
@@ -788,6 +788,7 @@ describe("Composer completion mentions", () => {
 
     const interruptButton = screen.getByRole("button", { name: "Interrupt active turn" });
     expect(interruptButton.closest(".pevo-composerRightControls")).toBeTruthy();
+    expect(interruptButton.getAttribute("data-variant")).toBe("interrupt");
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
   });
 
@@ -855,15 +856,15 @@ describe("Composer completion mentions", () => {
     );
 
     const textarea = screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
-    expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Turn mode" })).toBeNull();
 
     fireEvent.change(textarea, { target: { value: "continue the task" } });
-    expect(screen.getByRole("tablist", { name: "Turn mode" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Queue" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Steer" })).toBeTruthy();
+    const turnMode = screen.getByRole("radiogroup", { name: "Turn mode" });
+    expect(within(turnMode).getByRole("radio", { name: "Queue" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(turnMode).getByRole("radio", { name: "Steer" }).getAttribute("aria-checked")).toBe("true");
 
     fireEvent.change(textarea, { target: { value: "   " } });
-    expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Turn mode" })).toBeNull();
   });
 
   it("queues running-turn input when steer is not an observed runtime capability", () => {
@@ -882,7 +883,7 @@ describe("Composer completion mentions", () => {
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "next queued turn" } });
 
-    expect(screen.queryByRole("tablist", { name: "Turn mode" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Turn mode" })).toBeNull();
     fireEvent.submit(textarea.closest("form") as HTMLFormElement);
     expect(onSteer).not.toHaveBeenCalled();
     expect(onSubmit).toHaveBeenCalledWith("next queued turn", []);

@@ -17,6 +17,20 @@ import {
 } from "./appComposerAgent.fixture";
 import { App } from "./App";
 
+async function openRightInspector() {
+  const toggle = await screen.findByRole("button", { name: "Right inspector" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+}
+
+function collapseRightInspector() {
+  const toggle = screen.getByRole("button", { name: "Right inspector" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+}
+
 describe("Workbench layout and workspace panels", () => {
   it("uses the authoritative initialize display path for the cold Composer", async () => {
     const canonicalCwd = "/home/tester/Projects/a-very-long-workspace";
@@ -431,9 +445,10 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Open workspace..." }));
     const dialog = await screen.findByRole("dialog", { name: "Choose workspace folder" });
-    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    const location = within(dialog).getByRole("textbox", { name: "Folder path" }) as HTMLInputElement;
+    expect(location.value).toBe("/tmp");
     fireEvent.click(await within(dialog).findByRole("button", { name: "manual-project" }));
-    expect(await within(dialog).findByText("/tmp/manual-project")).toBeTruthy();
+    await waitFor(() => expect(location.value).toBe("/tmp/manual-project"));
     fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -448,6 +463,7 @@ describe("Workbench layout and workspace panels", () => {
       const current = (params as { path?: string | null }).path ?? "/tmp/project";
       return {
         root: "/",
+        roots: [{ name: "/", path: "/" }],
         current,
         parent: current === "/" ? null : "/tmp",
         folders: current === "/tmp/project"
@@ -459,9 +475,10 @@ describe("Workbench layout and workspace panels", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
     const dialog = await screen.findByRole("dialog", { name: "Open workspace" });
-    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    const location = within(dialog).getByRole("textbox", { name: "Folder path" }) as HTMLInputElement;
+    expect(location.value).toBe("/tmp/project");
     fireEvent.click(await within(dialog).findByRole("button", { name: "existing-workspace" }));
-    expect(await within(dialog).findByText("/tmp/project/existing-workspace")).toBeTruthy();
+    await waitFor(() => expect(location.value).toBe("/tmp/project/existing-workspace"));
     fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
     await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
       method: "thread/draft/open",
@@ -471,11 +488,69 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
     const createDialog = await screen.findByRole("dialog", { name: "Open workspace" });
     fireEvent.click(await within(createDialog).findByRole("button", { name: "New workspace..." }));
-    fireEvent.change(within(createDialog).getByRole("textbox"), { target: { value: "fresh-workspace" } });
+    fireEvent.change(within(createDialog).getByRole("textbox", { name: "Workspace name" }), { target: { value: "fresh-workspace" } });
     fireEvent.click(within(createDialog).getByRole("button", { name: "Create workspace" }));
     await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
       method: "workspace/create",
       params: { name: "fresh-workspace", parent: "/tmp/project" }
+    }));
+  });
+
+  it("browses and opens custom paths pasted into the workspace folder location", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
+    const dialog = await screen.findByRole("dialog", { name: "Open workspace" });
+    const location = within(dialog).getByRole("textbox", { name: "Folder path" }) as HTMLInputElement;
+
+    fireEvent.change(location, { target: { value: "/opt/pasted-workspace" } });
+    fireEvent.keyDown(location, { key: "Enter" });
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "workspace/folders",
+      params: expect.objectContaining({ path: "/opt/pasted-workspace" })
+    }));
+    expect(location.value).toBe("/opt/pasted-workspace");
+
+    fireEvent.change(location, { target: { value: "/srv/direct-open-workspace" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/draft/open",
+      params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "/srv/direct-open-workspace" }) })
+    }));
+  });
+
+  it("opens a workspace on another Windows drive from the folder panel", async () => {
+    gatewayMock.workspaceFolderList = (params) => {
+      const current = (params as { path?: string | null }).path ?? "C:\\project";
+      const root = current.startsWith("D:") ? "D:\\" : "C:\\";
+      return {
+        root,
+        roots: [
+          { name: "C:", path: "C:\\" },
+          { name: "D:", path: "D:\\" }
+        ],
+        current,
+        parent: current === root ? null : root,
+        folders: current === "D:\\"
+          ? [{ name: "other-workspace", path: "D:\\other-workspace" }]
+          : []
+      };
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
+    const dialog = await screen.findByRole("dialog", { name: "Open workspace" });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Drive" }), {
+      target: { value: "D:\\" }
+    });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "other-workspace" }));
+    await waitFor(() => expect((within(dialog).getByRole("textbox", { name: "Folder path" }) as HTMLInputElement).value)
+      .toBe("D:\\other-workspace"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open folder" }));
+
+    await waitFor(() => expect(gatewayMock.requestLog).toContainEqual({
+      method: "thread/draft/open",
+      params: expect.objectContaining({ origin: expect.objectContaining({ cwd: "D:\\other-workspace" }) })
     }));
   });
 
@@ -511,6 +586,22 @@ describe("Workbench layout and workspace panels", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Git branch" }).textContent).toContain("feature/new-composer"));
   });
 
+  it("requires explicit controls to dismiss workspace and branch dialogs", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open workspace" }));
+    const workspaceDialog = await screen.findByRole("dialog", { name: "Open workspace" });
+    fireEvent.mouseDown(workspaceDialog.parentElement!);
+    expect(screen.getByRole("dialog", { name: "Open workspace" })).toBeTruthy();
+    fireEvent.click(within(workspaceDialog).getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Git branch" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New branch..." }));
+    const branchDialog = await screen.findByRole("dialog", { name: "New branch" });
+    fireEvent.mouseDown(branchDialog.parentElement!);
+    expect(screen.getByRole("dialog", { name: "New branch" })).toBeTruthy();
+  });
+
   it("keeps the bound Workspace control scoped to Files instead of retargeting the Thread", async () => {
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Bound workspace")];
     render(<App />);
@@ -524,10 +615,10 @@ describe("Workbench layout and workspace panels", () => {
   });
 
   it("opens right workspace tabs from Home and the add menu", async () => {
-    const { container } = render(<App />);
+    render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     expect(within(home).queryByText("local PTY")).toBeNull();
     expect(within(home).queryByText("workspace tree")).toBeNull();
@@ -540,7 +631,7 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.click(addMenuFiles!);
     expect(await screen.findByRole("region", { name: "Workspace files" })).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("Workspace home"));
+    fireEvent.click(screen.getByRole("tab", { name: "Workspace home" }));
     const visibleHome = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(visibleHome).getByRole("button", { name: /Terminal/ }));
     expect(await screen.findByRole("region", { name: "Terminal" })).toBeTruthy();
@@ -551,7 +642,7 @@ describe("Workbench layout and workspace panels", () => {
 
   it("opens a reusable preview-only Browser tab with safe URL handling", async () => {
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Browser session")];
-    const { container } = render(<App />);
+    render(<App />);
 
     fireEvent.click(await screen.findByText("Browser session"));
     await waitFor(() => {
@@ -560,7 +651,7 @@ describe("Workbench layout and workspace panels", () => {
         params: expect.objectContaining({ threadId: "thread-1" })
       });
     });
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Browser" }));
     const browser = await screen.findByRole("region", { name: "Browser" });
@@ -596,10 +687,11 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.submit(address.closest("form") as HTMLFormElement);
     expect((await within(browser).findByRole("alert")).textContent).toContain("Browser supports http and https URLs.");
 
-    fireEvent.click(screen.getByLabelText("Workspace home"));
+    fireEvent.click(screen.getByRole("tab", { name: "Workspace home" }));
     const visibleHome = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(visibleHome).getByRole("button", { name: "Browser" }));
-    expect(container.querySelectorAll(".rightWorkspaceTab button[title='Browser']")).toHaveLength(1);
+    expect(within(screen.getByRole("tablist", { name: "Right workspace tabs" }))
+      .getAllByRole("tab", { name: "Browser" })).toHaveLength(1);
   });
 
   it("isolates Browser tabs and restores navigation state per thread", async () => {
@@ -607,7 +699,7 @@ describe("Workbench layout and workspace panels", () => {
       sessionSummary("thread-a", "Thread A"),
       sessionSummary("thread-b", "Thread B")
     ];
-    const { container } = render(<App />);
+    render(<App />);
 
     fireEvent.click(await screen.findByText("Thread A"));
     await waitFor(() => {
@@ -616,7 +708,7 @@ describe("Workbench layout and workspace panels", () => {
         params: expect.objectContaining({ threadId: "thread-a" })
       });
     });
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     let home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Browser" }));
     let browser = await screen.findByRole("region", { name: "Browser" });
@@ -640,7 +732,8 @@ describe("Workbench layout and workspace panels", () => {
     fireEvent.change(address, { target: { value: "b.example" } });
     fireEvent.submit(address.closest("form") as HTMLFormElement);
     expect((await within(browser).findByTitle("b.example")).getAttribute("src")).toBe("https://b.example/");
-    expect(container.querySelectorAll(".rightWorkspaceTab button[title='Browser']")).toHaveLength(1);
+    expect(within(screen.getByRole("tablist", { name: "Right workspace tabs" }))
+      .getAllByRole("tab", { name: "Browser" })).toHaveLength(1);
 
     fireEvent.click(screen.getByText("Thread A"));
     home = await screen.findByRole("region", { name: "Workspace status" });
@@ -649,14 +742,15 @@ describe("Workbench layout and workspace panels", () => {
     expect((within(browser).getByLabelText("Browser address") as HTMLInputElement).value).toBe("https://a.example/");
     expect((within(browser).getByTitle("a.example") as HTMLIFrameElement).getAttribute("src")).toBe("https://a.example/");
     expect(within(browser).queryByTitle("b.example")).toBeNull();
-    expect(container.querySelectorAll(".rightWorkspaceTab button[title='Browser']")).toHaveLength(1);
+    expect(within(screen.getByRole("tablist", { name: "Right workspace tabs" }))
+      .getAllByRole("tab", { name: "Browser" })).toHaveLength(1);
   });
 
   it("closes the right workspace add menu on outside click and item activation", async () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: /Review/ }));
     expect(await screen.findByRole("region", { name: "Review" })).toBeTruthy();
@@ -724,7 +818,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Review" }));
     const review = await screen.findByRole("region", { name: "Review" });
@@ -775,7 +869,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Review" }));
     const review = await screen.findByRole("region", { name: "Review" });
@@ -812,7 +906,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
@@ -820,17 +914,28 @@ describe("Workbench layout and workspace panels", () => {
     expect(files.querySelector("header p")).toBeNull();
 
     fireEvent.click(within(files).getByRole("treeitem", { name: /README\.md/ }));
-    expect(await within(files).findByText("/tmp/project/docs/README.md")).toBeTruthy();
+    const breadcrumb = await within(files).findByRole("navigation", { name: "File breadcrumb" });
+    expect(breadcrumb.textContent).toBe("projectdocsREADME.md");
+    expect(within(files).queryByText("/tmp/project/docs/README.md")).toBeNull();
     const table = await within(files).findByRole("table", { name: "YAML frontmatter" });
     expect(within(table).getByText("title")).toBeTruthy();
     expect(within(table).getByText("docs")).toBeTruthy();
     expect(within(table).getByText("guide")).toBeTruthy();
     expect(await within(files).findByRole("heading", { name: "API Notes" })).toBeTruthy();
     expect(within(files).getByText("supports markdown")).toBeTruthy();
-    fireEvent.click(within(files).getByRole("button", { name: "Copy Markdown file" }));
+    fireEvent.click(within(files).getByRole("button", { name: "Copy docs/README.md" }));
     await waitFor(() => {
       expect(gatewayMock.clipboardWriteLog[gatewayMock.clipboardWriteLog.length - 1]).toBe(markdownSource);
     });
+    const sourceViewToggle = within(files).getByRole("button", { name: "Source view for docs/README.md" });
+    expect(sourceViewToggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(sourceViewToggle);
+    expect(sourceViewToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(files.querySelector(".rightCodePreview")?.textContent).toContain(markdownSource);
+    expect(within(files).queryByRole("heading", { name: "API Notes" })).toBeNull();
+    fireEvent.click(sourceViewToggle);
+    expect(sourceViewToggle.getAttribute("aria-pressed")).toBe("false");
+    expect(await within(files).findByRole("heading", { name: "API Notes" })).toBeTruthy();
   });
 
   it("opens file-tree external actions and keeps rich-preview files context-menu accessible", async () => {
@@ -846,7 +951,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
@@ -938,11 +1043,11 @@ describe("Workbench layout and workspace panels", () => {
     }
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("srcdoc")).toContain("Artifact preview");
-    expect(within(files).getByRole("button", { name: "Show file tree" })).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "File tree" }).getAttribute("aria-pressed")).toBe("false");
     expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
-    expect(within(files).getByRole("button", { name: "Hide file tree" })).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "File tree" }).getAttribute("aria-pressed")).toBe("true");
     expect(within(files).getByRole("complementary", { name: "Workspace file tree" })).toBeTruthy();
 
     fireEvent.click(pathButton("C:\\repo\\site\\index.html"));
@@ -988,7 +1093,7 @@ describe("Workbench layout and workspace panels", () => {
 
       const files = await screen.findByRole("region", { name: "Workspace files" });
       expect(await within(files).findByRole("heading", { name: "Tool report" })).toBeTruthy();
-      expect(within(files).getByRole("button", { name: "Show file tree" })).toBeTruthy();
+      expect(within(files).getByRole("button", { name: "File tree" }).getAttribute("aria-pressed")).toBe("false");
       expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
       await waitFor(() => {
         expect(gatewayMock.requestLog).toContainEqual({
@@ -1015,14 +1120,14 @@ describe("Workbench layout and workspace panels", () => {
         params: expect.objectContaining({ threadId: "thread-1" })
       });
     });
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     await screen.findByRole("region", { name: "Workspace files" });
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "workspace/files")).toBe(true);
     });
-    fireEvent.click(screen.getByLabelText("Collapse right inspector"));
+    collapseRightInspector();
 
     const emitCompletedTurn = async (turnId: string, entries: TranscriptEntry[]) => {
       await act(async () => {
@@ -1197,13 +1302,15 @@ describe("Workbench layout and workspace panels", () => {
     const { container } = render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
     fireEvent.click(within(files).getByRole("treeitem", { name: /index\.html/ }));
 
-    expect(await within(files).findByText("/tmp/project/site/index.html")).toBeTruthy();
+    const breadcrumb = await within(files).findByRole("navigation", { name: "File breadcrumb" });
+    expect(breadcrumb.textContent).toBe("projectsiteindex.html");
+    expect(within(files).queryByText("/tmp/project/site/index.html")).toBeNull();
     await waitFor(() => expect(files.querySelector(".htmlStaticPreview iframe")).toBeTruthy());
     const inlineFrame = files.querySelector(".htmlStaticPreview iframe") as HTMLIFrameElement | null;
     if (!inlineFrame) {
@@ -1231,17 +1338,22 @@ describe("Workbench layout and workspace panels", () => {
     const openPreviewAction = within(files).getByLabelText("Open HTML preview for site/index.html");
     const editAction = within(files).getByLabelText("Edit site/index.html");
     expect(openPreviewAction.parentElement).toBe(editAction.parentElement);
-    expect(openPreviewAction.parentElement?.classList.contains("filePreviewActions")).toBe(true);
+    expect(openPreviewAction.parentElement?.classList.contains("workspaceFileToolbarActions")).toBe(true);
     expect(openPreviewAction.nextElementSibling).toBe(editAction);
 
-    const hideFileTree = within(files).getByRole("button", { name: "Hide file tree" });
-    expect(hideFileTree.closest("header")).toBe(files.querySelector(":scope > header"));
-    fireEvent.click(hideFileTree);
+    const fileTreeToggle = within(files).getByRole("button", { name: "File tree" });
+    expect(fileTreeToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(fileTreeToggle.closest("header")).toBe(files.querySelector(".workspaceFileToolbar"));
+    fireEvent.click(fileTreeToggle);
+    expect(fileTreeToggle.getAttribute("aria-pressed")).toBe("false");
     expect(within(files).queryByRole("complementary", { name: "Workspace file tree" })).toBeNull();
     expect(files.classList.contains("has-fileTree")).toBe(false);
-    fireEvent.click(within(files).getByRole("button", { name: "Show file tree" }));
+    fireEvent.click(within(breadcrumb).getByRole("button", { name: "project" }));
     expect(within(files).getByRole("complementary", { name: "Workspace file tree" })).toBeTruthy();
     expect(files.classList.contains("has-fileTree")).toBe(true);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(files).getByLabelText("Filter workspace files"));
+    });
 
     fireEvent.click(within(files).getByLabelText("Edit site/index.html"));
     fireEvent.change(within(files).getByLabelText("Edit site/index.html"), { target: { value: changedHtmlSource } });
@@ -1313,7 +1425,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
@@ -1356,13 +1468,15 @@ describe("Workbench layout and workspace panels", () => {
     const { container } = render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
 
     fireEvent.click(within(files).getByRole("treeitem", { name: /main\.py/ }));
-    expect(await within(files).findByText("/tmp/project/src/main.py")).toBeTruthy();
+    const breadcrumb = await within(files).findByRole("navigation", { name: "File breadcrumb" });
+    expect(breadcrumb.textContent).toBe("projectsrcmain.py");
+    expect(within(files).queryByText("/tmp/project/src/main.py")).toBeNull();
     await waitFor(() => expect(container.querySelector(".rightCodePreview")).toBeTruthy());
     const preview = container.querySelector(".rightCodePreview") as HTMLElement | null;
     expect(preview?.dataset.lang).toBe("python");
@@ -1375,7 +1489,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Terminal" }));
     const terminal = await screen.findByRole("region", { name: "Terminal" });
@@ -1399,7 +1513,7 @@ describe("Workbench layout and workspace panels", () => {
     render(<App />);
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Terminal" }));
     expect(await screen.findByRole("region", { name: "Terminal" })).toBeTruthy();

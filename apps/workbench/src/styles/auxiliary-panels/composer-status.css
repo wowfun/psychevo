@@ -66,7 +66,7 @@
   width: fit-content;
 }
 
-.composerRequest input {
+.composerRequest input:not([type="checkbox"]):not([type="radio"]) {
   flex: 1 1 180px;
   min-height: 32px;
   color: var(--pevo-ink);
@@ -293,7 +293,7 @@
   gap: 8px;
   padding: 5px 8px;
   color: var(--pevo-muted);
-  background: var(--pevo-panel-muted);
+  background: transparent;
   border: 1px solid var(--pevo-border);
   border-radius: var(--pevo-radius-sm);
   font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
@@ -313,11 +313,36 @@
   border-radius: var(--pevo-radius-sm);
 }
 
-.composerFolderLocation > span {
+.composerFolderLocation > button:not(:disabled) {
+  cursor: pointer;
+}
+
+.composerFolderLocation > select {
+  width: auto;
+  max-width: 96px;
+  flex: 0 0 auto;
+  padding: 4px 22px 4px 7px;
+  color: var(--pevo-text);
+  background-color: var(--pevo-panel);
+  font: inherit;
+}
+
+.composerFolderLocation > input {
+  width: 100%;
   min-width: 0;
-  overflow: hidden;
+  min-height: 28px;
+  flex: 1 1 auto;
+  padding: 0 7px;
+  color: var(--pevo-text);
+  background: var(--pevo-panel);
+  border: 1px solid transparent;
+  border-radius: var(--pevo-radius-sm);
+  font: inherit;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.composerFolderLocation > input:hover:not(:disabled) {
+  border-color: var(--pevo-border);
 }
 
 .composerFolderList {
@@ -382,9 +407,9 @@
 
 .composerFolderDialog > footer button[type="submit"],
 .composerBranchDialog > footer button[type="submit"] {
-  color: var(--pevo-bg);
-  background: var(--pevo-ink);
-  border-color: var(--pevo-ink);
+  color: var(--pevo-control-primary-ink);
+  background: var(--pevo-control-primary-bg);
+  border-color: var(--pevo-control-primary-border);
 }
 
 .composerSubmitControls {

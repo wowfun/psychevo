@@ -152,6 +152,90 @@ test.describe("pevo Web Workbench", () => {
     }
   });
 
+  test("unifies navigation surfaces, buttons, and semantic fields", async ({ page, isMobile }, testInfo) => {
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+
+      const history = page.locator(".historyColumn");
+      const darkHistorySurface = isMobile ? null : await history.evaluate((element) => getComputedStyle(element).backgroundColor);
+      const newSession = history.getByRole("button", { name: "New Session", exact: true });
+      const search = history.getByRole("button", { name: "Search", exact: true });
+      await expect(newSession).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(newSession).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+      const [newSessionIconBox, searchIconBox] = await Promise.all([
+        newSession.locator("svg").boundingBox(),
+        search.locator("svg").boundingBox()
+      ]);
+      expect(newSessionIconBox).not.toBeNull();
+      expect(searchIconBox).not.toBeNull();
+      expect(Math.abs(newSessionIconBox!.x - searchIconBox!.x)).toBeLessThanOrEqual(1);
+      await page.getByRole("button", { name: "Settings" }).click();
+
+      const settings = page.getByRole("region", { name: "Settings", exact: true });
+      await expect(settings).toBeVisible();
+      const backToApp = settings.getByRole("button", { name: "Back to app" });
+      const appearanceNavItem = settings.getByRole("button", { name: "Appearance" });
+      await expect(settings.locator(".pevo-navItemMarker")).toHaveCount(0);
+      const [backIconBox, appearanceIconBox] = await Promise.all([
+        backToApp.locator("svg").boundingBox(),
+        appearanceNavItem.locator("svg").boundingBox()
+      ]);
+      expect(backIconBox).not.toBeNull();
+      expect(appearanceIconBox).not.toBeNull();
+      expect(Math.abs(backIconBox!.x - appearanceIconBox!.x)).toBeLessThanOrEqual(1);
+      if (!isMobile) {
+        expect(await settings.locator(".settingsNav").evaluate((element) => getComputedStyle(element).backgroundColor))
+          .toBe(darkHistorySurface);
+      }
+
+      await settings.getByRole("button", { name: "Light" }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-pevo-appearance", "light");
+      const lightSettingsSurface = isMobile ? null : await settings.locator(".settingsNav").evaluate((element) => getComputedStyle(element).backgroundColor);
+      await settings.getByRole("button", { name: "Web Search" }).click();
+
+      const webSearch = settings.locator(".webSearchSettings");
+      const executionField = webSearch.getByRole("combobox", { name: "Execution" });
+      await expect(executionField).toBeVisible();
+      await expect(executionField).toHaveClass(/pevo-fieldControl/);
+      await expect(executionField).toHaveCSS("min-height", isMobile ? "44px" : "32px");
+      expect(await executionField.evaluate((element) => getComputedStyle(element).backgroundColor))
+        .not.toBe("rgba(0, 0, 0, 0)");
+
+      const allowedDomains = webSearch.getByRole("textbox", { name: "Allowed domains" });
+      await expect(allowedDomains).toHaveClass(/pevo-fieldControl/);
+      await allowedDomains.focus();
+      expect(await allowedDomains.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
+      await expect(webSearch.locator(".pevo-fieldControl--secret")).toHaveCount(4);
+      await expect(webSearch.locator(".pevo-choiceControl").first()).toHaveCSS("width", "16px");
+
+      const saveWebSearch = webSearch.getByRole("button", { name: "Save web search" });
+      await expect(saveWebSearch).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(saveWebSearch).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+      expect(await saveWebSearch.evaluate((element) => getComputedStyle(element).color))
+        .toBe(await page.locator("body").evaluate((element) => getComputedStyle(element).color));
+      await assertNoHorizontalOverflow(page, settings);
+      await captureWorkbench(page, testInfo, `settings-web-search-light-${isMobile ? "mobile" : "desktop"}`);
+
+      await settings.getByRole("button", { name: "Back to app" }).click();
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      } else {
+        expect(await history.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(lightSettingsSurface);
+      }
+      await expect(newSession).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(newSession).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+      await captureWorkbench(page, testInfo, `history-controls-light-${isMobile ? "mobile" : "desktop"}`);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("renders Channels settings with compact detail and QR-first setup", async ({ page, isMobile }, testInfo) => {
     await page.setViewportSize(isMobile ? { width: 390, height: 900 } : { width: 1440, height: 1000 });
     const server = await startPevoWeb({

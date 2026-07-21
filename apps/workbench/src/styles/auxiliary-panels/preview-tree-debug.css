@@ -49,30 +49,7 @@
 }
 
 .workspaceFileTreeFilter {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
   margin: 4px 0 8px 10px;
-  padding: 0 9px;
-  color: var(--pevo-muted);
-  background: color-mix(in oklch, var(--pevo-panel), transparent 76%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.workspaceFileTreeFilter input {
-  min-width: 0;
-  color: var(--pevo-ink);
-  background: transparent;
-  border: 0;
-  outline: 0;
-  font: inherit;
-}
-
-.workspaceFileTreeFilter input::placeholder {
-  color: color-mix(in oklch, var(--pevo-muted), transparent 18%);
 }
 
 .fileTree,
@@ -191,7 +168,22 @@
 }
 
 .workspaceFileContextMenu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
+}
+
+.workspaceFileContextMenu button > svg {
+  flex: 0 0 auto;
+  color: var(--pevo-muted);
+}
+
+.workspaceFileContextMenu button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workspaceFileContextMenu button:hover,

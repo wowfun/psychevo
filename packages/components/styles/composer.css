@@ -120,17 +120,7 @@
   right: 18px;
   bottom: 58px;
   z-index: 15;
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  padding: 0;
-  color: var(--pevo-accent-ink);
-  background: var(--pevo-accent);
-  border: 1px solid var(--pevo-accent);
-  border-radius: var(--pevo-radius-sm);
   box-shadow: 0 6px 16px rgb(21 28 36 / 16%);
-  cursor: pointer;
 }
 
 .pevo-jumpBottom::after {
@@ -173,7 +163,11 @@
 }
 
 .pevo-composer textarea:focus-visible {
+  border-color: var(--pevo-field-focus);
   outline: none;
+  box-shadow:
+    inset 0 1px 2px rgb(21 28 36 / 5%),
+    0 0 0 2px color-mix(in oklch, var(--pevo-field-focus), transparent 72%);
 }
 
 .pevo-composerInput {
@@ -232,33 +226,16 @@
   white-space: nowrap;
 }
 
-.pevo-planChip button {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  padding: 0;
-  color: var(--pevo-muted);
-  background: transparent;
-  border: 0;
-  border-radius: 999px;
-  cursor: pointer;
+.pevo-planChip .pevo-iconButton {
   opacity: 0;
   pointer-events: none;
-  transition: color 140ms ease, opacity 140ms ease, background-color 140ms ease;
+  transition-property: color, opacity, background-color;
 }
 
-.pevo-planChip:hover button,
-.pevo-planChip:focus-within button {
+.pevo-planChip:hover .pevo-iconButton,
+.pevo-planChip:focus-within .pevo-iconButton {
   opacity: 1;
   pointer-events: auto;
-}
-
-@media (hover: hover) {
-  .pevo-planChip button:hover {
-    color: var(--pevo-ink);
-    background: var(--pevo-panel);
-  }
 }
 
 .pevo-attachmentList {
@@ -344,28 +321,13 @@
   color: var(--pevo-danger);
 }
 
-.pevo-attachmentChip button {
+.pevo-attachmentChip > .pevo-iconButton {
   grid-column: 2;
   grid-row: 1 / span 2;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  color: var(--pevo-muted);
-  background: transparent;
-  border: 0;
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
 }
 
-.pevo-attachmentChip.is-image button {
+.pevo-attachmentChip.is-image > .pevo-iconButton {
   grid-column: 3;
-}
-
-.pevo-attachmentChip button:hover {
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
 }
 
 .pevo-composerRequestPanel {
@@ -524,18 +486,6 @@
   z-index: 2;
 }
 
-.pevo-primaryButton.pevo-sendButton {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-  padding: 0;
-  color: var(--pevo-bg);
-  background: var(--pevo-ink);
-  border-color: var(--pevo-ink);
-  border-radius: 999px;
-}
-
 .pevo-stopGlyph {
   display: block;
   width: 11px;
@@ -544,83 +494,7 @@
   border-radius: 2px;
 }
 
-@media (hover: hover) {
-  .pevo-primaryButton.pevo-sendButton:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--pevo-ink), var(--pevo-bg) 14%);
-    border-color: color-mix(in oklch, var(--pevo-ink), var(--pevo-bg) 14%);
-  }
-}
-
-.pevo-primaryButton,
-.pevo-buttonRow button,
-.pevo-request button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 12px;
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border-strong);
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
-  transition-duration: 140ms;
-  transition-property: background-color, border-color, color, transform;
-  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.pevo-primaryButton:active:not(:disabled),
-.pevo-buttonRow button:active:not(:disabled),
-.pevo-request button:active:not(:disabled) {
-  transform: scale(0.96);
-}
-
-.pevo-primaryButton {
-  color: var(--pevo-accent-ink);
-  background: var(--pevo-accent);
-  border-color: var(--pevo-accent);
-}
-
-@media (hover: hover) {
-  .pevo-primaryButton:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--pevo-accent), black 8%);
-    border-color: color-mix(in oklch, var(--pevo-accent), black 8%);
-  }
-
-  .pevo-buttonRow button:hover:not(:disabled),
-  .pevo-request button:hover:not(:disabled) {
-    background: var(--pevo-panel-muted);
-    border-color: var(--pevo-border-strong);
-  }
-}
-
-.pevo-primaryButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-}
-
 .pevo-segmented {
   grid-column: 1 / -1;
-  display: inline-flex;
   width: max-content;
-  padding: 3px;
-  background: var(--pevo-panel-muted);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.pevo-segmented button {
-  min-width: 72px;
-  padding: 5px 10px;
-  color: var(--pevo-muted);
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.pevo-segmented button.is-selected {
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  box-shadow: 0 1px 2px rgb(21 28 36 / 9%);
 }

@@ -16,6 +16,13 @@ import {
 } from "./appComposerAgent.fixture";
 import { App } from "./App";
 
+async function openRightInspector() {
+  const toggle = await screen.findByRole("button", { name: "Right inspector" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+}
+
 describe("Workbench session status observability", () => {
   it("renders the full session id in the Status panel", async () => {
     const longSessionId = "019ebc20-1234-5678-9abc-def0123492dd";
@@ -30,7 +37,7 @@ describe("Workbench session status observability", () => {
         params: expect.objectContaining({ threadId: longSessionId })
       });
     });
-    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    await openRightInspector();
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "observability/read",
@@ -103,8 +110,8 @@ describe("Workbench session status observability", () => {
         params: expect.objectContaining({ threadId: "old-thread" })
       });
     });
-    fireEvent.click(await screen.findByLabelText("Show right inspector"));
-    fireEvent.click(screen.getByLabelText("New Session"));
+    await openRightInspector();
+    fireEvent.click(screen.getByRole("button", { name: "New Session" }));
 
     const home = await screen.findByRole("region", { name: "Workspace status" });
     await waitFor(() => {
@@ -132,7 +139,7 @@ describe("Workbench session status observability", () => {
 
     expect(await screen.findByPlaceholderText("Ask Psychevo...")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "New Session" }));
-    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     await waitFor(() => {
       expect(within(home).getByText("draft")).toBeTruthy();
@@ -191,7 +198,7 @@ describe("Workbench session status observability", () => {
         params: expect.objectContaining({ threadId: "parent-thread" })
       });
     });
-    fireEvent.click(await screen.findByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     await waitFor(() => {
@@ -254,7 +261,7 @@ describe("Workbench session status observability", () => {
     expect(within(contextPopover).getByText("Context unavailable.")).toBeTruthy();
     expect(within(contextPopover).queryByText("0%")).toBeNull();
     expect(screen.queryByRole("region", { name: "Workspace status" })).toBeNull();
-    expect(screen.getByLabelText("Show right inspector")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Right inspector" }).getAttribute("aria-expanded")).toBe("false");
   });
 
   it("shows token usage and Limit unavailable when a runtime reports no context ceiling", async () => {

@@ -4,7 +4,7 @@ import type {
   SetStateAction
 } from "react";
 import type { GatewayClient } from "@psychevo/client";
-import type { TranscriptAgentSession } from "@psychevo/components";
+import type { ConfirmAction, TranscriptAgentSession } from "@psychevo/components";
 import type { GatewayRequestScope, WorkspaceDiffResult } from "@psychevo/protocol";
 import {
   createRightTabId,
@@ -22,6 +22,7 @@ import type {
 type RightWorkspaceActionsParams = {
   activeRightTabId: string | null;
   client: GatewayClient | null;
+  confirmAction: ConfirmAction;
   currentThreadId: string | null;
   debugEnabled: boolean;
   dirtyRightTabs: Record<string, boolean>;
@@ -40,6 +41,13 @@ type RightWorkspaceActionsParams = {
 };
 
 export function createRightWorkspaceActions(params: RightWorkspaceActionsParams) {
+  const confirmDiscardedEdits = () => params.confirmAction({
+    confirmLabel: "Discard edits",
+    description: "The unsaved file changes will be lost.",
+    title: "Discard unsaved file edits?",
+    tone: "caution"
+  });
+
   function revealRightWorkspace(tabId: string | null = params.activeRightTabId) {
     params.setActiveCommandOverlay(null);
     params.setRightCollapsed(false);
@@ -47,7 +55,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     params.setMobilePanel("status");
   }
 
-  function openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch: Partial<RightWorkspaceTab> = {}, forceNew = false) {
+  async function openRightWorkspaceTab(kind: RightWorkspaceTabKind, patch: Partial<RightWorkspaceTab> = {}, forceNew = false) {
     if (kind === "debug" && !params.debugEnabled) {
       return;
     }
@@ -70,7 +78,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
       && params.dirtyRightTabs[nextId]
       && patch.path !== undefined
       && (replacedFileTab.path ?? null) !== (patch.path ?? null)
-      && !window.confirm("Discard unsaved file edits?")
+      && !await confirmDiscardedEdits()
     ) {
       return;
     }
@@ -122,8 +130,8 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     )));
   }
 
-  function closeRightWorkspaceTab(tabId: string) {
-    if (params.dirtyRightTabs[tabId] && !window.confirm("Discard unsaved file edits?")) {
+  async function closeRightWorkspaceTab(tabId: string) {
+    if (params.dirtyRightTabs[tabId] && !await confirmDiscardedEdits()) {
       return;
     }
     const closingTab = params.rightTabs.find((tab) => tab.id === tabId) ?? null;

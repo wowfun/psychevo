@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { gatewayMock, sessionSummary } from "./appComposerAgent.fixture";
+import { GatewayClient } from "@psychevo/client";
 import { App } from "./App";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("Workbench automations", () => {
   it("shows one empty-state creation surface before a draft is opened", async () => {
@@ -126,6 +131,19 @@ describe("Workbench automations", () => {
   });
 
   it("creates, runs, and deletes a project automation", async () => {
+    let releaseDelete!: () => void;
+    const deleteGate = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    const originalRequest = GatewayClient.prototype.request;
+    const requestSpy = vi.spyOn(GatewayClient.prototype, "request").mockImplementation(function (this: GatewayClient, method, params) {
+      const result = Reflect.apply(originalRequest, this, [method, params]) as ReturnType<GatewayClient["request"]>;
+      if (method !== "automation/delete") return result;
+      return result.then(async (value) => {
+        await deleteGate;
+        return value;
+      }) as ReturnType<GatewayClient["request"]>;
+    });
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Automations" }));
@@ -165,15 +183,38 @@ describe("Workbench automations", () => {
     });
     expect(await within(page).findByText("running")).toBeTruthy();
 
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(within(page).getByRole("button", { name: "Delete" }));
+    let deleteDialog = await screen.findByRole("dialog", { name: "Delete Morning check?" });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "automation/delete")).toBe(false);
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Delete Morning check?" })).toBeNull();
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "automation/delete")).toBe(false);
+
+    fireEvent.click(within(page).getByRole("button", { name: "Delete" }));
+    deleteDialog = await screen.findByRole("dialog", { name: "Delete Morning check?" });
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete automation" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "automation/delete",
         params: { automationId: "automation-1" }
       });
+      expect(requestSpy).toHaveBeenCalledWith("automation/delete", { automationId: "automation-1" });
     });
-    confirm.mockRestore();
+    await waitFor(() => {
+      const pendingDialog = screen.getByRole("dialog", { name: "Delete Morning check?" });
+      expect(pendingDialog.getAttribute("aria-busy")).toBe("true");
+      expect((within(pendingDialog).getByRole("button", { name: "Close" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((within(pendingDialog).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((within(pendingDialog).getByRole("button", { name: "Delete automation" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    expect(within(page).getByText("Morning check")).toBeTruthy();
+
+    releaseDelete();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Delete Morning check?" })).toBeNull();
+    });
     await waitFor(() => {
       expect(within(page).queryByText("Morning check")).toBeNull();
     });

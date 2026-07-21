@@ -94,7 +94,7 @@ describe("component fallback rendering", () => {
   });
 
   it("renders hover copy and timestamp affordances on user and assistant rows", () => {
-    const html = renderToStaticMarkup(
+    const view = render(
       <TranscriptPanel
         entries={[
           transcriptEntry({
@@ -132,14 +132,15 @@ describe("component fallback rendering", () => {
       />
     );
 
-    expect(html).toContain("Message actions");
-    expect(html).toContain("pevo-messageFrame is-user");
-    expect(html).toContain("pevo-messageFrame is-assistant");
-    expect(html).toContain("Copy message");
-    expect(html).toContain("1m05s");
-    expect(html).toContain("2026-06-07T14:02:00.000Z");
-    expect(html).toContain("2026-06-07T14:03:00.000Z");
-    expect(html.match(/Copy message/g)?.length).toBe(2);
+    expect(screen.getAllByLabelText("Message actions")).toHaveLength(2);
+    expect(view.container.querySelector(".pevo-messageFrame.is-user")).toBeTruthy();
+    expect(view.container.querySelector(".pevo-messageFrame.is-assistant")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Copy message" })).toHaveLength(2);
+    expect(view.container.textContent).toContain("1m05s");
+    expect(Array.from(view.container.querySelectorAll("time"), (time) => time.dateTime)).toEqual([
+      "2026-06-07T14:02:00.000Z",
+      "2026-06-07T14:03:00.000Z"
+    ]);
   });
 
   it("does not render decorative transcript role or evidence icons", () => {

@@ -18,6 +18,13 @@ import {
 import { App } from "./App";
 
 describe("Workbench command routing", () => {
+  async function openRightInspector() {
+    const toggle = await screen.findByRole("button", { name: "Right inspector" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  }
+
   async function resumeSession(threadId = "thread-1", title = "Active session") {
     gatewayMock.sessionSummaries = [sessionSummary(threadId, title)];
     const sessionRow = await screen.findByText(title);
@@ -109,18 +116,20 @@ describe("Workbench command routing", () => {
 
     render(<App />);
     await resumeSession();
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const home = await screen.findByRole("region", { name: "Workspace status" });
     fireEvent.click(within(home).getByRole("button", { name: "Files" }));
     const files = await screen.findByRole("region", { name: "Workspace files" });
-    fireEvent.click(within(files).getByRole("button", { name: "Hide file tree" }));
-    expect(within(files).getByRole("button", { name: "Show file tree" })).toBeTruthy();
+    const fileTreeToggle = within(files).getByRole("button", { name: "File tree" });
+    expect(fileTreeToggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(fileTreeToggle);
+    expect(fileTreeToggle.getAttribute("aria-pressed")).toBe("false");
 
     const textarea = screen.getByPlaceholderText("Ask Psychevo...");
     fireEvent.change(textarea, { target: { value: "/files" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(await within(files).findByRole("button", { name: "Hide file tree" })).toBeTruthy();
+    expect((await within(files).findByRole("button", { name: "File tree" })).getAttribute("aria-pressed")).toBe("true");
     expect(within(files).getByRole("complementary", { name: "Workspace file tree" })).toBeTruthy();
   });
 
@@ -185,7 +194,7 @@ describe("Workbench command routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     const rightWorkspace = await screen.findByRole("region", { name: "Right workspace" });
-    expect(within(rightWorkspace).getByRole("button", { name: "Side chat" })).toBeTruthy();
+    expect(within(rightWorkspace).getByRole("tab", { name: "Side chat" }).getAttribute("aria-selected")).toBe("true");
     expect(within(rightWorkspace).getByRole("region", { name: "Side chat" })).toBeTruthy();
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -294,7 +303,7 @@ describe("Workbench command routing", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open Planck agent session" }));
 
-    expect(await screen.findByRole("button", { name: "Planck" })).toBeTruthy();
+    expect((await screen.findByRole("tab", { name: "Planck" })).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("region", { name: "Planck" })).toBeTruthy();
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -370,7 +379,7 @@ describe("Workbench command routing", () => {
     render(<App />);
     await resumeSession();
 
-    fireEvent.click(screen.getByLabelText("Show right inspector"));
+    await openRightInspector();
     const workspace = await screen.findByRole("region", { name: "Right workspace" });
     fireEvent.click(within(workspace).getByRole("button", { name: "Team" }));
 
@@ -458,7 +467,7 @@ describe("Workbench command routing", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open investigate agent session" }));
 
-    expect(await screen.findByRole("button", { name: "investigate" })).toBeTruthy();
+    expect((await screen.findByRole("tab", { name: "investigate" })).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("region", { name: "investigate" })).toBeTruthy();
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -786,7 +795,10 @@ describe("Workbench command routing", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Collapse left sidebar" }));
+    const sidebarToggle = await screen.findByRole("button", { name: "Session sidebar" });
+    expect(sidebarToggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(sidebarToggle);
+    expect(sidebarToggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("Sessions")).toBeNull();
 
     const textarea = await screen.findByPlaceholderText("Ask Psychevo...");

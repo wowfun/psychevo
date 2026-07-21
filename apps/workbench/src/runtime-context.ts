@@ -112,6 +112,28 @@ export function parseThreadContext(value: unknown): ThreadContextReadResult {
   };
 }
 
+export function shouldRetainFirstTurnDraftContext(
+  current: ThreadContextReadResult | null,
+  observed: ThreadContextReadResult,
+  firstTurnBindingPending: boolean,
+  threadId: string | null | undefined
+): boolean {
+  if (
+    !firstTurnBindingPending
+    || !threadId
+    || !current
+    || current.binding
+    || current.selectionState !== "draft"
+    || !current.selectedTargetId
+  ) {
+    return false;
+  }
+  return observed.binding === null
+    && observed.selectionState === "default"
+    && observed.selectedTargetId === null
+    && observed.suggestedTargetId === current.selectedTargetId;
+}
+
 function threadActionKind(value: unknown): ThreadActionKind | null {
   const action = stringValue(value) as ThreadActionKind;
   return THREAD_ACTION_KINDS.has(action) ? action : null;

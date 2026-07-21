@@ -2,39 +2,116 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ActionButton, CreatePanel, FormField, Switch } from "./primitives";
+import {
+  ActionButton,
+  ActionLink,
+  CreatePanel,
+  DisclosureButton,
+  FormField,
+  IconButton,
+  NavItem,
+  SegmentedControl,
+  Switch,
+  Tabs,
+  ToggleButton
+} from "./primitives";
 
 afterEach(() => {
   cleanup();
 });
 
 describe("ActionButton", () => {
-  it("defaults to a button type and supports variants, active state, and busy state", () => {
+  it("renders a visible command without toggle semantics and keeps its label while pending", () => {
     render(
-      <ActionButton active busy icon={<span data-testid="icon" />} variant="primary">
-        Save
+      <ActionButton block icon={<span data-testid="icon" />} pending variant="primary">
+        Save changes
       </ActionButton>
     );
 
-    const button = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
     expect(button.type).toBe("button");
     expect(button.disabled).toBe(true);
     expect(button.getAttribute("aria-busy")).toBe("true");
-    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.hasAttribute("aria-pressed")).toBe(false);
     expect(button.className).toContain("pevo-actionButton--primary");
+    expect(button.className).toContain("pevo-actionButton--block");
     expect(screen.getByTestId("icon")).toBeTruthy();
   });
 
-  it("supports icon-only accessible labels", () => {
+  it("renders icon commands with one stable label and tooltip", () => {
     render(
-      <ActionButton ariaLabel="Add backend" icon={<span />} iconOnly tooltip="Add backend">
-        Add backend
-      </ActionButton>
+      <IconButton icon={<span data-testid="icon" />} label="Add backend" />
     );
 
     const button = screen.getByRole("button", { name: "Add backend" });
     expect(button.getAttribute("title")).toBe("Add backend");
-    expect(screen.getByText("Add backend").className).toContain("pevo-srOnly");
+    expect(screen.getByTestId("icon")).toBeTruthy();
+  });
+});
+
+describe("semantic controls", () => {
+  it("keeps pressed, expanded, and current state on separate interfaces", () => {
+    const onPressedChange = vi.fn();
+    const onExpandedChange = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <>
+        <ToggleButton icon={<span />} label="Preview" onPressedChange={onPressedChange} pressed={false} />
+        <DisclosureButton controls="details" expanded={false} label="Details" onExpandedChange={onExpandedChange} />
+        <NavItem current icon={<span />} label="Sessions" onSelect={onSelect} />
+      </>
+    );
+
+    const toggle = screen.getByRole("button", { name: "Preview" });
+    const disclosure = screen.getByRole("button", { name: "Details" });
+    const nav = screen.getByRole("button", { name: "Sessions" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure.getAttribute("aria-controls")).toBe("details");
+    expect(nav.getAttribute("aria-current")).toBe("page");
+    expect(nav.textContent).toBe("Sessions");
+    expect(nav.querySelector(".pevo-navItemMarker")).toBeNull();
+    fireEvent.click(toggle);
+    fireEvent.click(disclosure);
+    fireEvent.click(nav);
+    expect(onPressedChange).toHaveBeenCalledWith(true);
+    expect(onExpandedChange).toHaveBeenCalledWith(true);
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders external actions as safe links", () => {
+    render(<ActionLink external href="https://example.com">Open documentation</ActionLink>);
+    const link = screen.getByRole("link", { name: "Open documentation" });
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("uses a radiogroup and arrow keys for mutually exclusive values", () => {
+    const onValueChange = vi.fn();
+    render(
+      <SegmentedControl
+        label="View mode"
+        onValueChange={onValueChange}
+        options={[{ label: "Source", value: "source" }, { label: "Preview", value: "preview" }]}
+        value="source"
+      />
+    );
+    const source = screen.getByRole("radio", { name: "Source" });
+    const preview = screen.getByRole("radio", { name: "Preview" });
+    expect(source.getAttribute("aria-checked")).toBe("true");
+    expect(source.tabIndex).toBe(0);
+    expect(preview.tabIndex).toBe(-1);
+    fireEvent.keyDown(source, { key: "ArrowRight" });
+    expect(onValueChange).toHaveBeenCalledWith("preview");
+  });
+
+  it("uses tab semantics for switching views", () => {
+    const onValueChange = vi.fn();
+    render(<Tabs label="Sections" onValueChange={onValueChange} options={[{ label: "General", value: "general" }, { label: "Advanced", value: "advanced" }]} value="general" />);
+    const general = screen.getByRole("tab", { name: "General" });
+    expect(general.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(general, { key: "ArrowRight" });
+    expect(onValueChange).toHaveBeenCalledWith("advanced");
   });
 });
 
@@ -108,10 +185,10 @@ describe("Switch", () => {
     expect(onPendingChange).not.toHaveBeenCalled();
   });
 
-  it("supports aria-label-only usage", () => {
-    render(<Switch ariaLabel="Enable deploy" checked={false} label="Deploy" showLabel={false} />);
+  it("keeps the setting name as its accessible label when visual copy is hidden", () => {
+    render(<Switch checked={false} label="Deploy" showLabel={false} />);
 
-    expect(screen.getByRole("switch", { name: "Enable deploy" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Deploy" })).toBeTruthy();
     expect(screen.queryByText("Deploy")).toBeNull();
   });
 });

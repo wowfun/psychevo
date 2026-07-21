@@ -10,6 +10,7 @@ import {
   type TranscriptEntry
 } from "@psychevo/protocol";
 import { MarkdownText } from "./markdown";
+import { ActionButton, IconButton } from "./primitives";
 import { asRecord, stringValue } from "./shared";
 import { evidenceDisplay, type EvidenceDisplay } from "./toolEvidence";
 import { ToolDetail } from "./transcript/tool-detail";
@@ -155,10 +156,11 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
         )}
       </div>
       {!followingBottom && (
-        <button
-          aria-label="Jump to latest"
+        <IconButton
           className="pevo-jumpBottom"
           data-tooltip="Jump to latest"
+          icon={<ArrowDownToLine size={17} />}
+          label="Jump to latest"
           onClick={() => {
             const scroller = scrollRef.current;
             if (scroller) {
@@ -167,11 +169,8 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
             }
             updateFollowingBottom(true);
           }}
-          title="Jump to latest"
-          type="button"
-        >
-          <ArrowDownToLine size={17} aria-hidden />
-        </button>
+          shape="circle"
+        />
       )}
     </section>
   );
@@ -698,34 +697,38 @@ function TranscriptBlockView({
       {canOpenAgentSession && agentSession ? (
         <div className="pevo-evidenceActionRow">
           {lineButton}
-          <button
+          <ActionButton
             aria-label={`Open ${agentSession.title ?? display.title} agent session`}
             className="pevo-evidenceOpenButton"
+            icon={<ExternalLink size={13} />}
             onClick={() => {
               onOpenAgentSession?.(agentSession);
             }}
+            size="compact"
             title="Open agent session"
             type="button"
+            variant="ghost"
           >
-            <ExternalLink size={13} aria-hidden />
-            <span>Open</span>
-          </button>
+            Open
+          </ActionButton>
         </div>
       ) : workspaceFileTarget && workspaceFileLinks ? (
         <div className="pevo-evidenceActionRow">
           {lineButton}
-          <button
+          <ActionButton
             aria-label={`Open file ${workspaceFileTarget.label}`}
             className="pevo-evidenceOpenButton"
+            icon={<ExternalLink size={13} />}
             onClick={() => {
               void workspaceFileLinks.onOpen(workspaceFileTarget.path);
             }}
+            size="compact"
             title="Open file preview"
             type="button"
+            variant="ghost"
           >
-            <ExternalLink size={13} aria-hidden />
-            <span>Open</span>
-          </button>
+            Open
+          </ActionButton>
         </div>
       ) : lineButton}
       {open && display.sections.length > 0 && <ToolDetail display={display} />}
@@ -1172,22 +1175,13 @@ function MessageMeta({
   return (
     <div className="pevo-messageMeta" aria-label="Message actions">
       {onEdit && (
-        <button className="pevo-messageCopy" onClick={() => void onEdit()} title="Edit message" type="button">
-          <Pencil size={14} aria-hidden />
-          <span className="pevo-srOnly">Edit this message in the same thread or fork a new thread</span>
-        </button>
+        <IconButton className="pevo-messageCopy" icon={<Pencil size={14} />} label="Edit this message in the same thread or fork a new thread" onClick={() => void onEdit()} size="compact" />
       )}
       {onCopy && (
-        <button className="pevo-messageCopy" onClick={() => void onCopy()} title="Copy" type="button">
-          {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-          <span className="pevo-srOnly">{copied ? "Copied" : "Copy message"}</span>
-        </button>
+        <IconButton className="pevo-messageCopy" icon={copied ? <Check size={14} /> : <Copy size={14} />} label="Copy message" onClick={() => void onCopy()} size="compact" tooltip={copied ? "Copied" : "Copy message"} />
       )}
       {onReadAloud && (
-        <button className="pevo-messageCopy" onClick={() => void onReadAloud()} title="Read aloud" type="button">
-          <Volume2 size={14} aria-hidden />
-          <span className="pevo-srOnly">Read aloud</span>
-        </button>
+        <IconButton className="pevo-messageCopy" icon={<Volume2 size={14} />} label="Read aloud" onClick={() => void onReadAloud()} size="compact" />
       )}
       {elapsed && <span className="pevo-messageElapsed">{elapsed}</span>}
       {timestamp && (
@@ -1254,23 +1248,28 @@ function HistoryMessageEditor({
         {draft.warning && <p className="pevo-historyEditorWarning" role="note">{draft.warning}</p>}
         {error && <p className="pevo-historyEditorError" role="alert">{error}</p>}
         <div className="pevo-historyEditorActions">
-          <button disabled={Boolean(pending)} onClick={onCancel} type="button">Cancel</button>
-          <button
+          <ActionButton disabled={Boolean(pending)} onClick={onCancel} type="button" variant="ghost">Cancel</ActionButton>
+          <ActionButton
             aria-label="Fork a new thread before this message"
             disabled={!hasPayload || Boolean(pending)}
+            icon={<GitFork size={14} />}
             onClick={() => void commit("fork")}
+            pending={pending === "fork"}
             type="button"
+            variant="secondary"
           >
-            <GitFork size={14} aria-hidden /> {pending === "fork" ? "Forking…" : "Fork"}
-          </button>
-          <button
+            Fork
+          </ActionButton>
+          <ActionButton
             aria-label="Update this message and run in the same thread"
             disabled={!hasPayload || Boolean(pending)}
             onClick={() => void commit("update")}
+            pending={pending === "update"}
             type="button"
+            variant="primary"
           >
-            {pending === "update" ? "Updating…" : "Update & run"}
-          </button>
+            Update & run
+          </ActionButton>
         </div>
       </article>
     </div>

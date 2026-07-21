@@ -50,9 +50,9 @@
   font-size: var(--pevo-font-size-xsmall);
 }
 
-.modelProviderRow button:not(.pevo-actionButton),
-.modelProviderEditorRow button:not(.pevo-actionButton),
-.modelProviderEditorActions button:not(.pevo-actionButton),
+.modelProviderRow button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.modelProviderEditorRow button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.modelProviderEditorActions button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
 .modelAssignmentControls button {
   display: inline-flex;
   align-items: center;
@@ -71,15 +71,15 @@
   white-space: nowrap;
 }
 
-.modelProviderRow button:not(.pevo-actionButton):disabled,
-.modelProviderEditorRow button:not(.pevo-actionButton):disabled,
-.modelProviderEditorActions button:not(.pevo-actionButton):disabled,
+.modelProviderRow button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
+.modelProviderEditorRow button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
+.modelProviderEditorActions button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
 .modelAssignmentControls button:disabled {
   cursor: default;
   opacity: 0.55;
 }
 
-.modelProviderRow button:not(.pevo-actionButton).is-active {
+.modelProviderRow button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch).is-active {
   color: var(--pevo-ink);
   background: color-mix(in oklch, var(--pevo-panel), transparent 28%);
   box-shadow: var(--pevo-shadow-active);
@@ -678,26 +678,6 @@
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.modelProviderEditor input,
-.modelProviderEditor select,
-.modelProviderEditor textarea {
-  box-sizing: border-box;
-  min-width: 0;
-  width: 100%;
-  min-height: 30px;
-  padding: 0 8px;
-  color: var(--pevo-ink);
-  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 34%);
-  border-radius: var(--pevo-radius-sm);
-  font: inherit;
-  font-size: var(--pevo-font-size-small);
-}
-
-.modelProviderEditor input[readonly] {
-  color: var(--pevo-muted);
 }
 
 .modelProviderEditor textarea {

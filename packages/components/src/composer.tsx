@@ -1,7 +1,7 @@
 import { ArrowUp, Bot, Command, FileText, Folder, Image as ImageIcon, Paperclip, Settings2, Sparkles, X, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { CompletionItem, CompletionListResult, GatewayMention, PendingAction, ThreadEditableInputPart } from "@psychevo/protocol";
-import { IconButton, Switch } from "./primitives";
+import { ActionButton, IconButton, SegmentedControl, Switch } from "./primitives";
 
 export interface ComposerProps {
   addMenuOptions?: ReactNode;
@@ -418,24 +418,26 @@ export function Composer({
   }
 
   const actionButton = running ? (
-    <button
-      aria-label="Interrupt active turn"
+    <IconButton
       className="pevo-primaryButton pevo-sendButton is-interrupt"
+      icon={<span className="pevo-stopGlyph" />}
+      label="Interrupt active turn"
       onClick={onInterrupt}
-      type="button"
-    >
-      <span className="pevo-stopGlyph" aria-hidden />
-    </button>
+      shape="circle"
+      variant="interrupt"
+    />
   ) : (
-    <button
-      aria-label={shellMode ? "Run shell command" : "Send message"}
+    <IconButton
       className="pevo-primaryButton pevo-sendButton"
       disabled={disabled || submissionPending || (shellMode ? (!trimmed || !onShell) : !hasPromptPayload || ((promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate))}
-      title={!shellMode && (promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate ? effectivePromptBlockReason : undefined}
+      icon={<ArrowUp size={17} />}
+      label={shellMode ? "Run shell command" : "Send message"}
+      pending={submissionPending}
+      shape="circle"
+      tooltip={!shellMode && (promptSubmitDisabled || promptTextBlocked) && !slashCommandCandidate ? effectivePromptBlockReason : undefined}
       type="submit"
-    >
-      <ArrowUp size={17} aria-hidden />
-    </button>
+      variant="primary"
+    />
   );
 
   return (
@@ -447,14 +449,13 @@ export function Composer({
     >
       {requestPanel && <div className="pevo-composerRequestPanel">{requestPanel}</div>}
       {showTurnModeControls && (
-        <div className="pevo-segmented" role="tablist" aria-label="Turn mode">
-          <button className={turnMode === "turn" ? "is-selected" : ""} onClick={() => setTurnMode("turn")} type="button">
-            Queue
-          </button>
-          <button className={turnMode === "steer" ? "is-selected" : ""} onClick={() => setTurnMode("steer")} type="button">
-            Steer
-          </button>
-        </div>
+        <SegmentedControl<"turn" | "steer">
+          className="pevo-segmented"
+          label="Turn mode"
+          onValueChange={setTurnMode}
+          options={[{ label: "Queue", value: "turn" }, { label: "Steer", value: "steer" }] as const}
+          value={turnMode}
+        />
       )}
       <div className="pevo-composerInput">
         {shellMode && <span className="pevo-shellMarker" aria-hidden>!</span>}
@@ -502,13 +503,12 @@ export function Composer({
                 <small>{attachment.kind} · {attachment.sizeLabel}</small>
                 {attachment.error && <small className="is-error">{attachment.error}</small>}
               </span>
-              <button
-                aria-label={`Remove ${attachment.name}`}
+              <IconButton
+                icon={<X size={13} />}
+                label={`Remove ${attachment.name}`}
                 onClick={() => onRemoveAttachment?.(attachment.id)}
-                type="button"
-              >
-                <X size={13} />
-              </button>
+                size="compact"
+              />
             </span>
           ))}
         </div>
@@ -559,15 +559,14 @@ export function Composer({
         <div className="pevo-composerLeftControls">
           <div className="pevo-addMenu" ref={attachMenuRef}>
             <IconButton
-              title="Add attachments and options"
+              icon={<Plus size={18} />}
+              label="Add attachments and options"
               onClick={() => setAttachMenuOpen((open) => !open)}
               disabled={disabled}
               type="button"
               aria-expanded={attachMenuOpen}
               aria-haspopup="dialog"
-            >
-              <Plus size={18} />
-            </IconButton>
+            />
             {attachMenuOpen && (
               <div aria-label="Add options" className="pevo-addPopover pevo-controlPopover" role="dialog">
                 <button
@@ -603,13 +602,12 @@ export function Composer({
           {modeControlVisible && planMode && (
             <div className="pevo-planChip" tabIndex={0}>
               <span>Plan</span>
-              <button
-                aria-label="Disable Plan mode"
+              <IconButton
+                icon={<X size={12} />}
+                label="Disable Plan mode"
                 onClick={() => onModeChange?.("default")}
-                type="button"
-              >
-                <X size={12} aria-hidden />
-              </button>
+                size="compact"
+              />
             </div>
           )}
         </div>
@@ -984,8 +982,8 @@ function ClarifyRequest({
       }}
     >
       <pre>{JSON.stringify(raw, null, 2)}</pre>
-      <input value={answer} onChange={(event) => setAnswer(event.target.value)} />
-      <button type="submit">Submit</button>
+      <input className="pevo-fieldControl pevo-fieldControl--compact" value={answer} onChange={(event) => setAnswer(event.target.value)} />
+      <ActionButton size="compact" type="submit">Submit</ActionButton>
     </form>
   );
 }

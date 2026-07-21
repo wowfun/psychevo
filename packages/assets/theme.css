@@ -1,12 +1,36 @@
 /* Generated from specs/075-design-system/DESIGN.md. Do not edit directly. */
 :root {
+  --pevo-control-compact-size: 28px;
+  --pevo-control-default-size: 32px;
+  --pevo-control-coarse-pointer-target: 44px;
+  --pevo-control-compact-icon-size: 14px;
+  --pevo-control-default-icon-size: 16px;
+  --pevo-control-focus-width: 2px;
+  --pevo-control-focus-offset: 2px;
+  --pevo-control-disabled-opacity: 0.55;
+  --pevo-control-press-offset: 1px;
+  --pevo-control-rounded-compact: 4px;
+  --pevo-control-rounded-default: 6px;
+}
+
+:root {
+  --pevo-field-compact-size: 28px;
+  --pevo-field-default-size: 32px;
+  --pevo-field-padding-x: 9px;
+  --pevo-field-padding-y: 7px;
+  --pevo-field-choice-size: 16px;
+  --pevo-field-rounded: 6px;
+  --pevo-field-mono-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+}
+
+:root {
   color-scheme: dark;
   --pevo-bg: oklch(12.8% 0.006 85);
   --pevo-bg-raised: oklch(16.5% 0.008 85);
   --pevo-panel: oklch(18.6% 0.009 85);
   --pevo-panel-muted: oklch(22.5% 0.011 85);
   --pevo-panel-warm: oklch(22.5% 0.018 78);
-  --pevo-sidebar-bg: oklch(16.8% 0.009 85);
+  --pevo-sidebar-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
   --pevo-sidebar-border: oklch(28% 0.012 85);
   --pevo-sidebar-active: oklch(24% 0.011 85);
   --pevo-ink: oklch(95.5% 0.012 84);
@@ -24,10 +48,30 @@
   --pevo-accent: oklch(91% 0.014 84);
   --pevo-accent-ink: oklch(13% 0.006 84);
   --pevo-accent-soft: oklch(25.5% 0.014 84);
+  --pevo-control-primary-bg: transparent;
+  --pevo-control-primary-ink: var(--pevo-ink);
+  --pevo-control-primary-border: transparent;
+  --pevo-control-interrupt-bg: oklch(31% 0.008 85);
+  --pevo-control-interrupt-ink: var(--pevo-ink);
+  --pevo-control-interrupt-border: oklch(31% 0.008 85);
+  --pevo-control-secondary-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 18%);
+  --pevo-control-hover-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 38%);
+  --pevo-control-selected-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 22%);
+  --pevo-control-focus: color-mix(in oklch, var(--pevo-switch-track-on), white 24%);
   --pevo-brass: oklch(77% 0.095 76);
   --pevo-brass-soft: oklch(26% 0.038 76);
   --pevo-caution: oklch(80% 0.105 64);
   --pevo-danger: oklch(74% 0.12 28);
+  --pevo-control-danger-bg: color-mix(in oklch, var(--pevo-danger), transparent 82%);
+  --pevo-control-caution-bg: color-mix(in oklch, var(--pevo-brass), transparent 84%);
+  --pevo-field-bg: color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 34%);
+  --pevo-field-search-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  --pevo-field-code-bg: color-mix(in oklch, var(--pevo-code-bg), var(--pevo-panel) 18%);
+  --pevo-field-border: color-mix(in oklch, var(--pevo-border), transparent 10%);
+  --pevo-field-border-hover: var(--pevo-border-strong);
+  --pevo-field-focus: var(--pevo-control-focus);
+  --pevo-field-placeholder: var(--pevo-muted);
+  --pevo-field-readonly-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 48%);
   --pevo-code-bg: oklch(11.5% 0.008 85);
   --pevo-code-ink: oklch(95% 0.012 84);
   --pevo-code-preview-ink: var(--pevo-code-ink);
@@ -101,7 +145,7 @@ html[data-pevo-appearance="light"] {
   --pevo-panel: oklch(99.35% 0.0028 88);
   --pevo-panel-muted: oklch(95.4% 0.005 88);
   --pevo-panel-warm: oklch(96.4% 0.008 84);
-  --pevo-sidebar-bg: oklch(94.2% 0.012 88);
+  --pevo-sidebar-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
   --pevo-sidebar-border: oklch(86.6% 0.010 86);
   --pevo-sidebar-active: oklch(98.55% 0.006 88);
   --pevo-ink: oklch(20.2% 0.003 255);
@@ -119,10 +163,30 @@ html[data-pevo-appearance="light"] {
   --pevo-accent: oklch(42% 0.012 255);
   --pevo-accent-ink: oklch(99.4% 0.001 255);
   --pevo-accent-soft: oklch(94.2% 0.003 255);
+  --pevo-control-primary-bg: transparent;
+  --pevo-control-primary-ink: var(--pevo-ink);
+  --pevo-control-primary-border: transparent;
+  --pevo-control-interrupt-bg: oklch(32% 0.004 255);
+  --pevo-control-interrupt-ink: var(--pevo-accent-ink);
+  --pevo-control-interrupt-border: oklch(32% 0.004 255);
+  --pevo-control-secondary-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 8%);
+  --pevo-control-hover-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 24%);
+  --pevo-control-selected-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 4%);
+  --pevo-control-focus: color-mix(in oklch, var(--pevo-switch-track-on), white 32%);
   --pevo-brass: oklch(58% 0.12 68);
   --pevo-brass-soft: oklch(94.8% 0.036 72);
   --pevo-caution: oklch(50% 0.12 64);
   --pevo-danger: oklch(48% 0.15 28);
+  --pevo-control-danger-bg: color-mix(in oklch, var(--pevo-danger), transparent 88%);
+  --pevo-control-caution-bg: color-mix(in oklch, var(--pevo-brass), transparent 88%);
+  --pevo-field-bg: color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 26%);
+  --pevo-field-search-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  --pevo-field-code-bg: color-mix(in oklch, var(--pevo-code-bg), var(--pevo-panel) 22%);
+  --pevo-field-border: color-mix(in oklch, var(--pevo-border), transparent 8%);
+  --pevo-field-border-hover: var(--pevo-border-strong);
+  --pevo-field-focus: var(--pevo-control-focus);
+  --pevo-field-placeholder: var(--pevo-muted);
+  --pevo-field-readonly-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 46%);
   --pevo-code-bg: oklch(96.8% 0.0045 88);
   --pevo-code-ink: oklch(21% 0.003 255);
   --pevo-code-preview-ink: var(--pevo-ink);
@@ -170,7 +234,7 @@ html[data-pevo-appearance="warm"] {
   --pevo-panel: oklch(99.1% 0.006 88);
   --pevo-panel-muted: oklch(94.8% 0.014 88);
   --pevo-panel-warm: oklch(96.3% 0.023 78);
-  --pevo-sidebar-bg: oklch(94.4% 0.018 88);
+  --pevo-sidebar-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
   --pevo-sidebar-border: oklch(84.8% 0.024 86);
   --pevo-sidebar-active: oklch(98.2% 0.011 88);
   --pevo-ink: oklch(20.5% 0.018 72);
@@ -188,10 +252,30 @@ html[data-pevo-appearance="warm"] {
   --pevo-accent: oklch(46% 0.03 72);
   --pevo-accent-ink: oklch(99% 0.004 90);
   --pevo-accent-soft: oklch(92% 0.026 78);
+  --pevo-control-primary-bg: transparent;
+  --pevo-control-primary-ink: var(--pevo-ink);
+  --pevo-control-primary-border: transparent;
+  --pevo-control-interrupt-bg: oklch(33% 0.018 72);
+  --pevo-control-interrupt-ink: var(--pevo-accent-ink);
+  --pevo-control-interrupt-border: oklch(33% 0.018 72);
+  --pevo-control-secondary-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 8%);
+  --pevo-control-hover-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 24%);
+  --pevo-control-selected-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 4%);
+  --pevo-control-focus: color-mix(in oklch, var(--pevo-switch-track-on), white 32%);
   --pevo-brass: oklch(55% 0.112 72);
   --pevo-brass-soft: oklch(93.8% 0.043 78);
   --pevo-caution: oklch(49% 0.12 64);
   --pevo-danger: oklch(48% 0.15 28);
+  --pevo-control-danger-bg: color-mix(in oklch, var(--pevo-danger), transparent 88%);
+  --pevo-control-caution-bg: color-mix(in oklch, var(--pevo-brass), transparent 88%);
+  --pevo-field-bg: color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 24%);
+  --pevo-field-search-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 52%);
+  --pevo-field-code-bg: color-mix(in oklch, var(--pevo-code-bg), var(--pevo-panel) 22%);
+  --pevo-field-border: color-mix(in oklch, var(--pevo-border), transparent 8%);
+  --pevo-field-border-hover: var(--pevo-border-strong);
+  --pevo-field-focus: var(--pevo-control-focus);
+  --pevo-field-placeholder: var(--pevo-muted);
+  --pevo-field-readonly-bg: color-mix(in oklch, var(--pevo-panel-muted), transparent 44%);
   --pevo-code-bg: oklch(96.2% 0.012 88);
   --pevo-code-ink: oklch(22% 0.018 72);
   --pevo-code-preview-ink: var(--pevo-ink);

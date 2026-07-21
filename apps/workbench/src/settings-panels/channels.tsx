@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { ArrowLeft, MessageCircle, Play, Plus, Save, Settings2, Trash2, Wrench, X } from "lucide-react";
-import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
+import { ArrowLeft, MessageCircle, Plus, Save, Settings2, Trash2, Wrench, X } from "lucide-react";
+import { ActionButton, CreatePanel, IconButton, Switch, Tabs, useActionReceipts } from "@psychevo/components";
 import { scopeForCwd, type GatewayClient } from "@psychevo/client";
 import type {
   ChannelWechatQrPollResult,
@@ -114,14 +114,11 @@ export function ChannelsSettingsPanel({
       <header className="agentSurfaceHeaderWithAction channelSettingsToolbar">
         <span><MessageCircle size={15} /> Connected Channels <b>{channels.length}</b></span>
         <div className="channelToolbarActions">
-          <ActionButton ariaLabel="Doctor Channels" disabled={disabled} icon={<Wrench size={13} />} onClick={onDoctorChannels} tooltip="Doctor Channels" variant="ghost">
+          <ActionButton disabled={disabled} icon={<Wrench size={13} />} onClick={onDoctorChannels} variant="ghost">
             Doctor
           </ActionButton>
-          <ActionButton ariaLabel="Set up channel" disabled={disabled} icon={<Plus size={13} />} onClick={() => setSetupOpen(true)} tooltip="Set up channel" variant="primary">
+          <ActionButton disabled={disabled} icon={<Plus size={13} />} onClick={() => setSetupOpen(true)} variant="primary">
             Set up channel
-          </ActionButton>
-          <ActionButton ariaLabel="Start Channels" disabled={disabled} icon={<Play size={13} />} onClick={onDoctorChannels} tooltip="Start Channels" variant="ghost">
-            Start
           </ActionButton>
         </div>
       </header>
@@ -134,20 +131,13 @@ export function ChannelsSettingsPanel({
           onClose={() => setSetupOpen(false)}
           title="Set up channel"
         >
-          <div className="channelPlatformPicker" role="tablist" aria-label="Channel type">
-            {CHANNEL_CHOICES.map((channel) => (
-              <button
-                aria-selected={selectedChannelChoice === channel}
-                className={selectedChannelChoice === channel ? "is-selected" : ""}
-                key={channel}
-                onClick={() => setSelectedChannelChoice(channel)}
-                role="tab"
-                type="button"
-              >
-                {formatChannelName(channel)}
-              </button>
-            ))}
-          </div>
+          <Tabs<ChannelChoice>
+            className="channelPlatformPicker"
+            label="Channel type"
+            onValueChange={setSelectedChannelChoice}
+            options={CHANNEL_CHOICES.map((channel) => ({ label: formatChannelName(channel), value: channel }))}
+            value={selectedChannelChoice}
+          />
           <ChannelSetupCard
             channel={selectedChannelChoice}
             disabled={disabled}
@@ -182,21 +172,16 @@ export function ChannelsSettingsPanel({
               </div>
               <div className="agentBackendSide">
                 <Switch
-                  ariaLabel={`${channel.enabled ? "Disable" : "Enable"} ${channel.id}`}
                   checked={channel.enabled}
                   disabled={disabled}
-                  label={channel.enabled ? "Enabled" : "Disabled"}
+                  label={`${channel.id} enabled`}
                   onCheckedChange={(enabled) => onSetChannelEnabled(channel, enabled)}
                   showLabel={false}
                   size="compact"
                 />
                 <div className="agentBackendActions">
-                  <ActionButton ariaLabel={`Test ${channel.id}`} disabled={disabled} icon={<Wrench size={13} />} iconOnly onClick={() => onDoctorChannel(channel)} size="compact" tooltip="Test" variant="ghost">
-                    Test {channel.id}
-                  </ActionButton>
-                  <ActionButton ariaLabel={`Settings ${channel.id}`} disabled={disabled} icon={<Settings2 size={13} />} iconOnly onClick={() => setSelectedChannelId(channel.id)} size="compact" tooltip="Settings" variant="ghost">
-                    Settings {channel.id}
-                  </ActionButton>
+                  <IconButton disabled={disabled} icon={<Wrench size={13} />} label={`Test ${channel.id}`} onClick={() => onDoctorChannel(channel)} size="compact" />
+                  <IconButton disabled={disabled} icon={<Settings2 size={13} />} label={`Settings ${channel.id}`} onClick={() => setSelectedChannelId(channel.id)} size="compact" />
                 </div>
               </div>
             </div>
@@ -242,6 +227,7 @@ function ChannelSettingsDetail({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const receipts = useActionReceipts();
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sources, setSources] = useState<WorkbenchChannelSource[] | null>(null);
@@ -423,7 +409,9 @@ function ChannelSettingsDetail({
       const nextChannel = await onUpdate(channelUpdateDraftFromDraft(draft));
       setDraft(channelDraftFromChannel(nextChannel));
       setDiscardPrompt(false);
-      setSavedNotice(workspaceChanged ? "Next message will start in the new workspace." : null);
+      const message = workspaceChanged ? "Channel saved. Next message will start in the new workspace." : "Channel settings saved.";
+      receipts.push({ message });
+      setSavedNotice(receipts.available ? null : message);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -439,6 +427,7 @@ function ChannelSettingsDetail({
     setError(null);
     try {
       await onDelete();
+      receipts.push({ message: `${channel.label || channel.id} deleted.`, tone: "danger" });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDeleting(false);
@@ -527,6 +516,7 @@ function ChannelSettingsDetail({
             <div className="channelControl">
               <input
                 aria-label="Channel label"
+                className="pevo-fieldControl"
                 disabled={busy}
                 onChange={(event) => updateDraft({ label: event.currentTarget.value })}
                 type="text"
@@ -542,6 +532,7 @@ function ChannelSettingsDetail({
               <input
                 aria-label="Require mention in groups"
                 checked={draft.requireMention}
+                className="pevo-choiceControl"
                 disabled={busy}
                 onChange={(event) => updateDraft({ requireMention: event.currentTarget.checked })}
                 type="checkbox"
@@ -553,6 +544,7 @@ function ChannelSettingsDetail({
             <div className="channelTextareaPair">
               <textarea
                 aria-label="Allowed direct users"
+                className="pevo-fieldControl"
                 disabled={busy}
                 onChange={(event) => updateDraft({ allowUsersText: event.currentTarget.value })}
                 rows={4}
@@ -560,6 +552,7 @@ function ChannelSettingsDetail({
               />
               <textarea
                 aria-label="Allowed groups"
+                className="pevo-fieldControl"
                 disabled={busy}
                 onChange={(event) => updateDraft({ allowGroupsText: event.currentTarget.value })}
                 rows={4}
@@ -574,6 +567,7 @@ function ChannelSettingsDetail({
             <div className="channelControl">
               <select
                 aria-label="Channel Runtime Profile"
+                className="pevo-fieldControl"
                 disabled={busy}
                 onChange={(event) => updateDraft({ runtimeRef: event.currentTarget.value })}
                 value={draft.runtimeRef}
@@ -625,6 +619,7 @@ function ChannelSettingsDetail({
               <div className="channelControl">
                 <select
                   aria-label="Channel model"
+                  className="pevo-fieldControl"
                   disabled={busy || !modelEditable}
                   onChange={(event) => updateDraft({ model: event.currentTarget.value })}
                   value={draft.model}
@@ -658,6 +653,7 @@ function ChannelSettingsDetail({
             <div className="channelControl channelWorkspaceControl">
               <select
                 aria-label="Channel workspace preset"
+                className="pevo-fieldControl"
                 disabled={busy}
                 onChange={(event) => {
                   const value = event.currentTarget.value;
@@ -677,6 +673,7 @@ function ChannelSettingsDetail({
               </select>
               <input
                 aria-label="Channel workspace"
+                className="pevo-fieldControl"
                 disabled={busy}
                 onChange={(event) => updateDraft({ cwd: event.currentTarget.value })}
                 placeholder={cwd}
@@ -811,6 +808,7 @@ function ChannelCredentialRow({
         </div>
         <input
           aria-label={label}
+          className="pevo-fieldControl"
           disabled={disabled}
           onChange={(event) => onChange(event.currentTarget.value)}
           type="text"

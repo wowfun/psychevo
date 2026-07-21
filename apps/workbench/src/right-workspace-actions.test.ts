@@ -32,10 +32,15 @@ function createFilesActionHarness(confirmReplacement: boolean) {
   const setMobilePanel = vi.fn();
   const setRightCollapsed = vi.fn();
   const setRightTabs = vi.fn();
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(confirmReplacement);
+  const setDirtyRightTabs = vi.fn();
+  const confirmAction = vi.fn().mockResolvedValue(confirmReplacement);
+  const nativeConfirm = vi.spyOn(window, "confirm").mockImplementation(() => {
+    throw new Error("native confirmation must not be used");
+  });
   const actions = createRightWorkspaceActions({
     activeRightTabId: filesTab.id,
     client: null,
+    confirmAction,
     currentThreadId: null,
     debugEnabled: false,
     dirtyRightTabs: { [filesTab.id]: true },
@@ -45,7 +50,7 @@ function createFilesActionHarness(confirmReplacement: boolean) {
     runAction: async (action) => action(),
     setActiveCommandOverlay,
     setActiveRightTabId,
-    setDirtyRightTabs: vi.fn(),
+    setDirtyRightTabs,
     setMobilePanel,
     setRightCollapsed,
     setRightTabs,
@@ -54,20 +59,23 @@ function createFilesActionHarness(confirmReplacement: boolean) {
   });
   return {
     actions,
-    confirm,
+    confirmAction,
+    nativeConfirm,
     setActiveCommandOverlay,
     setActiveRightTabId,
     setMobilePanel,
     setRightCollapsed,
-    setRightTabs
+    setRightTabs,
+    setDirtyRightTabs
   };
 }
 
 describe("right workspace file actions", () => {
-  it("keeps a dirty Files target when replacing it with another path is declined", () => {
+  it("keeps a dirty Files target when replacing it with another path is declined", async () => {
     const {
       actions,
-      confirm,
+      confirmAction,
+      nativeConfirm,
       setActiveCommandOverlay,
       setActiveRightTabId,
       setMobilePanel,
@@ -75,13 +83,19 @@ describe("right workspace file actions", () => {
       setRightTabs
     } = createFilesActionHarness(false);
 
-    actions.openRightWorkspaceTab("files", {
+    await actions.openRightWorkspaceTab("files", {
       path: "report.pdf",
       title: "report.pdf"
     });
 
-    expect(confirm).toHaveBeenCalledOnce();
-    expect(confirm).toHaveBeenCalledWith("Discard unsaved file edits?");
+    expect(confirmAction).toHaveBeenCalledOnce();
+    expect(confirmAction).toHaveBeenCalledWith({
+      confirmLabel: "Discard edits",
+      description: "The unsaved file changes will be lost.",
+      title: "Discard unsaved file edits?",
+      tone: "caution"
+    });
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(setRightTabs).not.toHaveBeenCalled();
     expect(setActiveCommandOverlay).not.toHaveBeenCalled();
     expect(setRightCollapsed).not.toHaveBeenCalled();
@@ -90,27 +104,44 @@ describe("right workspace file actions", () => {
   });
 
   it("does not confirm when reopening the same Files path or only revealing its tree", () => {
-    const { actions, confirm, setRightTabs } = createFilesActionHarness(false);
+    const { actions, confirmAction, nativeConfirm, setRightTabs } = createFilesActionHarness(false);
 
-    actions.openRightWorkspaceTab("files", {
+    void actions.openRightWorkspaceTab("files", {
       path: "notes.md",
       title: "notes.md"
     });
-    actions.openRightWorkspaceTab("files", { fileTreeOpen: true });
+    void actions.openRightWorkspaceTab("files", { fileTreeOpen: true });
 
-    expect(confirm).not.toHaveBeenCalled();
+    expect(confirmAction).not.toHaveBeenCalled();
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(setRightTabs).toHaveBeenCalledTimes(2);
   });
 
-  it("replaces a dirty Files target after confirmation", () => {
-    const { actions, confirm, setRightTabs } = createFilesActionHarness(true);
+  it("replaces a dirty Files target after confirmation", async () => {
+    const { actions, confirmAction, nativeConfirm, setRightTabs } = createFilesActionHarness(true);
 
-    actions.openRightWorkspaceTab("files", {
+    await actions.openRightWorkspaceTab("files", {
       path: "report.pdf",
       title: "report.pdf"
     });
 
-    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirmAction).toHaveBeenCalledOnce();
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(setRightTabs).toHaveBeenCalledOnce();
+  });
+
+  it("keeps or closes a dirty Files tab through product confirmation", async () => {
+    const declined = createFilesActionHarness(false);
+    await declined.actions.closeRightWorkspaceTab("files:existing");
+    expect(declined.confirmAction).toHaveBeenCalledOnce();
+    expect(declined.nativeConfirm).not.toHaveBeenCalled();
+    expect(declined.setRightTabs).not.toHaveBeenCalled();
+
+    const confirmed = createFilesActionHarness(true);
+    await confirmed.actions.closeRightWorkspaceTab("files:existing");
+    expect(confirmed.confirmAction).toHaveBeenCalledOnce();
+    expect(confirmed.nativeConfirm).not.toHaveBeenCalled();
+    expect(confirmed.setRightTabs).toHaveBeenCalledOnce();
+    expect(confirmed.setDirtyRightTabs).toHaveBeenCalledOnce();
   });
 });

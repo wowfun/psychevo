@@ -23,6 +23,12 @@ rounded:
 spacing:
   sm: 8px
 components:
+  control:
+    compactSize: 28px
+    defaultSize: 32px
+  field:
+    defaultSize: 32px
+    rounded: "{rounded.sm}"
   button-primary:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
@@ -87,6 +93,10 @@ describe("DESIGN.md asset generator", () => {
     expect(outputs.ts).toContain("\"glyphs\"");
     expect(outputs.ts).toContain("\"embeddedTerminal\"");
     expect(outputs.css).toContain("--pevo-bg: #111111;");
+    expect(outputs.css).toContain("--pevo-control-compact-size: 28px;");
+    expect(outputs.css).toContain("--pevo-control-default-size: 32px;");
+    expect(outputs.css).toContain("--pevo-field-default-size: 32px;");
+    expect(outputs.css).toContain("--pevo-field-rounded: 4px;");
   });
 
   it("reports generated output drift", () => {

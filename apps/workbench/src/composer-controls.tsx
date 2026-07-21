@@ -133,6 +133,7 @@ function ClarifyComposerRequest({
       ) : null}
       {questions.length === 0 ? (
         <input
+          className="pevo-fieldControl"
           value={fallbackAnswer}
           onChange={(event) => setFallbackAnswer(event.target.value)}
           onKeyDown={(event) => {
@@ -161,6 +162,7 @@ function ClarifyComposerRequest({
                     <label className="composerClarifyOption" key={`${option.label}:${optionIndex}`}>
                       <input
                         checked={checked}
+                        className="pevo-choiceControl"
                         name={`${request.actionId}:${questionIndex}`}
                         type={question.multiple ? "checkbox" : "radio"}
                         onChange={() => {
@@ -186,6 +188,7 @@ function ClarifyComposerRequest({
                 {answer.customSelected ? (
                   <input
                     aria-label={`${question.question} custom answer`}
+                    className={question.secret ? "pevo-fieldControl pevo-fieldControl--secret" : "pevo-fieldControl"}
                     type={question.secret ? "password" : "text"}
                     value={answer.custom}
                     onChange={(event) => {

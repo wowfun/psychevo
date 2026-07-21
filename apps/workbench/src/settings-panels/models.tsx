@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, RotateCcw, Save, Search, X } from "lucide-react";
-import { ActionButton, CreatePanel } from "@psychevo/components";
+import { ActionButton, CreatePanel, DisclosureButton, useActionReceipts } from "@psychevo/components";
 import type { GatewayClient } from "@psychevo/client";
 import type { AuxiliaryModelAssignmentView, ModelOptionView, ModelProviderView, ModelSettingsResult } from "@psychevo/protocol";
 import { ModelReasoningSelector, reasoningEffortsForModelOption } from "../model-picker";
@@ -67,6 +67,11 @@ export function ModelsSettingsPanel({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const receipts = useActionReceipts();
+  const showReceipt = (message: string) => {
+    receipts.push({ message });
+    setNotice(receipts.available ? null : message);
+  };
 
   async function loadModelSettings() {
     if (!client) {
@@ -154,7 +159,7 @@ export function ModelsSettingsPanel({
       });
       setCatalog((current) => ({ ...current, [result.providerId]: result.models }));
       onModelCatalogLoaded(result.models);
-      setNotice(`${displayProviderName(draft)} catalog updated`);
+      showReceipt(`${displayProviderName(draft)} catalog updated`);
     } catch (nextError) {
       setError(errorMessage(nextError));
     } finally {
@@ -194,7 +199,7 @@ export function ModelsSettingsPanel({
       });
       setSettings(result);
       setProviderDrafts((current) => mergeProviderDrafts(current, result.providers, result.modelOptions));
-      setNotice(`${displayProviderName(draft)} saved`);
+      showReceipt(`${displayProviderName(draft)} saved`);
       if (mode === "add") {
         setAddingProvider(false);
         setAddDraft(initialAddDraft(result.providers));
@@ -228,7 +233,7 @@ export function ModelsSettingsPanel({
         model: split?.model ?? "",
         reasoningEffort: draft.reasoningEffort || "none"
       });
-      setNotice(target === "default" ? "Default model saved" : `${formatAuxTaskLabel(task ?? "")} saved`);
+      showReceipt(target === "default" ? "Default model saved" : `${formatAuxTaskLabel(task ?? "")} saved`);
       await loadModelSettings();
       if (target === "default") {
         await onModelAssignmentSaved();
@@ -247,24 +252,22 @@ export function ModelsSettingsPanel({
     <section className="modelsSettingsPanel" aria-label="Models">
       <div className="modelSettingsToolbar">
         <ActionButton
-          ariaLabel="Refresh model settings"
           disabled={disabled || loading || !client}
           icon={<RotateCcw size={13} />}
           onClick={() => void loadModelSettings()}
-          tooltip="Refresh model settings"
           variant="ghost"
         >
           Refresh
         </ActionButton>
-        <ActionButton
-          active={addingProvider}
-          aria-expanded={addingProvider}
-          ariaLabel="Connect provider"
+        <DisclosureButton
+          controls="model-provider-editor-add"
+          expanded={addingProvider}
+          label="Connect provider"
           className={`modelProviderAddButton${addingProvider ? " is-active" : ""}`}
           disabled={disabled || loading || !client}
           icon={<Plus size={13} />}
-          onClick={() => {
-            if (addingProvider) {
+          onExpandedChange={(expanded) => {
+            if (!expanded) {
               setAddingProvider(false);
               return;
             }
@@ -272,11 +275,10 @@ export function ModelsSettingsPanel({
             setEditingProviderId(null);
             setAddDraft((current) => current ?? initialAddDraft(providerTemplates));
           }}
-          tooltip={addingProvider ? "Close provider setup" : "Connect provider"}
-          variant={addingProvider ? "neutral" : "primary"}
+          variant={addingProvider ? "secondary" : "primary"}
         >
           Connect provider
-        </ActionButton>
+        </DisclosureButton>
       </div>
       {error && <div className="modelSettingsMessage is-error" role="alert">{error}</div>}
       {notice && <div className="modelSettingsMessage">{notice}</div>}
@@ -453,18 +455,17 @@ function ProviderSummaryRow({
       <div className="modelProviderStatus" data-status={provider.credentialStatus}>
         {provider.credentialStatus === "notRequired" ? "No auth" : "API key ready"}
       </div>
-        <ActionButton
-          aria-expanded={editing}
-          active={editing}
+        <DisclosureButton
+          controls={`model-provider-editor-${provider.id}`}
+          expanded={editing}
+          label={`Edit ${provider.name}`}
           className={editing ? "is-active" : undefined}
           disabled={disabled || busy}
           icon={<Pencil size={13} />}
-          onClick={onEdit}
-          tooltip={editing ? `Close ${provider.name} editor` : `Edit ${provider.name}`}
-          variant="ghost"
+          onExpandedChange={onEdit}
         >
           Edit
-        </ActionButton>
+        </DisclosureButton>
     </div>
   );
 }
@@ -606,6 +607,7 @@ function ProviderEditor({
       description={mode === "add" ? "Connect a provider and register its first model." : "Update provider connection and model metadata."}
       icon={mode === "add" ? <Plus size={16} /> : <Pencil size={16} />}
       layout="side"
+      id={`model-provider-editor-${mode === "add" ? "add" : draft.providerId}`}
       onClose={onCancel}
       title={mode === "add" ? "Connect provider" : `Edit ${displayProviderName(draft)}`}
       footer={
@@ -625,6 +627,7 @@ function ProviderEditor({
             <label>
               <span>Provider id</span>
               <input
+                className="pevo-fieldControl pevo-fieldControl--compact"
                 disabled={disabled || busy}
                 onChange={(event) => onDraftChange({ ...draft, providerId: event.currentTarget.value })}
                 value={draft.providerId}
@@ -634,6 +637,7 @@ function ProviderEditor({
             <label>
               <span>Provider id</span>
               <select
+                className="pevo-fieldControl pevo-fieldControl--compact"
                 disabled={disabled || busy || mode === "edit"}
                 onChange={(event) => {
                   const selected = providerTemplates.find((provider) => provider.id === event.currentTarget.value) ?? customProviderTemplate();
@@ -650,6 +654,7 @@ function ProviderEditor({
           <label>
             <span>Name</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               onChange={(event) => onDraftChange({ ...draft, name: event.currentTarget.value })}
               value={draft.name}
@@ -660,6 +665,7 @@ function ProviderEditor({
           <label>
             <span>Base URL</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               onChange={(event) => onDraftChange({ ...draft, api: event.currentTarget.value })}
               value={draft.api}
@@ -668,6 +674,7 @@ function ProviderEditor({
           <label>
             <span>API key</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--secret pevo-fieldControl--compact"
               disabled={disabled || busy || draft.noAuth}
               onChange={(event) => onDraftChange({ ...draft, apiKey: event.currentTarget.value })}
               type="password"
@@ -676,11 +683,12 @@ function ProviderEditor({
           </label>
           <label>
             <span>API key env</span>
-            <input readOnly value={defaultApiKeyEnv(draft.providerId)} />
+            <input className="pevo-fieldControl pevo-fieldControl--compact" readOnly value={defaultApiKeyEnv(draft.providerId)} />
           </label>
           <label className="modelNoAuthToggle">
             <input
               checked={draft.noAuth}
+              className="pevo-choiceControl"
               disabled={disabled || busy}
               onChange={(event) => onDraftChange({ ...draft, noAuth: event.currentTarget.checked, apiKey: "" })}
               type="checkbox"
@@ -692,6 +700,7 @@ function ProviderEditor({
           <label>
             <span>Model id</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               list={modelListId}
               onChange={(event) => onDraftChange({ ...draft, modelId: event.currentTarget.value })}
@@ -709,6 +718,7 @@ function ProviderEditor({
           <label>
             <span>Name</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               onChange={(event) => onDraftChange({ ...draft, modelName: event.currentTarget.value })}
               value={draft.modelName}
@@ -719,6 +729,7 @@ function ProviderEditor({
           <label>
             <span>Context</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               inputMode="numeric"
               onChange={(event) => onDraftChange({ ...draft, context: event.currentTarget.value })}
@@ -728,6 +739,7 @@ function ProviderEditor({
           <label>
             <span>Max output</span>
             <input
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               inputMode="numeric"
               onChange={(event) => onDraftChange({ ...draft, output: event.currentTarget.value })}
@@ -737,6 +749,7 @@ function ProviderEditor({
           <label>
             <span>Advanced</span>
             <select
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || busy}
               onChange={(event) => onDraftChange({ ...draft, advancedFormat: event.currentTarget.value === "toml" ? "toml" : "json" })}
               value={draft.advancedFormat}
@@ -750,6 +763,7 @@ function ProviderEditor({
           <label>
             <span>Advanced Metadata</span>
             <textarea
+              className="pevo-fieldControl pevo-fieldControl--code"
               disabled={disabled || busy}
               onChange={(event) => onDraftChange({ ...draft, advanced: event.currentTarget.value })}
               spellCheck={false}

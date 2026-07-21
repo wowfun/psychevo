@@ -3,6 +3,30 @@ import { startPevoWeb } from "./harness";
 import { assertNoHorizontalOverflow, captureWorkbench, openPanel } from "./workbench.support";
 
 test.describe("Workbench New/Create visual contract", () => {
+  test("keeps the workspace location strip transparent", async ({ page, isMobile }, testInfo) => {
+    await page.setViewportSize(isMobile ? { width: 390, height: 900 } : { width: 1440, height: 960 });
+    const server = await startPevoWeb({ live: false });
+    try {
+      await page.goto(server.url);
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      if (isMobile) {
+        await openPanel(page, isMobile, "History");
+      }
+
+      await page.getByRole("button", { name: "Open workspace" }).click();
+      const workspaceDialog = page.getByRole("dialog", { name: "Open workspace" });
+      const locationStrip = workspaceDialog.locator(".composerFolderLocation");
+      const pathField = workspaceDialog.getByRole("textbox", { name: "Folder path" });
+      await expect(locationStrip).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expect(pathField).toBeVisible();
+      expect(await pathField.evaluate((element) => getComputedStyle(element).backgroundColor))
+        .not.toBe("rgba(0, 0, 0, 0)");
+      await captureWorkbench(page, testInfo, `workspace-location-transparent-${isMobile ? "mobile" : "desktop"}`);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test("keeps New/Add/Install/Connect panels within the visible Workbench viewport", async ({ page, isMobile }, testInfo) => {
     await page.setViewportSize(isMobile ? { width: 390, height: 900 } : { width: 1440, height: 960 });
     const server = await startPevoWeb({ live: false });
@@ -19,7 +43,7 @@ test.describe("Workbench New/Create visual contract", () => {
       await expect(workspaceDialog.getByRole("button", { name: "src", exact: true })).toBeVisible();
       await captureWorkbench(page, testInfo, `new-create-workspace-${isMobile ? "mobile" : "desktop"}`);
       await workspaceDialog.getByRole("button", { name: "New workspace..." }).click();
-      await expect(workspaceDialog.getByRole("textbox")).toBeVisible();
+      await expect(workspaceDialog.getByRole("textbox", { name: "Workspace name" })).toBeVisible();
       await expectPanelInViewport(page, workspaceDialog, "workspace create dialog");
       await workspaceDialog.getByRole("button", { name: "Back" }).click();
       await workspaceDialog.getByRole("button", { name: "Cancel" }).click();
@@ -53,7 +77,7 @@ test.describe("Workbench New/Create visual contract", () => {
       await expect(capabilities).toBeVisible();
       await capabilities.getByRole("tab", { name: "Agents" }).click();
       await capabilities.getByRole("tab", { name: "ACP Backends" }).click();
-      await capabilities.getByRole("button", { name: "Add ACP backend" }).click();
+      await capabilities.getByRole("button", { name: "Add backend" }).click();
       await expectPanelInViewport(page, capabilities.getByRole("group", { name: "Add backend" }), "add backend panel");
       await captureWorkbench(page, testInfo, `new-create-capabilities-agents-backend-${isMobile ? "mobile" : "desktop"}`);
 

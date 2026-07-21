@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Pause, Pencil, Play, Plus, RefreshCw, Save, Sparkles, Trash2 } from "lucide-react";
-import { ActionButton, CreatePanel } from "@psychevo/components";
+import { ActionButton, CreatePanel, useConfirmAction } from "@psychevo/components";
 import type {
   AutomationDraftParams,
   AutomationDraftView,
@@ -83,6 +83,7 @@ export function AutomationsPage({
   const [requestText, setRequestText] = useState("");
   const [draftError, setDraftError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const confirmAction = useConfirmAction();
   const sorted = useMemo(() => [...automations].sort(sortAutomations), [automations]);
   const surfaceMode = draft ? "has-draft" : "is-list-only";
   const workspaceOptions = useMemo(
@@ -166,6 +167,7 @@ export function AutomationsPage({
             <span>Workspace</span>
             <select
               aria-label="Workspace"
+              className="pevo-fieldControl pevo-fieldControl--compact"
               disabled={disabled || Boolean(pendingAction)}
               onChange={(event) => selectCwd(event.target.value)}
               value={selectedCwd}
@@ -197,12 +199,13 @@ export function AutomationsPage({
       >
         <textarea
           aria-label="Automation description"
+          className="pevo-fieldControl"
           disabled={disabled || pendingAction === "draft"}
           onChange={(event) => setRequestText(event.target.value)}
           placeholder="Every weekday at 9, review the repo before standup"
           value={requestText}
         />
-        <ActionButton busy={pendingAction === "draft"} disabled={disabled || Boolean(pendingAction) || !requestText.trim()} icon={<Sparkles size={15} />} type="submit" variant="neutral">
+        <ActionButton pending={pendingAction === "draft"} disabled={disabled || Boolean(pendingAction) || !requestText.trim()} icon={<Sparkles size={15} />} type="submit" variant="secondary">
           {pendingAction === "draft" ? "Drafting" : "Draft"}
         </ActionButton>
       </form>
@@ -214,13 +217,13 @@ export function AutomationsPage({
           ) : sorted.length === 0 ? (
             <div className="automationEmpty">
               <div className="automationTemplateActions">
-                <ActionButton disabled={disabled} onClick={() => setDraft(projectDraft(selectedCwd))} variant="neutral">
+                <ActionButton disabled={disabled} onClick={() => setDraft(projectDraft(selectedCwd))} variant="secondary">
                   Project check
                 </ActionButton>
                 <ActionButton
                   disabled={disabled || selectedThreadOptions.length === 0}
                   onClick={() => setDraft(threadDraft(selectedCwd, selectedThreadOptions[0]?.id ?? null))}
-                  variant="neutral"
+                  variant="secondary"
                 >
                   Thread heartbeat
                 </ActionButton>
@@ -253,45 +256,55 @@ export function AutomationsPage({
                     </div>
                     <div className="automationRowActions">
                       {threadId && (
-                        <button disabled={disabled} onClick={() => onOpenSession(threadId)} type="button">
+                        <ActionButton disabled={disabled} onClick={() => onOpenSession(threadId)} size="compact" type="button" variant="ghost">
                           Open thread
-                        </button>
+                        </ActionButton>
                       )}
-                      <button disabled={disabled || Boolean(pendingAction)} onClick={() => void runPending(`run:${automation.id}`, () => onRun(automation.id))} type="button">
-                        <Play size={14} aria-hidden /> Run
-                      </button>
-                      <button
+                      <ActionButton disabled={disabled || Boolean(pendingAction)} icon={<Play size={14} />} onClick={() => void runPending(`run:${automation.id}`, () => onRun(automation.id))} size="compact" type="button" variant="secondary">
+                        Run
+                      </ActionButton>
+                      <ActionButton
                         disabled={disabled || Boolean(pendingAction)}
+                        icon={automation.enabled ? <Pause size={14} /> : <Play size={14} />}
                         onClick={() => void runPending(
                           `${automation.enabled ? "pause" : "resume"}:${automation.id}`,
                           () => automation.enabled ? onPause(automation.id) : onResume(automation.id)
                         )}
+                        size="compact"
                         type="button"
+                        variant="ghost"
                       >
-                        {automation.enabled ? <Pause size={14} aria-hidden /> : <Play size={14} aria-hidden />}
-                        {automation.enabled ? " Pause" : " Resume"}
-                      </button>
-                      <button
+                        {automation.enabled ? "Pause" : "Resume"}
+                      </ActionButton>
+                      <ActionButton
                         disabled={disabled || Boolean(pendingAction)}
+                        icon={<Pencil size={14} />}
                         onClick={() => {
                           setSelectedCwd(automation.cwd);
                           setDraft(draftFromAutomation(automation));
                         }}
+                        size="compact"
                         type="button"
+                        variant="ghost"
                       >
-                        <Pencil size={14} aria-hidden /> Edit
-                      </button>
-                      <button
+                        Edit
+                      </ActionButton>
+                      <ActionButton
                         disabled={disabled || Boolean(pendingAction)}
-                        onClick={() => {
-                          if (window.confirm(`Delete ${automation.title}?`)) {
-                            void runPending(`delete:${automation.id}`, () => onDelete(automation.id));
-                          }
-                        }}
+                        icon={<Trash2 size={14} />}
+                        onClick={() => void confirmAction({
+                          action: () => runPending(`delete:${automation.id}`, () => onDelete(automation.id)),
+                          confirmLabel: "Delete automation",
+                          description: `This permanently deletes ${automation.title}.`,
+                          title: `Delete ${automation.title}?`,
+                          tone: "danger"
+                        })}
+                        size="compact"
                         type="button"
+                        variant="danger"
                       >
-                        <Trash2 size={14} aria-hidden /> Delete
-                      </button>
+                        Delete
+                      </ActionButton>
                     </div>
                   </article>
                 );
@@ -330,6 +343,7 @@ export function AutomationsPage({
                 <span>Workspace</span>
                 <select
                   aria-label="Draft workspace"
+                  className="pevo-fieldControl"
                   onChange={(event) => {
                     const nextCwd = event.target.value;
                     selectCwd(nextCwd);
@@ -346,6 +360,7 @@ export function AutomationsPage({
                 <span>Bind to</span>
                 <select
                   aria-label="Bind to"
+                  className="pevo-fieldControl"
                   onChange={(event) => {
                     const value = event.target.value;
                     setDraft(value === "project"
@@ -363,6 +378,7 @@ export function AutomationsPage({
               <label className="automationField">
                 <span>Title</span>
                 <input
+                  className="pevo-fieldControl"
                   onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                   required
                   value={draft.title}
@@ -371,6 +387,7 @@ export function AutomationsPage({
               <label className="automationField automationFieldWide">
                 <span>Prompt</span>
                 <textarea
+                  className="pevo-fieldControl"
                   onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
                   required
                   value={draft.prompt}
@@ -387,6 +404,7 @@ export function AutomationsPage({
                 <label className="automationField automationFieldCompact">
                   <span>Every minutes</span>
                   <input
+                    className="pevo-fieldControl"
                     min={1}
                     onChange={(event) => setDraft({ ...draft, everyMinutes: Math.max(1, Number(event.target.value) || 1) })}
                     type="number"
@@ -398,6 +416,7 @@ export function AutomationsPage({
                 <label className="automationField automationFieldCompact">
                   <span>After minutes</span>
                   <input
+                    className="pevo-fieldControl"
                     min={1}
                     onChange={(event) => setDraft({ ...draft, afterMinutes: Math.max(1, Number(event.target.value) || 1) })}
                     type="number"
@@ -409,6 +428,7 @@ export function AutomationsPage({
                 <label className="automationField automationFieldCompact">
                   <span>Run once at</span>
                   <input
+                    className="pevo-fieldControl"
                     onChange={(event) => setDraft({ ...draft, onceAt: event.target.value || defaultOnceAt() })}
                     type="datetime-local"
                     value={draft.onceAt}
@@ -419,6 +439,7 @@ export function AutomationsPage({
                 <label className="automationField automationFieldCompact">
                   <span>Time</span>
                   <input
+                    className="pevo-fieldControl"
                     onChange={(event) => setDraft({ ...draft, time: event.target.value || "09:00" })}
                     type="time"
                     value={draft.time}
@@ -431,6 +452,7 @@ export function AutomationsPage({
                     <label key={day.value}>
                       <input
                         checked={draft.weekdays.includes(day.value)}
+                        className="pevo-choiceControl"
                         onChange={(event) => {
                           const weekdays = event.target.checked
                             ? [...draft.weekdays, day.value].sort()

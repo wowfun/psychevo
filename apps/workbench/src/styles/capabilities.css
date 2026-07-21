@@ -62,22 +62,11 @@
   gap: 2px;
 }
 
-.capabilityTabs {
-  gap: 4px;
-  padding: 3px;
-  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 44%);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 36%);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.capabilityTabs button,
-.agentCapabilitySegments button,
-.agentEditorMode button,
-.capabilitiesHeader button:not(.pevo-actionButton),
-.capabilityDetailHeader button:not(.pevo-actionButton),
-.capabilityActionGrid button:not(.pevo-actionButton),
-.capabilityInlineFields button:not(.pevo-actionButton),
-.capabilityForm button:not(.pevo-actionButton) {
+.capabilitiesHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityDetailHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityActionGrid button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityInlineFields button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityForm button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -94,26 +83,20 @@
   font-weight: 650;
 }
 
-.capabilityTabs button.is-selected,
-.agentCapabilitySegments button.is-selected,
-.agentEditorMode button.is-selected,
-.capabilityActionGrid button:not(.pevo-actionButton),
-.capabilityInlineFields button:not(.pevo-actionButton),
-.capabilityForm button:not(.pevo-actionButton),
-.capabilitiesHeader button:not(.pevo-actionButton),
-.capabilityDetailHeader button:not(.pevo-actionButton) {
+.capabilityActionGrid button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityInlineFields button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityForm button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilitiesHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch),
+.capabilityDetailHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch) {
   background: var(--pevo-panel);
   border-color: color-mix(in oklch, var(--pevo-border), transparent 28%);
 }
 
-.capabilityTabs button:disabled,
-.agentCapabilitySegments button:disabled,
-.agentEditorMode button:disabled,
-.capabilitiesHeader button:not(.pevo-actionButton):disabled,
-.capabilityDetailHeader button:not(.pevo-actionButton):disabled,
-.capabilityActionGrid button:not(.pevo-actionButton):disabled,
-.capabilityInlineFields button:not(.pevo-actionButton):disabled,
-.capabilityForm button:not(.pevo-actionButton):disabled {
+.capabilitiesHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
+.capabilityDetailHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
+.capabilityActionGrid button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
+.capabilityInlineFields button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled,
+.capabilityForm button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):disabled {
   cursor: not-allowed;
   opacity: 0.54;
 }
@@ -222,36 +205,7 @@
 }
 
 .capabilitiesToolbar label {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
   width: min(360px, 100%);
-  gap: 7px;
-  min-height: 32px;
-  padding: 0 9px;
-  color: var(--pevo-muted);
-  background: var(--pevo-panel);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
-  border-radius: var(--pevo-radius-sm);
-}
-
-.capabilitiesToolbar input,
-.capabilityInlineFields input,
-.capabilityForm input,
-.capabilityForm select {
-  min-width: 0;
-  min-height: 30px;
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 32%);
-  border-radius: var(--pevo-radius-sm);
-  font: inherit;
-  font-size: var(--pevo-font-size-small);
-}
-
-.capabilitiesToolbar input {
-  border: 0;
-  outline: 0;
 }
 
 .capabilityBanner {
@@ -651,7 +605,6 @@
 
 .capabilityInlineFields input {
   width: min(220px, 100%);
-  padding: 0 8px;
 }
 
 .capabilityKeyValues {
@@ -701,10 +654,9 @@
   min-width: 0;
 }
 
-.capabilityForm input,
-.capabilityForm select {
+.capabilityForm input.pevo-fieldControl,
+.capabilityForm select.pevo-fieldControl {
   width: min(190px, 100%);
-  padding: 0 8px;
 }
 
 .capabilityForm label {
@@ -750,7 +702,7 @@
 
 .runtimeProfileForm .runtimeProfileOptionsField textarea {
   min-height: 112px;
-  font-family: var(--pevo-mono);
+  font-family: var(--pevo-field-mono-family);
 }
 
 .runtimeProfileFieldHint {
@@ -876,14 +828,11 @@
 }
 
 @media (hover: hover) {
-  .capabilityTabs button:hover,
-  .agentCapabilitySegments button:hover,
-  .agentEditorMode button:hover,
-  .capabilitiesHeader button:not(.pevo-actionButton):hover,
-  .capabilityDetailHeader button:not(.pevo-actionButton):hover,
-  .capabilityActionGrid button:not(.pevo-actionButton):hover,
-  .capabilityInlineFields button:not(.pevo-actionButton):hover,
-  .capabilityForm button:not(.pevo-actionButton):hover,
+  .capabilitiesHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):hover,
+  .capabilityDetailHeader button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):hover,
+  .capabilityActionGrid button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):hover,
+  .capabilityInlineFields button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):hover,
+  .capabilityForm button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch):hover,
   .capabilityRow:hover,
   .capabilityRowSelect:hover,
   .skillRowSelect:hover {
@@ -925,9 +874,9 @@
     max-height: 46vh;
   }
 
-  .capabilityForm input,
-  .capabilityForm select,
-  .capabilityInlineFields input {
+  .capabilityForm input.pevo-fieldControl,
+  .capabilityForm select.pevo-fieldControl,
+  .capabilityInlineFields input.pevo-fieldControl {
     width: 100%;
   }
 

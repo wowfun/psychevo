@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { GatewayClient } from "@psychevo/client";
-import { ActionButton, CreatePanel, MarkdownText, Switch } from "@psychevo/components";
+import { ActionButton, CreatePanel, DisclosureButton, IconButton, MarkdownText, SegmentedControl, Switch, Tabs, useActionReceipts, useConfirmAction } from "@psychevo/components";
 import type {
   GatewayRequestScope,
   RuntimeProfileView,
@@ -34,7 +34,12 @@ type PluginInstallDraft = {
   force: boolean;
   inspection: JsonObject | null;
 };
-type MutationOptions = { notice?: string; refresh?: boolean };
+type MutationOptions = {
+  notice?: string;
+  receipt?: false;
+  refresh?: boolean;
+  undo?: (() => Promise<void> | void) | undefined;
+};
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
 type AgentsSegment = "definitions" | "teams" | "runtimes" | "backends";
 
@@ -270,6 +275,7 @@ export function CapabilitiesPage({
   const [pluginConnectSession, setPluginConnectSession] = useState<string | null>(null);
   const [pluginDetail, setPluginDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
   const [pluginOperation, setPluginOperation] = useState<JsonObject | null>(null);
+  const receipts = useActionReceipts();
 
   const requestScope = scope ?? (cwd ? { cwd, source: { kind: "web", rawId: null, lifetime: "persistent", rawIdentity: null, visibleName: null } } as GatewayRequestScope : null);
 
@@ -397,8 +403,12 @@ export function CapabilitiesPage({
       if (partial) {
         setPluginOperation(resultObject);
         setNotice(null);
+      } else if (options.receipt !== false) {
+        const message = options.notice ?? "Saved. Changes apply to the next run/session; current sessions may differ.";
+        receipts.push({ message, undo: options.undo });
+        setNotice(receipts.available ? null : message);
       } else {
-        setNotice(options.notice ?? "Saved. Changes apply to the next run/session; current sessions may differ.");
+        setNotice(null);
       }
       if (options.refresh !== false) setRefreshToken((value) => value + 1);
       return true;
@@ -419,45 +429,38 @@ export function CapabilitiesPage({
           <h2>Capabilities</h2>
           <span>{cwd}</span>
         </div>
-        <ActionButton ariaLabel="Refresh" disabled={busy} icon={<RefreshCw size={15} />} iconOnly onClick={() => setRefreshToken((value) => value + 1)} tooltip="Refresh" variant="ghost">
-          Refresh
-        </ActionButton>
+        <IconButton disabled={busy} icon={<RefreshCw size={15} />} label="Refresh" onClick={() => setRefreshToken((value) => value + 1)} />
       </header>
 
-      <div className="capabilityTabs" role="tablist" aria-label="Capability types">
-        {TABS.map((tab) => (
-          <button
-            aria-selected={activeTab === tab.id}
-            className={activeTab === tab.id ? "is-selected" : ""}
-            key={tab.id}
-            onClick={() => {
-              onActiveTabChange(tab.id);
-              setCreatePanel(null);
-              setQuery("");
-            }}
-            role="tab"
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs<CapabilityTab>
+        className="capabilityTabs"
+        label="Capability types"
+        onValueChange={(value) => {
+          onActiveTabChange(value);
+          setCreatePanel(null);
+          setQuery("");
+        }}
+        options={TABS.map((tab) => ({ label: tab.label, value: tab.id }))}
+        value={activeTab}
+      />
 
       {activeTab !== "agents" && (
         <div className="capabilitiesToolbar">
-          <label>
+          <label className="pevo-searchField">
             <Search size={15} />
-            <input aria-label={`Search ${tabLabel(activeTab)}`} onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
+            <input aria-label={`Search ${tabLabel(activeTab)}`} className="pevo-fieldControl pevo-fieldControl--search" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
           </label>
-          <ActionButton
-            active={createPanel === activeTab}
+          <DisclosureButton
+            controls={`capability-create-${activeTab}`}
             disabled={busy}
+            expanded={createPanel === activeTab}
             icon={<Plus size={14} />}
-            onClick={() => setCreatePanel((current) => current === activeTab ? null : activeTab)}
-            variant={createPanel === activeTab ? "neutral" : "primary"}
+            label={createActionLabel(activeTab)}
+            onExpandedChange={(expanded) => setCreatePanel(expanded ? activeTab : null)}
+            variant={createPanel === activeTab ? "secondary" : "primary"}
           >
             {createActionLabel(activeTab)}
-          </ActionButton>
+          </DisclosureButton>
         </div>
       )}
 
@@ -521,16 +524,6 @@ export function CapabilitiesPage({
         />
       ) : (
         <>
-          {activeTab === "plugins" && (
-            <CodexAuthorityCard
-              authority={objectField(data.plugins, "codex_authority")}
-              busy={busy}
-              client={client}
-              key={stringField(objectField(data.plugins, "codex_authority"), "resolvedBinary") || "codex"}
-              mutate={mutate}
-              scope={requestScope}
-            />
-          )}
           <CapabilityForms
             busy={busy}
             client={client}
@@ -546,6 +539,16 @@ export function CapabilitiesPage({
             open={createPanel === activeTab}
             onClose={() => setCreatePanel(null)}
           />
+          {activeTab === "plugins" && (
+            <CodexAuthorityCard
+              authority={objectField(data.plugins, "codex_authority")}
+              busy={busy}
+              client={client}
+              key={stringField(objectField(data.plugins, "codex_authority"), "resolvedBinary") || "codex"}
+              mutate={mutate}
+              scope={requestScope}
+            />
+          )}
 
           <div className="capabilitiesGrid">
             <div className="capabilityList" role="list">
@@ -578,12 +581,17 @@ export function CapabilitiesPage({
                         <CapabilityBadges row={row} />
                       </button>
                       <Switch
-                        ariaLabel={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
                         checked={row.enabled}
                         className="capabilityRowSwitch"
                         disabled={busy || (activeTab === "plugins" && !pluginEnablementMutable(row))}
-                        label={row.enabled ? "Enabled" : "Disabled"}
-                        onCheckedChange={(enabled) => void mutate(() => setCapabilityEnabled(client, requestScope, activeTab, row, enabled))}
+                        label={`${row.name} enabled`}
+                        onCheckedChange={(enabled) => void mutate(
+                          () => setCapabilityEnabled(client, requestScope, activeTab, row, enabled),
+                          {
+                            notice: `${row.name} ${enabled ? "enabled" : "disabled"}.`,
+                            undo: async () => { await mutate(() => setCapabilityEnabled(client, requestScope, activeTab, row, !enabled), { notice: `${row.name} restored.` }); }
+                          }
+                        )}
                         showLabel={false}
                         size="compact"
                       />
@@ -711,6 +719,7 @@ function AgentsCapabilityPanel({
   const [pendingSelection, setPendingSelection] = useState<{ name: string; target: BackendConfigTarget } | null>(null);
   const [pendingTeamSelection, setPendingTeamSelection] = useState<{ name: string; target: BackendConfigTarget } | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const confirmAction = useConfirmAction();
 
   const allRows = useMemo(() => agentRowsFromData(data), [data]);
   const allTeamRows = useMemo(() => agentTeamRowsFromData(data), [data]);
@@ -987,20 +996,18 @@ function AgentsCapabilityPanel({
 
   return (
     <div className="agentsCapability">
-      <div className="agentCapabilitySegments" role="tablist" aria-label="Agent management">
-        <button className={segment === "definitions" ? "is-selected" : ""} onClick={() => setSegment("definitions")} role="tab" aria-selected={segment === "definitions"} type="button">
-          Definitions
-        </button>
-        <button className={segment === "teams" ? "is-selected" : ""} onClick={() => setSegment("teams")} role="tab" aria-selected={segment === "teams"} type="button">
-          Teams
-        </button>
-        <button className={segment === "runtimes" ? "is-selected" : ""} onClick={() => setSegment("runtimes")} role="tab" aria-selected={segment === "runtimes"} type="button">
-          Runtime Profiles
-        </button>
-        <button className={segment === "backends" ? "is-selected" : ""} onClick={() => setSegment("backends")} role="tab" aria-selected={segment === "backends"} type="button">
-          ACP Backends
-        </button>
-      </div>
+      <Tabs<AgentsSegment>
+        className="agentCapabilitySegments"
+        label="Agent management"
+        onValueChange={setSegment}
+        options={[
+          { label: "Definitions", value: "definitions" },
+          { label: "Teams", value: "teams" },
+          { label: "Runtime Profiles", value: "runtimes" },
+          { label: "ACP Backends", value: "backends" }
+        ]}
+        value={segment}
+      />
 
       {segment === "backends" ? (
         <AgentsConfigPanel
@@ -1039,9 +1046,9 @@ function AgentsCapabilityPanel({
       ) : segment === "teams" ? (
         <>
           <div className="capabilitiesToolbar agentDefinitionsToolbar">
-            <label>
+            <label className="pevo-searchField">
               <Search size={15} />
-              <input aria-label="Search Teams" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
+              <input aria-label="Search Teams" className="pevo-fieldControl pevo-fieldControl--search" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
             </label>
             <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={openCreateTeam} variant="primary">
               Create team
@@ -1069,14 +1076,17 @@ function AgentsCapabilityPanel({
                     }} />
                   </button>
                   <Switch
-                    ariaLabel={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
                     checked={row.enabled}
                     className="capabilityRowSwitch"
                     disabled={busy || !row.mutable || !row.target}
-                    label={row.enabled ? "Enabled" : "Disabled"}
+                    label={`${row.name} enabled`}
                     onCheckedChange={(enabled) => {
                       if (!row.target) return;
-                      void mutate(() => client.request("team/setEnabled", { name: row.name, target: row.target, enabled, scope }), { notice: enabled ? "Team enabled." : "Team disabled." });
+                      const target = row.target;
+                      void mutate(() => client.request("team/setEnabled", { name: row.name, target, enabled, scope }), {
+                        notice: enabled ? "Team enabled." : "Team disabled.",
+                        undo: async () => { await mutate(() => client.request("team/setEnabled", { name: row.name, target, enabled: !enabled, scope }), { notice: "Team state restored." }); }
+                      });
                     }}
                     showLabel={false}
                     size="compact"
@@ -1112,17 +1122,30 @@ function AgentsCapabilityPanel({
                       <span>{[targetLabel(selectedTeam.target), selectedTeam.sourceLabel, teamStateLabel(selectedTeam.state)].filter(Boolean).join(" · ")}</span>
                     </div>
                     <div className="capabilityDetailHeaderActions">
-                      <button
+                      <ActionButton
                         disabled={busy || !selectedTeam.mutable || !selectedTeam.target}
+                        icon={<Trash2 size={14} />}
                         onClick={() => {
-                          if (!selectedTeam.target || !confirmAction(`Delete team ${selectedTeam.name}?`)) return;
-                          void mutate(() => client.request("team/delete", { name: selectedTeam.name, target: selectedTeam.target, scope }), { notice: "Team deleted." });
+                          const target = selectedTeam.target;
+                          if (!target) return;
+                          void confirmAction({
+                            action: () => mutate(
+                              () => client.request("team/delete", { name: selectedTeam.name, target, scope }),
+                              { notice: "Team deleted." }
+                            ),
+                            confirmLabel: "Delete team",
+                            description: `This permanently deletes ${selectedTeam.name}.`,
+                            title: `Delete team ${selectedTeam.name}?`,
+                            tone: "danger"
+                          });
                         }}
                         title={selectedTeam.mutable && selectedTeam.target ? "Delete" : "Only mutable Project/Profile teams can be deleted here"}
+                        size="compact"
                         type="button"
+                        variant="danger"
                       >
-                        <Trash2 size={14} /> Delete
-                      </button>
+                        Delete
+                      </ActionButton>
                     </div>
                   </div>
                   <TeamDefinitionFields row={selectedTeam} />
@@ -1148,9 +1171,9 @@ function AgentsCapabilityPanel({
       ) : (
         <>
           <div className="capabilitiesToolbar agentDefinitionsToolbar">
-            <label>
+            <label className="pevo-searchField">
               <Search size={15} />
-              <input aria-label="Search Agents" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
+              <input aria-label="Search Agents" className="pevo-fieldControl pevo-fieldControl--search" onChange={(event) => setQuery(event.target.value)} placeholder="Search" value={query} />
             </label>
             <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={openCreate} variant="primary">
               Create agent
@@ -1178,18 +1201,22 @@ function AgentsCapabilityPanel({
                     }} />
                   </button>
                   <Switch
-                    ariaLabel={row.enabled ? `Disable ${row.name}` : `Enable ${row.name}`}
                     checked={row.enabled}
                     className="capabilityRowSwitch"
                     disabled={busy || !row.mutable || !row.target}
-                    label={row.enabled ? "Enabled" : "Disabled"}
+                    label={`${row.name} enabled`}
                     onCheckedChange={(enabled) => {
                       if (!row.target) return;
                       void mutate(async () => {
                         const result = await client.request("agent/setEnabled", { name: row.name, target: row.target, enabled, scope });
                         await onAgentSurfaceChanged?.();
                         return result;
-                      }, { notice: enabled ? "Agent enabled." : "Agent disabled." });
+                      }, {
+                        notice: enabled ? "Agent enabled." : "Agent disabled.",
+                        undo: async () => {
+                          await mutate(() => client.request("agent/setEnabled", { name: row.name, target: row.target!, enabled: !enabled, scope }), { notice: "Agent state restored." });
+                        }
+                      });
                     }}
                     showLabel={false}
                     size="compact"
@@ -1225,21 +1252,31 @@ function AgentsCapabilityPanel({
                       <span>{[targetLabel(selected.target), selected.sourceLabel, agentStateLabel(selected.state)].filter(Boolean).join(" · ")}</span>
                     </div>
                     <div className="capabilityDetailHeaderActions">
-                      <button
+                      <ActionButton
                         disabled={busy || !selected.mutable || !selected.target}
+                        icon={<Trash2 size={14} />}
                         onClick={() => {
-                          if (!selected.target || !confirmAction(`Delete agent ${selected.name}?`)) return;
-                          void mutate(async () => {
-                            const result = await client.request("agent/delete", { name: selected.name, target: selected.target, scope });
-                            await onAgentSurfaceChanged?.();
-                            return result;
-                          }, { notice: "Agent deleted." });
+                          const target = selected.target;
+                          if (!target) return;
+                          void confirmAction({
+                            action: () => mutate(async () => {
+                              const result = await client.request("agent/delete", { name: selected.name, target, scope });
+                              await onAgentSurfaceChanged?.();
+                              return result;
+                            }, { notice: "Agent deleted." }),
+                            confirmLabel: "Delete agent",
+                            description: `This permanently deletes ${selected.name}.`,
+                            title: `Delete agent ${selected.name}?`,
+                            tone: "danger"
+                          });
                         }}
                         title={selected.mutable && selected.target ? "Delete" : "Only mutable Project/Profile agents can be deleted here"}
+                        size="compact"
                         type="button"
+                        variant="danger"
                       >
-                        <Trash2 size={14} /> Delete
-                      </button>
+                        Delete
+                      </ActionButton>
                     </div>
                   </div>
                   <AgentDefinitionFields row={selected} />
@@ -1300,6 +1337,7 @@ function RuntimeProfilesPanel({
   const [editing, setEditing] = useState<RuntimeProfileRow | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorLoadingId, setEditorLoadingId] = useState<string | null>(null);
+  const confirmAction = useConfirmAction();
 
   function openCreate() {
     setEditing(null);
@@ -1376,15 +1414,22 @@ function RuntimeProfilesPanel({
     const fallback = runtimeProfileHasFallback(row)
       ? " The next lower-precedence source or generated profile will remain."
       : "";
-    if (!confirmAction(`Delete the ${source} configuration for ${row.label || row.id}?${fallback}`)) return;
-    const ok = await mutate(
-      () => client.request("runtime/profile/delete", { id: row.id, target, scope }),
-      { notice: `${source} Runtime Profile configuration deleted.` }
-    );
-    if (ok) {
-      closeEditor();
-      onSelect(null);
-    }
+    await confirmAction({
+      action: async () => {
+        const ok = await mutate(
+          () => client.request("runtime/profile/delete", { id: row.id, target, scope }),
+          { notice: `${source} Runtime Profile configuration deleted.` }
+        );
+        if (ok) {
+          closeEditor();
+          onSelect(null);
+        }
+      },
+      confirmLabel: "Delete configuration",
+      description: `Delete the ${source} configuration for ${row.label || row.id}?${fallback}`,
+      title: "Delete Runtime Profile configuration?",
+      tone: "danger"
+    });
   }
 
   const selectedBackend = selected?.backendRef
@@ -1394,9 +1439,9 @@ function RuntimeProfilesPanel({
   return (
     <>
       <div className="capabilitiesToolbar agentDefinitionsToolbar">
-        <label>
+        <label className="pevo-searchField">
           <Search size={15} />
-          <input aria-label="Search Runtime Profiles" onChange={(event) => onQueryChange(event.target.value)} placeholder="Search" value={query} />
+          <input aria-label="Search Runtime Profiles" className="pevo-fieldControl pevo-fieldControl--search" onChange={(event) => onQueryChange(event.target.value)} placeholder="Search" value={query} />
         </label>
         <span className="capabilityToolbarHint">{rows.length} profiles</span>
         <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={openCreate} variant="primary">
@@ -1429,18 +1474,27 @@ function RuntimeProfilesPanel({
                 }} />
               </button>
               <Switch
-                ariaLabel={row.enabled ? `Disable ${row.id}` : `Enable ${row.id}`}
                 checked={row.enabled}
                 className="capabilityRowSwitch"
                 disabled={busy || !runtimeProfileCanCustomize(row)}
-                label={row.enabled ? "Enabled" : "Disabled"}
+                label={`${row.id} enabled`}
                 onCheckedChange={(enabled) => {
                   void mutate(() => client.request("runtime/profile/setEnabled", {
                     id: row.id,
                     target: runtimeProfileMutableTarget(row) ?? "profile",
                     enabled,
                     scope
-                  }), { notice: enabled ? "Runtime profile enabled." : "Runtime profile disabled." });
+                  }), {
+                    notice: enabled ? "Runtime profile enabled." : "Runtime profile disabled.",
+                    undo: async () => {
+                      await mutate(() => client.request("runtime/profile/setEnabled", {
+                        id: row.id,
+                        target: runtimeProfileMutableTarget(row) ?? "profile",
+                        enabled: !enabled,
+                        scope
+                      }), { notice: "Runtime profile state restored." });
+                    }
+                  });
                 }}
                 showLabel={false}
                 size="compact"
@@ -1475,31 +1529,38 @@ function RuntimeProfilesPanel({
                   <span>{[selected.provenance, runtimeProfileSource(selected), runtimeReadinessLabel(selected.healthStatus)].filter(Boolean).join(" · ")}</span>
                 </div>
                 <div className="capabilityDetailHeaderActions">
-                  <button
+                  <ActionButton
                     disabled={busy || editorLoadingId === selected.id || !runtimeProfileCanCustomize(selected)}
+                    icon={<Edit3 size={14} />}
                     onClick={() => void openEdit(selected)}
                     title={runtimeProfileCanCustomize(selected) ? (selected.generated ? "Create a configured override" : "Edit configuration") : "Generated ACP compatibility profiles are managed from ACP Backends"}
+                    size="compact"
                     type="button"
                   >
-                    <Edit3 size={14} /> {selected.generated ? "Customize" : "Edit"}
-                  </button>
-                  <button
+                    {selected.generated ? "Customize" : "Edit"}
+                  </ActionButton>
+                  <ActionButton
                     disabled={busy || !runtimeProfileMutableTarget(selected)}
+                    icon={<Trash2 size={14} />}
                     onClick={() => void deleteRuntimeProfile(selected)}
                     title={runtimeProfileMutableTarget(selected) ? `Delete ${targetLabel(runtimeProfileMutableTarget(selected))} configuration` : "Generated profiles cannot be deleted"}
+                    size="compact"
                     type="button"
+                    variant="danger"
                   >
-                    <Trash2 size={14} /> Delete
-                  </button>
+                    Delete
+                  </ActionButton>
                   {selected.runtime === "acp" && (
-                    <button
+                    <ActionButton
                       disabled={busy || !selectedBackend}
+                      icon={<Wrench size={14} />}
                       onClick={() => selectedBackend && onDoctorBackend(selectedBackend)}
                       title={selectedBackend ? `Doctor ACP backend ${selectedBackend.id}` : `ACP backend ${selected.backendRef || "is not configured"}`}
+                      size="compact"
                       type="button"
                     >
-                      <Wrench size={14} /> Doctor backend
-                    </button>
+                      Doctor backend
+                    </ActionButton>
                   )}
                 </div>
               </div>
@@ -1585,7 +1646,7 @@ function RuntimeProfileEditorForm({
     <form aria-label="Runtime Profile" className="capabilityForm agentDefinitionForm runtimeProfileForm" onSubmit={onSubmit}>
       <label>
         <span>Target</span>
-        <select aria-label="Runtime Profile target" disabled={busy || configuredSource} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
+        <select aria-label="Runtime Profile target" className="pevo-fieldControl" disabled={busy || configuredSource} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
           <option value="project">Project</option>
           <option value="profile">Profile</option>
         </select>
@@ -1595,6 +1656,7 @@ function RuntimeProfileEditorForm({
         <span>Profile id</span>
         <input
           aria-label="Runtime Profile id"
+          className="pevo-fieldControl"
           disabled={busy || Boolean(editing)}
           onChange={(event) => onChange({ ...draft, id: event.target.value })}
           pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
@@ -1605,52 +1667,52 @@ function RuntimeProfileEditorForm({
       </label>
       <label>
         <span>Runtime</span>
-        <select aria-label="Runtime Profile runtime" disabled={busy || generatedIdentity} onChange={(event) => onChange({ ...draft, runtime: runtimeProfileKind(event.target.value) })} value={draft.runtime}>
+        <select aria-label="Runtime Profile runtime" className="pevo-fieldControl" disabled={busy || generatedIdentity} onChange={(event) => onChange({ ...draft, runtime: runtimeProfileKind(event.target.value) })} value={draft.runtime}>
           {(editing || draft.runtime === "native") && <option value="native">Native</option>}
           <option value="acp">ACP</option>
         </select>
       </label>
       <label>
         <span>Label</span>
-        <input aria-label="Runtime Profile label" disabled={busy} onChange={(event) => onChange({ ...draft, label: event.target.value })} placeholder="Review Codex" value={draft.label} />
+        <input aria-label="Runtime Profile label" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, label: event.target.value })} placeholder="Review Codex" value={draft.label} />
       </label>
       <label className="agentDefinitionSwitch">
         <span>Enabled</span>
-        <Switch ariaLabel="Runtime Profile enabled" checked={draft.enabled} disabled={busy} label={draft.enabled ? "Enabled" : "Disabled"} onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
+        <Switch checked={draft.enabled} disabled={busy} label="Runtime Profile enabled" onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
       </label>
       {draft.runtime === "acp" && (
         <label>
           <span>ACP backend ref</span>
-          <input aria-label="Runtime Profile ACP backend ref" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} placeholder="cursor" required value={draft.backendRef} />
+          <input aria-label="Runtime Profile ACP backend ref" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} placeholder="cursor" required value={draft.backendRef} />
         </label>
       )}
       <label>
         <span>Default model</span>
-        <input aria-label="Runtime Profile default model" disabled={busy} onChange={(event) => onChange({ ...draft, defaultModel: event.target.value })} placeholder="Runtime default" value={draft.defaultModel} />
+        <input aria-label="Runtime Profile default model" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, defaultModel: event.target.value })} placeholder="Runtime default" value={draft.defaultModel} />
       </label>
       <label>
         <span>Default mode</span>
-        <input aria-label="Runtime Profile default mode" disabled={busy} onChange={(event) => onChange({ ...draft, defaultMode: event.target.value })} placeholder="Runtime default" value={draft.defaultMode} />
+        <input aria-label="Runtime Profile default mode" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, defaultMode: event.target.value })} placeholder="Runtime default" value={draft.defaultMode} />
       </label>
       <label>
         <span>Default agent</span>
-        <input aria-label="Runtime Profile default agent" disabled={busy} onChange={(event) => onChange({ ...draft, defaultAgent: event.target.value })} placeholder="Runtime default" value={draft.defaultAgent} />
+        <input aria-label="Runtime Profile default agent" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, defaultAgent: event.target.value })} placeholder="Runtime default" value={draft.defaultAgent} />
       </label>
       <label>
         <span>Approval mode</span>
-        <input aria-label="Runtime Profile approval mode" disabled={busy} onChange={(event) => onChange({ ...draft, approvalMode: event.target.value })} placeholder="Runtime default" value={draft.approvalMode} />
+        <input aria-label="Runtime Profile approval mode" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, approvalMode: event.target.value })} placeholder="Runtime default" value={draft.approvalMode} />
       </label>
       <label>
         <span>Sandbox</span>
-        <input aria-label="Runtime Profile sandbox" disabled={busy} onChange={(event) => onChange({ ...draft, sandbox: event.target.value })} placeholder="Runtime default" value={draft.sandbox} />
+        <input aria-label="Runtime Profile sandbox" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, sandbox: event.target.value })} placeholder="Runtime default" value={draft.sandbox} />
       </label>
       <label className="agentWideField runtimeProfileCompactTextArea">
         <span>Workspace roots</span>
-        <textarea aria-label="Runtime Profile workspace roots" disabled={busy} onChange={(event) => onChange({ ...draft, workspaceRootsText: event.target.value })} placeholder="One absolute path per line" spellCheck={false} value={draft.workspaceRootsText} />
+        <textarea aria-label="Runtime Profile workspace roots" className="pevo-fieldControl pevo-fieldControl--code pevo-fieldControl--compact" disabled={busy} onChange={(event) => onChange({ ...draft, workspaceRootsText: event.target.value })} placeholder="One absolute path per line" spellCheck={false} value={draft.workspaceRootsText} />
       </label>
       <label className="agentWideField runtimeProfileOptionsField">
         <span>Advanced options (JSON)</span>
-        <textarea aria-label="Runtime Profile options" disabled={busy} onChange={(event) => onChange({ ...draft, optionsText: event.target.value })} placeholder="{}" spellCheck={false} value={draft.optionsText} />
+        <textarea aria-label="Runtime Profile options" className="pevo-fieldControl pevo-fieldControl--code" disabled={busy} onChange={(event) => onChange({ ...draft, optionsText: event.target.value })} placeholder="{}" spellCheck={false} value={draft.optionsText} />
       </label>
       <div className="capabilityFormActions">
         <ActionButton disabled={busy} icon={<X size={14} />} onClick={onCancel} type="button" variant="ghost">Cancel</ActionButton>
@@ -1681,57 +1743,54 @@ function AgentDefinitionEditorForm({
 }) {
   return (
     <form aria-label="Agent definition" className="capabilityForm agentDefinitionForm" onSubmit={onSubmit}>
-      <div className="agentEditorMode" role="tablist" aria-label="Agent editor mode">
-        <button aria-selected={draft.mode === "form"} className={draft.mode === "form" ? "is-selected" : ""} onClick={() => onModeChange("form")} role="tab" type="button">Form</button>
-        <button aria-selected={draft.mode === "markdown"} className={draft.mode === "markdown" ? "is-selected" : ""} onClick={() => onModeChange("markdown")} role="tab" type="button">Markdown</button>
-      </div>
+      <SegmentedControl<AgentDraft["mode"]> className="agentEditorMode" label="Agent editor mode" onValueChange={onModeChange} options={[{ label: "Form", value: "form" }, { label: "Markdown", value: "markdown" }]} value={draft.mode} />
 
       <label>
         <span>Target</span>
-        <select aria-label="Agent target" disabled={editing || busy} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
+        <select aria-label="Agent target" className="pevo-fieldControl" disabled={editing || busy} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
           <option value="project">Project</option>
           <option value="profile">Profile</option>
         </select>
       </label>
       <label>
         <span>Name</span>
-        <input aria-label="Agent name" disabled={editing || busy} onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} />
+        <input aria-label="Agent name" className="pevo-fieldControl" disabled={editing || busy} onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} />
       </label>
       {draft.mode === "form" ? (
         <>
           <label>
             <span>Description</span>
-            <input aria-label="Agent description" disabled={busy} onChange={(event) => onChange({ ...draft, description: event.target.value })} value={draft.description} />
+            <input aria-label="Agent description" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, description: event.target.value })} value={draft.description} />
           </label>
           <label className="agentDefinitionSwitch">
             <span>Enabled</span>
-            <Switch ariaLabel="Agent enabled" checked={draft.enabled} disabled={busy} label={draft.enabled ? "Enabled" : "Disabled"} onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
+            <Switch checked={draft.enabled} disabled={busy} label="Agent enabled" onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
           </label>
           <label className="agentWideField">
             <span>Instructions</span>
-            <textarea aria-label="Agent instructions" disabled={busy} onChange={(event) => onChange({ ...draft, instructions: event.target.value })} value={draft.instructions} />
+            <textarea aria-label="Agent instructions" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, instructions: event.target.value })} value={draft.instructions} />
           </label>
           <label>
             <span>Backend ref</span>
-            <input aria-label="Agent backend ref" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} value={draft.backendRef} />
+            <input aria-label="Agent backend ref" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, backendRef: event.target.value })} value={draft.backendRef} />
           </label>
           <label>
             <span>Entrypoints</span>
-            <input aria-label="Agent entrypoints" disabled={busy} onChange={(event) => onChange({ ...draft, entrypointsText: event.target.value })} value={draft.entrypointsText} />
+            <input aria-label="Agent entrypoints" className="pevo-fieldControl pevo-fieldControl--compact" disabled={busy} onChange={(event) => onChange({ ...draft, entrypointsText: event.target.value })} value={draft.entrypointsText} />
           </label>
           <label>
             <span>Tools</span>
-            <input aria-label="Agent tools" disabled={busy} onChange={(event) => onChange({ ...draft, toolsText: event.target.value })} value={draft.toolsText} />
+            <input aria-label="Agent tools" className="pevo-fieldControl pevo-fieldControl--compact" disabled={busy} onChange={(event) => onChange({ ...draft, toolsText: event.target.value })} value={draft.toolsText} />
           </label>
           <label>
             <span>MCP servers</span>
-            <input aria-label="Agent MCP servers" disabled={busy} onChange={(event) => onChange({ ...draft, mcpServersText: event.target.value })} value={draft.mcpServersText} />
+            <input aria-label="Agent MCP servers" className="pevo-fieldControl pevo-fieldControl--compact" disabled={busy} onChange={(event) => onChange({ ...draft, mcpServersText: event.target.value })} value={draft.mcpServersText} />
           </label>
         </>
       ) : (
         <label className="agentWideField">
           <span>Markdown</span>
-          <textarea aria-label="Agent Markdown" disabled={busy} onChange={(event) => onChange({ ...draft, rawMarkdown: event.target.value })} spellCheck={false} value={draft.rawMarkdown} />
+          <textarea aria-label="Agent Markdown" className="pevo-fieldControl pevo-fieldControl--code" disabled={busy} onChange={(event) => onChange({ ...draft, rawMarkdown: event.target.value })} spellCheck={false} value={draft.rawMarkdown} />
         </label>
       )}
       <div className="capabilityFormActions">
@@ -1761,54 +1820,51 @@ function TeamDefinitionEditorForm({
 }) {
   return (
     <form aria-label="Team definition" className="capabilityForm agentDefinitionForm" onSubmit={onSubmit}>
-      <div className="agentEditorMode" role="tablist" aria-label="Team editor mode">
-        <button aria-selected={draft.mode === "form"} className={draft.mode === "form" ? "is-selected" : ""} onClick={() => onModeChange("form")} role="tab" type="button">Form</button>
-        <button aria-selected={draft.mode === "markdown"} className={draft.mode === "markdown" ? "is-selected" : ""} onClick={() => onModeChange("markdown")} role="tab" type="button">Markdown</button>
-      </div>
+      <SegmentedControl<TeamDraft["mode"]> className="agentEditorMode" label="Team editor mode" onValueChange={onModeChange} options={[{ label: "Form", value: "form" }, { label: "Markdown", value: "markdown" }]} value={draft.mode} />
 
       <label>
         <span>Target</span>
-        <select aria-label="Team target" disabled={editing || busy} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
+        <select aria-label="Team target" className="pevo-fieldControl" disabled={editing || busy} onChange={(event) => onChange({ ...draft, target: agentTargetValue(event.target.value) })} value={draft.target}>
           <option value="project">Project</option>
           <option value="profile">Profile</option>
         </select>
       </label>
       <label>
         <span>Name</span>
-        <input aria-label="Team name" disabled={editing || busy} onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} />
+        <input aria-label="Team name" className="pevo-fieldControl" disabled={editing || busy} onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} />
       </label>
       {draft.mode === "form" ? (
         <>
           <label>
             <span>Description</span>
-            <input aria-label="Team description" disabled={busy} onChange={(event) => onChange({ ...draft, description: event.target.value })} value={draft.description} />
+            <input aria-label="Team description" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, description: event.target.value })} value={draft.description} />
           </label>
           <label>
             <span>Leader</span>
-            <input aria-label="Team leader" disabled={busy} onChange={(event) => onChange({ ...draft, leader: event.target.value })} value={draft.leader} />
+            <input aria-label="Team leader" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, leader: event.target.value })} value={draft.leader} />
           </label>
           <label>
             <span>Parallel agents</span>
-            <input aria-label="Team max parallel agents" disabled={busy} min={1} max={4} onChange={(event) => onChange({ ...draft, maxParallelAgents: event.target.value })} type="number" value={draft.maxParallelAgents} />
+            <input aria-label="Team max parallel agents" className="pevo-fieldControl" disabled={busy} min={1} max={4} onChange={(event) => onChange({ ...draft, maxParallelAgents: event.target.value })} type="number" value={draft.maxParallelAgents} />
           </label>
           <label className="agentDefinitionSwitch">
             <span>Enabled</span>
-            <Switch ariaLabel="Team enabled" checked={draft.enabled} disabled={busy} label={draft.enabled ? "Enabled" : "Disabled"} onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
+            <Switch checked={draft.enabled} disabled={busy} label="Team enabled" onCheckedChange={(enabled) => onChange({ ...draft, enabled })} showLabel={false} size="compact" />
           </label>
           <label className="agentWideField">
             <span>Members</span>
-            <textarea aria-label="Team members" disabled={busy} onChange={(event) => onChange({ ...draft, membersText: event.target.value })} value={draft.membersText} />
+            <textarea aria-label="Team members" className="pevo-fieldControl pevo-fieldControl--code" disabled={busy} onChange={(event) => onChange({ ...draft, membersText: event.target.value })} value={draft.membersText} />
             <small>One member per line. Add named fields such as runtime=codex, option.mode=auto-review, role=review.</small>
           </label>
           <label className="agentWideField">
             <span>Instructions</span>
-            <textarea aria-label="Team instructions" disabled={busy} onChange={(event) => onChange({ ...draft, instructions: event.target.value })} value={draft.instructions} />
+            <textarea aria-label="Team instructions" className="pevo-fieldControl" disabled={busy} onChange={(event) => onChange({ ...draft, instructions: event.target.value })} value={draft.instructions} />
           </label>
         </>
       ) : (
         <label className="agentWideField">
           <span>Markdown</span>
-          <textarea aria-label="Team Markdown" disabled={busy} onChange={(event) => onChange({ ...draft, rawMarkdown: event.target.value })} spellCheck={false} value={draft.rawMarkdown} />
+          <textarea aria-label="Team Markdown" className="pevo-fieldControl pevo-fieldControl--code" disabled={busy} onChange={(event) => onChange({ ...draft, rawMarkdown: event.target.value })} spellCheck={false} value={draft.rawMarkdown} />
         </label>
       )}
       <div className="capabilityFormActions">
@@ -1853,17 +1909,15 @@ function MarkdownDefinitionPreview({
             text={boundedText(preview, 4000)}
           />
           {onEdit && (
-            <button
-              aria-label={editLabel}
+            <IconButton
               className="markdownDefinitionEdit"
               disabled={editDisabled}
+              icon={<Edit3 size={14} />}
+              label={editLabel}
               onClick={onEdit}
-              title={editDisabled ? editDisabledReason : editLabel}
-              type="button"
-            >
-              <Edit3 size={14} aria-hidden />
-              <span className="pevo-srOnly">{editLabel}</span>
-            </button>
+              size="compact"
+              tooltip={editDisabled ? editDisabledReason : editLabel}
+            />
           )}
         </>
       ) : "No preview"}
@@ -1890,6 +1944,7 @@ function MarkdownDefinitionEditor({
     <section className="markdownDefinitionEditor" aria-label={ariaLabel}>
       <textarea
         aria-label={ariaLabel}
+        className="pevo-fieldControl pevo-fieldControl--code"
         disabled={busy}
         onChange={(event) => onChange(event.target.value)}
         spellCheck={false}
@@ -1988,6 +2043,7 @@ function SkillsPanel({
 }) {
   const [detail, setDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
   const [markdownDraft, setMarkdownDraft] = useState<{ id: string; text: string } | null>(null);
+  const confirmAction = useConfirmAction();
 
   const allRows = useMemo(() => skillRowsFromData(data), [data]);
   const rows = useMemo(() => {
@@ -2026,27 +2082,38 @@ function SkillsPanel({
   return (
     <>
       {createOpen && (
-        <CreatePanel className="capabilityCreatePanel" description="Install a skill from a local path or Git source." icon={<Plus size={14} />} layout="side" onClose={onCloseCreate} title="Install skill">
-          <form className="capabilityForm skillInstallForm" onSubmit={(event) => {
+        <CreatePanel className="capabilityCreatePanel" description="Install a skill from a local path or Git source." icon={<Plus size={14} />} id="capability-create-skills" layout="side" onClose={onCloseCreate} title="Install skill">
+          <form className="capabilityForm skillInstallForm" onSubmit={async (event) => {
             event.preventDefault();
-            if (skillInstall.force && !confirmAction("Install skill with force?")) return;
-            void mutate(() => client.request("skill/install", {
-              source: skillInstall.source,
-              name: skillInstall.name || null,
-              target: skillInstall.target,
-              force: skillInstall.force,
-              scope
-            })).then((ok) => {
+            const install = async () => {
+              const ok = await mutate(() => client.request("skill/install", {
+                source: skillInstall.source,
+                name: skillInstall.name || null,
+                target: skillInstall.target,
+                force: skillInstall.force,
+                scope
+              }));
               if (ok) onCloseCreate();
-            });
+            };
+            if (skillInstall.force) {
+              await confirmAction({
+                action: install,
+                confirmLabel: "Install with force",
+                description: "Existing skill files may be overwritten.",
+                title: "Install skill with force?",
+                tone: "caution"
+              });
+              return;
+            }
+            await install();
           }}>
-            <input aria-label="Skill source" onChange={(event) => setSkillInstall({ ...skillInstall, source: event.target.value })} placeholder="path or git source" value={skillInstall.source} />
-            <input aria-label="Skill name" onChange={(event) => setSkillInstall({ ...skillInstall, name: event.target.value })} placeholder="name" value={skillInstall.name} />
-            <select aria-label="Skill target" onChange={(event) => setSkillInstall({ ...skillInstall, target: event.target.value === "project" ? "project" : "profile" })} value={skillInstall.target}>
+            <input aria-label="Skill source" className="pevo-fieldControl" onChange={(event) => setSkillInstall({ ...skillInstall, source: event.target.value })} placeholder="path or git source" value={skillInstall.source} />
+            <input aria-label="Skill name" className="pevo-fieldControl" onChange={(event) => setSkillInstall({ ...skillInstall, name: event.target.value })} placeholder="name" value={skillInstall.name} />
+            <select aria-label="Skill target" className="pevo-fieldControl" onChange={(event) => setSkillInstall({ ...skillInstall, target: event.target.value === "project" ? "project" : "profile" })} value={skillInstall.target}>
               <option value="profile">Profile</option>
               <option value="project">Project</option>
             </select>
-            <label><input checked={skillInstall.force} onChange={(event) => setSkillInstall({ ...skillInstall, force: event.target.checked })} type="checkbox" /> Force</label>
+            <label><input checked={skillInstall.force} className="pevo-choiceControl" onChange={(event) => setSkillInstall({ ...skillInstall, force: event.target.checked })} type="checkbox" /> Force</label>
             <ActionButton disabled={busy || !skillInstall.source.trim()} icon={<Plus size={14} />} type="submit" variant="primary">Install</ActionButton>
           </form>
         </CreatePanel>
@@ -2072,12 +2139,17 @@ function SkillsPanel({
                   </span>
                 </button>
                 <Switch
-                  ariaLabel={item.enabled ? `Disable ${item.name}` : `Enable ${item.name}`}
                   checked={item.enabled}
                   className="capabilityRowSwitch"
                   disabled={busy}
-                  label={item.enabled ? "Enabled" : "Disabled"}
-                  onCheckedChange={(enabled) => void mutate(() => client.request("skill/setEnabled", { name: item.name, enabled, target: mutableTargetForSkill(item) ?? skillInstall.target, scope }))}
+                  label={`${item.name} enabled`}
+                  onCheckedChange={(enabled) => {
+                    const target = mutableTargetForSkill(item) ?? skillInstall.target;
+                    void mutate(() => client.request("skill/setEnabled", { name: item.name, enabled, target, scope }), {
+                      notice: `${item.name} ${enabled ? "enabled" : "disabled"}.`,
+                      undo: async () => { await mutate(() => client.request("skill/setEnabled", { name: item.name, enabled: !enabled, target, scope }), { notice: `${item.name} restored.` }); }
+                    });
+                  }}
                   showLabel={false}
                   size="compact"
                 />
@@ -2095,18 +2167,27 @@ function SkillsPanel({
                   <span>{skillDetailSummary(row)}</span>
                 </div>
                 <div className="capabilityDetailHeaderActions">
-                  <button
+                  <ActionButton
                     disabled={busy || !mutableTargetForSkill(row)}
-                    onClick={() => {
+                    icon={<Trash2 size={14} />}
+                    onClick={() => void (async () => {
                       const target = mutableTargetForSkill(row);
-                      if (!target || !confirmAction(`Uninstall skill ${row.name}?`)) return;
-                      void mutate(() => client.request("skill/uninstall", { name: row.name, path: row.location || null, target, scope }));
-                    }}
+                      if (!target) return;
+                      await confirmAction({
+                        action: () => mutate(() => client.request("skill/uninstall", { name: row.name, path: row.location || null, target, scope })),
+                        confirmLabel: "Uninstall skill",
+                        description: `This removes ${row.name} from ${target}.`,
+                        title: `Uninstall skill ${row.name}?`,
+                        tone: "danger"
+                      });
+                    })()}
                     title={mutableTargetForSkill(row) ? "Uninstall" : "Only profile/project-installed skills can be uninstalled here"}
+                    size="compact"
                     type="button"
+                    variant="danger"
                   >
-                    <Trash2 size={14} /> Uninstall
-                  </button>
+                    Uninstall
+                  </ActionButton>
                 </div>
               </div>
 
@@ -2256,6 +2337,10 @@ function CapabilityActions({
   tab: CapabilityTab;
   toolPolicyDraft: { enabledTools: string; disabledTools: string };
 }) {
+  const confirmAction = useConfirmAction();
+  const runConfirmed = (title: string, confirmLabel: string, action: () => Promise<unknown>, tone: "caution" | "danger" = "danger") => {
+    void confirmAction({ action, confirmLabel, description: title, title, tone });
+  };
   if (!client || !scope) return null;
   if (tab === "tools") {
     const canToggleModes = toolsetModeMutable(row);
@@ -2265,18 +2350,16 @@ function CapabilityActions({
       <div className="capabilityActionGrid">
         {canToggleModes && (
           <>
-            <button disabled={busy} onClick={() => void mutate(() => client.request("tool/setEnabled", { name: row.name, mode: "default", enabled: !modeEnabled(row.raw, "default"), scope }))} type="button">
+            <ActionButton disabled={busy} onClick={() => void mutate(() => client.request("tool/setEnabled", { name: row.name, mode: "default", enabled: !modeEnabled(row.raw, "default"), scope }))} size="compact" type="button">
               Default {modeEnabled(row.raw, "default") ? "Off" : "On"}
-            </button>
-            <button disabled={busy} onClick={() => void mutate(() => client.request("tool/setEnabled", { name: row.name, mode: "plan", enabled: !modeEnabled(row.raw, "plan"), scope }))} type="button">
+            </ActionButton>
+            <ActionButton disabled={busy} onClick={() => void mutate(() => client.request("tool/setEnabled", { name: row.name, mode: "plan", enabled: !modeEnabled(row.raw, "plan"), scope }))} size="compact" type="button">
               Plan {modeEnabled(row.raw, "plan") ? "Off" : "On"}
-            </button>
+            </ActionButton>
           </>
         )}
         {canRemove && (
-          <button disabled={busy} onClick={() => confirmAction(`Remove toolset ${row.name}?`) && void mutate(() => client.request("tool/remove", { name: row.name, scope }))} type="button">
-            <Trash2 size={14} /> Remove
-          </button>
+          <ActionButton disabled={busy} icon={<Trash2 size={14} />} onClick={() => runConfirmed(`Remove toolset ${row.name}?`, "Remove toolset", () => mutate(() => client.request("tool/remove", { name: row.name, scope })))} size="compact" type="button" variant="danger">Remove</ActionButton>
         )}
       </div>
     );
@@ -2288,25 +2371,15 @@ function CapabilityActions({
     return (
       <div className="capabilityStack">
         <div className="capabilityActionGrid">
-          <button disabled={busy} onClick={() => void mutate(() => client.request("mcp/test", { name: row.name, scope }))} type="button">
-            <Play size={14} /> Test
-          </button>
-          <button disabled={busy} onClick={() => void startOAuth(client, scope, row.name, onOAuthSession, mutate)} type="button">
-            <LogIn size={14} /> Login
-          </button>
-          <button disabled={busy} onClick={() => void mutate(() => client.request("mcp/oauth/logout", { name: row.name, scope }))} type="button">
-            <LogOut size={14} /> Logout
-          </button>
-          <button disabled={busy} onClick={() => confirmAction(`Remove MCP server ${row.name}?`) && void mutate(() => client.request("mcp/remove", { name: row.name, scope }))} type="button">
-            <Trash2 size={14} /> Remove
-          </button>
+          <ActionButton disabled={busy} icon={<Play size={14} />} onClick={() => void mutate(() => client.request("mcp/test", { name: row.name, scope }), { receipt: false })} size="compact" type="button">Test</ActionButton>
+          <ActionButton disabled={busy} icon={<LogIn size={14} />} onClick={() => void startOAuth(client, scope, row.name, onOAuthSession, mutate)} size="compact" type="button">Login</ActionButton>
+          <ActionButton disabled={busy} icon={<LogOut size={14} />} onClick={() => void mutate(() => client.request("mcp/oauth/logout", { name: row.name, scope }))} size="compact" type="button" variant="ghost">Logout</ActionButton>
+          <ActionButton disabled={busy} icon={<Trash2 size={14} />} onClick={() => runConfirmed(`Remove MCP server ${row.name}?`, "Remove server", () => mutate(() => client.request("mcp/remove", { name: row.name, scope })))} size="compact" type="button" variant="danger">Remove</ActionButton>
         </div>
         <div className="capabilityInlineFields">
-          <input aria-label="Enabled MCP tools" onChange={(event) => setToolPolicyDraft({ ...toolPolicyDraft, enabledTools: event.target.value })} placeholder={enabledTools || "enabled tools"} value={toolPolicyDraft.enabledTools} />
-          <input aria-label="Disabled MCP tools" onChange={(event) => setToolPolicyDraft({ ...toolPolicyDraft, disabledTools: event.target.value })} placeholder={disabledTools || "disabled tools"} value={toolPolicyDraft.disabledTools} />
-          <button disabled={busy} onClick={() => void mutate(() => client.request("mcp/setToolPolicy", { name: row.name, enabledTools: splitList(toolPolicyDraft.enabledTools || enabledTools) || null, disabledTools: splitList(toolPolicyDraft.disabledTools || disabledTools) ?? [], scope }))} type="button">
-            Save Policy
-          </button>
+          <input aria-label="Enabled MCP tools" className="pevo-fieldControl pevo-fieldControl--compact" onChange={(event) => setToolPolicyDraft({ ...toolPolicyDraft, enabledTools: event.target.value })} placeholder={enabledTools || "enabled tools"} value={toolPolicyDraft.enabledTools} />
+          <input aria-label="Disabled MCP tools" className="pevo-fieldControl pevo-fieldControl--compact" onChange={(event) => setToolPolicyDraft({ ...toolPolicyDraft, disabledTools: event.target.value })} placeholder={disabledTools || "disabled tools"} value={toolPolicyDraft.disabledTools} />
+          <ActionButton disabled={busy} onClick={() => void mutate(() => client.request("mcp/setToolPolicy", { name: row.name, enabledTools: splitList(toolPolicyDraft.enabledTools || enabledTools) || null, disabledTools: splitList(toolPolicyDraft.disabledTools || disabledTools) ?? [], scope }))} size="compact" type="button" variant="primary">Save Policy</ActionButton>
         </div>
       </div>
     );
@@ -2330,55 +2403,41 @@ function CapabilityActions({
     const marketplace = stringField(objectField(row.raw, "authority"), "marketplace");
     return (
       <div className="capabilityActionGrid">
-        <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/doctor", { selector, scope }))} type="button">
-          <Play size={14} /> Doctor
-        </button>
+        <ActionButton disabled={busy} icon={<Play size={14} />} onClick={() => void mutate(() => client.request("plugin/doctor", { selector, scope }), { receipt: false })} size="compact" type="button">Doctor</ActionButton>
         {needsTrust && packageMutable && (
-          <button disabled={busy} onClick={() => confirmAction(`Trust plugin ${row.name} for its current package fingerprint?`) && void mutate(() => client.request("plugin/setTrust", { selector, scopeName, trusted: true, scope }))} type="button">
-            <LogIn size={14} /> Trust
-          </button>
+          <ActionButton disabled={busy} icon={<LogIn size={14} />} onClick={() => runConfirmed(`Trust plugin ${row.name} for its current package fingerprint?`, "Trust fingerprint", () => mutate(() => client.request("plugin/setTrust", { selector, scopeName, trusted: true, scope })), "caution")} size="compact" type="button" variant="caution">Trust</ActionButton>
         )}
         {codexAuthority && installed && (
           <>
-            <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "profile", enabled: !profileEnabled, scope }))} type="button">
+            <ActionButton disabled={busy} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "profile", enabled: !profileEnabled, scope }))} size="compact" type="button">
               {profileEnabled ? "Disable in profile" : "Enable in profile"}
-            </button>
-            <button disabled={busy || projectOverride === false} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "project", enabled: false, scope }))} type="button">
+            </ActionButton>
+            <ActionButton disabled={busy || projectOverride === false} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "project", enabled: false, scope }))} size="compact" type="button">
               Disable in this project
-            </button>
-            <button disabled={busy || projectOverride == null} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "project", enabled: null, scope }))} type="button">
+            </ActionButton>
+            <ActionButton disabled={busy || projectOverride == null} onClick={() => void mutate(() => client.request("plugin/setEnabled", { selector, scopeName: "project", enabled: null, scope }))} size="compact" type="button" variant="ghost">
               Reset project override
-            </button>
+            </ActionButton>
           </>
         )}
         {codexAuthority && installed && connectTarget && (
-          <button disabled={busy} onClick={() => void startPluginConnect(client, scope, selector, connectTarget, onPluginConnectSession, mutate)} type="button">
-            <LogIn size={14} /> Connect
-          </button>
+          <ActionButton disabled={busy} icon={<LogIn size={14} />} onClick={() => void startPluginConnect(client, scope, selector, connectTarget, onPluginConnectSession, mutate)} size="compact" type="button" variant="primary">Connect</ActionButton>
         )}
         {codexAuthority && installed && marketplace && (
-          <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/catalog/upgrade", { authority: "codex", name: marketplace, scope }))} type="button">
-            <RefreshCw size={14} /> Upgrade
-          </button>
+          <ActionButton disabled={busy} icon={<RefreshCw size={14} />} onClick={() => void mutate(() => client.request("plugin/catalog/upgrade", { authority: "codex", name: marketplace, scope }))} size="compact" type="button">Upgrade</ActionButton>
         )}
         {packageMutable && removable && (
-          <button disabled={busy} onClick={() => confirmAction(`Uninstall plugin ${row.name}?`) && void mutate(() => client.request("plugin/uninstall", { selector, scopeName, scope }))} type="button">
-            <Trash2 size={14} /> Uninstall
-          </button>
+          <ActionButton disabled={busy} icon={<Trash2 size={14} />} onClick={() => runConfirmed(`Uninstall plugin ${row.name}?`, "Uninstall plugin", () => mutate(() => client.request("plugin/uninstall", { selector, scopeName, scope })))} size="compact" type="button" variant="danger">Uninstall</ActionButton>
         )}
         {codexAuthority && !installed && (
-          <button disabled={busy} onClick={() => void mutate(() => client.request("plugin/install", { source: selector, scope }))} type="button">
-            <Plus size={14} /> Install
-          </button>
+          <ActionButton disabled={busy} icon={<Plus size={14} />} onClick={() => void mutate(() => client.request("plugin/install", { source: selector, scope }))} size="compact" type="button" variant="primary">Install</ActionButton>
         )}
       </div>
     );
   }
   return (
     <div className="capabilityActionGrid">
-      <button disabled={busy} onClick={() => confirmAction(`Uninstall skill ${row.name}?`) && void mutate(() => client.request("skill/uninstall", { name: row.name, scope }))} type="button">
-        <Trash2 size={14} /> Uninstall
-      </button>
+      <ActionButton disabled={busy} icon={<Trash2 size={14} />} onClick={() => runConfirmed(`Uninstall skill ${row.name}?`, "Uninstall skill", () => mutate(() => client.request("skill/uninstall", { name: row.name, scope })))} size="compact" type="button" variant="danger">Uninstall</ActionButton>
     </div>
   );
 }
@@ -2415,25 +2474,23 @@ function CodexAuthorityCard({
           <span>{[stringField(authority, "runtime") || "disabled", stringField(authority, "auth") || "unavailable"].join(" · ")}</span>
         </div>
         <Switch
-          ariaLabel={enabled ? "Disable Codex plugins" : "Enable Codex plugins"}
           checked={enabled}
           disabled={busy}
-          label={enabled ? "Enabled" : "Disabled"}
-          onCheckedChange={(nextEnabled) => void mutate(() => write(nextEnabled), { notice: nextEnabled ? "Codex plugin compatibility enabled." : "Codex plugin compatibility disabled." })}
+          label="Codex plugin compatibility"
+          onCheckedChange={(nextEnabled) => void mutate(() => write(nextEnabled), {
+            notice: nextEnabled ? "Codex plugin compatibility enabled." : "Codex plugin compatibility disabled.",
+            undo: async () => { await mutate(() => write(!nextEnabled), { notice: "Codex plugin compatibility restored." }); }
+          })}
           size="compact"
         />
       </div>
       <div className="capabilityInlineFields">
-        <input aria-label="Codex binary path" ref={binaryInputRef} onChange={(event) => {
+        <input aria-label="Codex binary path" className="pevo-fieldControl pevo-fieldControl--compact" ref={binaryInputRef} onChange={(event) => {
           binaryRef.current = event.target.value;
           setBinary(event.target.value);
         }} placeholder="codex (from PATH)" value={binary} />
-        <button disabled={busy} onClick={() => void mutate(() => write(enabled), { notice: "Codex binary setting saved." })} type="button">
-          <Save size={14} /> Save
-        </button>
-        <button disabled={busy || !enabled} onClick={() => void mutate(() => client.request("plugin/authority/refresh", { scope }), { notice: "Codex compatibility refreshed." })} type="button">
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <ActionButton disabled={busy} icon={<Save size={14} />} onClick={() => void mutate(() => write(enabled), { notice: "Codex binary setting saved." })} size="compact" type="button" variant="primary">Save</ActionButton>
+        <ActionButton disabled={busy || !enabled} icon={<RefreshCw size={14} />} onClick={() => void mutate(() => client.request("plugin/authority/refresh", { scope }), { receipt: false })} size="compact" type="button">Refresh</ActionButton>
       </div>
       <dl className="capabilityKeyValues pluginInspectionGrid">
         <div><dt>Version</dt><dd>{stringField(authority, "version") || "Not resolved"}</dd></div>
@@ -2475,6 +2532,7 @@ function CapabilityForms(props: {
   toolDraft: { name: string; description: string; tools: string; includes: string; force: boolean };
 }) {
   const { busy, client, mutate, onClose, open, scope, tab } = props;
+  const confirmAction = useConfirmAction();
   if (!client || !scope || !open) return null;
   if (tab === "plugins") {
     const draft = props.pluginInstall;
@@ -2488,40 +2546,51 @@ function CapabilityForms(props: {
       scope
     };
     return (
-      <CreatePanel className="capabilityCreatePanel" description="Inspect and install a plugin package." icon={<Plus size={14} />} layout="side" onClose={onClose} title="Install plugin">
-        <form className="capabilityForm" onSubmit={(event) => {
+      <CreatePanel className="capabilityCreatePanel" description="Inspect and install a plugin package." icon={<Plus size={14} />} id="capability-create-plugins" layout="side" onClose={onClose} title="Install plugin">
+        <form className="capabilityForm" onSubmit={async (event) => {
           event.preventDefault();
-          if (draft.force && !confirmAction("Install plugin with force?")) return;
-          void mutate(() => client.request("plugin/install", { ...inspectParams, force: draft.force })).then((ok) => {
+          const install = async () => {
+            const ok = await mutate(() => client.request("plugin/install", { ...inspectParams, force: draft.force }));
             if (ok) onClose();
-          });
+          };
+          if (draft.force) {
+            await confirmAction({
+              action: install,
+              confirmLabel: "Install with force",
+              description: "Existing plugin files and trust state may be replaced.",
+              title: "Install plugin with force?",
+              tone: "caution"
+            });
+            return;
+          }
+          await install();
         }}>
-          <input aria-label="Plugin source" onChange={(event) => props.setPluginInstall({ ...draft, source: event.target.value, inspection: null })} placeholder="path, git source, or npm package" value={draft.source} />
-          <select aria-label="Plugin source kind" onChange={(event) => props.setPluginInstall({ ...draft, kind: pluginKindValue(event.target.value), inspection: null })} value={draft.kind}>
+          <input aria-label="Plugin source" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, source: event.target.value, inspection: null })} placeholder="path, git source, or npm package" value={draft.source} />
+          <select aria-label="Plugin source kind" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, kind: pluginKindValue(event.target.value), inspection: null })} value={draft.kind}>
             <option value="local">Local</option>
             <option value="git">Git</option>
             <option value="npm">npm</option>
           </select>
           {draft.kind === "npm" && (
             <>
-              <input aria-label="Npm package version" onChange={(event) => props.setPluginInstall({ ...draft, npmVersion: event.target.value, inspection: null })} placeholder="version" value={draft.npmVersion} />
-              <input aria-label="Npm registry" onChange={(event) => props.setPluginInstall({ ...draft, npmRegistry: event.target.value, inspection: null })} placeholder="registry" value={draft.npmRegistry} />
+              <input aria-label="Npm package version" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, npmVersion: event.target.value, inspection: null })} placeholder="version" value={draft.npmVersion} />
+              <input aria-label="Npm registry" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, npmRegistry: event.target.value, inspection: null })} placeholder="registry" value={draft.npmRegistry} />
             </>
           )}
-          <select aria-label="Plugin adapter mode" onChange={(event) => props.setPluginInstall({ ...draft, adapterMode: pluginAdapterModeValue(event.target.value), inspection: null })} value={draft.adapterMode}>
+          <select aria-label="Plugin adapter mode" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, adapterMode: pluginAdapterModeValue(event.target.value), inspection: null })} value={draft.adapterMode}>
             <option value="manifest_only">Manifest only</option>
             <option value="adapter_host">Adapter host</option>
             <option value="disabled">Disabled</option>
           </select>
-          <label><input checked={draft.force} onChange={(event) => props.setPluginInstall({ ...draft, force: event.target.checked })} type="checkbox" /> Force</label>
+          <label><input checked={draft.force} className="pevo-choiceControl" onChange={(event) => props.setPluginInstall({ ...draft, force: event.target.checked })} type="checkbox" /> Force</label>
           <div className="capabilityFormActions">
             <ActionButton disabled={busy || !draft.source.trim()} icon={<Search size={14} />} onClick={() => {
               void mutate(async () => {
                 const result = await client.request("plugin/import/inspect", inspectParams);
                 props.setPluginInstall({ ...draft, inspection: objectField(result, "inspection") });
                 return result;
-              }, { notice: "Inspection complete.", refresh: false });
-            }} type="button" variant="neutral">Inspect</ActionButton>
+              }, { receipt: false, refresh: false });
+            }} type="button" variant="secondary">Inspect</ActionButton>
             <ActionButton disabled={busy || !draft.source.trim()} icon={<Plus size={14} />} type="submit" variant="primary">Install</ActionButton>
           </div>
           {draft.inspection && <PluginInspectionSummary inspection={draft.inspection} />}
@@ -2532,7 +2601,7 @@ function CapabilityForms(props: {
   if (tab === "mcp") {
     const draft = props.mcpDraft;
     return (
-      <CreatePanel className="capabilityCreatePanel" description="Add a profile-scoped stdio or HTTP MCP server." icon={<Plus size={14} />} layout="side" onClose={onClose} title="Add MCP server">
+      <CreatePanel className="capabilityCreatePanel" description="Add a profile-scoped stdio or HTTP MCP server." icon={<Plus size={14} />} id="capability-create-mcp" layout="side" onClose={onClose} title="Add MCP server">
         <form className="capabilityForm" onSubmit={(event) => {
           event.preventDefault();
           void mutate(() => client.request("mcp/upsert", {
@@ -2547,14 +2616,14 @@ function CapabilityForms(props: {
             if (ok) onClose();
           });
         }}>
-          <input aria-label="MCP name" onChange={(event) => props.setMcpDraft({ ...draft, name: event.target.value })} placeholder="name" value={draft.name} />
-          <select aria-label="MCP transport" onChange={(event) => props.setMcpDraft({ ...draft, transport: event.target.value })} value={draft.transport}>
+          <input aria-label="MCP name" className="pevo-fieldControl" onChange={(event) => props.setMcpDraft({ ...draft, name: event.target.value })} placeholder="name" value={draft.name} />
+          <select aria-label="MCP transport" className="pevo-fieldControl" onChange={(event) => props.setMcpDraft({ ...draft, transport: event.target.value })} value={draft.transport}>
             <option value="stdio">stdio</option>
             <option value="streamable_http">HTTP</option>
           </select>
-          <input aria-label="MCP command or URL" onChange={(event) => draft.transport === "stdio" ? props.setMcpDraft({ ...draft, command: event.target.value }) : props.setMcpDraft({ ...draft, url: event.target.value })} placeholder={draft.transport === "stdio" ? "command" : "url"} value={draft.transport === "stdio" ? draft.command : draft.url} />
-          <input aria-label="Bearer token env var" onChange={(event) => props.setMcpDraft({ ...draft, bearerTokenEnvVar: event.target.value })} placeholder="bearer env" value={draft.bearerTokenEnvVar} />
-          <input aria-label="OAuth client id" onChange={(event) => props.setMcpDraft({ ...draft, oauthClientId: event.target.value })} placeholder="client id" value={draft.oauthClientId} />
+          <input aria-label="MCP command or URL" className="pevo-fieldControl" onChange={(event) => draft.transport === "stdio" ? props.setMcpDraft({ ...draft, command: event.target.value }) : props.setMcpDraft({ ...draft, url: event.target.value })} placeholder={draft.transport === "stdio" ? "command" : "url"} value={draft.transport === "stdio" ? draft.command : draft.url} />
+          <input aria-label="Bearer token env var" className="pevo-fieldControl" onChange={(event) => props.setMcpDraft({ ...draft, bearerTokenEnvVar: event.target.value })} placeholder="bearer env" value={draft.bearerTokenEnvVar} />
+          <input aria-label="OAuth client id" className="pevo-fieldControl" onChange={(event) => props.setMcpDraft({ ...draft, oauthClientId: event.target.value })} placeholder="client id" value={draft.oauthClientId} />
           <ActionButton disabled={busy || !draft.name.trim()} icon={<Plus size={14} />} type="submit" variant="primary">Save</ActionButton>
         </form>
       </CreatePanel>
@@ -2563,27 +2632,38 @@ function CapabilityForms(props: {
   const draft = props.toolDraft;
   const builtInToolsetName = isBuiltInToolsetName(draft.name);
   return (
-    <CreatePanel className="capabilityCreatePanel" description="Create or overwrite a custom toolset." icon={<Plus size={14} />} layout="side" onClose={onClose} title="Create toolset">
-      <form className="capabilityForm" onSubmit={(event) => {
+    <CreatePanel className="capabilityCreatePanel" description="Create or overwrite a custom toolset." icon={<Plus size={14} />} id="capability-create-toolsets" layout="side" onClose={onClose} title="Create toolset">
+      <form className="capabilityForm" onSubmit={async (event) => {
         event.preventDefault();
         if (isBuiltInToolsetName(draft.name)) return;
-        if (draft.force && !confirmAction("Overwrite toolset?")) return;
-        void mutate(() => client.request("tool/create", {
-          name: draft.name,
-          description: draft.description || null,
-          tools: splitList(draft.tools) ?? [],
-          includes: splitList(draft.includes) ?? [],
-          force: draft.force,
-          scope
-        })).then((ok) => {
+        const save = async () => {
+          const ok = await mutate(() => client.request("tool/create", {
+            name: draft.name,
+            description: draft.description || null,
+            tools: splitList(draft.tools) ?? [],
+            includes: splitList(draft.includes) ?? [],
+            force: draft.force,
+            scope
+          }));
           if (ok) onClose();
-        });
+        };
+        if (draft.force) {
+          await confirmAction({
+            action: save,
+            confirmLabel: "Overwrite toolset",
+            description: "The existing custom toolset definition will be replaced.",
+            title: "Overwrite toolset?",
+            tone: "caution"
+          });
+          return;
+        }
+        await save();
       }}>
-        <input aria-label="Toolset name" onChange={(event) => props.setToolDraft({ ...draft, name: event.target.value })} placeholder="name" value={draft.name} />
-        <input aria-label="Toolset description" onChange={(event) => props.setToolDraft({ ...draft, description: event.target.value })} placeholder="description" value={draft.description} />
-        <input aria-label="Tool names" onChange={(event) => props.setToolDraft({ ...draft, tools: event.target.value })} placeholder="tools" value={draft.tools} />
-        <input aria-label="Included toolsets" onChange={(event) => props.setToolDraft({ ...draft, includes: event.target.value })} placeholder="includes" value={draft.includes} />
-        <label><input checked={draft.force} onChange={(event) => props.setToolDraft({ ...draft, force: event.target.checked })} type="checkbox" /> Force</label>
+        <input aria-label="Toolset name" className="pevo-fieldControl" onChange={(event) => props.setToolDraft({ ...draft, name: event.target.value })} placeholder="name" value={draft.name} />
+        <input aria-label="Toolset description" className="pevo-fieldControl" onChange={(event) => props.setToolDraft({ ...draft, description: event.target.value })} placeholder="description" value={draft.description} />
+        <input aria-label="Tool names" className="pevo-fieldControl pevo-fieldControl--compact" onChange={(event) => props.setToolDraft({ ...draft, tools: event.target.value })} placeholder="tools" value={draft.tools} />
+        <input aria-label="Included toolsets" className="pevo-fieldControl pevo-fieldControl--compact" onChange={(event) => props.setToolDraft({ ...draft, includes: event.target.value })} placeholder="includes" value={draft.includes} />
+        <label><input checked={draft.force} className="pevo-choiceControl" onChange={(event) => props.setToolDraft({ ...draft, force: event.target.checked })} type="checkbox" /> Force</label>
         <ActionButton disabled={busy || !draft.name.trim() || builtInToolsetName} icon={<Plus size={14} />} title={builtInToolsetName ? "Built-in toolsets cannot be overwritten" : "Save"} type="submit" variant="primary">Save</ActionButton>
       </form>
     </CreatePanel>
@@ -3122,7 +3202,7 @@ async function startOAuth(
   scope: GatewayRequestScope,
   name: string,
   onOAuthSession: (sessionId: string | null) => void,
-  mutate: (action: () => Promise<unknown>) => Promise<boolean>
+  mutate: (action: () => Promise<unknown>, options?: MutationOptions) => Promise<boolean>
 ) {
   await mutate(async () => {
     const result = await client.request("mcp/oauth/start", { name, scope });
@@ -3131,7 +3211,7 @@ async function startOAuth(
     if (url) window.open(url, "_blank", "noopener,noreferrer");
     if (sessionId) onOAuthSession(sessionId);
     return result;
-  });
+  }, { receipt: false });
 }
 
 type CodexConnectTarget = { componentId: string; kind: "app" | "mcp" };
@@ -3169,7 +3249,7 @@ async function startPluginConnect(
     if (url) window.open(url, "_blank", "noopener,noreferrer");
     if (sessionId) onSession(sessionId);
     return result;
-  }, { notice: "Plugin connection started.", refresh: false });
+  }, { receipt: false, refresh: false });
 }
 
 function skillRowsFromData(data: JsonObject | null): SkillRow[] {
@@ -3629,8 +3709,4 @@ function labelForKey(value: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function confirmAction(message: string): boolean {
-  return window.confirm(message);
 }

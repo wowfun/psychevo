@@ -1,79 +1,355 @@
+import { X } from "lucide-react";
 import { cloneElement, isValidElement, useId } from "react";
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactElement, ReactNode } from "react";
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, HTMLAttributes, ReactElement, ReactNode, Ref } from "react";
 
-export function IconButton({
-  children,
-  danger,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }) {
-  const label = props["aria-label"] ?? (typeof props.title === "string" ? props.title : undefined);
-  return (
-    <button
-      {...props}
-      aria-label={label}
-      className={`pevo-iconButton ${danger ? "is-danger" : ""} ${props.className ?? ""}`.trim()}
-      type={props.type ?? "button"}
-    >
-      {children}
-    </button>
-  );
-}
+export type ControlSize = "compact" | "default";
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "caution" | "danger" | "interrupt";
 
-export type ActionButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> & {
-  active?: boolean | undefined;
-  ariaLabel?: string | undefined;
-  busy?: boolean | undefined;
+export type ActionButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  block?: boolean | undefined;
   icon?: ReactNode;
-  iconOnly?: boolean | undefined;
-  size?: "default" | "compact" | undefined;
-  tooltip?: string | undefined;
-  variant?: "neutral" | "primary" | "ghost" | "danger" | undefined;
-  "aria-label"?: string | undefined;
+  pending?: boolean | undefined;
+  ref?: Ref<HTMLButtonElement> | undefined;
+  size?: ControlSize | undefined;
+  variant?: ButtonVariant | undefined;
 };
 
 export function ActionButton({
-  active = false,
-  ariaLabel,
-  busy = false,
+  block = false,
   children,
   className,
   disabled,
   icon,
-  iconOnly = false,
+  pending = false,
+  ref,
   size = "default",
-  title,
-  tooltip,
   type = "button",
-  variant = "neutral",
+  variant = "secondary",
   ...props
 }: ActionButtonProps) {
-  const explicitLabel = ariaLabel ?? props["aria-label"];
-  const iconOnlyLabel = explicitLabel ?? (typeof title === "string" ? title : undefined) ?? tooltip;
-  const unavailable = disabled || busy;
+  const unavailable = disabled || pending;
   return (
     <button
       {...props}
-      aria-busy={busy || undefined}
-      aria-label={iconOnly ? iconOnlyLabel : explicitLabel ?? undefined}
-      aria-pressed={active || undefined}
+      aria-busy={pending || undefined}
       className={[
         "pevo-actionButton",
         `pevo-actionButton--${variant}`,
         `pevo-actionButton--${size}`,
-        iconOnly ? "pevo-actionButton--iconOnly" : "",
-        active ? "is-active" : "",
-        busy ? "is-busy" : "",
+        block ? "pevo-actionButton--block" : "",
+        pending ? "is-pending" : "",
         className ?? ""
       ].filter(Boolean).join(" ")}
-      data-active={active || undefined}
+      data-pending={pending || undefined}
       data-variant={variant}
       disabled={unavailable}
-      title={typeof title === "string" ? title : tooltip}
+      ref={ref}
       type={type}
     >
       {icon && <span aria-hidden="true" className="pevo-actionButtonIcon">{icon}</span>}
-      {iconOnly ? children && <span className="pevo-srOnly">{children}</span> : children && <span className="pevo-actionButtonLabel">{children}</span>}
+      {children && <span className="pevo-actionButtonLabel">{children}</span>}
+      {pending && <span aria-hidden="true" className="pevo-controlSpinner" />}
     </button>
+  );
+}
+
+export type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "children" | "title"> & {
+  icon: ReactNode;
+  label: string;
+  pending?: boolean | undefined;
+  shape?: "rounded" | "circle" | undefined;
+  size?: ControlSize | undefined;
+  tooltip?: string | undefined;
+  variant?: ButtonVariant | undefined;
+};
+
+export function IconButton({
+  className,
+  disabled,
+  icon,
+  label,
+  pending = false,
+  shape = "rounded",
+  size = "default",
+  type = "button",
+  tooltip,
+  variant = "ghost",
+  ...props
+}: IconButtonProps) {
+  return (
+    <button
+      {...props}
+      aria-busy={pending || undefined}
+      aria-label={label}
+      className={[
+        "pevo-iconButton",
+        `pevo-iconButton--${variant}`,
+        `pevo-iconButton--${size}`,
+        `pevo-iconButton--${shape}`,
+        pending ? "is-pending" : "",
+        className ?? ""
+      ].filter(Boolean).join(" ")}
+      data-pending={pending || undefined}
+      data-variant={variant}
+      disabled={disabled || pending}
+      title={tooltip ?? label}
+      type={type}
+    >
+      <span aria-hidden="true" className="pevo-iconButtonIcon">{icon}</span>
+      {pending && <span aria-hidden="true" className="pevo-controlSpinner" />}
+    </button>
+  );
+}
+
+export type ToggleButtonProps = Omit<IconButtonProps, "onClick" | "variant"> & {
+  children?: ReactNode;
+  onPressedChange(pressed: boolean): void;
+  pressed: boolean;
+};
+
+export function ToggleButton({
+  children,
+  className,
+  onPressedChange,
+  pressed,
+  ...props
+}: ToggleButtonProps) {
+  const { icon, label, pending, shape, size, tooltip, ...buttonProps } = props;
+  if (children) {
+    return (
+      <ActionButton
+        {...buttonProps}
+        aria-label={label}
+        aria-pressed={pressed}
+        className={["pevo-toggleButton", pressed ? "is-selected" : "", className ?? ""].filter(Boolean).join(" ")}
+        icon={icon}
+        onClick={() => onPressedChange(!pressed)}
+        pending={pending}
+        size={size}
+        title={tooltip ?? label}
+        variant="ghost"
+      >
+        {children}
+      </ActionButton>
+    );
+  }
+  return (
+    <IconButton
+      {...buttonProps}
+      aria-pressed={pressed}
+      className={["pevo-toggleButton", pressed ? "is-selected" : "", className ?? ""].filter(Boolean).join(" ")}
+      icon={icon}
+      label={label}
+      onClick={() => onPressedChange(!pressed)}
+      pending={pending}
+      shape={shape}
+      size={size}
+      tooltip={tooltip}
+    />
+  );
+}
+
+export type DisclosureButtonProps = Omit<ActionButtonProps, "aria-expanded" | "aria-controls" | "onClick"> & {
+  controls: string;
+  expanded: boolean;
+  label: string;
+  onExpandedChange(expanded: boolean): void;
+};
+
+export function DisclosureButton({
+  children,
+  className,
+  controls,
+  expanded,
+  label,
+  onExpandedChange,
+  variant = "ghost",
+  ...props
+}: DisclosureButtonProps) {
+  return (
+    <ActionButton
+      {...props}
+      aria-controls={controls}
+      aria-expanded={expanded}
+      aria-label={label}
+      className={["pevo-disclosureButton", expanded ? "is-expanded" : "", className ?? ""].filter(Boolean).join(" ")}
+      onClick={() => onExpandedChange(!expanded)}
+      variant={variant}
+    >
+      {children ?? label}
+    </ActionButton>
+  );
+}
+
+export type NavItemProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "onClick"> & {
+  current: boolean;
+  icon?: ReactNode;
+  label: ReactNode;
+  meta?: ReactNode;
+  onSelect(): void;
+};
+
+export function NavItem({ className, current, icon, label, meta, onSelect, type = "button", ...props }: NavItemProps) {
+  return (
+    <button
+      {...props}
+      aria-current={current ? "page" : undefined}
+      className={["pevo-navItem", current ? "is-current" : "", className ?? ""].filter(Boolean).join(" ")}
+      onClick={onSelect}
+      type={type}
+    >
+      {icon && <span aria-hidden="true" className="pevo-navItemIcon">{icon}</span>}
+      <span className="pevo-navItemLabel">{label}</span>
+      {meta && <span className="pevo-navItemMeta">{meta}</span>}
+    </button>
+  );
+}
+
+export type ActionLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
+  external?: boolean | undefined;
+  icon?: ReactNode;
+  tone?: "neutral" | "danger" | undefined;
+};
+
+export function ActionLink({ children, className, external = false, icon, rel, target, tone = "neutral", ...props }: ActionLinkProps) {
+  return (
+    <a
+      {...props}
+      className={["pevo-actionLink", `pevo-actionLink--${tone}`, className ?? ""].filter(Boolean).join(" ")}
+      rel={external ? "noopener noreferrer" : rel}
+      target={external ? "_blank" : target}
+    >
+      {icon && <span aria-hidden="true" className="pevo-actionLinkIcon">{icon}</span>}
+      <span>{children}</span>
+    </a>
+  );
+}
+
+export type SegmentOption<Value extends string> = {
+  disabled?: boolean | undefined;
+  icon?: ReactNode;
+  label: string;
+  value: Value;
+};
+
+export type SegmentedControlProps<Value extends string> = {
+  className?: string | undefined;
+  disabled?: boolean | undefined;
+  label: string;
+  onValueChange(value: Value): void;
+  options: readonly SegmentOption<Value>[];
+  value: Value;
+};
+
+export function SegmentedControl<Value extends string>({
+  className,
+  disabled = false,
+  label,
+  onValueChange,
+  options,
+  value
+}: SegmentedControlProps<Value>) {
+  function move(currentValue: Value, key: string, group: HTMLElement) {
+    const enabled = options.filter((option) => !option.disabled);
+    const currentIndex = enabled.findIndex((option) => option.value === currentValue);
+    if (enabled.length === 0 || currentIndex < 0) return;
+    const nextIndex = key === "Home"
+      ? 0
+      : key === "End"
+        ? enabled.length - 1
+        : key === "ArrowRight" || key === "ArrowDown"
+          ? (currentIndex + 1) % enabled.length
+          : (currentIndex - 1 + enabled.length) % enabled.length;
+    const next = enabled[nextIndex];
+    if (!next) return;
+    onValueChange(next.value);
+    [...group.querySelectorAll<HTMLElement>("[data-segment-value]")]
+      .find((element) => element.dataset.segmentValue === next.value)
+      ?.focus();
+  }
+
+  return (
+    <div aria-label={label} className={["pevo-segmentedControl", className ?? ""].filter(Boolean).join(" ")} role="radiogroup">
+      {options.map((option) => {
+        const checked = option.value === value;
+        return (
+          <button
+            aria-checked={checked}
+            className={checked ? "is-selected" : undefined}
+            data-segment-value={option.value}
+            disabled={disabled || option.disabled}
+            key={option.value}
+            onClick={() => onValueChange(option.value)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              move(option.value, event.key, event.currentTarget.parentElement!);
+            }}
+            role="radio"
+            tabIndex={checked ? 0 : -1}
+            type="button"
+          >
+            {option.icon && <span aria-hidden="true" className="pevo-segmentedControlIcon">{option.icon}</span>}
+            <span>{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export type TabOption<Value extends string> = SegmentOption<Value> & {
+  panelId?: string | undefined;
+};
+
+export type TabsProps<Value extends string> = Omit<SegmentedControlProps<Value>, "options"> & {
+  options: readonly TabOption<Value>[];
+};
+
+export function Tabs<Value extends string>({ className, disabled = false, label, onValueChange, options, value }: TabsProps<Value>) {
+  function move(currentValue: Value, key: string, list: HTMLElement) {
+    const enabled = options.filter((option) => !option.disabled);
+    const currentIndex = enabled.findIndex((option) => option.value === currentValue);
+    if (enabled.length === 0 || currentIndex < 0) return;
+    const nextIndex = key === "Home" ? 0
+      : key === "End" ? enabled.length - 1
+        : key === "ArrowRight" || key === "ArrowDown" ? (currentIndex + 1) % enabled.length
+          : (currentIndex - 1 + enabled.length) % enabled.length;
+    const next = enabled[nextIndex];
+    if (!next) return;
+    onValueChange(next.value);
+    [...list.querySelectorAll<HTMLElement>("[data-tab-value]")]
+      .find((element) => element.dataset.tabValue === next.value)
+      ?.focus();
+  }
+  return (
+    <div aria-label={label} className={["pevo-tabs", className ?? ""].filter(Boolean).join(" ")} role="tablist">
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            aria-controls={option.panelId}
+            aria-selected={selected}
+            className={selected ? "is-selected" : undefined}
+            data-tab-value={option.value}
+            disabled={disabled || option.disabled}
+            key={option.value}
+            onClick={() => onValueChange(option.value)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              move(option.value, event.key, event.currentTarget.parentElement!);
+            }}
+            role="tab"
+            tabIndex={selected ? 0 : -1}
+            type="button"
+          >
+            {option.icon && <span aria-hidden="true" className="pevo-tabsIcon">{option.icon}</span>}
+            <span>{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -167,9 +443,7 @@ export function CreatePanel({
           </div>
         </div>
         {onClose && (
-          <ActionButton ariaLabel="Close" iconOnly onClick={onClose} size="compact" tooltip="Close" variant="ghost">
-            Close
-          </ActionButton>
+          <IconButton icon={<X size={14} />} label="Close" onClick={onClose} size="compact" />
         )}
       </header>
       <div className="pevo-createPanelBody">{children}</div>
@@ -181,7 +455,6 @@ export function CreatePanel({
 export type SwitchProps = {
   checked: boolean;
   label: string;
-  ariaLabel?: string | undefined;
   className?: string | undefined;
   disabled?: boolean | undefined;
   icon?: ReactNode;
@@ -192,7 +465,6 @@ export type SwitchProps = {
 };
 
 export function Switch({
-  ariaLabel,
   checked,
   className,
   disabled = false,
@@ -208,7 +480,7 @@ export function Switch({
     <button
       aria-busy={pending || undefined}
       aria-checked={checked}
-      aria-label={ariaLabel ?? (showLabel ? undefined : label)}
+      aria-label={showLabel ? undefined : label}
       className={[
         "pevo-switch",
         `pevo-switch--${size}`,

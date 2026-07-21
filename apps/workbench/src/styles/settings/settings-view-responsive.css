@@ -45,7 +45,7 @@
 
 .appShell[data-main-view="settings"] .settingsNav {
   padding: 24px 14px 16px 12px;
-  background: color-mix(in oklch, var(--pevo-panel-muted), transparent 58%);
+  background: var(--pevo-sidebar-bg);
   border-right: 1px solid color-mix(in oklch, var(--pevo-border), transparent 46%);
 }
 
@@ -83,7 +83,7 @@
     padding-bottom: 1px;
   }
 
-  .settingsNavGroups button {
+  .settingsNavGroups .pevo-navItem {
     flex: 0 0 auto;
     min-width: 126px;
   }

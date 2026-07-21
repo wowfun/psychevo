@@ -198,7 +198,7 @@ export function ModelReasoningSelector({
             <input
               ref={searchRef}
               aria-label={`${ariaLabel} filter`}
-              className="modelReasoningSearch"
+              className="modelReasoningSearch pevo-fieldControl pevo-fieldControl--search pevo-fieldControl--compact"
               onChange={(event) => setModelFilter(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key !== "Escape") {

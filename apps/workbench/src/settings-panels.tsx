@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { ChannelWechatQrPollResult, ChannelWechatQrStartResult, ModelOptionView, RuntimeProfileView } from "@psychevo/protocol";
-import { Switch } from "@psychevo/components";
+import { ActionButton, NavItem, Switch } from "@psychevo/components";
 import type {
   Appearance,
   SessionBrowserWorkspaceState,
@@ -117,14 +117,12 @@ export function SettingsPage({
       <div className="settingsShell">
         <aside className="settingsNav" aria-label="Settings sections">
           <div className="settingsNavTop">
-            <button className="settingsBackButton" onClick={onOpenTranscript} type="button">
-              <ArrowLeft size={15} />
-              <span>Back to app</span>
-            </button>
-            <label className="settingsSearch">
+            <ActionButton block className="settingsBackButton" icon={<ArrowLeft size={15} />} onClick={onOpenTranscript} type="button" variant="ghost">Back to app</ActionButton>
+            <label className="settingsSearch pevo-searchField">
               <Search size={14} aria-hidden />
               <input
                 aria-label="Search settings"
+                className="pevo-fieldControl pevo-fieldControl--search"
                 onChange={(event) => setQuery(event.currentTarget.value)}
                 placeholder="Search settings"
                 type="search"
@@ -134,16 +132,14 @@ export function SettingsPage({
           </div>
           <div className="settingsNavGroups">
             {visibleSections.map((item) => (
-              <button
-                aria-current={item.id === section ? "page" : undefined}
+              <NavItem
                 className={item.id === section ? "is-selected" : ""}
+                current={item.id === section}
+                icon={settingsSectionIcon(item.id, 15)}
                 key={item.id}
-                onClick={() => onSectionChange(item.id)}
-                type="button"
-              >
-                {settingsSectionIcon(item.id, 15)}
-                <span>{item.label}</span>
-              </button>
+                label={item.label}
+                onSelect={() => onSectionChange(item.id)}
+              />
             ))}
             {visibleSections.length === 0 && (
               <p className="settingsNavEmpty">No settings found</p>
@@ -308,7 +304,6 @@ function SettingsSectionPanel({
         <div className="settingsRows">
           <SettingsOptionRow title="Show debug tab" description="Recent Gateway notifications in the right inspector.">
             <Switch
-              ariaLabel="Show debug tab"
               checked={debugEnabled}
               label="Show debug tab"
               onCheckedChange={onDebugChange}

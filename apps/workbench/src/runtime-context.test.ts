@@ -4,7 +4,8 @@ import {
   runnableTargetUnavailableReason,
   runtimeControlSelections,
   runtimeProfileCapsuleLabel,
-  runtimeProfileDisplayLabel
+  runtimeProfileDisplayLabel,
+  shouldRetainFirstTurnDraftContext
 } from "./runtime-context";
 
 function parseThreadContext(value: Record<string, unknown>) {
@@ -220,6 +221,47 @@ describe("runtime context projection", () => {
     });
     expect(context.selectedTargetId).toBeNull();
     expect(context.suggestedTargetId).toBeNull();
+  });
+
+  it("rejects only the non-effective context observed during first-turn binding", () => {
+    const current = parseThreadContext({
+      selectionState: "draft",
+      compatibleTargets: [{
+        targetId: "target:test",
+        agentRef: null,
+        runtimeProfileRef: "native",
+        ready: true
+      }]
+    });
+    const observed = parseRawThreadContext({
+      selectedTargetId: null,
+      suggestedTargetId: "target:test",
+      selectionState: "default",
+      binding: null,
+      compatibleTargets: current.compatibleTargets
+    });
+
+    expect(shouldRetainFirstTurnDraftContext(current, observed, true, "thread-1")).toBe(true);
+    expect(shouldRetainFirstTurnDraftContext(current, observed, false, "thread-1")).toBe(false);
+    expect(shouldRetainFirstTurnDraftContext(current, {
+      ...observed,
+      selectedTargetId: "target:test",
+      suggestedTargetId: null,
+      selectionState: "bound",
+      binding: {
+        threadId: "thread-1",
+        agentRef: null,
+        agentFingerprint: "native-agent-fingerprint",
+        runtimeRef: "native",
+        backendKind: "native",
+        nativeKind: "native",
+        sessionHandle: "native-session",
+        cwd: "/tmp/project",
+        profileFingerprint: "native-fingerprint",
+        ownership: "readWrite",
+        bindingRevision: 1
+      }
+    }, true, "thread-1")).toBe(false);
   });
 
   it("normalizes ACP suffixes and fails malformed enums to conservative defaults", () => {

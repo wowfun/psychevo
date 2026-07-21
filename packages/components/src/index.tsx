@@ -10,9 +10,41 @@ export type { HistoryBrowserWorkspace, HistoryDraftSession, HistoryPanelProps } 
 export { MarkdownText } from "./markdown";
 export type { MarkdownTextProps } from "./markdown";
 export type { WorkspaceFileLinkContext } from "./workspaceFileLinks";
-export { ActionButton, CreatePanel, FormField, Switch } from "./primitives";
-export type { ActionButtonProps, CreatePanelProps, FormFieldProps, SwitchProps } from "./primitives";
+export {
+  ActionButton,
+  ActionLink,
+  CreatePanel,
+  DisclosureButton,
+  FormField,
+  IconButton,
+  NavItem,
+  SegmentedControl,
+  Switch,
+  Tabs,
+  ToggleButton
+} from "./primitives";
+export type {
+  ActionButtonProps,
+  ActionLinkProps,
+  ButtonVariant,
+  ControlSize,
+  CreatePanelProps,
+  DisclosureButtonProps,
+  FormFieldProps,
+  IconButtonProps,
+  NavItemProps,
+  SegmentedControlProps,
+  SegmentOption,
+  SwitchProps,
+  TabOption,
+  TabsProps,
+  ToggleButtonProps
+} from "./primitives";
 export { StatusPanel } from "./status";
 export type { StatusPanelProps } from "./status";
+export { ConfirmActionProvider, ConfirmDialog, Menu, useConfirmAction } from "./overlays";
+export type { ConfirmAction, ConfirmActionRequest, ConfirmDialogProps, MenuItem, MenuProps } from "./overlays";
+export { ActionReceiptProvider, useActionReceipts } from "./receipts";
+export type { ActionReceiptInput } from "./receipts";
 export { TranscriptPanel } from "./transcript";
 export type { TranscriptAgentSession, TranscriptPanelProps } from "./transcript";

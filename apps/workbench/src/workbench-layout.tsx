@@ -1,6 +1,6 @@
 import { lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
-import { ActionButton, Composer, HistoryPanel, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
+import { ActionButton, Composer, HistoryPanel, IconButton, NavItem, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
 import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
 import type { ThreadEditableInputPart } from "@psychevo/protocol";
 import { LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
@@ -320,16 +320,16 @@ export function WorkbenchLayout(props: Record<string, any>) {
         />
       )}
       <nav className="mobileTabs" aria-label="Workbench panels">
-        <button className={mobilePanel === "history" ? "is-selected" : ""} onClick={() => setMobilePanel("history")} type="button">
+        <button aria-current={mobilePanel === "history" ? "page" : undefined} className={mobilePanel === "history" ? "is-selected" : ""} onClick={() => setMobilePanel("history")} type="button">
           <PanelLeft size={17} />
           History
         </button>
-        <button className={mobilePanel === "transcript" ? "is-selected" : ""} onClick={() => setMobilePanel("transcript")} type="button">
+        <button aria-current={mobilePanel === "transcript" ? "page" : undefined} className={mobilePanel === "transcript" ? "is-selected" : ""} onClick={() => setMobilePanel("transcript")} type="button">
           <MessageSquare size={17} />
           Transcript
         </button>
         {showSessionChrome && (
-          <button className={mobilePanel === "status" ? "is-selected" : ""} onClick={() => setMobilePanel("status")} type="button">
+          <button aria-current={mobilePanel === "status" ? "page" : undefined} className={mobilePanel === "status" ? "is-selected" : ""} onClick={() => setMobilePanel("status")} type="button">
             <PanelRight size={17} />
             {activeRightTab ? rightWorkspaceTabLabel(activeRightTab.kind) : "Status"}
           </button>
@@ -340,7 +340,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
         className={`workbench ${leftCollapsed ? "is-leftCollapsed" : ""} ${rightCollapsed || !showSessionChrome ? "is-rightCollapsed" : ""}`}
         style={{ "--right-column-width": `${rightWidthPx}px` } as CSSProperties}
       >
-        <aside className={`historyColumn ${leftCollapsed ? "is-collapsed" : ""} ${mobilePanel === "history" ? "is-mobileSelected" : ""}`}>
+        <aside className={`historyColumn ${leftCollapsed ? "is-collapsed" : ""} ${mobilePanel === "history" ? "is-mobileSelected" : ""}`} id="workbench-left-sidebar">
           <div className="leftChrome">
             <div className="leftBrandRow">
               <div className="brandMark">
@@ -349,23 +349,27 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   <h1>Psychevo</h1>
                 </div>
               </div>
-              <button
-                aria-label={leftCollapsed ? "Expand left sidebar" : "Collapse left sidebar"}
+              <IconButton
+                aria-controls="workbench-left-sidebar"
+                aria-expanded={!leftCollapsed}
                 className={`sidebarToggle ${leftCollapsed ? "is-logoToggle" : ""}`}
+                icon={leftCollapsed ? <img alt="" aria-hidden className="sidebarToggleLogo" src={logoUrl} /> : <PanelLeft size={16} />}
+                label="Session sidebar"
                 onClick={() => setLeftCollapsed((value: boolean) => !value)}
-                title={leftCollapsed ? "Expand left sidebar" : "Collapse left sidebar"}
-                type="button"
-              >
-                {leftCollapsed ? <img alt="" aria-hidden className="sidebarToggleLogo" src={logoUrl} /> : <PanelLeft size={16} />}
-              </button>
+                size="compact"
+              />
             </div>
             <div className="leftActions" aria-label="Session actions">
-              <ActionButton ariaLabel="New Session" icon={<MessageSquare size={16} />} onClick={() => void runAction(async () => startNewThread())} variant="ghost">
-                New Session
-              </ActionButton>
-              <button aria-label="Search" className={mainView === "search" ? "is-selected" : ""} onClick={() => switchMainView("search")} type="button">
-                <Search size={16} /> <span>Search</span>
-              </button>
+              {leftCollapsed ? (
+                <IconButton icon={<MessageSquare size={16} />} label="New Session" onClick={() => void runAction(async () => startNewThread())} shape="rounded" variant="primary" />
+              ) : (
+                <ActionButton block className="newSessionAction" icon={<MessageSquare size={16} />} onClick={() => void runAction(async () => startNewThread())} variant="primary">New Session</ActionButton>
+              )}
+              {leftCollapsed ? (
+                <IconButton icon={<Search size={16} />} label="Search" onClick={() => switchMainView("search")} shape="rounded" />
+              ) : (
+                <NavItem current={mainView === "search"} icon={<Search size={16} />} label="Search" onSelect={() => switchMainView("search")} />
+              )}
             </div>
             {!leftCollapsed && (
               <>
@@ -538,15 +542,15 @@ export function WorkbenchLayout(props: Record<string, any>) {
               </button>
             )}
             {showSessionChrome && (
-              <button
-                aria-label={rightCollapsed ? "Show right inspector" : "Collapse right inspector"}
+              <IconButton
+                aria-controls="workbench-right-inspector"
+                aria-expanded={!rightCollapsed}
                 className="rightInspectorToggle"
+                icon={<PanelRight size={16} />}
+                label="Right inspector"
                 onClick={() => setRightCollapsed((value: boolean) => !value)}
-                title={rightCollapsed ? "Show right inspector" : "Collapse right inspector"}
-                type="button"
-              >
-                <PanelRight size={16} />
-              </button>
+                size="compact"
+              />
             )}
           </div>
           <div className="centerWorkspace">
@@ -696,7 +700,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
             {snapshot.historyEditing?.kind === "conversationEdit" && (
               <div className="historyEditingStrip" role="status">
                 <span>{snapshot.historyEditing.hiddenEntryCount} hidden {snapshot.historyEditing.hiddenEntryCount === 1 ? "entry" : "entries"}</span>
-                <button onClick={() => void runAction(async () => {
+                <ActionButton onClick={() => void runAction(async () => {
                   const target = snapshotThreadApplicationTarget(snapshot);
                   if (!client || !target) return;
                   const result = await client.request("thread/action/run", {
@@ -706,9 +710,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   if (result.kind !== "unrevertConversation") return;
                   setSnapshot(result.snapshot);
                   prefillEditableDraft(result.draft.parts, patchComposerDraft, setAttachments);
-                })} type="button">
+                })} size="compact" type="button" variant="caution">
                   Restore history
-                </button>
+                </ActionButton>
               </div>
             )}
             {(commandFeedback?.feedbackAnchor === "composer" || commandFeedback?.feedbackAnchor === "status") && (
@@ -926,7 +930,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
         </section>
 
         {showSessionChrome && !rightCollapsed && (
-          <aside className={`statusColumn ${mobilePanel === "status" ? "is-mobileSelected" : ""}`}>
+          <aside className={`statusColumn ${mobilePanel === "status" ? "is-mobileSelected" : ""}`} id="workbench-right-inspector">
             <button
               aria-label="Resize right workspace"
               className="rightResizeHandle"

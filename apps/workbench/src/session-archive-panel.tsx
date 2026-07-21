@@ -19,7 +19,7 @@ import type {
   ThreadImportListResult,
   ThreadImportProfileView
 } from "@psychevo/protocol";
-import { ActionButton, DismissibleDetails } from "@psychevo/components";
+import { DismissibleDetails, IconButton } from "@psychevo/components";
 
 export function SessionArchivePanel({
   archivedSessions,
@@ -157,43 +157,27 @@ export function SessionArchivePanel({
           <h2>Sessions</h2>
         </div>
         <div className="pevo-iconRow">
-          <ActionButton
-            ariaLabel="Open workspace"
+          <IconButton
             disabled={disabled}
             icon={<FolderOpen size={17} />}
-            iconOnly
+            label="Open workspace"
             onClick={onOpenWorkspace}
             size="compact"
-            tooltip="Open workspace"
-            variant="ghost"
-          >
-            Open workspace
-          </ActionButton>
-          <ActionButton
-            active
-            ariaLabel="Active sessions"
+          />
+          <IconButton
             disabled={disabled}
             icon={<Inbox size={17} />}
-            iconOnly
+            label="Active sessions"
             onClick={onShowActive}
             size="compact"
-            tooltip="Active sessions"
-            variant="ghost"
-          >
-            Active sessions
-          </ActionButton>
-          <ActionButton
-            ariaLabel={hasCollapsedGroups ? "Expand all sources" : "Collapse all sources"}
+          />
+          <IconButton
             disabled={groupIds.length === 0}
             icon={hasCollapsedGroups ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
-            iconOnly
+            label={hasCollapsedGroups ? "Expand all sources" : "Collapse all sources"}
             onClick={toggleAllGroups}
             size="compact"
-            title={hasCollapsedGroups ? "Expand all sources" : "Collapse all sources"}
-            variant="ghost"
-          >
-            {hasCollapsedGroups ? "Expand all sources" : "Collapse all sources"}
-          </ActionButton>
+          />
         </div>
       </header>
       <div className="pevo-sessionList">
@@ -232,6 +216,7 @@ export function SessionArchivePanel({
               trailing={profile.targets.length > 1 ? (
                 <select
                   aria-label={`Agent target for ${profile.profileLabel}`}
+                  className="pevo-fieldControl pevo-fieldControl--compact"
                   disabled={disabled || Boolean(pendingId)}
                   onChange={(event) => setSelectedTargets((current) => ({
                     ...current,

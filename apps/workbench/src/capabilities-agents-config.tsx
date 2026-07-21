@@ -1,5 +1,5 @@
 import { Edit3, PlugZap, Plus, RefreshCw, Save, Trash2, Wrench, X } from "lucide-react";
-import { ActionButton, CreatePanel, Switch } from "@psychevo/components";
+import { ActionButton, CreatePanel, IconButton, Switch } from "@psychevo/components";
 import { backendDisplayLabel, prettyJson } from "./data";
 import type { BackendCommandJson, BackendDraft, WorkbenchBackend, WorkbenchBackendDoctor } from "./types";
 
@@ -63,7 +63,7 @@ export function AgentsConfigPanel({
       <header className="agentSurfaceHeaderWithAction">
         <span><PlugZap size={15} /> ACP Backends <b>{catalogBackends.length}</b></span>
         {!backendDraft && (
-          <ActionButton ariaLabel="Add ACP backend" disabled={disabled} icon={<Plus size={14} />} onClick={onNewBackend} size="compact" tooltip="Add ACP backend" variant="primary">
+          <ActionButton disabled={disabled} icon={<Plus size={14} />} onClick={onNewBackend} size="compact" variant="primary">
             Add backend
           </ActionButton>
         )}
@@ -103,7 +103,7 @@ export function AgentsConfigPanel({
                 <div className="agentBackendControls">
                   {managedRecovery ? (
                     <ActionButton
-                      ariaLabel={`${managedActionLabel(managedRecovery)} ${backend.label || backend.id} ACP`}
+                      aria-label={`${managedActionLabel(managedRecovery)} ${backend.label || backend.id} ACP`}
                       disabled={disabled}
                       icon={managedRecovery === "repair" ? <Wrench size={13} /> : <Plus size={13} />}
                       onClick={() => onManageBackend(backend, managedRecovery)}
@@ -114,10 +114,9 @@ export function AgentsConfigPanel({
                     </ActionButton>
                   ) : (
                     <Switch
-                      ariaLabel={`${backend.enabled ? "Disable" : "Enable"} ${backend.id}`}
                       checked={backend.enabled}
                       disabled={disabled || !profileMutable || !backendReady}
-                      label={backend.enabled ? "Enabled" : "Disabled"}
+                      label={`${backend.id} enabled`}
                       onCheckedChange={(enabled) => onSetBackendEnabled(backend, enabled)}
                       showLabel={false}
                       size="compact"
@@ -131,37 +130,25 @@ export function AgentsConfigPanel({
                 </div>
                 <div className="agentBackendActions">
                   {managedAction && (
-                    <ActionButton
-                      ariaLabel={`${managedActionLabel(managedAction)} managed ${backend.id}`}
+                    <IconButton
                       disabled={disabled}
                       icon={managedAction === "upgrade" ? <RefreshCw size={13} /> : managedAction === "repair" ? <Wrench size={13} /> : <Plus size={13} />}
-                      iconOnly
+                      label={`${managedActionLabel(managedAction)} managed ${backend.id}`}
                       onClick={() => onManageBackend(backend, managedAction)}
                       size="compact"
-                      tooltip={`${managedActionLabel(managedAction)} managed adapter`}
                       variant={managedAction === "repair" ? "danger" : "ghost"}
-                    >
-                      {managedActionLabel(managedAction)} managed {backend.id}
-                    </ActionButton>
+                    />
                   )}
-                  <ActionButton ariaLabel={`Edit ${backend.id}`} disabled={disabled || !profileMutable} icon={<Edit3 size={13} />} iconOnly onClick={() => onEditBackend(backend)} size="compact" tooltip={profileMutable ? "Edit Profile backend" : "Generated or Project backend is read-only here"} variant="ghost">
-                    Edit {backend.id}
-                  </ActionButton>
-                  <ActionButton ariaLabel={`Doctor ${backend.id}`} disabled={disabled} icon={<Wrench size={13} />} iconOnly onClick={() => onDoctorBackend(backend)} size="compact" tooltip="Doctor" variant="ghost">
-                    Doctor {backend.id}
-                  </ActionButton>
-                  <ActionButton
-                    ariaLabel={`Delete ${backend.id} from Profile`}
+                  <IconButton disabled={disabled || !profileMutable} icon={<Edit3 size={13} />} label={`Edit ${backend.id}`} onClick={() => onEditBackend(backend)} size="compact" />
+                  <IconButton disabled={disabled} icon={<Wrench size={13} />} label={`Doctor ${backend.id}`} onClick={() => onDoctorBackend(backend)} size="compact" />
+                  <IconButton
                     disabled={disabled || !profileMutable}
                     icon={<Trash2 size={13} />}
-                    iconOnly
+                    label={`Delete ${backend.id} from Profile`}
                     onClick={() => onDeleteBackend(backend)}
                     size="compact"
-                    tooltip="Delete Profile backend"
                     variant="danger"
-                  >
-                    Delete {backend.id}
-                  </ActionButton>
+                  />
                 </div>
               </div>
             </div>
@@ -233,6 +220,7 @@ function BackendEntrypointControls({
             <input
               aria-label={`${backend.id} ${entrypoint} entrypoint`}
               checked={checked}
+              className="pevo-choiceControl"
               disabled={disabled || isLastSelected}
               onChange={(event) => {
                 const next = event.currentTarget.checked
@@ -307,15 +295,15 @@ function BackendEditorForm({
       >
         <label>
           <span>ID</span>
-          <input aria-label="ID" disabled={disabled} onChange={(event) => patch({ id: event.currentTarget.value })} value={draft.id} />
+          <input aria-label="ID" className="pevo-fieldControl" disabled={disabled} onChange={(event) => patch({ id: event.currentTarget.value })} value={draft.id} />
         </label>
         <label>
           <span>Label <em>Optional</em></span>
-          <input aria-label="Label" disabled={disabled} onChange={(event) => patch({ label: event.currentTarget.value })} value={draft.label} />
+          <input aria-label="Label" className="pevo-fieldControl" disabled={disabled} onChange={(event) => patch({ label: event.currentTarget.value })} value={draft.label} />
         </label>
         <label>
           <span>Description <em>Optional</em></span>
-          <input aria-label="Description" disabled={disabled} onChange={(event) => patch({ description: event.currentTarget.value })} value={draft.description} />
+          <input aria-label="Description" className="pevo-fieldControl" disabled={disabled} onChange={(event) => patch({ description: event.currentTarget.value })} value={draft.description} />
         </label>
         <label>
           <span>Command JSON</span>
@@ -323,7 +311,7 @@ function BackendEditorForm({
             aria-describedby={commandJsonError ? "backend-command-json-error" : undefined}
             aria-invalid={commandJsonError ? true : undefined}
             aria-label="Command JSON"
-            className="backendJsonInput"
+            className="backendJsonInput pevo-fieldControl pevo-fieldControl--code"
             disabled={disabled}
             onChange={(event) => patch({ commandJsonText: event.currentTarget.value })}
             spellCheck={false}
@@ -335,6 +323,7 @@ function BackendEditorForm({
           <span>Workspace</span>
           <input
             aria-label="Backend workspace"
+            className="pevo-fieldControl"
             disabled={disabled}
             onChange={(event) => patch({ cwd: event.currentTarget.value })}
             placeholder="Defaults to workspace"
@@ -347,6 +336,7 @@ function BackendEditorForm({
             <label key={capability}>
               <input
                 checked={draft.clientCapabilities.includes(capability)}
+                className="pevo-choiceControl"
                 disabled={disabled}
                 onChange={() => toggleClientCapability(capability)}
                 type="checkbox"
@@ -357,7 +347,7 @@ function BackendEditorForm({
         </fieldset>
         <label>
           <span>MCP Servers</span>
-          <textarea aria-label="MCP Servers" disabled={disabled} onChange={(event) => patch({ mcpServersText: event.currentTarget.value })} value={draft.mcpServersText} />
+          <textarea aria-label="MCP Servers" className="pevo-fieldControl pevo-fieldControl--code pevo-fieldControl--compact" disabled={disabled} onChange={(event) => patch({ mcpServersText: event.currentTarget.value })} value={draft.mcpServersText} />
         </label>
       </CreatePanel>
     </form>

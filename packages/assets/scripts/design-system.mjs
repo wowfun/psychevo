@@ -108,8 +108,11 @@ export function generateCss(frontmatter) {
   }
   const order = orderedKeys(themes, ["dark", "light", "warm"]);
   const blocks = order.map((name) => formatThemeBlock(themes[name], name));
+  const componentBlocks = ["control", "field"]
+    .map((name) => formatComponentTokenBlock(name, frontmatter.components?.[name], frontmatter))
+    .filter(Boolean);
   return `${generatedHeader("css")}
-${blocks.join("\n\n")}
+${componentBlocks.length > 0 ? `${componentBlocks.join("\n\n")}\n\n` : ""}${blocks.join("\n\n")}
 
 * {
   box-sizing: border-box;
@@ -134,6 +137,23 @@ button {
   touch-action: manipulation;
 }
 `;
+}
+
+function formatComponentTokenBlock(name, component, frontmatter) {
+  if (!component || typeof component !== "object") {
+    return "";
+  }
+  const resolved = resolveTokenReferences(component, frontmatter);
+  const lines = [":root {"];
+  for (const [key, value] of Object.entries(resolved)) {
+    if (!["string", "number"].includes(typeof value)) {
+      throw new Error(`${name} token ${key} must resolve to a string or number.`);
+    }
+    const cssKey = key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+    lines.push(`  --pevo-${name}-${cssKey}: ${String(value)};`);
+  }
+  lines.push("}");
+  return lines.join("\n");
 }
 
 export function generateTs(designSystem) {

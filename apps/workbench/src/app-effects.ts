@@ -366,7 +366,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             }
           }
           if (event.type === "turnCompleted" && (event.threadId || event.turn.threadId)) {
-            if (event.turn.error?.message) {
+            if (event.turn.status === "failed" && event.turn.error?.message) {
               params.setError(event.turn.error.message);
             }
             const threadId = event.threadId ?? event.turn.threadId;

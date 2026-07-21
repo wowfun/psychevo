@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { HistoryDraftSession } from "@psychevo/components";
+import {
+  ActionReceiptProvider,
+  ConfirmActionProvider,
+  useConfirmAction,
+  type HistoryDraftSession
+} from "@psychevo/components";
 import {
   GatewayClient,
   latestAssistantTranscriptText,
@@ -57,7 +62,8 @@ import {
 } from "./right-workspace-model";
 import { runtimeControlAsConfigOption } from "./runtime-controls";
 import {
-  parseThreadContext
+  parseThreadContext,
+  shouldRetainFirstTurnDraftContext
 } from "./runtime-context";
 import {
   readPinnedSessionIds,
@@ -133,6 +139,17 @@ function mergeBrowserWorkspaces(
 }
 
 export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtimeFactory?: WorkbenchRuntimeFactory } = {}) {
+  return (
+    <ConfirmActionProvider>
+      <ActionReceiptProvider>
+        <WorkbenchApp runtimeFactory={runtimeFactory} />
+      </ActionReceiptProvider>
+    </ConfirmActionProvider>
+  );
+}
+
+function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFactory }) {
+  const confirmAction = useConfirmAction();
   const threadController = useMemo(() => new ThreadController(EMPTY_SNAPSHOT), []);
   const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
   const threadSnapshotStore = useMemo(() => ({
@@ -314,6 +331,14 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
     }).then((value) => {
       if (cancelled) return;
       const context = parseThreadContext(value);
+      if (shouldRetainFirstTurnDraftContext(
+        threadController.context(),
+        context,
+        firstTurnContextRefreshPendingRef.current,
+        currentThreadId
+      )) {
+        return;
+      }
       setRuntimeContext(context);
       threadController.setContext(context);
       const pendingTarget = context.compatibleTargets.find((target) => (
@@ -757,6 +782,7 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
   } = createRightWorkspaceActions({
     activeRightTabId,
     client,
+    confirmAction,
     currentThreadId: currentThreadId ?? null,
     debugEnabled,
     dirtyRightTabs,

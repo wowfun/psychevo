@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { Edit3, Keyboard, Link2, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { SlashSettingsResult } from "@psychevo/protocol";
-import { ActionButton } from "@psychevo/components";
+import { ActionButton, IconButton, useActionReceipts } from "@psychevo/components";
 import { errorMessage } from "./common";
 
 type SlashAliasDraft = {
@@ -47,6 +47,7 @@ export function SlashCommandsSettingsPanel({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const receipts = useActionReceipts();
   const targetListId = useId();
 
   async function loadSlashSettings() {
@@ -106,7 +107,8 @@ export function SlashCommandsSettingsPanel({
         }))
       });
       applySlashSettings(result);
-      setNotice(message);
+      receipts.push({ message });
+      setNotice(receipts.available ? null : message);
       await onSaved();
     } catch (nextError) {
       setError(errorMessage(nextError));
@@ -165,19 +167,14 @@ export function SlashCommandsSettingsPanel({
     <section className="agentSurfacePanel slashSettingsPanel" aria-label="Slash Commands">
       <header className="agentSurfaceHeaderWithAction">
         <span><Keyboard size={15} /> Profile Slash Commands <b>{totalRows}</b></span>
-        <ActionButton
-          aria-label="Refresh slash command settings"
+        <IconButton
           disabled={disabled || loading || !client}
           icon={<RotateCcw size={13} />}
-          iconOnly
+          label="Refresh slash command settings"
           onClick={() => void loadSlashSettings()}
           size="compact"
-          title="Refresh"
           type="button"
-          variant="ghost"
-        >
-          Refresh
-        </ActionButton>
+        />
       </header>
       {error && <div className="modelSettingsMessage is-error" role="alert">{error}</div>}
       {notice && <div className="modelSettingsMessage">{notice}</div>}
@@ -198,6 +195,7 @@ export function SlashCommandsSettingsPanel({
               <label>
                 <span>Leader key</span>
                 <input
+                  className="pevo-fieldControl pevo-fieldControl--compact"
                   disabled={disabled || !client || loading || saving}
                   onChange={(event) => setLeaderKeyDraft(event.currentTarget.value)}
                   placeholder="ctrl+x"
@@ -207,6 +205,7 @@ export function SlashCommandsSettingsPanel({
               <label>
                 <span>Timeout ms</span>
                 <input
+                  className="pevo-fieldControl pevo-fieldControl--compact"
                   disabled={disabled || !client || loading || saving}
                   inputMode="numeric"
                   onChange={(event) => setLeaderTimeoutDraft(event.currentTarget.value)}
@@ -214,7 +213,7 @@ export function SlashCommandsSettingsPanel({
                   value={leaderTimeoutDraft}
                 />
               </label>
-              <ActionButton disabled={disabled || !client || loading || saving} icon={<Save size={13} />} title="Save leader key" type="submit" variant="neutral">
+              <ActionButton disabled={disabled || !client || loading || saving} icon={<Save size={13} />} title="Save leader key" type="submit" variant="secondary">
                 {busyKey === "leader" ? "Saving" : "Save"}
               </ActionButton>
             </div>
@@ -344,6 +343,7 @@ export function SlashCommandsSettingsPanel({
                 <label>
                   <span>Alias</span>
                   <input
+                    className="pevo-fieldControl"
                     disabled={disabled || !client || loading || saving}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
@@ -356,6 +356,7 @@ export function SlashCommandsSettingsPanel({
                 <label>
                   <span>Target slash line</span>
                   <input
+                    className="pevo-fieldControl"
                     disabled={disabled || !client || loading || saving}
                     list={targetListId}
                     onChange={(event) => {
@@ -384,6 +385,7 @@ export function SlashCommandsSettingsPanel({
                 <label>
                   <span>Shortcut</span>
                   <input
+                    className="pevo-fieldControl"
                     disabled={disabled || !client || loading || saving}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
@@ -396,6 +398,7 @@ export function SlashCommandsSettingsPanel({
                 <label>
                   <span>Target slash line</span>
                   <input
+                    className="pevo-fieldControl"
                     disabled={disabled || !client || loading || saving}
                     list={targetListId}
                     onChange={(event) => {

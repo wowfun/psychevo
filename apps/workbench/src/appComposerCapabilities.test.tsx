@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { agentRecord, gatewayMock } from "./appComposerAgent.fixture";
 import { App } from "./App";
 
@@ -75,8 +75,41 @@ describe("Workbench capabilities management", () => {
     expect(within(region).queryByRole("tab", { name: "All" })).toBeNull();
   });
 
+  it("does not publish mutation receipts for diagnostic actions", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "MCP" }));
+    const testButton = await within(region).findByRole("button", { name: "Test" });
+    fireEvent.click(testButton);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "mcp/test")).toBe(true);
+    });
+    expect(screen.queryByText("Saved. Changes apply to the next run/session; current sessions may differ.")).toBeNull();
+
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+    const doctorButton = await within(region).findByRole("button", { name: "Doctor" });
+    fireEvent.click(doctorButton);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/doctor")).toBe(true);
+    });
+    expect(screen.queryByText("Saved. Changes apply to the next run/session; current sessions may differ.")).toBeNull();
+
+    fireEvent.click(within(region).getByRole("tab", { name: "MCP" }));
+    const docsSwitch = await within(region).findByRole("switch", { name: "docs enabled" });
+    expect(docsSwitch.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(docsSwitch);
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "mcp/setEnabled",
+        params: expect.objectContaining({ name: "docs", enabled: false })
+      });
+    });
+    expect(await screen.findByText("docs disabled.")).toBeTruthy();
+  });
+
   it("manages Project/Profile Markdown agent definitions", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     gatewayMock.agentRecords = [
       {
         ...agentRecord("project-helper", ["subagent"]),
@@ -119,7 +152,9 @@ describe("Workbench capabilities management", () => {
     expect(within(region).getByText("Shadowed")).toBeTruthy();
     expect(within(region).getByText("Disabled")).toBeTruthy();
 
-    fireEvent.click(within(region).getByRole("switch", { name: "Enable disabled-helper" }));
+    const disabledHelperSwitch = within(region).getByRole("switch", { name: "disabled-helper enabled" });
+    expect(disabledHelperSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(disabledHelperSwitch);
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "agent/setEnabled",
@@ -129,6 +164,9 @@ describe("Workbench capabilities management", () => {
           enabled: true
         })
       });
+    });
+    await waitFor(() => {
+      expect(within(region).getByRole("switch", { name: "disabled-helper enabled" }).getAttribute("aria-checked")).toBe("true");
     });
 
     fireEvent.click(within(region).getByRole("button", { name: "Create agent" }));
@@ -163,7 +201,9 @@ describe("Workbench capabilities management", () => {
     const editForm = await within(region).findByRole("form", { name: "Agent definition" });
     expect((within(editForm).getByLabelText("Agent name") as HTMLInputElement).disabled).toBe(true);
     expect((within(editForm).getByLabelText("Agent target") as HTMLSelectElement).disabled).toBe(true);
-    fireEvent.click(within(editForm).getByRole("tab", { name: "Markdown" }));
+    const markdownMode = within(editForm).getByRole("radio", { name: "Markdown" });
+    expect(markdownMode.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(markdownMode);
     fireEvent.change(within(editForm).getByLabelText("Agent Markdown"), {
       target: { value: "---\nname: reviewer\ndescription: Review code changes\nenabled: true\n---\nReview in Markdown mode." }
     });
@@ -182,8 +222,10 @@ describe("Workbench capabilities management", () => {
 
     fireEvent.click(await within(region).findByRole("button", { name: "Agent reviewer" }));
     fireEvent.click(within(region).getByRole("button", { name: "Delete" }));
+    const deleteDialog = await screen.findByRole("dialog", { name: "Delete agent reviewer?" });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "agent/delete")).toBe(false);
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete agent" }));
     await waitFor(() => {
-      expect(confirm).toHaveBeenCalledWith("Delete agent reviewer?");
       expect(gatewayMock.requestLog).toContainEqual({
         method: "agent/delete",
         params: expect.objectContaining({
@@ -192,7 +234,9 @@ describe("Workbench capabilities management", () => {
         })
       });
     });
-    confirm.mockRestore();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Delete agent reviewer?" })).toBeNull();
+    });
   });
 
   it("manages Project/Profile Markdown team definitions", async () => {
@@ -270,7 +314,9 @@ describe("Workbench capabilities management", () => {
         })
       });
     });
-    fireEvent.click(within(region).getByRole("switch", { name: "Enable disabled-team" }));
+    const disabledTeamSwitch = within(region).getByRole("switch", { name: "disabled-team enabled" });
+    expect(disabledTeamSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(disabledTeamSwitch);
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "team/setEnabled",
@@ -280,6 +326,9 @@ describe("Workbench capabilities management", () => {
           enabled: true
         })
       });
+    });
+    await waitFor(() => {
+      expect(within(region).getByRole("switch", { name: "disabled-team enabled" }).getAttribute("aria-checked")).toBe("true");
     });
 
     fireEvent.click(within(region).getByRole("button", { name: "Create team" }));
@@ -363,7 +412,6 @@ describe("Workbench capabilities management", () => {
   });
 
   it("creates and edits ACP Runtime Profiles without transport configuration", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const codex = gatewayMock.runtimeProfileRecords.find((profile) => profile.id === "codex");
     if (!codex) throw new Error("expected Codex Runtime Profile fixture");
     gatewayMock.runtimeProfileRecords = [
@@ -438,14 +486,27 @@ describe("Workbench capabilities management", () => {
     fireEvent.click(await within(region).findByRole("button", { name: "Runtime Profile review-codex" }));
     detail = within(region).getByRole("complementary", { name: "Runtime Profile detail" });
     fireEvent.click(within(detail).getByRole("button", { name: "Delete" }));
+    let deleteDialog = await screen.findByRole("dialog", { name: "Delete Runtime Profile configuration?" });
+    expect(within(deleteDialog).getByText("Delete the Project configuration for Review Codex Updated?")).toBeTruthy();
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/profile/delete")).toBe(false);
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Delete Runtime Profile configuration?" })).toBeNull();
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "runtime/profile/delete")).toBe(false);
+
+    fireEvent.click(within(detail).getByRole("button", { name: "Delete" }));
+    deleteDialog = await screen.findByRole("dialog", { name: "Delete Runtime Profile configuration?" });
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete configuration" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "runtime/profile/delete",
         params: expect.objectContaining({ id: "review-codex", target: "project" })
       });
     });
-    expect(confirm).toHaveBeenCalledWith("Delete the Project configuration for Review Codex Updated?");
-    confirm.mockRestore();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Delete Runtime Profile configuration?" })).toBeNull();
+    });
   });
 
   it("offers typed managed Codex install from the ACP Backend catalog", async () => {
@@ -492,7 +553,8 @@ describe("Workbench capabilities management", () => {
     fireEvent.click(within(region).getByRole("tab", { name: "Agents" }));
     fireEvent.click(await within(region).findByRole("tab", { name: "ACP Backends" }));
 
-    expect(await within(region).findByRole("switch", { name: "Disable codex" })).toBeTruthy();
+    const codexSwitch = await within(region).findByRole("switch", { name: "codex enabled" });
+    expect(codexSwitch.getAttribute("aria-checked")).toBe("true");
     expect(within(region).queryByRole("button", { name: "Install Codex ACP" })).toBeNull();
   });
 
@@ -513,21 +575,18 @@ describe("Workbench capabilities management", () => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "skill/read" && JSON.stringify(entry.params).includes("deploy"))).toBe(true);
     });
     expect(within(region).getByText("DEPLOY_TOKEN")).toBeTruthy();
-    expect(within(region).queryByRole("button", { name: "Enable deploy" })).toBeNull();
-
-    const enable = within(region).getByRole("switch", { name: "Enable deploy" });
+    const enable = within(region).getByRole("switch", { name: "deploy enabled" });
     expect(enable.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(enable);
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "skill/setEnabled" && JSON.stringify(entry.params).includes("\"enabled\":true"))).toBe(true);
     });
     await waitFor(() => {
-      expect(within(region).getByRole("switch", { name: "Disable deploy" }).getAttribute("aria-checked")).toBe("true");
+      expect(within(region).getByRole("switch", { name: "deploy enabled" }).getAttribute("aria-checked")).toBe("true");
     });
   });
 
   it("uses plugin action hints, canonical selectors, and mutation scopes", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
@@ -537,7 +596,7 @@ describe("Workbench capabilities management", () => {
     const browserRow = await within(region).findByRole("button", { name: "Plugin Browser" });
     fireEvent.click(browserRow);
     expect(within(region).queryByRole("button", { name: "Uninstall" })).toBeNull();
-    const browserSwitch = await within(region).findByRole("switch", { name: "Disable Browser" });
+    const browserSwitch = await within(region).findByRole("switch", { name: "Browser enabled" });
     expect(browserSwitch.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(browserSwitch);
     await waitFor(() => {
@@ -553,7 +612,7 @@ describe("Workbench capabilities management", () => {
 
     fireEvent.click(within(region).getByRole("button", { name: "Plugin writer-kit" }));
     const uninstall = within(region).getByRole("button", { name: "Uninstall" });
-    const pluginSwitch = await within(region).findByRole("switch", { name: "Disable writer-kit" });
+    const pluginSwitch = await within(region).findByRole("switch", { name: "writer-kit enabled" });
     expect(pluginSwitch.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(pluginSwitch);
     await waitFor(() => {
@@ -567,6 +626,9 @@ describe("Workbench capabilities management", () => {
       });
     });
     fireEvent.click(uninstall);
+    const uninstallDialog = await screen.findByRole("dialog", { name: "Uninstall plugin writer-kit?" });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/uninstall")).toBe(false);
+    fireEvent.click(within(uninstallDialog).getByRole("button", { name: "Uninstall plugin" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
         method: "plugin/uninstall",
@@ -594,7 +656,8 @@ describe("Workbench capabilities management", () => {
     expect(projectItem.className).toContain("is-selected");
     expect(profileItem.className).not.toContain("is-selected");
 
-    const profileSwitch = within(profileItem).getByRole("switch", { name: "Disable dual-scope" });
+    const profileSwitch = within(profileItem).getByRole("switch", { name: "dual-scope enabled" });
+    expect(profileSwitch.getAttribute("aria-checked")).toBe("true");
     await waitFor(() => expect((profileSwitch as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(profileSwitch);
     await waitFor(() => {
@@ -607,7 +670,8 @@ describe("Workbench capabilities management", () => {
         })
       });
     });
-    const projectSwitch = within(projectItem).getByRole("switch", { name: "Enable dual-scope" });
+    const projectSwitch = within(projectItem).getByRole("switch", { name: "dual-scope enabled" });
+    expect(projectSwitch.getAttribute("aria-checked")).toBe("false");
     await waitFor(() => expect((projectSwitch as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(projectSwitch);
     await waitFor(() => {
@@ -622,7 +686,7 @@ describe("Workbench capabilities management", () => {
     });
 
     fireEvent.click(within(region).getByRole("tab", { name: "MCP" }));
-    const mcpSwitch = await within(region).findByRole("switch", { name: "Disable docs" });
+    const mcpSwitch = await within(region).findByRole("switch", { name: "docs enabled" });
     expect(mcpSwitch.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(mcpSwitch);
     await waitFor(() => {
@@ -634,7 +698,6 @@ describe("Workbench capabilities management", () => {
         })
       });
     });
-    confirm.mockRestore();
   });
 
   it("keeps Codex authority distinct and shows component-level compatibility evidence", async () => {
@@ -646,7 +709,8 @@ describe("Workbench capabilities management", () => {
 
     const review = await within(region).findByRole("button", { name: "Plugin review" });
     expect(within(review).getByText("Codex")).toBeTruthy();
-    const toggle = within(region).getByRole("switch", { name: "Enable review" }) as HTMLButtonElement;
+    const toggle = within(region).getByRole("switch", { name: "review enabled" }) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(toggle.disabled).toBe(true);
     fireEvent.click(review);
 
@@ -692,7 +756,9 @@ describe("Workbench capabilities management", () => {
         })
       });
     });
-    fireEvent.click(within(card).getByRole("switch", { name: "Enable Codex plugins" }));
+    const authoritySwitch = within(card).getByRole("switch", { name: "Codex plugin compatibility" });
+    expect(authoritySwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(authoritySwitch);
 
     await waitFor(() => {
       expect(gatewayMock.requestLog).toContainEqual({
@@ -864,7 +930,6 @@ describe("Workbench capabilities management", () => {
   });
 
   it("requires confirmation before sending a force skill install", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
@@ -875,14 +940,23 @@ describe("Workbench capabilities management", () => {
     fireEvent.click(within(region).getByLabelText("Force"));
 
     fireEvent.click(within(region).getByRole("button", { name: "Install" }));
-    expect(confirm).toHaveBeenCalledWith("Install skill with force?");
+    let installDialog = await screen.findByRole("dialog", { name: "Install skill with force?" });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "skill/install")).toBe(false);
+    fireEvent.click(within(installDialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Install skill with force?" })).toBeNull();
+    });
     expect(gatewayMock.requestLog.some((entry) => entry.method === "skill/install")).toBe(false);
 
     fireEvent.click(within(region).getByRole("button", { name: "Install" }));
+    installDialog = await screen.findByRole("dialog", { name: "Install skill with force?" });
+    fireEvent.click(within(installDialog).getByRole("button", { name: "Install with force" }));
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "skill/install" && JSON.stringify(entry.params).includes("\"force\":true"))).toBe(true);
     });
-    confirm.mockRestore();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Install skill with force?" })).toBeNull();
+    });
   });
 
   it("inspects plugin sources before install", async () => {

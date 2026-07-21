@@ -821,6 +821,43 @@ describe("Workbench first-class Agent runtime controls", () => {
       .filter((method) => forbidden.has(method))).toEqual([]);
   });
 
+  it("keeps accepted first-turn controls when the pre-binding context is not yet effective", async () => {
+    gatewayMock.runtimeContextRead = (params) => {
+      const threadId = (params as { threadId?: string | null } | null)?.threadId ?? null;
+      return threadId === "thread-1"
+        ? firstClassContext("native", {
+            selectedTargetId: null,
+            suggestedTargetId: "target:default:native",
+            selectionState: "default",
+            binding: null,
+            sendability: {
+              allowed: false,
+              reason: "Select an Agent target before starting a turn.",
+              recoveryAction: null
+            }
+          })
+        : firstClassContext("native");
+    };
+    render(<App />);
+
+    expect(await screen.findByRole("combobox", { name: "Mode" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("Ask Psychevo..."), {
+      target: { value: "keep the Composer environment" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "thread/context/read",
+        params: expect.objectContaining({ threadId: "thread-1", target: null })
+      });
+    });
+    expect(screen.getByRole("button", { name: "Interrupt active turn" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Mode" }).textContent).toContain("Default");
+    expect(screen.getByRole("combobox", { name: "Permission mode" }).textContent).toContain("Default");
+  });
+
   it("refreshes authoritative Thread context after shell catalog changes", async () => {
     useFirstClassContexts();
     gatewayMock.sessionSummaries = [sessionSummary("thread-1", "Bound ACP thread")];

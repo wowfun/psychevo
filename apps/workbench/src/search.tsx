@@ -88,7 +88,13 @@ export function SearchPage({
           <p>Search session ids, session names, and message text.</p>
         </div>
       </header>
-      <input autoFocus placeholder="Search current workspace" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <input
+        autoFocus
+        className="pevo-fieldControl pevo-fieldControl--search"
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search current workspace"
+        value={query}
+      />
       {query.trim() && results.length > 0 ? (
         <div className="searchResults">
           {results.map((result) => (

@@ -16,12 +16,12 @@
   justify-content: center;
   gap: 7px;
   min-width: 0;
-  height: 32px;
+  height: var(--pevo-control-default-size);
   padding: 0 12px;
   color: var(--pevo-ink);
-  background: var(--pevo-panel-muted);
-  border: 1px solid color-mix(in oklch, var(--pevo-border), transparent 16%);
-  border-radius: var(--pevo-radius-sm);
+  background: var(--pevo-control-secondary-bg);
+  border: 1px solid transparent;
+  border-radius: var(--pevo-control-rounded-default);
   box-shadow: none;
   cursor: pointer;
   font: inherit;
@@ -29,34 +29,59 @@
   font-weight: 650;
   line-height: 1;
   text-decoration: none;
-  transition-duration: 140ms;
+  transition-duration: var(--pevo-motion-feedback, 120ms);
   transition-property: background-color, border-color, box-shadow, color, opacity, transform;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
 }
 
 .pevo-actionButton--compact {
-  height: 27px;
+  height: var(--pevo-control-compact-size);
   gap: 6px;
   padding: 0 9px;
-  border-radius: var(--pevo-radius-xs);
+  border-radius: var(--pevo-control-rounded-compact);
   font-size: var(--pevo-font-size-xsmall);
 }
 
-.pevo-actionButton--iconOnly {
-  width: 32px;
-  padding: 0;
+.pevo-actionButton--block {
+  width: 100%;
 }
 
-.pevo-actionButton--compact.pevo-actionButton--iconOnly {
-  width: 27px;
+.pevo-controlGroup {
+  display: inline-flex;
+  align-items: center;
+}
+
+.pevo-controlGroup > :is(.pevo-actionButton, .pevo-iconButton) {
+  border-radius: 0;
+}
+
+.pevo-controlGroup > :is(.pevo-actionButton, .pevo-iconButton):not(:first-child) {
+  margin-left: -1px;
+}
+
+.pevo-controlGroup > :is(.pevo-actionButton, .pevo-iconButton):first-child {
+  border-radius: var(--pevo-control-rounded-default) 0 0 var(--pevo-control-rounded-default);
+}
+
+.pevo-controlGroup > :is(.pevo-actionButton, .pevo-iconButton):last-child {
+  border-radius: 0 var(--pevo-control-rounded-default) var(--pevo-control-rounded-default) 0;
+}
+
+.pevo-controlGroup > :is(.pevo-actionButton, .pevo-iconButton):only-child {
+  border-radius: var(--pevo-control-rounded-default);
 }
 
 .pevo-actionButton--primary {
-  color: var(--pevo-accent-ink);
-  background: var(--pevo-accent);
-  border-color: var(--pevo-accent);
-  box-shadow: var(--pevo-shadow-active);
+  color: var(--pevo-control-primary-ink);
+  background: var(--pevo-control-primary-bg);
+  border-color: var(--pevo-control-primary-border);
+  box-shadow: none;
+}
+
+.pevo-actionButton--secondary {
+  color: var(--pevo-ink);
+  background: var(--pevo-control-secondary-bg);
 }
 
 .pevo-actionButton--ghost {
@@ -67,15 +92,20 @@
 
 .pevo-actionButton--danger {
   color: var(--pevo-danger);
-  background: color-mix(in oklch, var(--pevo-danger), transparent 92%);
-  border-color: color-mix(in oklch, var(--pevo-danger), transparent 66%);
+  background: var(--pevo-control-danger-bg);
+  border-color: transparent;
 }
 
-.pevo-actionButton.is-active {
-  color: var(--pevo-ink);
-  background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-accent-soft) 34%);
-  border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-border) 58%);
-  box-shadow: var(--pevo-shadow-active);
+.pevo-actionButton--interrupt {
+  color: var(--pevo-control-interrupt-ink);
+  background: var(--pevo-control-interrupt-bg);
+  border-color: var(--pevo-control-interrupt-border);
+}
+
+.pevo-actionButton--caution {
+  color: var(--pevo-brass);
+  background: var(--pevo-control-caution-bg);
+  border-color: transparent;
 }
 
 .pevo-actionButtonIcon {
@@ -96,14 +126,248 @@
   text-overflow: ellipsis;
 }
 
-.pevo-actionButton:focus-visible {
-  outline: 2px solid var(--pevo-switch-focus, var(--pevo-accent));
-  outline-offset: 2px;
+.pevo-actionButton:focus-visible,
+.pevo-iconButton:focus-visible,
+.pevo-navItem:focus-visible,
+.pevo-segmentedControl button:focus-visible,
+.pevo-actionLink:focus-visible {
+  outline: var(--pevo-control-focus-width) solid var(--pevo-control-focus);
+  outline-offset: var(--pevo-control-focus-offset);
 }
 
-.pevo-actionButton:disabled {
+.pevo-actionButton:disabled,
+.pevo-iconButton:disabled,
+.pevo-navItem:disabled,
+.pevo-segmentedControl button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: var(--pevo-control-disabled-opacity);
+}
+
+.pevo-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: var(--pevo-control-disabled-opacity);
+}
+
+.pevo-actionButton:active:not(:disabled),
+.pevo-iconButton:active:not(:disabled),
+.pevo-navItem:active:not(:disabled),
+.pevo-segmentedControl button:active:not(:disabled) {
+  transform: translateY(var(--pevo-control-press-offset));
+}
+
+.pevo-iconButton {
+  position: relative;
+  display: inline-grid;
+  width: var(--pevo-control-default-size);
+  height: var(--pevo-control-default-size);
+  padding: 0;
+  place-items: center;
+  color: var(--pevo-muted-strong);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--pevo-control-rounded-default);
+  cursor: pointer;
+  transition: background-color var(--pevo-motion-feedback, 120ms), border-color var(--pevo-motion-feedback, 120ms), color var(--pevo-motion-feedback, 120ms), transform var(--pevo-motion-feedback, 120ms);
+}
+
+.pevo-iconButton--compact {
+  width: var(--pevo-control-compact-size);
+  height: var(--pevo-control-compact-size);
+  border-radius: var(--pevo-control-rounded-compact);
+}
+
+.pevo-iconButton--circle {
+  border-radius: var(--pevo-radius-pill, 999px);
+}
+
+.pevo-iconButton--primary {
+  color: var(--pevo-control-primary-ink);
+  background: var(--pevo-control-primary-bg);
+  border-color: var(--pevo-control-primary-border);
+}
+
+.pevo-iconButton--secondary {
+  color: var(--pevo-ink);
+  background: var(--pevo-control-secondary-bg);
+  border-color: transparent;
+}
+
+.pevo-iconButton--caution {
+  color: var(--pevo-brass);
+  background: var(--pevo-control-caution-bg);
+}
+
+.pevo-iconButton--danger {
+  color: var(--pevo-danger);
+  background: var(--pevo-control-danger-bg);
+}
+
+.pevo-iconButton--interrupt {
+  color: var(--pevo-control-interrupt-ink);
+  background: var(--pevo-control-interrupt-bg);
+  border-color: var(--pevo-control-interrupt-border);
+}
+
+.pevo-iconButtonIcon,
+.pevo-actionLinkIcon,
+.pevo-segmentedControlIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pevo-toggleButton[aria-pressed="true"],
+.pevo-disclosureButton[aria-expanded="true"] {
+  color: var(--pevo-ink);
+  background: var(--pevo-control-selected-bg);
+  border-color: transparent;
+}
+
+.pevo-navItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: var(--pevo-control-default-size);
+  gap: 7px;
+  padding: 0 8px 0 23px;
+  color: var(--pevo-nav-text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-control-rounded-default);
+  cursor: pointer;
+  transition: background-color var(--pevo-motion-feedback, 120ms), color var(--pevo-motion-feedback, 120ms), transform var(--pevo-motion-feedback, 120ms);
+}
+
+.pevo-navItem[aria-current="page"] {
+  color: var(--pevo-ink);
+  background: var(--pevo-control-selected-bg);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-navItemIcon {
+  display: inline-flex;
+  grid-column: 1;
+  justify-content: center;
+}
+
+.pevo-navItemLabel,
+.pevo-navItemMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pevo-navItemLabel {
+  grid-column: 2;
+}
+
+.pevo-navItemMeta {
+  grid-column: 3;
+  color: var(--pevo-muted);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.pevo-actionLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pevo-muted-strong);
+  border-radius: var(--pevo-control-rounded-compact);
+  text-decoration: none;
+}
+
+.pevo-actionLink--danger {
+  color: var(--pevo-danger);
+}
+
+.pevo-segmentedControl {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px;
+  background: color-mix(in oklch, var(--pevo-panel), transparent 20%);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-control-rounded-default);
+}
+
+.pevo-segmentedControl button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--pevo-control-compact-size) - 4px);
+  gap: 5px;
+  padding: 0 8px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-control-rounded-compact);
+  cursor: pointer;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.pevo-segmentedControl button[aria-checked="true"] {
+  color: var(--pevo-ink);
+  background: var(--pevo-control-selected-bg);
+  box-shadow: var(--pevo-shadow-active);
+}
+
+.pevo-tabs {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  gap: 2px;
+  border-bottom: 1px solid var(--pevo-border);
+}
+
+.pevo-tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--pevo-control-default-size);
+  gap: 6px;
+  padding: 0 10px;
+  color: var(--pevo-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-control-rounded-compact) var(--pevo-control-rounded-compact) 0 0;
+  cursor: pointer;
+}
+
+.pevo-tabs button[aria-selected="true"] {
+  color: var(--pevo-ink);
+  background: var(--pevo-control-selected-bg);
+}
+
+.pevo-tabs button[aria-selected="true"]::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 2px;
+  content: "";
+  background: var(--pevo-control-focus);
+}
+
+.pevo-tabs button:focus-visible {
+  outline: var(--pevo-control-focus-width) solid var(--pevo-control-focus);
+  outline-offset: calc(var(--pevo-control-focus-offset) * -1);
+}
+
+.pevo-controlSpinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pevo-control-spin 720ms linear infinite;
+}
+
+@keyframes pevo-control-spin {
+  to { transform: rotate(360deg); }
 }
 
 .pevo-formField {
@@ -146,6 +410,168 @@
 
 .pevo-formField.is-invalid :is(input, select, textarea) {
   border-color: color-mix(in oklch, var(--pevo-danger), var(--pevo-border) 36%);
+}
+
+.pevo-fieldControl {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0 var(--pevo-field-padding-x);
+  font: inherit;
+  font-size: var(--pevo-font-size-small);
+  line-height: 1.35;
+}
+
+.pevo-fieldControl.pevo-fieldControl {
+  color: var(--pevo-ink);
+  caret-color: var(--pevo-ink);
+  background-color: var(--pevo-field-bg);
+  border: 1px solid var(--pevo-field-border);
+  border-radius: var(--pevo-field-rounded);
+  outline: 0;
+  transition-duration: var(--pevo-motion-feedback, 120ms);
+  transition-property: background-color, border-color, box-shadow, color, opacity;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input.pevo-fieldControl,
+select.pevo-fieldControl {
+  min-height: var(--pevo-field-default-size);
+}
+
+textarea.pevo-fieldControl {
+  padding-block: var(--pevo-field-padding-y);
+  resize: vertical;
+}
+
+select.pevo-fieldControl.pevo-fieldControl {
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--pevo-field-placeholder) 50%),
+    linear-gradient(135deg, var(--pevo-field-placeholder) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+}
+
+.pevo-fieldControl.pevo-fieldControl--compact {
+  padding-inline: 8px;
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+:is(input, select).pevo-fieldControl.pevo-fieldControl--compact {
+  min-height: var(--pevo-field-compact-size);
+}
+
+select.pevo-fieldControl--compact.pevo-fieldControl--compact {
+  padding-right: 26px;
+  background-position:
+    calc(100% - 12px) 50%,
+    calc(100% - 8px) 50%;
+}
+
+.pevo-fieldControl--search.pevo-fieldControl--search {
+  background-color: var(--pevo-field-search-bg);
+}
+
+.pevo-fieldControl--secret.pevo-fieldControl--secret,
+.pevo-fieldControl--mono.pevo-fieldControl--mono {
+  font-family: var(--pevo-field-mono-family);
+  font-size: var(--pevo-font-size-xsmall);
+}
+
+.pevo-fieldControl--secret.pevo-fieldControl--secret {
+  letter-spacing: 0.025em;
+}
+
+.pevo-fieldControl--code.pevo-fieldControl--code {
+  color: var(--pevo-code-preview-ink);
+  background-color: var(--pevo-field-code-bg);
+  font-family: var(--pevo-field-mono-family);
+  font-size: var(--pevo-font-size-xsmall);
+  line-height: 1.45;
+  tab-size: 2;
+}
+
+.pevo-fieldControl.pevo-fieldControl::placeholder {
+  color: var(--pevo-field-placeholder);
+  opacity: 1;
+}
+
+.pevo-fieldControl.pevo-fieldControl:hover:not(:disabled):not(:read-only) {
+  border-color: var(--pevo-field-border-hover);
+}
+
+.pevo-fieldControl.pevo-fieldControl:focus-visible {
+  border-color: var(--pevo-field-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--pevo-field-focus), transparent 72%);
+}
+
+.pevo-fieldControl.pevo-fieldControl:read-only {
+  color: var(--pevo-muted-strong);
+  background-color: var(--pevo-field-readonly-bg);
+}
+
+.pevo-fieldControl.pevo-fieldControl:disabled {
+  cursor: not-allowed;
+  opacity: var(--pevo-control-disabled-opacity);
+}
+
+.pevo-fieldControl.pevo-fieldControl[aria-invalid="true"] {
+  border-color: color-mix(in oklch, var(--pevo-danger), var(--pevo-field-border) 32%);
+}
+
+.pevo-searchField {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: var(--pevo-field-default-size);
+  padding: 0 8px;
+  color: var(--pevo-field-placeholder);
+  background: var(--pevo-field-search-bg);
+  border: 1px solid var(--pevo-field-border);
+  border-radius: var(--pevo-field-rounded);
+  transition: border-color var(--pevo-motion-feedback, 120ms), box-shadow var(--pevo-motion-feedback, 120ms);
+}
+
+.pevo-searchField .pevo-fieldControl.pevo-fieldControl {
+  min-height: calc(var(--pevo-field-default-size) - 2px);
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.pevo-searchField:focus-within {
+  border-color: var(--pevo-field-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--pevo-field-focus), transparent 72%);
+}
+
+.pevo-choiceControl.pevo-choiceControl {
+  width: var(--pevo-field-choice-size);
+  min-width: var(--pevo-field-choice-size);
+  height: var(--pevo-field-choice-size);
+  min-height: var(--pevo-field-choice-size);
+  padding: 0;
+  margin: 0;
+  accent-color: var(--pevo-switch-track-on);
+  cursor: pointer;
+}
+
+.pevo-choiceControl.pevo-choiceControl:focus-visible {
+  outline: var(--pevo-control-focus-width) solid var(--pevo-field-focus);
+  outline-offset: var(--pevo-control-focus-offset);
+}
+
+.pevo-choiceControl.pevo-choiceControl:disabled {
+  cursor: not-allowed;
+  opacity: var(--pevo-control-disabled-opacity);
 }
 
 .pevo-createPanel {
@@ -222,28 +648,228 @@
 
 @media (hover: hover) {
   .pevo-actionButton:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--pevo-panel-muted), var(--pevo-ink) 8%);
-    border-color: var(--pevo-border-strong);
+    background: var(--pevo-control-hover-bg);
+    border-color: transparent;
   }
 
   .pevo-actionButton--primary:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--pevo-accent), var(--pevo-ink) 8%);
-    border-color: color-mix(in oklch, var(--pevo-accent), var(--pevo-ink) 8%);
+    background: var(--pevo-control-hover-bg);
+    border-color: transparent;
   }
 
   .pevo-actionButton--ghost:hover:not(:disabled) {
-    background: var(--pevo-panel-muted);
-    border-color: color-mix(in oklch, var(--pevo-border), transparent 22%);
+    background: var(--pevo-control-hover-bg);
+    border-color: transparent;
   }
 
   .pevo-actionButton--danger:hover:not(:disabled) {
     background: color-mix(in oklch, var(--pevo-danger), transparent 86%);
-    border-color: color-mix(in oklch, var(--pevo-danger), transparent 48%);
+    border-color: transparent;
+  }
+
+  .pevo-iconButton:hover:not(:disabled),
+  .pevo-navItem:hover:not(:disabled),
+  .pevo-segmentedControl button:hover:not(:disabled) {
+    color: var(--pevo-ink);
+    background: var(--pevo-control-hover-bg);
+  }
+
+  .pevo-actionButton--interrupt:hover:not(:disabled),
+  .pevo-iconButton--interrupt:hover:not(:disabled) {
+    color: var(--pevo-control-interrupt-ink);
+    background: color-mix(
+      in oklch,
+      var(--pevo-control-interrupt-bg),
+      var(--pevo-control-interrupt-ink) 12%
+    );
+    border-color: var(--pevo-control-interrupt-border);
+  }
+
+  .pevo-tabs button:hover:not(:disabled) {
+    color: var(--pevo-ink);
+    background: var(--pevo-control-hover-bg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pevo-actionButton {
+  .pevo-actionButton,
+  .pevo-iconButton,
+  .pevo-navItem,
+  .pevo-segmentedControl button,
+  .pevo-fieldControl,
+  .pevo-searchField {
     transition-duration: var(--pevo-motion-reduce, 0ms);
   }
+
+  .pevo-tabs button {
+    transition-duration: var(--pevo-motion-reduce, 0ms);
+  }
+
+  .pevo-controlSpinner {
+    animation-duration: 1.4s;
+  }
+}
+
+@media (pointer: coarse) {
+  .pevo-actionButton,
+  .pevo-iconButton,
+  .pevo-navItem,
+  .pevo-searchField {
+    min-height: var(--pevo-control-coarse-pointer-target);
+  }
+
+  :is(input, select).pevo-fieldControl.pevo-fieldControl {
+    min-height: var(--pevo-control-coarse-pointer-target);
+  }
+
+  textarea.pevo-fieldControl {
+    min-height: var(--pevo-control-coarse-pointer-target);
+  }
+
+  .pevo-tabs button {
+    min-height: var(--pevo-control-coarse-pointer-target);
+  }
+
+  .pevo-iconButton {
+    min-width: var(--pevo-control-coarse-pointer-target);
+  }
+}
+
+.pevo-modalBackdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  padding: 24px;
+  place-items: center;
+  background: color-mix(in oklch, var(--pevo-bg), transparent 22%);
+  backdrop-filter: blur(6px);
+}
+
+.pevo-confirmDialog {
+  width: min(460px, 100%);
+  overflow: hidden;
+  color: var(--pevo-ink);
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-radius-lg);
+  box-shadow: var(--pevo-shadow-overlay, var(--pevo-shadow));
+}
+
+.pevo-confirmDialogHeader,
+.pevo-confirmDialogFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.pevo-confirmDialogHeader {
+  border-bottom: 1px solid var(--pevo-border);
+}
+
+.pevo-confirmDialogHeader h2 {
+  margin: 2px 0 0;
+  font-size: var(--pevo-font-size-medium);
+}
+
+.pevo-confirmDialogKicker {
+  margin: 0;
+  color: var(--pevo-brass);
+  font-size: var(--pevo-font-size-xsmall);
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pevo-confirmDialogBody {
+  padding: 18px 16px;
+  color: var(--pevo-muted-strong);
+  line-height: 1.55;
+}
+
+.pevo-confirmDialogFooter {
+  justify-content: flex-end;
+  background: var(--pevo-panel-muted);
+  border-top: 1px solid var(--pevo-border);
+}
+
+.pevo-menu {
+  z-index: 110;
+  display: grid;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--pevo-panel);
+  border: 1px solid var(--pevo-border-strong);
+  border-radius: var(--pevo-control-rounded-default);
+  box-shadow: var(--pevo-shadow-overlay, var(--pevo-shadow));
+}
+
+.pevo-menu [role="menuitem"] {
+  min-height: var(--pevo-control-compact-size);
+  padding: 0 9px;
+  color: var(--pevo-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--pevo-control-rounded-compact);
+  cursor: pointer;
+}
+
+.pevo-menu [role="menuitem"]:focus-visible,
+.pevo-menu [role="menuitem"]:hover {
+  outline: 0;
+  background: var(--pevo-control-hover-bg);
+}
+
+.pevo-menu [role="menuitem"].is-danger {
+  color: var(--pevo-danger);
+}
+
+.pevo-actionReceiptRail {
+  position: fixed;
+  z-index: 130;
+  right: 18px;
+  bottom: 18px;
+  display: grid;
+  width: min(420px, calc(100vw - 36px));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.pevo-actionReceipt {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  min-height: 42px;
+  gap: 8px;
+  padding: 6px 7px 6px 11px;
+  color: var(--pevo-ink);
+  background: color-mix(in oklch, var(--pevo-panel), transparent 3%);
+  border: 1px solid var(--pevo-border-strong);
+  border-left: 2px solid var(--pevo-brass);
+  border-radius: var(--pevo-control-rounded-default);
+  box-shadow: var(--pevo-shadow-overlay, var(--pevo-shadow));
+  pointer-events: auto;
+}
+
+.pevo-actionReceipt.is-danger {
+  border-left-color: var(--pevo-danger);
+}
+
+.pevo-actionReceiptMarker {
+  color: var(--pevo-brass);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.pevo-actionReceipt.is-danger .pevo-actionReceiptMarker {
+  color: var(--pevo-danger);
+}
+
+.pevo-actionReceiptMessage {
+  min-width: 0;
+  font-size: var(--pevo-font-size-small);
+  overflow-wrap: anywhere;
 }

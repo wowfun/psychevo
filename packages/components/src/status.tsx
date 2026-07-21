@@ -39,9 +39,7 @@ export function StatusPanel(props: StatusPanelProps) {
           </div>
           <p className="pevo-statusSessionId">{props.sessionId ?? "draft"}</p>
         </div>
-        <IconButton title="Refresh" onClick={props.onRefresh}>
-          <RefreshCw size={17} />
-        </IconButton>
+        <IconButton icon={<RefreshCw size={17} />} label="Refresh" onClick={props.onRefresh} />
       </header>
 
       <div className="pevo-stack">

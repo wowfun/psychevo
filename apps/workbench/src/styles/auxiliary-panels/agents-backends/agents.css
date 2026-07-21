@@ -55,7 +55,7 @@
   gap: 6px;
 }
 
-.agentSurfaceHeaderWithAction button:not(.pevo-actionButton) {
+.agentSurfaceHeaderWithAction button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -203,7 +203,7 @@
   gap: 4px;
 }
 
-.agentBackendActions button:not(.pevo-actionButton) {
+.agentBackendActions button:not(.pevo-actionButton):not(.pevo-iconButton):not(.pevo-switch) {
   display: grid;
   width: 28px;
   height: 28px;
@@ -296,8 +296,7 @@
   font-weight: 650;
 }
 
-.backendEditor input,
-.backendEditor textarea {
+.backendEditor :where(input.pevo-fieldControl, textarea.pevo-fieldControl) {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -349,9 +348,9 @@
 }
 
 .backendEditor > footer button[type="submit"] {
-  color: white;
-  background: var(--pevo-accent);
-  border-color: color-mix(in oklch, var(--pevo-accent), black 12%);
+  color: var(--pevo-control-primary-ink);
+  background: var(--pevo-control-primary-bg);
+  border-color: var(--pevo-control-primary-border);
 }
 
 .backendEditor > footer button:disabled,

@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { SessionSummary } from "@psychevo/protocol";
 import { DismissibleDetails } from "./dismissibleDetails";
-import { ActionButton, IconButton } from "./primitives";
+import { IconButton } from "./primitives";
 
 export interface HistoryPanelProps {
   archived: boolean;
@@ -137,36 +137,29 @@ export function HistoryPanel(props: HistoryPanelProps) {
         </div>
         <div className="pevo-iconRow">
           {props.onCreateWorkspace && (
-            <ActionButton
-              ariaLabel="Open workspace"
+            <IconButton
               disabled={props.disabled}
               icon={<FolderOpen size={17} />}
-              iconOnly
+              label="Open workspace"
               onClick={props.onCreateWorkspace}
               size="compact"
-              tooltip="Open workspace"
-              variant="ghost"
-            >
-              Open workspace
-            </ActionButton>
+            />
           )}
           {props.onImportSessions && !props.archived && (
-            <ActionButton
-              ariaLabel="Imported and archived sessions"
+            <IconButton
               disabled={props.disabled}
               icon={<Inbox size={17} />}
-              iconOnly
+              label="Imported and archived sessions"
               onClick={props.onImportSessions}
               size="compact"
-              tooltip="Imported and archived sessions"
-              variant="ghost"
-            >
-              Imported and archived sessions
-            </ActionButton>
+            />
           )}
-          <IconButton title={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"} onClick={toggleAllProjects} disabled={groupedSessions.length === 0}>
-            {hasCollapsedProjects ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
-          </IconButton>
+          <IconButton
+            disabled={groupedSessions.length === 0}
+            icon={hasCollapsedProjects ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
+            label={hasCollapsedProjects ? "Expand all workspaces" : "Collapse all workspaces"}
+            onClick={toggleAllProjects}
+          />
         </div>
       </header>
       <div className="pevo-sessionList">
@@ -181,6 +174,7 @@ export function HistoryPanel(props: HistoryPanelProps) {
               <section className={`pevo-sessionGroup ${collapsed ? "is-collapsed" : ""}`} key={group.cwd}>
                 <header className="pevo-sessionGroupHeader">
                   <button
+                    aria-expanded={!collapsed}
                     className="pevo-sessionGroupToggle"
                     onClick={() => toggleProject(group.cwd)}
                     type="button"
@@ -188,23 +182,19 @@ export function HistoryPanel(props: HistoryPanelProps) {
                     {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
                     <span>{group.label}</span>
                   </button>
-                  <ActionButton
-                    ariaLabel={`New session in ${group.label}`}
+                  <IconButton
                     className="pevo-sessionProjectNew"
                     disabled={props.disabled}
                     icon={<Plus size={15} />}
-                    iconOnly
+                    label={`New session in ${group.label}`}
                     onClick={() => startProjectSession(group.cwd)}
                     size="compact"
-                    tooltip={`New session in ${group.label}`}
-                    variant="ghost"
-                  >
-                    New session in {group.label}
-                  </ActionButton>
+                  />
                 </header>
                 {!collapsed && groupDraftSession && (
                   <article className="pevo-sessionRow is-active is-draft" key={groupDraftSession.id}>
                     <button
+                      aria-current="page"
                       className="pevo-sessionMain"
                       onClick={() => props.onResumeDraft?.()}
                       disabled={props.disabled}
@@ -249,17 +239,14 @@ export function HistoryPanel(props: HistoryPanelProps) {
                             setEditingId(null);
                           }}
                         >
-                          <input value={draft} onChange={(event) => setDraft(event.target.value)} autoFocus />
-                          <IconButton title="Save title" type="submit">
-                            <Check size={16} />
-                          </IconButton>
-                          <IconButton title="Cancel rename" type="button" onClick={() => setEditingId(null)}>
-                            <X size={16} />
-                          </IconButton>
+                          <input className="pevo-fieldControl pevo-fieldControl--compact" value={draft} onChange={(event) => setDraft(event.target.value)} autoFocus />
+                          <IconButton icon={<Check size={16} />} label="Save title" type="submit" />
+                          <IconButton icon={<X size={16} />} label="Cancel rename" type="button" onClick={() => setEditingId(null)} />
                         </form>
                       ) : (
                         <>
                           <button
+                            aria-current={active ? "page" : undefined}
                             className="pevo-sessionMain"
                             onClick={() => props.onResume(session.id)}
                             disabled={props.disabled}

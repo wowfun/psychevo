@@ -1,5 +1,9 @@
 .pevo-floating {
   color-scheme: dark;
+  --pevo-control-primary-bg: var(--pevo-floating-action);
+  --pevo-control-primary-ink: var(--pevo-floating-action-ink);
+  --pevo-control-secondary-bg: var(--pevo-floating-chip-bg);
+  --pevo-control-hover-bg: var(--pevo-floating-hover-bg);
   background:
     linear-gradient(135deg, color-mix(in oklch, var(--pevo-floating-bg), transparent 3%), color-mix(in oklch, var(--pevo-floating-bg-raised), transparent 5%)),
     var(--pevo-floating-bg);
@@ -83,68 +87,15 @@
   scrollbar-width: none;
 }
 
-.pevo-floating-actionButton,
 .pevo-floating-attachmentChip,
-.pevo-floating-attachButton,
-.pevo-floating-iconButton,
-.pevo-floating-promptRow,
-.pevo-floating-sendButton,
-.pevo-floating-errorRow button {
+.pevo-floating-promptRow {
   cursor: default;
   user-select: auto;
 }
 
-.pevo-floating-actionButton,
-.pevo-floating-attachButton,
-.pevo-floating-iconButton,
-.pevo-floating-sendButton,
-.pevo-floating-parkedButton,
-.pevo-floating-errorRow button {
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-}
-
 .pevo-floating-actionButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: var(--pevo-radius-sm);
-  background: transparent;
   color: var(--pevo-floating-ink);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.pevo-floating-actionButton:hover,
-.pevo-floating-iconButton:hover,
-.pevo-floating-attachButton:hover {
-  background: var(--pevo-floating-hover-bg);
-}
-
-.pevo-floating-actionButton:disabled,
-.pevo-floating-sendButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.pevo-floating-iconButton,
-.pevo-floating-sendButton {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.pevo-floating-sendButton {
-  background: var(--pevo-floating-action);
-  color: var(--pevo-floating-action-ink);
 }
 
 .pevo-floating-attachmentStrip {
@@ -156,14 +107,13 @@
   overflow-x: auto;
 }
 
-.pevo-floating-attachmentChip,
-.pevo-floating-attachButton {
+.pevo-floating-attachmentChip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 220px;
-  height: 24px;
-  padding: 0 8px;
+  height: 30px;
+  padding: 0 2px 0 8px;
   border-radius: 999px;
   background: var(--pevo-floating-chip-bg);
   color: color-mix(in oklch, var(--pevo-floating-ink), transparent 12%);
@@ -172,7 +122,7 @@
 }
 
 .pevo-floating-attachmentChip.is-image {
-  height: 28px;
+  height: 30px;
   padding-left: 4px;
 }
 
@@ -184,30 +134,19 @@
   border-radius: 6px;
 }
 
-.pevo-floating-attachmentChip span {
+.pevo-floating-attachmentChip > span:not(.pevo-iconButtonIcon) {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.pevo-floating-attachmentChip button {
-  display: inline-grid;
+.pevo-floating-attachmentChip .pevo-iconButton {
   flex: 0 0 auto;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
   color: inherit;
-  cursor: pointer;
 }
 
 .pevo-floating-attachButton {
   flex: 0 0 auto;
-  background: transparent;
-  cursor: pointer;
 }
 
 .pevo-floating-promptRow {
@@ -305,12 +244,6 @@
   background: var(--pevo-floating-danger-bg);
 }
 
-.pevo-floating-errorRow button {
-  border-radius: var(--pevo-radius-sm);
-  background: color-mix(in oklch, var(--pevo-floating-ink), transparent 86%);
-  padding: 3px 7px;
-}
-
 .pevo-floating-parkedButton {
   display: inline-grid;
   place-items: center;
@@ -322,6 +255,7 @@
   color: var(--pevo-floating-action-ink);
   font-weight: 800;
   cursor: pointer;
+  border: 0;
 }
 
 .pevo-floating-parkedButton .pevo-floating-logo {

@@ -649,16 +649,16 @@
   resize: vertical;
   padding: 8px 9px;
   color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border-strong);
-  border-radius: var(--pevo-radius-sm);
+  background: var(--pevo-field-bg);
+  border: 1px solid var(--pevo-field-border);
+  border-radius: var(--pevo-field-rounded);
   font: inherit;
   line-height: 1.5;
 }
 
 .pevo-historyEditor textarea:focus {
-  border-color: var(--pevo-accent);
-  outline: 2px solid color-mix(in oklch, var(--pevo-accent), transparent 78%);
+  border-color: var(--pevo-field-focus);
+  outline: 2px solid color-mix(in oklch, var(--pevo-field-focus), transparent 72%);
 }
 
 .pevo-historyEditorImage {
@@ -696,30 +696,6 @@
   justify-content: flex-end;
   gap: 7px;
   margin-top: 10px;
-}
-
-.pevo-historyEditorActions button {
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 10px;
-  color: var(--pevo-ink);
-  background: var(--pevo-panel);
-  border: 1px solid var(--pevo-border-strong);
-  border-radius: var(--pevo-radius-sm);
-  cursor: pointer;
-}
-
-.pevo-historyEditorActions button:last-child {
-  color: var(--pevo-accent-ink);
-  background: var(--pevo-accent);
-  border-color: var(--pevo-accent);
-}
-
-.pevo-historyEditorActions button:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 
 .pevo-message.is-assistant {
@@ -763,30 +739,6 @@
 .pevo-messageMeta:hover {
   opacity: 1;
   transform: translateY(0);
-}
-
-.pevo-messageCopy {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  padding: 0;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  border-radius: var(--pevo-radius-xs);
-  cursor: pointer;
-}
-
-.pevo-messageCopy:hover,
-.pevo-messageCopy:focus-visible {
-  color: var(--pevo-ink);
-  background: var(--pevo-panel-muted);
-}
-
-.pevo-messageCopy:focus-visible {
-  outline: 2px solid color-mix(in oklch, var(--pevo-accent), white 24%);
-  outline-offset: 2px;
 }
 
 .pevo-messageElapsed,
@@ -910,34 +862,6 @@
   font-family: var(--pevo-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
-}
-
-.pevo-evidenceOpenButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  min-height: 26px;
-  gap: 5px;
-  padding: 0 8px;
-  color: var(--pevo-muted-strong);
-  background: var(--pevo-panel-muted);
-  border: 1px solid var(--pevo-border);
-  border-radius: var(--pevo-radius-sm);
-  font-size: var(--pevo-font-size-xsmall);
-  line-height: 1;
-  cursor: pointer;
-}
-
-.pevo-evidenceOpenButton span {
-  white-space: nowrap;
-}
-
-.pevo-evidenceOpenButton:hover,
-.pevo-evidenceOpenButton:focus-visible {
-  color: var(--pevo-ink);
-  background: color-mix(in oklch, var(--pevo-panel), var(--pevo-accent) 10%);
-  border-color: color-mix(in oklch, var(--pevo-border), var(--pevo-accent) 34%);
 }
 
 .pevo-toolDetail {
