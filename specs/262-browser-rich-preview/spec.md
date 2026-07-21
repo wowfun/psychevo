@@ -113,13 +113,57 @@ must suspend the Files iframe, and returning to Files must suspend the Preview
 iframe, without unmounting unrelated inactive tabs such as Terminal or Side
 chat.
 
-The Files pane header exposes a persistent toggle for its right-hand file tree.
+The Files pane has one toolbar rather than a panel title followed by a second
+absolute-path row. Its left side is a breadcrumb rooted at the workspace name;
+all following segments come from the selected workspace-relative path and must
+not disclose or repeat the absolute host path. Activating a directory breadcrumb
+restores the file tree, expands the relevant ancestors, and moves focus to that
+directory; activating the root breadcrumb focuses the tree filter. The current
+file is the non-interactive final breadcrumb.
+
+Every breadcrumb node before the current file has a separate disclosure button
+after its label, matching a desktop file explorer address bar. Its menu contains
+only that node's immediate children from the current Gateway-authorized Files
+inventory, with directories before files and each group ordered by name.
+Selecting a directory restores the file tree and reveals that directory;
+selecting a file opens it in the same Files tab. The menu is keyboard navigable,
+closes on Escape, outside interaction, scroll, selection, or target change, and
+does not query or expose paths outside the existing inventory. A node with no
+known children has no disclosure button.
+
+The toolbar's right side contains the selected-file actions followed by the
+persistent toggle for the right-hand file tree. Text-backed rich previews expose
+`View source`, which switches between the product preview and a read-only
+highlighted source view without entering edit mode. While source is visible the
+same control reads `View preview`. `Edit` remains revision-aware and is disabled
+when the selected file is not editable. `Open HTML preview`, when applicable,
+remains adjacent to those file actions.
+
+When the selected lease contains complete non-binary text and the host provides
+clipboard writing, a file-level icon-only `Copy` action copies the canonical raw
+file content. It replaces the Markdown renderer's nested copy affordance and
+sits immediately to the left of the external `Open` control. Pending and copied
+states remain visible and announced without changing the copied payload when
+the user switches between preview and source.
+
+When Gateway advertises external actions, the toolbar exposes a compact split
+open control. Its primary icon, accessible label, tooltip, and action use
+Gateway's `preferredAction`; the adjacent text remains the generic verb `Open`
+and application names stay in the menu rather than consuming toolbar width. The
+menu preserves the ordered `availableActions`,
+including reveal. Choosing a different action executes that action once without
+changing Gateway preference or storing executable paths in Workbench. The
+control sends only the existing closed semantic action, scope, and
+workspace-relative path through
+`workspace/file/openExternal`. Browser hosts with no advertised action omit the
+control. Loading, pending, failure, keyboard focus, and menu dismissal remain
+explicit states rather than falling back to an untrusted local launch.
+
 Hiding the tree expands the selected-file preview to the full pane while keeping
-the header toggle available to restore it. The selected content renderer also
+the toolbar toggle available to restore it. The selected content renderer also
 uses that full width instead of retaining the tree-open reading-width cap or an
-equivalent empty gutter. In the selected-file action row,
-`Open HTML preview` sits immediately to the left of `Edit`; panel-level tree
-visibility remains visually separate from those file-level actions.
+equivalent empty gutter. Panel-level tree visibility remains visually separate
+from the preceding file-level actions.
 
 Opening a file preview from an assistant workspace-file link or from the
 `Open` action on a completed `read`, `edit`, or `write` tool call starts in the
@@ -140,18 +184,24 @@ WorkspaceFileSurface({
   active,
   textEditing: "enabled" | "disabled",
   onDirtyChange,
-  onCompare
+  onCompare,
+  workspaceRoot,
+  fileTree: { open, content, items, onOpen, onOpenChange, onReveal }
 })
 ```
 
-Callers supply only the selected target, activation state, editing capability,
-and file-level callbacks. Format recognition, loading, renderer selection,
-progress and error presentation, lease renewal, parse cancellation, workers,
-object URLs, and media lifecycle remain private to the module. The renderer
-catalog is not a public plugin API and vendor renderer names never cross the
-wire protocol. A Files tab retains navigation, selected path, tree visibility,
-and dirty state; it does not retain file bodies, blobs, object URLs, or preview
-leases.
+Callers supply the selected target, activation state, editing capability,
+file-level callbacks, and the Files-owned authorized tree items/content/state
+needed to compose the single toolbar, breadcrumb child menus, and split body.
+Format recognition, toolbar file-action
+state, external-action discovery and execution, source/preview selection,
+loading, renderer selection, progress and error presentation, lease renewal,
+parse cancellation, workers, object URLs, and media lifecycle remain private to
+the module. The renderer catalog is not a public plugin API and vendor renderer
+names never cross the wire protocol. A Files tab retains navigation, selected
+path, tree visibility, and dirty state; it does not retain file bodies, blobs,
+object URLs, preview leases, application paths, or a duplicate preferred-opener
+preference.
 
 All ordinary files enter this surface. Files must not reject a target merely
 from its extension before Gateway authorization and media classification. An
@@ -188,10 +238,18 @@ Native images, video, and audio consume the authorized Range URL directly.
 PDF uses the renderer's streaming-URL path. Office, delimited tables, HEIC,
 OFD, ZIP, and Excalidraw use a bounded whole-file blob. Whole-file parsing is
 limited to 32 MiB. ZIP preview lists at most 5,000 sanitized directory entries
-without extracting content. Excalidraw preview is a lightweight read-only
-canvas limited to 5 MiB and 5,000 elements; it does not depend on the official
-Excalidraw application package. CSV and TSV render as read-only tables bounded
-to 2,000 total rows, 100 columns per row, and 20,000 rendered cells. Parsing
+without extracting content. Excalidraw preview is an export-only Adapter over
+the exactly pinned official `@excalidraw/excalidraw` `0.18.1` package, limited
+to 5 MiB and 5,000 elements. The Adapter restores the bounded scene and exports
+an inert read-only SVG; it does not mount the Excalidraw editor. Element links
+and embeddables are removed, binary files are restricted to embedded image
+data, and the exported SVG is scrubbed of executable or externally addressable
+content before it enters the DOM. Required fonts are self-hosted and rendering
+must not fall back to the Excalidraw CDN. Development asset requests resolve
+only to strict descendants of the configured font root: empty, parent,
+absolute-relative, cross-root, and cross-volume results are rejected before
+file access on every host platform. CSV and TSV render as read-only tables
+bounded to 2,000 total rows, 100 columns per row, and 20,000 rendered cells. Parsing
 retains no cells beyond those structural limits and stops early once no further
 row or cell can be retained. The table displays a truncation notice instead of
 materializing the remainder into DOM nodes. SVG, CSV, TSV, and Excalidraw may
@@ -203,18 +261,26 @@ Workbench JavaScript request graph and budget must not grow with preview
 renderers. The Vite build copies required workers and assets and creates
 renderer-specific deferred chunks. File Viewer integration is locked exactly
 to the compatible `@file-viewer/*` `2.2.2` React/core, PDF, Word, Spreadsheet,
-Presentation, OFD, Image, Drawing, and Vite-plugin packages. ZIP parsing uses a
-direct `jszip` dependency. Preset packages and vendor download, export, or edit
+Presentation, OFD, Image, and Vite-plugin packages. Excalidraw integration is
+locked exactly to `@excalidraw/excalidraw` `0.18.1`; ZIP parsing uses a direct
+`jszip` dependency. Workbench and Desktop production builds resolve the bare
+`jszip` package entry to its pinned official browser distribution so the
+package's Node stream compatibility adapter does not enter either browser
+module graph. Preview code must not import `jszip` subpaths or add a general
+Node stream polyfill. Preset packages and vendor download, export, or edit
 actions are not part of the surface.
 
 Office sanitization, ZIP directory parsing, CSV/TSV parsing, and Excalidraw
-parsing run in a task-scoped Vite module Worker whenever the host exposes the
-Worker API. Each task owns one Worker and terminates it after success, failure,
-or abort; aborting the task must terminate the Worker immediately rather than
-only ignoring a later result. Non-browser and deterministic test hosts without
-Worker support may execute the same pure parser functions in-process. The
-parser Worker remains deferred with the selected preview chunk and must not
-enter the initial Workbench request graph.
+validation and security projection run in a task-scoped Vite module Worker
+whenever the host exposes the Worker API. Each task owns one Worker and
+terminates it after success, failure, or abort; aborting the task must terminate
+the Worker immediately rather than only ignoring a later result. The official
+restore/export step runs only after Excalidraw becomes the active renderer. Its
+non-abortable work may finish after deactivation, but stale output must never be
+committed to the DOM. Non-browser and deterministic test hosts without Worker
+support may execute the same pure parser functions in-process. The parser
+Worker remains deferred with the selected preview chunk and must not enter the
+initial Workbench request graph.
 
 Only controls needed to inspect the selected content remain: page, slide, or
 sheet navigation; search; zoom and fit; and native media controls. When
@@ -400,18 +466,27 @@ Default validation uses deterministic local harnesses and fake providers.
 - Workspace file-surface tests exercise the public component seam and cover
   latest-target-wins, stale-lease release, inactive parsing cancellation and
   media pause, one automatic expired-lease reopen, loading progress, parser
-  limits, common error presentation, and the existing text editing and dirty
-  guard behavior.
+  limits, common error presentation, workspace-relative breadcrumbs,
+  direct-child breadcrumb menus, preview/source switching, file-level copy,
+  preferred and alternate external actions, and the existing text editing and
+  dirty guard behavior. File-tree tests cover
+  breadcrumb-driven ancestor expansion and focus.
 - Deterministically generated, traceable fixtures cover PNG, SVG, HEIC, PDF,
   H.264/AAC MP4, VP9/Opus WebM, MP3, DOCX, XLSX, PPTX, ODF, RTF, OFD, CSV, TSV,
   ZIP, and Excalidraw by asserting visible content through real renderers rather
   than mocking vendor internals. Security fixtures prove SVG scripts, Office
-  macros and external relationships, and hostile ZIP paths cannot execute,
-  fetch, or write.
+  macros and external relationships, hostile ZIP paths, and Excalidraw links or
+  embeddables cannot execute, fetch, or write. Excalidraw fixtures cover shapes,
+  arrows, free draw, frames, bound text, and embedded images.
 - Playwright validates PDF Range traffic, media play and seek, Office worker and
-  asset delivery without 404s, narrow and wide layout, and external-open
-  fallback. Its startup-performance assertion verifies that preview chunks are
-  absent from the initial Workbench request graph.
+  asset delivery without 404s, Excalidraw self-hosted font delivery without
+  external requests, narrow and wide layout, and external-open fallback. Its
+  startup-performance assertion verifies that preview chunks are absent from
+  the initial Workbench request graph.
+- Pure path-containment tests exercise both POSIX and Windows path semantics,
+  including different drive letters, without requiring a Windows CI host.
+- Workbench and Desktop production builds complete without a Node built-in
+  externalization warning from `jszip`.
 - Gateway/runtime tests cover the built-in Browser plugin list row, default
   enabled policy, explicit disable policy, and secret-free projection.
 - Desktop tests cover Browser host command routing once the native host lands.

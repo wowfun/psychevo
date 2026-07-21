@@ -110,9 +110,11 @@ units, because WebKitGTK/WSLg can report `dvh` larger than the actual webview
 viewport. Desktop also locks the renderer root document to the native webview
 viewport so WebKitGTK cannot scroll the `html` element past the bounded
 Workbench shell.
-The native app icon uses a square bundle icon generated from the shared
-`assets/psychevo-logo.png` asset, rather than a Desktop-local source icon, so
-Linux AppImage packaging has a square icon candidate.
+The native app icon uses platform bundle formats generated from the shared
+square logo rather than a Desktop-local source icon. The bundle retains a
+square PNG candidate for Linux/AppImage and an ICO candidate for the Windows
+executable resource; Windows development builds must not depend on Tauri's
+missing default `icons/icon.ico` fallback.
 
 Both surfaces connect through the native Desktop Gateway bridge. The bridge
 keeps the managed bearer token in Rust and never exposes it to webviews. Each
@@ -301,6 +303,11 @@ Default validation is deterministic and local:
   assistant-message behavior
 - focused package typecheck/build for Desktop, Workbench, Floating, client, and
   host
+- native Windows compile validation covers the Gateway-owned system-default and
+  File Explorer reveal adapters, including the Shell item-ID bindings required
+  to select a file in Explorer
+- native Windows Tauri build validation exercises the configured ICO candidate
+  through resource generation instead of accepting a Linux-only PNG check
 - deterministic Desktop/Floating visual smoke with screenshot artifacts
 - native Desktop/Floating WebdriverIO smoke uses the embedded Tauri driver
   under the test-only `wdio-test` Cargo feature; production Desktop builds must

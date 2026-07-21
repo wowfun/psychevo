@@ -20,6 +20,7 @@ feedback.
   handling, and interruption cleanup
 - undo/redo and interrupt interaction invariants shared across product
   surfaces
+- display-only mutation receipts and destructive-action confirmation semantics
 
 Out of scope:
 
@@ -91,6 +92,32 @@ cleared on session switches, new input, or product-specific dismissal. Command
 feedback must not count as user prompt text, visible assistant message,
 durable session message, or provider-context input.
 
+User-initiated committed mutations may publish a transient ledger receipt.
+Navigation, selection, copying, uncommitted draft edits, and ordinary turn
+submission do not. A receipt may offer Undo only when the surface has a reliable
+inverse operation; invoking it keeps the receipt pending until the inverse
+settles. Receipt state is display-only and follows the same persistence,
+export, accounting, and provider-context exclusions as command feedback.
+Diagnostics, health checks, import inspection, and connection-start operations
+are command feedback rather than committed mutations and must not publish a
+default mutation receipt.
+
+Reversible organization actions such as archive, restore, pin, unpin, or
+locally reconstructable mapping removal execute immediately with Undo.
+Irreversible deletes and remote configuration removal require a product-owned
+confirmation dialog. Native host confirmation dialogs are not part of the UI
+contract. Confirmation begins on Cancel, never treats Enter as implicit
+approval, and cannot be dismissed while its mutation is pending. The
+confirmation surface owns that asynchronous mutation lifecycle: it remains
+visible, marks the confirm action pending, and disables every dismissal path
+until the operation settles. Product modal dialogs do not dismiss from backdrop
+presses; cancellation is always an explicit control or an enabled Escape path.
+
+Shared application roots own the interaction providers needed to implement
+confirmation and mutation receipts. Browser, Desktop, tests, and other hosts
+that render the exported application root must receive the same interaction
+semantics without independently wrapping host entrypoints.
+
 `/diff` is backed by the shared command catalog and
 [214 pevo Diff Command](../214-pevo-diff-command/spec.md). Executing it opens a
 structured display artifact rather than appending ordinary transcript rows.
@@ -109,6 +136,12 @@ chrome. Surfaces route responses through Gateway/runtime APIs with enough
 thread/source context to reject stale or wrong-thread responses. Backend
 permission and sandbox layers remain responsible for translating allow
 decisions into bounded runtime grants.
+
+Permission decisions use explicit scope language. `Allow once` is the primary
+visual action without becoming an Enter default, `Allow for session` is
+secondary, `Always allow` is cautionary and explains persistence, and `Deny` is
+a neutral exit. Submitting one decision makes the whole decision group pending
+until the runtime response settles.
 
 When a running turn is interrupted or a surface exits while requests are
 pending, the UI releases pending permission or clarify state so suspended work

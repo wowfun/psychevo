@@ -160,6 +160,13 @@ durable cwd identity, Gateway cwd identity, user-facing cwd displays, and
 model-visible tool metadata. Low-level diagnostics may show a raw verbatim path
 only when diagnosing host filesystem API behavior explicitly requires it.
 
+Host folder discovery on Windows must treat each logical drive as a separate
+filesystem root. A folder browser that reaches one drive root must remain able
+to discover and navigate to the other logical drives; parent traversal alone is
+not a complete Windows host-filesystem navigation model. Drive discovery does
+not grant workspace or file authority by itself: the selected directory still
+passes through the normal canonical cwd and scope-establishment path.
+
 Filesystem containment checks must compare the workspace root and every
 resolved target or parent directory using the same canonical native identity.
 The implementation must resolve the filesystem path first so symbolic links

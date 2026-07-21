@@ -288,8 +288,9 @@ the local Debug switch. Archived-session browsing and activation belong only to
 the Sessions header toggle. The default is the dark ledger appearance. The setting is a
 Workbench host preference and does not require Gateway to persist
 provider/runtime configuration. `light` is the neutral paper-warm daytime shell
-with a near-white canvas, warmer paper sidebar, soft warm-gray dividers, and
-low-contrast selected rows while keeping neutral text and accent semantics.
+with a near-white canvas, one shared quiet navigation paper surface for the
+Sessions and Settings left rails, soft warm-gray dividers, and low-contrast
+selected rows while keeping neutral text and accent semantics.
 `warm` is the reading-paper palette formerly exposed as light, with ivory
 canvas, warm paper panels, taupe borders, warm charcoal text, and low-chroma
 amber/taupe active states. The dark palette keeps the near-black ledger

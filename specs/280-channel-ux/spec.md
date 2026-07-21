@@ -79,6 +79,9 @@ Workbench exposes Channels as a Settings subpage.
   Test, Settings, and an enable switch.
 - Add channel stays inline below the connected list with WeChat, Telegram,
   Feishu, and Lark setup cards.
+- The inline setup panel remains fully bounded inside narrow viewports after
+  Settings navigation and page chrome; its body scrolls internally when the
+  setup content is taller than the available panel height.
 - Doctor results open inline under the header/list area.
 
 Selecting a configured channel opens an independent settings page with Back,

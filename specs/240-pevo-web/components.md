@@ -24,19 +24,43 @@ clarify, tabs, buttons, inputs, and layout primitives. Components should
 support desktop density and mobile/shell collapse without requiring a separate
 native component tree.
 
-Shared GUI creation primitives live in `@psychevo/components` and are
-controlled like the rest of the package. `ActionButton` owns compact
-button sizing, variants, icon rendering, tooltip/label requirements, active
-state, and busy state. `FormField` owns label, hint, error, and ARIA wiring for
-ordinary input controls. `CreatePanel` owns the visual shell for inline,
-side-panel, and compact dialog create/edit flows while callers keep state,
-validation, RPC calls, and close behavior. These primitives consume generated
-`--pevo-*` semantic variables; product pages must not duplicate page-local
-button, field, or create-panel color systems. Create panels are viewport-bound
-interaction surfaces: opening a create/edit panel must keep its shell inside the
-visible page region at desktop and narrow widths, constrain long bodies with
-internal scrolling, and keep close and primary actions reachable without
-requiring page-level horizontal scrolling.
+Shared GUI control modules live in `@psychevo/components` and are controlled
+like the rest of the package. `ActionButton` owns visible commands only;
+`IconButton`, `ToggleButton`, `DisclosureButton`, `NavItem`, `ActionLink`,
+`Switch`, `Tabs`, `SegmentedControl`, selection popovers, menus, dialogs, and
+mutation receipts own their corresponding semantic state, keyboard behavior,
+focus lifecycle, and visual treatment. A generic `active` state is forbidden.
+`FormField` owns label, hint, error, and ARIA wiring for ordinary input controls.
+Opt-in shared field classes own the visual frame for search/filter, ordinary
+value, secret/high-entropy, select, multiline, structured, compact-inline, and
+native choice controls. Text-field rules exclude checkbox and radio elements.
+Composer, Markdown/JSON, and file editors retain specialized geometry but reuse
+the shared field color and focus roles.
+`CreatePanel` owns non-modal inline and side-panel create/edit shells;
+`ModalDialog` separately owns modal behavior. Callers keep business state,
+validation, and RPC operations, while shared control modules own pending and
+dismissal presentation. These modules consume generated `--pevo-control-*` and
+`--pevo-field-*`
+semantic variables. Product CSS may arrange their wrappers but must not
+duplicate color, border, radius, height, focus, press, pending, disabled, or
+selected state systems through descendant `button` selectors.
+Ordinary action and icon commands have no visible resting or hover border;
+keyboard focus remains visible through the shared focus ring, while selected,
+caution, and danger meaning comes from semantic foreground and surface roles.
+
+Create panels and dialogs are viewport-bound interaction surfaces. Long bodies
+scroll internally, close and primary actions remain reachable, dialogs trap and
+restore focus, backdrop presses do not dismiss, and Escape dismisses only an
+idle surface whose caller permits cancellation. A dialog or local action group
+contains at most one primary action, and that action remains transparent at
+rest with theme foreground text. Dangerous confirmation initially
+focuses Cancel and cannot use Enter as an implicit destructive default.
+
+Committed GUI mutations publish display-only ledger receipts. Workbench keeps
+at most two receipts visible for eight seconds, pauses expiry while a receipt
+has hover or focus, and exposes Undo only for a reliable caller-owned inverse.
+Receipt state must not enter transcript, persistence, export, accounting, tool
+results, or provider context.
 
 The client package owns headless UX state machines that must behave the same
 across Web, Desktop, and Mobile shells:
@@ -172,6 +196,8 @@ If Gateway cannot provide an effective value, the control shows an explicit
 unavailable or selection-required state. In a detached draft, Workspace opens
 a switcher plus a final `Open workspace...` folder-browser action; Git branch
 opens a local branch switcher plus a final `New branch...` action.
+The folder browser keeps the editable path field visually distinct while its
+surrounding location strip has a transparent background.
 Context and session observability controls are display-only chrome. Compact
 surfaces may show context percent, session tokens, cache-read percent, and
 estimated cost. The composer context popover remains compact and must not show
@@ -195,8 +221,10 @@ discarded after the user creates or selects a different session or detached
 draft.
 In a detached draft, Workspace opens a known-workspace switcher whose final
 action opens a folder browser. The browser starts at the active cwd, can
-traverse the filesystem visible to Gateway, and selects a folder without a
-free-form path field. In a bound Thread, Workspace continues to open Files.
+traverse the filesystem visible to Gateway, and exposes its current location as
+an editable folder-path field. Pasting or typing an absolute path and pressing
+Enter browses that location; opening the folder resolves a changed path first.
+In a bound Thread, Workspace continues to open Files.
 Git branch opens a local-branch switcher with `New branch...` as its final
 action; checkout and creation use structured Gateway operations and are
 disabled while a turn is running. Path and branch remain in the quieter status

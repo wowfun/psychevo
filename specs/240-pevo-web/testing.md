@@ -21,7 +21,13 @@ product surface and frontend platform.
 - Generated protocol schemas and clients preserve public `gatewaySchemas`,
   method names, event names, and wire shape compatibility.
 - Desktop and narrow viewports preserve usable navigation and non-overlapping
-  primary controls.
+  primary controls. Expanded History assertions keep the `New Session` icon
+  aligned with the `Search` navigation icon while collapsed action icons remain
+  centered. Settings assertions keep `Back to app` aligned with section-row
+  icons and reject a visible `›` navigation indicator. Folder-picker visual
+  assertions keep the location strip background transparent while preserving
+  the editable path field. Workspace-create tests address its name field by the
+  stable `Workspace name` accessibility contract rather than placeholder text.
 - Agent-session import browser coverage uses a short viewport and enough
   discovered sessions to require internal dialog scrolling while keeping the
   dialog header, footer, and document shell fixed. It imports deterministic

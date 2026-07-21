@@ -1,15 +1,31 @@
 # Changelog
 
+## 2026-07-21
+
+- Unified confirmation receipts and cancellation behavior across Workbench and
+  Desktop, including stable Composer controls during initial Thread binding.
+- Hardened self-hosted Excalidraw assets against Windows cross-volume escapes.
+
 ## 2026-07-20
 
+- Refined Workbench Files navigation, previews, copy actions, and preferred
+  external-application actions.
 - Added bounded workspace previews for written content and common document,
   media, table, archive, and drawing formats across Workbench, Desktop, and
   TUI, with canonical renderers and bounded CSV/TSV materialization.
+- Replaced the lightweight Excalidraw approximation with a pinned,
+  sanitized export-only renderer and self-hosted fonts.
 - Added cross-platform external file actions and `-C/--cd` launch-directory
   selection without changing the caller's process cwd.
+- Enabled pasted and cross-drive GUI workspace switching on Windows, and
+  hardened native Windows Gateway/Desktop builds.
+- Upgraded the shared frontend compiler and removed browser-build JSZip stream
+  warnings.
 - Hardened Gateway, ACP, TUI, transcript, runtime, and Windows/Git Bash/Desktop
   behavior, including shared fixture-based test doubles.
 - Improved CI journey profiling and failure diagnostics with bounded output.
+- Unified Workbench navigation, primary actions, responsive panels, and field
+  styling.
 
 ## 2026-07-19
 

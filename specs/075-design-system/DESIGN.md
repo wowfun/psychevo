@@ -83,6 +83,26 @@ components:
     typography: "{typography.chrome-md}"
     rounded: "{rounded.sm}"
     size: 32px
+  control:
+    compactSize: 28px
+    defaultSize: 32px
+    coarsePointerTarget: 44px
+    compactIconSize: 14px
+    defaultIconSize: 16px
+    focusWidth: 2px
+    focusOffset: 2px
+    disabledOpacity: 0.55
+    pressOffset: 1px
+    roundedCompact: "{rounded.xs}"
+    roundedDefault: "{rounded.sm}"
+  field:
+    compactSize: 28px
+    defaultSize: 32px
+    paddingX: 9px
+    paddingY: 7px
+    choiceSize: 16px
+    rounded: "{rounded.sm}"
+    monoFamily: '"SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, "Liberation Mono", monospace'
   composer-input:
     backgroundColor: "{colors.canvas-dark}"
     textColor: "{colors.ink-dark}"
@@ -113,7 +133,7 @@ themes:
       panel: "oklch(18.6% 0.009 85)"
       panel-muted: "oklch(22.5% 0.011 85)"
       panel-warm: "oklch(22.5% 0.018 78)"
-      sidebar-bg: "oklch(16.8% 0.009 85)"
+      sidebar-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 58%)"
       sidebar-border: "oklch(28% 0.012 85)"
       sidebar-active: "oklch(24% 0.011 85)"
       ink: "oklch(95.5% 0.012 84)"
@@ -131,10 +151,30 @@ themes:
       accent: "oklch(91% 0.014 84)"
       accent-ink: "oklch(13% 0.006 84)"
       accent-soft: "oklch(25.5% 0.014 84)"
+      control-primary-bg: "transparent"
+      control-primary-ink: "var(--pevo-ink)"
+      control-primary-border: "transparent"
+      control-interrupt-bg: "oklch(31% 0.008 85)"
+      control-interrupt-ink: "var(--pevo-ink)"
+      control-interrupt-border: "oklch(31% 0.008 85)"
+      control-secondary-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 18%)"
+      control-hover-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 38%)"
+      control-selected-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 22%)"
+      control-focus: "color-mix(in oklch, var(--pevo-switch-track-on), white 24%)"
       brass: "oklch(77% 0.095 76)"
       brass-soft: "oklch(26% 0.038 76)"
       caution: "oklch(80% 0.105 64)"
       danger: "oklch(74% 0.12 28)"
+      control-danger-bg: "color-mix(in oklch, var(--pevo-danger), transparent 82%)"
+      control-caution-bg: "color-mix(in oklch, var(--pevo-brass), transparent 84%)"
+      field-bg: "color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 34%)"
+      field-search-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 52%)"
+      field-code-bg: "color-mix(in oklch, var(--pevo-code-bg), var(--pevo-panel) 18%)"
+      field-border: "color-mix(in oklch, var(--pevo-border), transparent 10%)"
+      field-border-hover: "var(--pevo-border-strong)"
+      field-focus: "var(--pevo-control-focus)"
+      field-placeholder: "var(--pevo-muted)"
+      field-readonly-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 48%)"
       code-bg: "oklch(11.5% 0.008 85)"
       code-ink: "oklch(95% 0.012 84)"
       code-preview-ink: "var(--pevo-code-ink)"
@@ -203,7 +243,7 @@ themes:
       panel: "oklch(99.35% 0.0028 88)"
       panel-muted: "oklch(95.4% 0.005 88)"
       panel-warm: "oklch(96.4% 0.008 84)"
-      sidebar-bg: "oklch(94.2% 0.012 88)"
+      sidebar-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 58%)"
       sidebar-border: "oklch(86.6% 0.010 86)"
       sidebar-active: "oklch(98.55% 0.006 88)"
       ink: "oklch(20.2% 0.003 255)"
@@ -221,10 +261,30 @@ themes:
       accent: "oklch(42% 0.012 255)"
       accent-ink: "oklch(99.4% 0.001 255)"
       accent-soft: "oklch(94.2% 0.003 255)"
+      control-primary-bg: "transparent"
+      control-primary-ink: "var(--pevo-ink)"
+      control-primary-border: "transparent"
+      control-interrupt-bg: "oklch(32% 0.004 255)"
+      control-interrupt-ink: "var(--pevo-accent-ink)"
+      control-interrupt-border: "oklch(32% 0.004 255)"
+      control-secondary-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 8%)"
+      control-hover-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 24%)"
+      control-selected-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 4%)"
+      control-focus: "color-mix(in oklch, var(--pevo-switch-track-on), white 32%)"
       brass: "oklch(58% 0.12 68)"
       brass-soft: "oklch(94.8% 0.036 72)"
       caution: "oklch(50% 0.12 64)"
       danger: "oklch(48% 0.15 28)"
+      control-danger-bg: "color-mix(in oklch, var(--pevo-danger), transparent 88%)"
+      control-caution-bg: "color-mix(in oklch, var(--pevo-brass), transparent 88%)"
+      field-bg: "color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 26%)"
+      field-search-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 52%)"
+      field-code-bg: "color-mix(in oklch, var(--pevo-code-bg), var(--pevo-panel) 22%)"
+      field-border: "color-mix(in oklch, var(--pevo-border), transparent 8%)"
+      field-border-hover: "var(--pevo-border-strong)"
+      field-focus: "var(--pevo-control-focus)"
+      field-placeholder: "var(--pevo-muted)"
+      field-readonly-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 46%)"
       code-bg: "oklch(96.8% 0.0045 88)"
       code-ink: "oklch(21% 0.003 255)"
       code-preview-ink: "var(--pevo-ink)"
@@ -272,7 +332,7 @@ themes:
       panel: "oklch(99.1% 0.006 88)"
       panel-muted: "oklch(94.8% 0.014 88)"
       panel-warm: "oklch(96.3% 0.023 78)"
-      sidebar-bg: "oklch(94.4% 0.018 88)"
+      sidebar-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 58%)"
       sidebar-border: "oklch(84.8% 0.024 86)"
       sidebar-active: "oklch(98.2% 0.011 88)"
       ink: "oklch(20.5% 0.018 72)"
@@ -290,10 +350,30 @@ themes:
       accent: "oklch(46% 0.03 72)"
       accent-ink: "oklch(99% 0.004 90)"
       accent-soft: "oklch(92% 0.026 78)"
+      control-primary-bg: "transparent"
+      control-primary-ink: "var(--pevo-ink)"
+      control-primary-border: "transparent"
+      control-interrupt-bg: "oklch(33% 0.018 72)"
+      control-interrupt-ink: "var(--pevo-accent-ink)"
+      control-interrupt-border: "oklch(33% 0.018 72)"
+      control-secondary-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 8%)"
+      control-hover-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 24%)"
+      control-selected-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 4%)"
+      control-focus: "color-mix(in oklch, var(--pevo-switch-track-on), white 32%)"
       brass: "oklch(55% 0.112 72)"
       brass-soft: "oklch(93.8% 0.043 78)"
       caution: "oklch(49% 0.12 64)"
       danger: "oklch(48% 0.15 28)"
+      control-danger-bg: "color-mix(in oklch, var(--pevo-danger), transparent 88%)"
+      control-caution-bg: "color-mix(in oklch, var(--pevo-brass), transparent 88%)"
+      field-bg: "color-mix(in oklch, var(--pevo-panel), var(--pevo-bg) 24%)"
+      field-search-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 52%)"
+      field-code-bg: "color-mix(in oklch, var(--pevo-code-bg), var(--pevo-panel) 22%)"
+      field-border: "color-mix(in oklch, var(--pevo-border), transparent 8%)"
+      field-border-hover: "var(--pevo-border-strong)"
+      field-focus: "var(--pevo-control-focus)"
+      field-placeholder: "var(--pevo-muted)"
+      field-readonly-bg: "color-mix(in oklch, var(--pevo-panel-muted), transparent 44%)"
       code-bg: "oklch(96.2% 0.012 88)"
       code-ink: "oklch(22% 0.018 72)"
       code-preview-ink: "var(--pevo-ink)"
@@ -527,6 +607,30 @@ local palettes.
 - **Switches:** management-style binary controls for enablement and modes. They
   use generated `--pevo-switch-*` roles, keep labels concise, and do not replace
   checkbox groups used for multi-select or confirmation.
+- **Action controls:** visible commands use transparent resting surfaces and
+  theme foreground text in every appearance. A local primary command is
+  distinguished by order, wording, iconography, border, and weight rather than
+  a dark/light inversion. Secondary, ghost, caution, and danger treatments stay
+  quiet. The Composer interrupt control uses the dedicated neutral deep-gray
+  interrupt role because stopping active work is not a danger-state warning.
+  Icon-only commands are reserved for familiar chrome and always keep a stable
+  accessible name and tooltip.
+- **Fields:** search/filter, ordinary value, secret/high-entropy, multiline,
+  structured, and editor inputs use explicit semantic variants. Shared field
+  roles own color, border, placeholder, focus, read-only, invalid, and disabled
+  presentation; product surfaces own widths and specialized editor geometry.
+  Checkbox and radio choices never inherit text-field geometry.
+- **Navigation and selection:** current browser navigation rows use a quiet
+  tonal step without a leading glyph indicator. Tabs change content panes,
+  segmented controls choose one value, toggles expose pressed state, and
+  disclosures expose expanded state; they do not share a generic active
+  presentation contract.
+- **Mutation receipts:** committed mutations produce a compact `•` ledger row
+  with a plain past-tense result. A reliable inverse may add Undo. Receipts are
+  transient display-only feedback rather than floating decorative toast cards.
+- **Dialogs and menus:** modal work owns initial and return focus, Escape,
+  dismissal, and pending behavior. Menus use one roving tab stop, direction
+  keys, Home/End, typeahead, outside dismissal, and focus return.
 - **Markdown frontmatter:** document-start YAML metadata renders as a compact
   table before the Markdown body. It uses the shared Markdown table/code
   treatment and existing `--pevo-*` border, panel, code, and ink roles; scalar

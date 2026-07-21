@@ -2,8 +2,9 @@
 
 The first Workbench visual direction is a dark precision ledger: quiet, dense,
 local-agent workspace chrome with transcript rows as the primary surface,
-evidence-oriented status details in secondary panes, and only black, white, or
-transparent button/logo backgrounds. It is an app shell, not a landing page;
+evidence-oriented status details in secondary panes, and transparent,
+borderless resting button treatments with theme foreground text. Logo
+backgrounds remain transparent. It is an app shell, not a landing page;
 the first viewport orients the user, shows current work state, and enables the
 next turn without hero copy or decorative backgrounds.
 
@@ -28,6 +29,26 @@ action rows above them, with matching text scale and weight. Active
 navigation rows, session rows, tabs, and segmented controls use a shallow tonal
 shadow with a quiet surface step instead of inset rail effects. Logo containers
 are transparent when the mark itself is visible against the dark chrome.
+Current browser navigation uses only the tonal selection treatment and does not
+render a leading glyph indicator. Related toolbar commands form quiet command
+strips separated by spacing or hairlines instead of appearing as unrelated
+boxed buttons. A local action group has at most one primary command,
+distinguished by placement, wording, iconography, and weight rather than a
+filled dark/light inversion or outline; caution uses brass and irreversible
+danger uses red without turning whole panels into warning surfaces.
+
+Text-entry controls use a small semantic family instead of page-local native
+styling. Search/filter fields use a quiet search surface; ordinary values,
+secrets, selects, and multiline descriptions share one field frame; structured
+values may opt into monospace; compact inline controls preserve the 28px
+control rhythm. Composer and document/file editors keep their purpose-built
+geometry while sharing the same color and focus roles. Checkbox and radio
+choices never inherit text-field padding or width.
+
+Committed mutations use an anchored ledger receipt rather than a generic
+floating toast card. The receipt starts with `•`, names the completed action,
+and may expose Undo. In Workbench it sits at the bottom of the active surface
+and moves above the Composer when that dock is visible.
 Settings and Status surfaces follow the same rule: setting rows, status metric
 groups, context usage, and changed-file lists are list-like content on the
 ordinary pane background. They should not render permanent row cards, heavy
@@ -215,10 +236,17 @@ Command catalog browsing is a transient transcript overlay, not a Settings
 section, and MCP/integration or observability placeholders do not appear in
 Settings until they become app-level configuration surfaces. The internal
 Settings navigation becomes horizontal tabs on narrow layouts and follows the
-same low-emphasis selected-row treatment as the left sidebar. The left sidebar collapse
+same low-emphasis selected-row treatment as the left sidebar. `Back to app` is
+left-aligned to the same icon and label columns as the Settings section rows.
+On desktop, the
+main Sessions rail and Settings left navigation use the exact same generated
+navigation-surface background so switching surfaces does not introduce a gray
+or temperature shift. The left sidebar collapse
 control sits in the
 same brand row as the logo/name and is icon-only; it must align to the right
-edge of the session column. When the left sidebar is collapsed, the same
+edge of the session column. While the sidebar is expanded, `New Session`
+aligns its icon and label to the same columns as `Search` instead of centering
+the command across the rail. When the left sidebar is collapsed, the same
 control becomes the expand affordance and uses a scaled Psychevo logo mark
 instead of the generic panel icon. Collapsed sidebar chrome keeps the primary
 action icons, such as New Session and Search, visible directly below
@@ -247,12 +275,12 @@ in light, warm, and dark appearances.
 
 Appearance is a frontend/host preference, not a provider or secret setting.
 Workbench supports `dark`, `light`, and `warm` appearances. `light` is the
-neutral paper-warm daytime shell: a near-white main canvas with a faint paper
-temperature, a warmer paper sidebar, soft warm-gray dividers, dark neutral
-text, and low-contrast selected rows that read like application chrome. Its
-main surfaces stay in the very low chroma range, while the sidebar may use a
-slightly higher paper chroma to avoid reading as gray, but still remains much
-weaker than `warm`. `warm` is the reading-paper palette formerly
+neutral paper-warm daytime shell: a near-white main canvas, one shared quiet
+navigation paper surface for Sessions and Settings, soft warm-gray dividers,
+dark neutral text, and low-contrast selected rows that read like application
+chrome. Its main and navigation surfaces stay in the very low chroma range so
+the navigation reads as paper rather than gray, and remains much weaker than
+`warm`. `warm` is the reading-paper palette formerly
 exposed as `light`: the canvas is ivory, panels are warm paper, borders are
 taupe, primary text is warm charcoal, and selected controls, status accents,
 and active UI state use low-chroma amber/taupe tokens so they read as quiet

@@ -71,6 +71,12 @@ All first-slice packages are `private: true`. Product code may change these
 interfaces without semver compatibility until a later SDK or package publishing
 topic declares otherwise.
 
+The root JavaScript workspace owns one shared TypeScript compiler version for
+all apps and packages. The current compiler baseline is TypeScript 7.0.2;
+workspace packages must not introduce private compiler-version overrides.
+Compiler upgrades refresh the root lockfile and must pass the recursive
+workspace typecheck without weakening strictness or suppressing new diagnostics.
+
 The root `assets/` directory remains the canonical tracked brand asset source
 defined by [075 Brand Assets](../075-design-system/brand-assets.md). `@psychevo/assets`
 packages those assets and theme tokens for Web consumers; it does not replace
@@ -239,6 +245,15 @@ same read again. Auxiliary Settings, Workspace, Observability, Agent catalog,
 and command refreshes are deduplicated by their owning scope and do not block
 the selected Transcript or Composer controls.
 
+After the first Turn of a detached draft is accepted, the durable Thread may be
+visible before its runtime binding has materialized. During that interval,
+Workbench keeps the last authoritative, target-matched draft context as its
+current state; an unbound default observation for the same suggested target is
+not a new effective context and must not blank Mode, Model, Reasoning,
+Permission, or the other Composer controls. The first authoritative bound
+context replaces that retained context atomically. Retaining the prior context
+is presentation continuity only and does not manufacture a durable binding.
+
 Workbench boot treats initialization and the first global session browse as
 one bounded transaction. It starts `initialize` and the single initial
 `thread/browser` request as soon as transport is connected, commits the
@@ -326,8 +341,24 @@ a switcher of known workspaces and ends with `Open workspace...`; choosing a
 workspace starts a detached draft in that cwd, while opening a new workspace
 opens a folder-selection panel at the active cwd. The panel supports traversing
 folders across the filesystem visible to the Gateway process, including parent
-folders up to the filesystem root, and does not fall back to free-form path
-entry. Once a Thread is bound, Workspace keeps its
+folders up to the filesystem root. When the Gateway runs on Windows, the folder
+result also exposes every logical drive reported by the host, and the panel
+offers a compact drive selector whenever more than one root is available so
+opening or switching workspaces can cross drive boundaries. An unavailable
+drive may fail when selected and must surface the bounded folder-read error;
+the current-location control is also an editable folder-path field so a user
+can paste or type an absolute custom path. Enter resolves that path and browses
+its folders. The location strip around that semantic field remains transparent;
+the field itself retains its input surface, boundary, and focus treatment.
+The create-workspace name field exposes the stable accessible name
+`Workspace name`, distinct from both the editable folder path and its displayed
+parent-location context.
+An opened Capabilities create panel renders directly after the action toolbar,
+before tab-specific status or catalog cards, so the requested action remains
+visible on narrow viewports without requiring the user to discover page scroll.
+`Open folder` resolves any edited path before opening it, so the visible address
+and selected workspace cannot diverge. The parent-folder action uses a pointer
+cursor when it is available. Once a Thread is bound, Workspace keeps its
 existing Files-opening behavior and cannot retarget the Thread.
 
 The Git branch control opens a local-branch switcher for the active workspace
@@ -446,6 +477,10 @@ Raw runtime chunks, Gateway events, client receipt, controller application,
 and an optional post-frame observation remain diagnostic marks. The settled
 checkpoint requires authoritative `turnCompleted` application, stable final
 content, an idle turn state, and a restored Composer.
+An interrupted Turn remains visible as terminal Transcript evidence and a
+cancelled outcome, but it is not a Workbench-global error. The global error
+band is reserved for failed Turns and failed user actions that require
+attention.
 
 Workbench state-application milestones are retained in a content-free internal
 browser timing registry and mirrored to the User Timing API when the engine
@@ -611,6 +646,27 @@ Workbench, shared components, and embedded terminal panels consume generated
 `@psychevo/assets` tokens. Product CSS should use `--pevo-*` semantic
 variables; embedded xterm palettes should come from the typed design-system
 export rather than isolated Workbench literals.
+
+Workbench controls use the shared semantic control modules and the Quiet
+Precision Ledger action hierarchy. Page layout code does not infer visual
+meaning from element type, DOM ancestry, last-child position, or a generic
+active class. Navigation, tabs, segmented choices, toggles, disclosures,
+menus, dialogs, and links retain distinct native semantics. Related commands
+form command strips, current navigation uses a quiet selected surface without a
+leading glyph indicator, and committed mutations publish bounded display-only
+ledger receipts. Product-owned modal confirmation replaces native
+`window.confirm`; only reliable inverse operations expose Undo.
+
+Ordinary Workbench commands, including local primary commands, use transparent,
+borderless resting surfaces with theme foreground text. Search/filter, ordinary
+value, secret, multiline, structured, compact-inline, and choice inputs opt into
+the shared semantic field classes; Composer and document/file editors retain
+their specialized geometry while reusing field color and focus roles. The main
+Sessions rail and the full-page Settings navigation consume the same generated
+navigation-surface token in every appearance. In the expanded Sessions rail,
+the global `New Session` command is left-aligned to the same icon and label
+columns as `Search`; its collapsed icon-only form remains centered. Settings
+aligns `Back to app` to the same icon and label columns as its section rows.
 
 ## Validation
 

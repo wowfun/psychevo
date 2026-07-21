@@ -38,6 +38,12 @@ Floating consumes shared visual tokens from [075 `DESIGN.md`](../075-design-syst
 through `@psychevo/assets/theme.css`. Its package CSS must be scoped under the
 `.pevo-floating` root so Desktop can import Floating and Workbench styles in
 the same renderer without global selector collisions.
+Floating maps its scoped palette onto the shared `--pevo-control-*` roles and
+reuses shared command, icon, toggle, disclosure, menu, and feedback behavior.
+It may keep capsule-specific composition and dark surface colors, but it must
+not duplicate control geometry, focus, pending, disabled, or accessible-name
+contracts. Narrow layouts may hide visible action text only when the shared
+control keeps the same accessible name and tooltip.
 
 Phase 1 uses explicit capture only. The user must summon the capsule or choose
 an attachment action before selected text, image content, file metadata, or a
@@ -133,6 +139,12 @@ Actions compile into visible prompt text. They may prefill or submit the
 composer, but they must not add hidden instruction text that the user cannot
 inspect. `Rewrite` produces answer text only in Phase 1; applying it back to the
 source app belongs to Phase 3.
+
+Floating action controls use a 28px visual size and the shared coarse-pointer
+hit target. Send/Interrupt and Park/Restore may remain circular; other actions
+use the compact squared-off radius. Committed Floating mutations and recoveries
+use an in-capsule ledger receipt, while ordinary selection, draft edits, and
+turn submission do not create duplicate receipt feedback.
 
 ## Native Host Responsibilities
 

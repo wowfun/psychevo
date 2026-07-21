@@ -16,7 +16,8 @@ consume it.
 - compact glyph/icon language, color roles, and adaptive host fallback
 - core transcript, prompt, composer, status line, sidebar, picker, and bottom
   panel surface treatment
-- shared browser control roles, including management-style switches
+- shared browser control roles, including actions, navigation, selection,
+  disclosure, menus, dialogs, mutation feedback, and management-style switches
 - shared browser Markdown metadata treatment, including YAML frontmatter tables
 - evidence language for inline ledger rows, collapsed details, and active work
 - composer-first interaction baseline and default shortcut expectations
@@ -54,6 +55,17 @@ parallel theme files. The generated public CSS variable prefix is `--pevo-`.
 Management-style browser switches consume the generated `--pevo-switch-*`
 semantic variables and keep sizing in component CSS so Web, Desktop, and
 Floating can share visual state without duplicating color decisions.
+Browser action controls consume generated `--pevo-control-*` variables. The
+shared component package owns their semantic variants, focus, press, pending,
+disabled, selected, expanded, and dangerous states; product CSS owns only
+layout around those controls and must not restyle descendant `button` elements.
+Composer interrupt controls use a dedicated neutral dark treatment rather than
+the danger palette: interrupting active work is an immediate runtime control,
+not a destructive-data warning.
+Ordinary browser fields consume generated `--pevo-field-*` variables through
+opt-in shared field, search, and choice-control classes. Product surfaces own
+field width and editor geometry, while the shared layer owns their resting,
+hover, focus, placeholder, read-only, invalid, and disabled treatments.
 Browser Markdown renderers consume the shared Markdown component for document
 body rendering and document-start YAML frontmatter. Frontmatter is supporting
 metadata: render it as a compact table before the Markdown body, use existing
@@ -113,7 +125,8 @@ log.
 
 The shared glyph language is deliberately small:
 
-- `›` marks prompt, focus, or selected rows.
+- `›` marks prompts or focus in text-oriented surfaces; browser navigation
+  selection does not add a leading glyph.
 - `•` marks evidence and active work.
 - `·` marks quiet status or notice rows that should remain visually below
   evidence.
@@ -151,9 +164,9 @@ titles are bold; ordinary content is default or dim text unless color carries
 state.
 
 Bottom panels and pickers use selection-sheet behavior: compact header,
-optional tabs only when needed, searchable row list, selected row marker, and a
-contextual footer. Slash command discovery remains a lightweight menu above the
-composer instead of becoming a full command palette.
+optional tabs only when needed, searchable row list, quiet selected-row
+treatment, and a contextual footer. Slash command discovery remains a
+lightweight menu above the composer instead of becoming a full command palette.
 
 Browser switches are reserved for direct binary state such as capability,
 backend, channel, debug, or mode enablement. They use a quiet neutral off track,
@@ -162,6 +175,35 @@ is carried by the control itself; adjacent visible text must name the setting
 being controlled, not repeat state words such as `On`, `Off`, `Enabled`, or
 `Disabled`. Ordinary checkboxes remain checkboxes when the user is selecting
 multiple options, confirming force behavior, or editing form fields.
+
+Browser controls use explicit semantic roles instead of a generic active state.
+Commands, icon commands, toggles, disclosures, navigation items, tabs,
+segmented choices, menus, links, and switches each expose the native ARIA state
+for that role. `current`, `pressed`, `expanded`, and `selected` are never
+interchangeable. Compact controls are 28px, ordinary workbench controls are
+32px, and coarse-pointer layouts provide at least a 44px hit target. Ordinary
+command buttons are transparent and borderless at rest in every appearance,
+including the primary command in a local action group. Order, wording,
+iconography, and weight communicate command priority without inverting
+foreground and background colors. Caution and danger may retain their bounded
+semantic tints. The Composer interrupt control is the narrow exception: it uses
+a compact deep-gray fill so the active stop affordance remains stable without
+presenting an ordinary interruption as an error.
+
+Browser fields use semantic families instead of page-local native styling.
+Search and filter fields use a quiet search surface; ordinary text, numeric,
+secret, and select controls share one field frame; multiline descriptive input
+shares that frame while retaining caller-owned height; high-entropy and
+structured values may opt into the shared monospace treatment. Markdown, JSON,
+file, and Composer editors keep their specialized geometry but reuse the field
+color and focus roles. Checkbox and radio choices use a distinct choice-control
+class and must never inherit text-field width, padding, or minimum height.
+
+The browser signature for committed mutations is a compact ledger receipt. It
+uses the shared `•` marker, states the completed action in plain language, and
+may expose Undo only when the caller supplies a reliable inverse operation.
+Receipts are display-only: they never become transcript entries, durable
+messages, exports, tool results, accounting input, or provider context.
 
 ## Evidence Language
 
