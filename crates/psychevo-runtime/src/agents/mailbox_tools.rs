@@ -246,7 +246,7 @@ impl ToolBinding for WaitAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Wait for a background agent mailbox update. The result only reports wait status; agent output is delivered through mailbox context."
+        "Wait for a background child-agent update. The result reports wait status; completed output arrives separately in the conversation context."
     }
 
     fn parameters(&self) -> Value {
@@ -256,7 +256,7 @@ impl ToolBinding for WaitAgentTool {
                 "timeout_ms": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Maximum time to wait for a pending or newly arriving background-agent mailbox event; defaults to 30000 milliseconds."
+                    "description": "Maximum time to wait for a pending or newly arriving background-agent update; defaults to 30000 milliseconds."
                 }
             },
             "additionalProperties": false
@@ -347,7 +347,7 @@ impl ToolBinding for SendMessageTool {
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Agent id or unambiguous model-visible task label identifying the child agent to message."
+                    "description": "Agent id or unambiguous task label identifying the child agent to message."
                 },
                 "message": {
                     "type": "string",
@@ -413,7 +413,7 @@ impl ToolBinding for CloseAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Close an agent and its open descendants, returning the previous status."
+        "Close an agent and its open descendants."
     }
 
     fn parameters(&self) -> Value {
@@ -422,7 +422,7 @@ impl ToolBinding for CloseAgentTool {
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Agent id or unambiguous model-visible task label identifying the child agent to close."
+                    "description": "Agent id or unambiguous task label identifying the child agent to close."
                 }
             },
             "required": ["target"],
@@ -480,7 +480,7 @@ impl ToolBinding for ResumeAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Reopen a previously closed agent so it can be addressed by later control tools."
+        "Reopen a closed agent."
     }
 
     fn parameters(&self) -> Value {
@@ -489,7 +489,7 @@ impl ToolBinding for ResumeAgentTool {
             "properties": {
                 "id": {
                     "type": "string",
-                    "description": "Agent id or unambiguous model-visible task label identifying the closed agent to reopen."
+                    "description": "Agent id or unambiguous task label identifying the closed agent to reopen."
                 }
             },
             "required": ["id"],

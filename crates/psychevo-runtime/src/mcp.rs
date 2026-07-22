@@ -975,7 +975,7 @@ impl McpUtilityTool {
         Self {
             kind: McpUtilityKind::ListResources,
             name: LIST_MCP_RESOURCES_TOOL,
-            description: "List MCP resources from one server or all accepted MCP servers.",
+            description: "List MCP resources from one server or all available MCP servers.",
             connection_set,
         }
     }
@@ -984,7 +984,7 @@ impl McpUtilityTool {
         Self {
             kind: McpUtilityKind::ListResourceTemplates,
             name: LIST_MCP_RESOURCE_TEMPLATES_TOOL,
-            description: "List MCP resource templates from one server or all accepted MCP servers.",
+            description: "List MCP resource templates from one server or all available MCP servers.",
             connection_set,
         }
     }
@@ -1002,7 +1002,7 @@ impl McpUtilityTool {
         Self {
             kind: McpUtilityKind::ListPrompts,
             name: LIST_MCP_PROMPTS_TOOL,
-            description: "List MCP prompts from one server or all accepted MCP servers.",
+            description: "List MCP prompts from one server or all available MCP servers.",
             connection_set,
         }
     }
@@ -1076,7 +1076,7 @@ impl ToolBinding for McpUtilityTool {
 fn mcp_utility_parameters(kind: McpUtilityKind) -> Value {
     let server = json!({
         "type": "string",
-        "description": "Normalized or raw MCP server name. Omit only for list operations that should query every accepted server."
+        "description": "MCP server name. Omit for list operations that should query every available server."
     });
     match kind {
         McpUtilityKind::ListResources
@@ -1654,6 +1654,35 @@ pub(crate) mod tests {
             Some(("*".to_string(), "prompts/list".to_string()))
         );
         assert!(mcp_utility_action("read", &json!({})).is_none());
+    }
+
+    #[test]
+    fn first_party_mcp_utilities_hide_selection_internals() {
+        let connection_set = Arc::new(McpUtilityConnectionSet {
+            connections: BTreeMap::new(),
+        });
+        let tools: Vec<Arc<dyn ToolBinding>> = vec![
+            Arc::new(McpUtilityTool::list_resources(Arc::clone(&connection_set))),
+            Arc::new(McpUtilityTool::list_resource_templates(Arc::clone(
+                &connection_set,
+            ))),
+            Arc::new(McpUtilityTool::read_resource(Arc::clone(&connection_set))),
+            Arc::new(McpUtilityTool::list_prompts(Arc::clone(&connection_set))),
+            Arc::new(McpUtilityTool::get_prompt(connection_set)),
+        ];
+
+        for tool in tools {
+            crate::tests::assert_first_party_tool_declaration_quality(tool.as_ref());
+        }
+    }
+
+    #[test]
+    fn external_mcp_description_keeps_source_owned_wording() {
+        let source_description = "Remote harness vocabulary remains source-owned.";
+        let description =
+            mcp_tool_description("docs", "search", Some("Search"), Some(source_description));
+
+        assert!(description.ends_with(source_description), "{description}");
     }
 
     #[test]

@@ -38,7 +38,7 @@ impl ToolBinding for ClarifyTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user for clarification, feedback, or a meaningful decision before proceeding. Use this for one to three short questions with concrete options. If one option is recommended, put it first and include \"(Recommended)\" in that option label. Do not use this tool for dangerous command, file write, or permission approval; those use the permission approval flow."
+        "Ask the user for clarification, feedback, or a meaningful decision before proceeding."
     }
 
     fn parameters(&self) -> Value {
@@ -48,12 +48,12 @@ impl ToolBinding for ClarifyTool {
             "properties": {
                 "questions": {
                     "type": "array",
-                    "description": "One to three user-facing questions to ask before continuing; each question must include two or three concrete options.",
+                    "description": "Questions to ask before continuing.",
                     "minItems": 1,
                     "maxItems": 3,
                     "items": {
                         "type": "object",
-                        "description": "A single clarification question and its selectable options.",
+                        "description": "One clarification question and its choices.",
                         "additionalProperties": false,
                         "properties": {
                             "question": {
@@ -62,17 +62,17 @@ impl ToolBinding for ClarifyTool {
                             },
                             "options": {
                                 "type": "array",
-                                "description": "Two or three concrete choices for this question. The client also offers an Other/freeform path.",
+                                "description": "Two or three concrete choices. Do not add an Other option; a free-form choice is supplied automatically.",
                                 "minItems": 2,
                                 "maxItems": 3,
                                 "items": {
                                     "type": "object",
-                                    "description": "A selectable answer option.",
+                                    "description": "One selectable choice.",
                                     "additionalProperties": false,
                                     "properties": {
                                         "label": {
                                             "type": "string",
-                                            "description": "Short option label shown to the user. Put the recommended choice first and include '(Recommended)' in its label when applicable."
+                                            "description": "Short option label. Put the recommended choice first and include '(Recommended)' in its label when applicable."
                                         },
                                         "description": {
                                             "type": "string",

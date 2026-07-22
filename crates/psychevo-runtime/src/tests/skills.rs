@@ -816,7 +816,7 @@ pub(crate) fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
 }
 
 #[test]
-pub(crate) fn skill_tool_schemas_describe_parameters() {
+pub(crate) fn first_party_skill_declarations_hide_implementation_details() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -825,8 +825,27 @@ pub(crate) fn skill_tool_schemas_describe_parameters() {
     let options = skill_options(&temp, &home, &cwd);
 
     for mode in [RunMode::Plan, RunMode::Default] {
-        for tool in skill_tools_for_mode(options.clone(), mode) {
-            assert_schema_property_descriptions(tool.name(), &tool.parameters());
+        let tools = skill_tools_for_mode(options.clone(), mode);
+        for tool in &tools {
+            assert_first_party_tool_declaration_quality(tool.as_ref());
+        }
+        if mode == RunMode::Default {
+            assert_eq!(
+                tools
+                    .iter()
+                    .find(|tool| tool.name() == "list_skills")
+                    .expect("list_skills")
+                    .description(),
+                "List available skills."
+            );
+            assert_eq!(
+                tools
+                    .iter()
+                    .find(|tool| tool.name() == "view_skill")
+                    .expect("view_skill")
+                    .description(),
+                "Read a skill's instructions or a supporting file."
+            );
         }
     }
 }

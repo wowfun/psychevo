@@ -141,42 +141,8 @@ mod tests {
         }
     }
 
-    pub(crate) fn assert_tool_schema_descriptions(tool: &dyn ToolBinding) {
-        let mut missing = Vec::new();
-        collect_missing_schema_descriptions(
-            &tool.parameters(),
-            tool.name().to_string(),
-            &mut missing,
-        );
-        assert!(
-            missing.is_empty(),
-            "{} has schema properties without descriptions: {:?}",
-            tool.name(),
-            missing
-        );
-    }
-
-    pub(crate) fn collect_missing_schema_descriptions(
-        value: &Value,
-        path: String,
-        missing: &mut Vec<String>,
-    ) {
-        if let Some(properties) = value.get("properties").and_then(Value::as_object) {
-            for (name, property) in properties {
-                let property_path = format!("{path}.{name}");
-                let described = property
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .is_some_and(|description| !description.trim().is_empty());
-                if !described {
-                    missing.push(property_path.clone());
-                }
-                collect_missing_schema_descriptions(property, property_path, missing);
-            }
-        }
-        if let Some(items) = value.get("items") {
-            collect_missing_schema_descriptions(items, format!("{path}[]"), missing);
-        }
+    pub(crate) fn assert_first_party_tool_declaration_quality(tool: &dyn ToolBinding) {
+        crate::tests::assert_first_party_tool_declaration_quality(tool);
     }
 
     pub(crate) mod catalog_and_lifecycle;

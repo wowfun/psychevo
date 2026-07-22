@@ -18,7 +18,7 @@ impl ToolBinding for ListSkillsTool {
     }
 
     fn description(&self) -> &str {
-        "List available skills with lightweight metadata, optional detail, filters, and diagnostics."
+        "List available skills."
     }
 
     fn parameters(&self) -> Value {
@@ -27,7 +27,7 @@ impl ToolBinding for ListSkillsTool {
             "properties": {
                 "include_hidden": {
                     "type": "boolean",
-                    "description": "When true, include skills hidden from normal model invocation, disabled skills, unsupported-platform skills, and diagnostics-only entries."
+                    "description": "When true, include hidden, disabled, unsupported-platform, and diagnostics-only skills."
                 },
                 "detail": {
                     "type": "boolean",
@@ -59,7 +59,7 @@ impl ToolBinding for ListSkillsTool {
                 },
                 "sort": {
                     "type": "string",
-                    "description": "Optional sort order; usage-based sorts may use aggregate SQLite counters when available."
+                    "description": "Optional sort order for the returned skills."
                 }
             }
         })
@@ -124,7 +124,7 @@ impl ToolBinding for ViewSkillTool {
     }
 
     fn description(&self) -> &str {
-        "Load a skill's instructions or a supporting file and report readiness metadata."
+        "Read a skill's instructions or a supporting file."
     }
 
     fn parameters(&self) -> Value {
@@ -197,7 +197,7 @@ impl ToolBinding for SkillManageTool {
     }
 
     fn description(&self) -> &str {
-        "Create, edit, patch, delete, or manage supporting files for local non-managed skills."
+        "Create, edit, or delete locally authored skills and their supporting files."
     }
 
     fn parameters(&self) -> Value {
@@ -216,7 +216,7 @@ impl ToolBinding for SkillManageTool {
                 },
                 "description": {
                     "type": "string",
-                    "description": "Required short model-visible skill description when action is create."
+                    "description": "Required short description of when the skill applies when action is create."
                 },
                 "content": {
                     "type": "string",
@@ -237,7 +237,7 @@ impl ToolBinding for SkillManageTool {
                 "scope": {
                     "type": "string",
                     "enum": ["global", "project"],
-                    "description": "Where to create or update the skill: global PSYCHEVO_HOME or the current project."
+                    "description": "Where to create or update the skill: the global profile or the current project."
                 },
                 "intent": {
                     "type": "string",
@@ -370,7 +370,7 @@ impl ToolBinding for SkillHubTool {
     }
 
     fn description(&self) -> &str {
-        "Browse, inspect, install, update, audit, uninstall, or publish skills through the Psychevo skills hub."
+        "Discover and manage skills through the skills hub."
     }
 
     fn parameters(&self) -> Value {
@@ -402,7 +402,7 @@ impl ToolBinding for SkillHubTool {
                 "scope": {
                     "type": "string",
                     "enum": ["global", "project"],
-                    "description": "Install or uninstall target scope: global PSYCHEVO_HOME or the current project."
+                    "description": "Install or uninstall target scope: the global profile or the current project."
                 },
                 "path": {
                     "type": "string",
@@ -605,7 +605,7 @@ impl ToolBinding for SkillConfigTool {
                 "scope": {
                     "type": "string",
                     "enum": ["global", "project"],
-                    "description": "Configuration scope: global PSYCHEVO_HOME or the current project."
+                    "description": "Configuration scope: the global profile or the current project."
                 },
                 "key": {
                     "type": "string",

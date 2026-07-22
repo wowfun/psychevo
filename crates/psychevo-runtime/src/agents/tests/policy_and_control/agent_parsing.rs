@@ -85,7 +85,7 @@ fn backend_backed_agent(name: &str, backend: &str) -> AgentDefinition {
 }
 
 #[test]
-pub(crate) fn agent_control_tool_schemas_describe_parameters() {
+pub(crate) fn agent_control_declarations_hide_implementation_details() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
     let store = SqliteStore::open(&db_path).expect("store");
@@ -98,9 +98,31 @@ pub(crate) fn agent_control_tool_schemas_describe_parameters() {
         AgentCatalog::default(),
     );
 
-    for tool in agent_tools(context) {
-        assert_tool_schema_descriptions(tool.as_ref());
+    let tools = agent_tools(context);
+    for tool in &tools {
+        assert_first_party_tool_declaration_quality(tool.as_ref());
     }
+    let spawn = tools
+        .iter()
+        .find(|tool| tool.name() == "spawn_agent")
+        .expect("spawn_agent");
+    assert_eq!(spawn.description(), "Spawn a focused child agent.");
+    let spawn_parameters = spawn.parameters();
+    assert!(
+        spawn_parameters["properties"]["task_name"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("Unique task name"))
+    );
+    assert!(
+        spawn_parameters["properties"]["message"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("Complete task instructions"))
+    );
+    let wait = tools
+        .iter()
+        .find(|tool| tool.name() == "wait_agent")
+        .expect("wait_agent");
+    assert!(wait.description().contains("conversation context"));
 }
 
 #[test]

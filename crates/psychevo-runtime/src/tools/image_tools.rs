@@ -25,7 +25,7 @@ impl ToolBinding for ViewImageTool {
     }
 
     fn description(&self) -> &str {
-        "Resolve and inspect an explicit image source, returning metadata and a model-visible image when the active model supports images."
+        "Inspect an image."
     }
 
     fn parameters(&self) -> Value {
@@ -34,12 +34,12 @@ impl ToolBinding for ViewImageTool {
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "Explicit local path, file URL, data image URL, remote image URL, or psychevo-media reference."
+                    "description": "Local path, file URL, data image URL, remote image URL, or media reference."
                 },
                 "detail": {
                     "type": "string",
                     "enum": ["low", "high", "original"],
-                    "description": "Requested inspection detail."
+                    "description": "Inspection detail."
                 }
             },
             "required": ["source"],
@@ -130,7 +130,7 @@ impl ToolBinding for ImageGenerateTool {
     }
 
     fn description(&self) -> &str {
-        "Generate an image from a prompt, optionally using explicit image references, and persist it as a Psychevo media artifact."
+        "Generate an image from a prompt."
     }
 
     fn parameters(&self) -> Value {
@@ -139,7 +139,7 @@ impl ToolBinding for ImageGenerateTool {
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "Image generation prompt."
+                    "description": "Text description of the image to generate."
                 },
                 "aspect_ratio": {
                     "type": "string",

@@ -71,7 +71,7 @@ impl ToolBinding for SpawnAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Spawn a focused child agent thread. Provide a canonical task_name and a complete message for the child agent."
+        "Spawn a focused child agent."
     }
 
     fn parameters(&self) -> Value {
@@ -80,12 +80,12 @@ impl ToolBinding for SpawnAgentTool {
             "properties": {
                 "agent_type": {
                     "type": "string",
-                    "description": "Agent definition name to run. Defaults to general when omitted and no @agent mention requires a specific target."
+                    "description": "Agent definition name to run; defaults to general when omitted."
                 },
                 "task_name": {
                     "type": "string",
                     "pattern": "^[a-z0-9_]+$",
-                    "description": "Required canonical task key using lowercase ASCII letters, digits, and underscores only."
+                    "description": "Unique task name using lowercase ASCII letters, digits, and underscores only."
                 },
                 "message": {
                     "type": "string",
@@ -93,11 +93,11 @@ impl ToolBinding for SpawnAgentTool {
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "When true, return a handle immediately and deliver completion through the parent mailbox; false waits for the child summary."
+                    "description": "When true, return immediately and deliver completion asynchronously; false waits for the child summary."
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model override for this child run; omitted means inherit the resolved model."
+                    "description": "Optional model override for this child run; omitted inherits the parent model."
                 },
                 "fork_context": {
                     "type": "boolean",
@@ -110,13 +110,13 @@ impl ToolBinding for SpawnAgentTool {
                 "max_turns": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Maximum model turns for the child run; omitted uses the agent definition or runtime default."
+                    "description": "Maximum model turns for the child run; omitted uses the agent definition or default limit."
                 },
                 "max_spawn_depth": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": MAX_AGENT_SPAWN_DEPTH_CAP,
-                    "description": "Additional descendant spawn levels this child may create. 0 makes it a leaf; values above the runtime cap are rejected."
+                    "description": "Additional descendant levels this child may create; 0 makes it a leaf."
                 },
                 "team_member": {
                     "type": "string",

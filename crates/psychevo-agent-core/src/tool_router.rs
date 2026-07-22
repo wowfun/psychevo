@@ -203,18 +203,18 @@ impl ToolRouter {
 fn tool_search_declaration() -> ToolDeclaration {
     ToolDeclaration::new(
         TOOL_SEARCH_NAME,
-        "Search deferred tools by name, description, or schema and activate relevant matches for later tool calls.",
+        "Find tools that are not currently loaded and make relevant matches available for later calls.",
         json!({
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search terms for the deferred tools to activate."
+                    "description": "Search terms for tools to make available."
                 },
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Maximum number of matching tools to activate."
+                    "description": "Maximum number of matching tools to make available."
                 }
             },
             "required": ["query"],

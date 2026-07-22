@@ -30,7 +30,7 @@ pub(crate) use crate::types::{
     ProjectContextInstructionMode, SelectedAgent,
 };
 pub(crate) use psychevo_agent_core::{
-    AgentEvent, AssistantBlock, EventSink, Message, ToolDisplaySpec,
+    AgentEvent, AssistantBlock, EventSink, Message, ToolBinding, ToolDisplaySpec,
 };
 pub(crate) use psychevo_ai::{FakeProvider, Outcome, RawStreamEvent};
 pub(crate) use rusqlite::Connection;
@@ -187,6 +187,48 @@ pub(crate) fn assert_schema_property_descriptions(tool_name: &str, schema: &Valu
     );
 }
 
+pub(crate) fn assert_first_party_tool_declaration_quality(tool: &dyn ToolBinding) {
+    assert!(
+        !tool.description().trim().is_empty(),
+        "{} has an empty tool description",
+        tool.name()
+    );
+    let parameters = tool.parameters();
+    assert_schema_property_descriptions(tool.name(), &parameters);
+    let declaration_text = format!(
+        "{}\n{}",
+        tool.description(),
+        serde_json::to_string(&parameters).expect("tool parameters serialize")
+    )
+    .to_ascii_lowercase();
+    for implementation_term in [
+        "harness",
+        "authorized",
+        "scoped grant",
+        "permission and resource",
+        "permissions.allow_login_shell",
+        "accepted cwd",
+        "model-visible",
+        "active model",
+        "runtime cap",
+        "sqlite counter",
+        "psychevo_home",
+        "accepted mcp",
+        "normalized or raw",
+        "psychevo media artifact",
+        "mailbox",
+        "adapter",
+        "ui projection",
+        "persistence",
+    ] {
+        assert!(
+            !declaration_text.contains(implementation_term),
+            "{} exposes implementation term {implementation_term:?}: {declaration_text}",
+            tool.name()
+        );
+    }
+}
+
 pub(crate) fn collect_missing_schema_descriptions(
     value: &Value,
     path: String,
@@ -207,6 +249,17 @@ pub(crate) fn collect_missing_schema_descriptions(
     }
     if let Some(items) = value.get("items") {
         collect_missing_schema_descriptions(items, format!("{path}[]"), missing);
+    }
+    for keyword in ["oneOf", "anyOf", "allOf"] {
+        if let Some(alternatives) = value.get(keyword).and_then(Value::as_array) {
+            for (index, alternative) in alternatives.iter().enumerate() {
+                collect_missing_schema_descriptions(
+                    alternative,
+                    format!("{path}.{keyword}[{index}]"),
+                    missing,
+                );
+            }
+        }
     }
 }
 

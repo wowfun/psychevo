@@ -122,11 +122,8 @@ pub(crate) fn exec_command_provider_schema_replaces_bash() {
         .iter()
         .find(|tool| tool.name() == "exec_command")
         .expect("exec_command");
-    assert!(
-        exec.description().contains("yield_time_ms"),
-        "{}",
-        exec.description()
-    );
+    assert!(exec.description().contains("session_id"));
+    assert!(exec.description().contains("write_stdin"));
     let exec_params = exec.parameters();
     assert_eq!(exec_params["required"], json!(["cmd"]));
     assert!(exec_params["properties"]["cmd"]["description"].is_string());
@@ -148,16 +145,46 @@ pub(crate) fn exec_command_provider_schema_replaces_bash() {
     let stdin_params = stdin.parameters();
     assert_eq!(stdin_params["required"], json!(["session_id"]));
     assert_eq!(stdin_params["properties"]["chars"]["default"], "");
+    assert!(
+        stdin_params["properties"]["chars"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("polls without writing"))
+    );
 
+    let write = tools
+        .iter()
+        .find(|tool| tool.name() == "write")
+        .expect("write");
+    assert!(write.description().contains("read completely"));
+    assert!(write.description().contains("unchanged"));
+    assert!(!write.description().contains("lint"));
+    assert!(!write.description().contains("parent directories"));
+
+    let edit = tools
+        .iter()
+        .find(|tool| tool.name() == "edit")
+        .expect("edit");
+    assert!(edit.description().contains("complete prior read"));
+    assert!(edit.description().contains("Move is unsupported"));
+    assert!(edit.description().contains("earlier operations committed"));
+    assert!(!edit.description().contains("candidate ranges"));
+    assert!(
+        edit.parameters()["properties"]["old_string"]["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("match uniquely"))
+    );
+
+    let web_search = tools
+        .iter()
+        .find(|tool| tool.name() == "web_search")
+        .expect("web_search");
+    assert!(web_search.description().contains("untrusted content"));
     let web_fetch = tools
         .iter()
         .find(|tool| tool.name() == "web_fetch")
         .expect("web_fetch");
-    assert!(
-        web_fetch.description().contains("not a web search tool"),
-        "{}",
-        web_fetch.description()
-    );
+    assert!(web_fetch.description().contains("untrusted"));
+    assert!(!web_fetch.description().contains("default to markdown"));
 }
 
 #[test]
@@ -203,15 +230,62 @@ pub(crate) fn toolset_config_controls_effective_core_tools() {
 }
 
 #[test]
-pub(crate) fn core_plan_and_clarify_tool_schemas_describe_parameters() {
+pub(crate) fn first_party_core_and_clarify_declarations_hide_implementation_details() {
     let temp = tempdir().expect("temp");
     let mut tools = crate::tools::coding_core_tools_for_mode(temp.path(), RunMode::Plan);
     tools.extend(crate::tools::coding_core_tools(temp.path()));
     tools.push(crate::tools::clarify_tool(None, None));
 
-    for tool in tools {
-        assert_schema_property_descriptions(tool.name(), &tool.parameters());
+    for tool in &tools {
+        assert_first_party_tool_declaration_quality(tool.as_ref());
     }
+    let clarify = tools
+        .iter()
+        .find(|tool| tool.name() == "clarify")
+        .expect("clarify");
+    assert_eq!(
+        clarify.description(),
+        "Ask the user for clarification, feedback, or a meaningful decision before proceeding."
+    );
+    assert!(
+        clarify.parameters()["properties"]["questions"]["items"]["properties"]["options"]
+            ["description"]
+            .as_str()
+            .is_some_and(|description| description.contains("free-form choice"))
+    );
+}
+
+#[test]
+pub(crate) fn cross_tool_guidance_lives_in_mode_instructions() {
+    let default = crate::tools::mode_instruction(RunMode::Default);
+    assert!(default.contains("read, write, and edit for project file I/O"));
+    assert!(default.contains("shell-local temporary artifacts"));
+    assert!(default.contains("prefer rg"));
+    assert!(default.contains("web_fetch for a known URL"));
+    assert!(default.contains("not permission approval"));
+
+    let plan = crate::tools::mode_instruction(RunMode::Plan);
+    assert!(plan.contains("Use read for file contents"));
+    assert!(plan.contains("prefer rg"));
+    assert!(plan.contains("web_fetch for a known URL"));
+
+    let temp = tempdir().expect("temp");
+    let tools = crate::tools::coding_core_tools(temp.path());
+    let read = tools
+        .iter()
+        .find(|tool| tool.name() == "read")
+        .expect("read");
+    assert!(!read.description().contains("shell"));
+    let exec = tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    assert!(!exec.description().contains("rg"));
+    let web_fetch = tools
+        .iter()
+        .find(|tool| tool.name() == "web_fetch")
+        .expect("web_fetch");
+    assert!(!web_fetch.description().contains("known"));
 }
 
 pub(crate) fn valid_clarify_args() -> Value {

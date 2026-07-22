@@ -11,7 +11,7 @@ impl ToolBinding for AutomationTool {
     }
 
     fn description(&self) -> &str {
-        "Create, list, update, pause, resume, run, or remove Psychevo local automations. Use this when the user asks in natural language to schedule or manage recurring or one-shot work. If the user does not specify a target, create automations for the Gateway-supplied current thread when available; otherwise use the current project."
+        "Create and manage recurring or one-shot automations."
     }
 
     fn parameters(&self) -> Value {
@@ -21,39 +21,58 @@ impl ToolBinding for AutomationTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "create", "update", "pause", "resume", "run", "remove"]
+                    "enum": ["list", "create", "update", "pause", "resume", "run", "remove"],
+                    "description": "Operation to perform."
                 },
                 "automationId": {
                     "type": "string",
-                    "description": "Required for update, pause, resume, run, and remove"
+                    "description": "Automation id required for update, pause, resume, run, and remove."
                 },
-                "title": { "type": "string" },
-                "prompt": { "type": "string" },
+                "title": {
+                    "type": "string",
+                    "description": "Automation title. Required for create; omit on update to keep the current title."
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Instructions to run. Required for create; omit on update to keep the current instructions."
+                },
                 "target": {
-                    "description": "Omit target for the default. Use \"currentThread\" only when this turn has a Gateway-supplied current thread. Use \"project\" for the current project, or an object like {\"kind\":\"threadHeartbeat\",\"threadId\":\"...\"}.",
+                    "description": "Automation target. On create, omit to use the current conversation when available, otherwise the current project. On update, omit to keep the current target.",
                     "oneOf": [
                         { "type": "string", "enum": ["project", "currentThread"] },
                         {
                             "type": "object",
                             "properties": {
-                                "kind": { "type": "string", "enum": ["project", "threadHeartbeat"] },
-                                "threadId": { "type": "string" }
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["project", "threadHeartbeat"],
+                                    "description": "Target type: project or a specific conversation thread."
+                                },
+                                "threadId": {
+                                    "type": "string",
+                                    "description": "Conversation thread id required when kind is threadHeartbeat."
+                                }
                             }
                         }
                     ]
                 },
                 "threadId": {
                     "type": "string",
-                    "description": "Shortcut for target {\"kind\":\"threadHeartbeat\",\"threadId\":\"...\"}"
+                    "description": "Explicit conversation thread id. Equivalent to a threadHeartbeat target and takes precedence over target when both are provided."
                 },
                 "schedule": {
                     "type": "object",
-                    "description": "One of interval {kind,everyMinutes}, delay {kind,afterMinutes}, once {kind,at}, daily {kind,time}, weekly {kind,weekdays,time}"
+                    "description": "Schedule definition. Required for create; omit on update to keep the current schedule. Use interval {kind,everyMinutes}, delay {kind,afterMinutes}, once {kind,at}, daily {kind,time}, or weekly {kind,weekdays,time}."
                 },
                 "execution": {
                     "type": "object",
+                    "description": "Execution policy. Omit on create to use autoSandbox; omit on update to keep the current policy.",
                     "properties": {
-                        "policy": { "type": "string", "enum": ["autoSandbox", "askFirst"] }
+                        "policy": {
+                            "type": "string",
+                            "enum": ["autoSandbox", "askFirst"],
+                            "description": "autoSandbox runs automatically with workspace-only writes; askFirst requests confirmation when needed."
+                        }
                     }
                 }
             }
@@ -277,6 +296,20 @@ pub(super) fn automation_tool_execute_for_test(
         current_thread_id,
     }
     .execute_automation_action(args)
+}
+
+#[cfg(test)]
+pub(super) fn automation_tool_declaration_for_test(
+    state: WebState,
+    cwd: PathBuf,
+    current_thread_id: Option<String>,
+) -> (String, Value) {
+    let tool = AutomationTool {
+        state,
+        cwd,
+        current_thread_id,
+    };
+    (tool.description().to_string(), tool.parameters())
 }
 
 fn tool_string(args: &Value, key: &str) -> psychevo_runtime::Result<String> {

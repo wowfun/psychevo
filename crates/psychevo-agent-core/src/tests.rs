@@ -253,8 +253,23 @@ pub(crate) fn tool_search_activates_deferred_tools_for_later_declarations() {
     let mut router = ToolRouter::from_tools(vec![Arc::new(DeferredTool) as Arc<dyn ToolBinding>])
         .with_tool_search(ToolSearchOptions::enabled());
 
-    let initial_names = router
-        .declarations()
+    let initial = router.declarations();
+    let search = initial.first().expect("tool_search declaration");
+    assert!(search.description.contains("not currently loaded"));
+    assert!(search.description.contains("later calls"));
+    let search_text = format!(
+        "{}\n{}",
+        search.description,
+        serde_json::to_string(&search.parameters).expect("search parameters")
+    )
+    .to_ascii_lowercase();
+    for implementation_term in ["deferred", "activate", "router", "harness"] {
+        assert!(
+            !search_text.contains(implementation_term),
+            "tool_search exposes {implementation_term:?}: {search_text}"
+        );
+    }
+    let initial_names = initial
         .into_iter()
         .map(|declaration| declaration.name)
         .collect::<Vec<_>>();

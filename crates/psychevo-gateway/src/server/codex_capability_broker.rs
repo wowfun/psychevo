@@ -4409,6 +4409,7 @@ mod tests {
             description: "Review app".to_string(),
             parameters: json!({"type":"object"}),
         };
+        assert_eq!(tool.description(), "Review app");
         let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
         let run =
             tokio::spawn(tool.execute("call-1".to_string(), json!({}), AbortSignal::new(abort_rx)));

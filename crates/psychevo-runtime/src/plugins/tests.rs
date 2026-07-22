@@ -1523,11 +1523,15 @@ async fn worker_tool_call_timeout_returns_tool_error() {
         spec,
         descriptor: WorkerToolDescriptor {
             name: "cleanup_status".to_string(),
-            description: "status".to_string(),
+            description: "Remote harness vocabulary remains source-owned.".to_string(),
             parameters: json!({"type": "object", "properties": {}}),
         },
         env: BTreeMap::new(),
     };
+    assert_eq!(
+        tool.description(),
+        "Remote harness vocabulary remains source-owned."
+    );
     let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
     let output = tool
         .execute("call_1".to_string(), json!({}), AbortSignal::new(abort_rx))

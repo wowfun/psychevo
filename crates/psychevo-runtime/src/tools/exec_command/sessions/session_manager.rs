@@ -35,7 +35,7 @@ impl ToolBinding for ExecCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Run a bounded shell command in the working directory. Prefer read/write/edit for workspace file I/O, and use shell redirection only for shell-local temporary artifacts. Prefer rg for text search and rg --files for project file listing. Commands that keep running return a session_id after yield_time_ms; use write_stdin with empty chars to poll or non-empty chars to send stdin."
+        "Run a shell command. Long-running commands return a session_id for use with write_stdin."
     }
 
     fn parameters(&self) -> Value {
@@ -49,7 +49,7 @@ impl ToolBinding for ExecCommandTool {
                 },
                 "cwd": {
                     "type": "string",
-                    "description": "Working directory for the command. Relative paths resolve against the accepted cwd; absolute paths must pass permission and resource gates."
+                    "description": "Working directory for the command. Defaults to the invocation working directory; relative paths resolve from it."
                 },
                 "shell": {
                     "type": "string",
@@ -58,7 +58,7 @@ impl ToolBinding for ExecCommandTool {
                 "tty": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Run the command in a PTY and keep stdin writable. If the PTY backend is unavailable, runtime falls back to writable pipes and prefixes the first output chunk with a notice."
+                    "description": "Run the command in a PTY when available and keep stdin writable; false or omitted uses pipes."
                 },
                 "yield_time_ms": {
                     "type": "integer",
@@ -71,12 +71,12 @@ impl ToolBinding for ExecCommandTool {
                     "type": "integer",
                     "default": DEFAULT_MAX_OUTPUT_TOKENS,
                     "minimum": 1,
-                    "description": "Maximum model-visible output tokens for this result."
+                    "description": "Maximum output tokens returned for this call."
                 },
                 "login": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Run the shell as a login shell. Disabled unless permissions.allow_login_shell is true."
+                    "description": "Run the shell with login semantics when true; false or omitted uses normal shell startup."
                 }
             }
         })
@@ -117,7 +117,7 @@ impl ToolBinding for WriteStdinTool {
     }
 
     fn description(&self) -> &str {
-        "Poll a yielded exec_command session or write text to its stdin. Empty chars means poll; non-empty chars requires a stdin-capable session started with tty=true or PTY fallback."
+        "Continue a yielded exec_command session and return recent output."
     }
 
     fn parameters(&self) -> Value {
@@ -143,7 +143,7 @@ impl ToolBinding for WriteStdinTool {
                     "type": "integer",
                     "default": DEFAULT_MAX_OUTPUT_TOKENS,
                     "minimum": 1,
-                    "description": "Maximum model-visible output tokens for this result."
+                    "description": "Maximum output tokens returned for this call."
                 }
             }
         })

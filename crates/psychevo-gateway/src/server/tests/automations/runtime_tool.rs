@@ -13,6 +13,95 @@ fn gateway_turns_expose_model_facing_automation_tool() {
 }
 
 #[test]
+fn automation_declaration_is_concise_and_product_facing() {
+    let (_temp, state) = web_state();
+    let (description, parameters) = automations::automation_tool_declaration_for_test(
+        state.clone(),
+        state.inner.cwd.clone(),
+        Some("thread-1".to_string()),
+    );
+
+    assert_eq!(
+        description,
+        "Create and manage recurring or one-shot automations."
+    );
+    let mut missing = Vec::new();
+    collect_missing_automation_schema_descriptions(
+        &parameters,
+        "automation".to_string(),
+        &mut missing,
+    );
+    assert!(
+        missing.is_empty(),
+        "automation has schema properties without descriptions: {missing:?}"
+    );
+
+    let declaration_text = format!(
+        "{description}\n{}",
+        serde_json::to_string(&parameters).expect("automation parameters serialize")
+    )
+    .to_ascii_lowercase();
+    for implementation_term in [
+        "gateway-supplied",
+        "harness",
+        "model-visible",
+        "adapter",
+        "persistence",
+        "permission_mode",
+        "sandbox_override",
+    ] {
+        assert!(
+            !declaration_text.contains(implementation_term),
+            "automation exposes implementation term {implementation_term:?}: {declaration_text}"
+        );
+    }
+    assert!(
+        parameters["properties"]["target"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("current conversation"))
+    );
+    assert!(
+        parameters["properties"]["execution"]["properties"]["policy"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("requests confirmation"))
+    );
+}
+
+fn collect_missing_automation_schema_descriptions(
+    value: &Value,
+    path: String,
+    missing: &mut Vec<String>,
+) {
+    if let Some(properties) = value.get("properties").and_then(Value::as_object) {
+        for (name, property) in properties {
+            let property_path = format!("{path}.{name}");
+            if !property
+                .get("description")
+                .and_then(Value::as_str)
+                .is_some_and(|description| !description.trim().is_empty())
+            {
+                missing.push(property_path.clone());
+            }
+            collect_missing_automation_schema_descriptions(property, property_path, missing);
+        }
+    }
+    if let Some(items) = value.get("items") {
+        collect_missing_automation_schema_descriptions(items, format!("{path}[]"), missing);
+    }
+    for keyword in ["oneOf", "anyOf", "allOf"] {
+        if let Some(alternatives) = value.get(keyword).and_then(Value::as_array) {
+            for (index, alternative) in alternatives.iter().enumerate() {
+                collect_missing_automation_schema_descriptions(
+                    alternative,
+                    format!("{path}.{keyword}[{index}]"),
+                    missing,
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn automation_tool_create_defaults_to_current_thread() {
     let (_temp, state) = web_state();
     let thread_id = state
