@@ -221,9 +221,12 @@ pub(crate) mod lsp_tests {
             env_for(&home, &path_dir),
             None,
         );
-        let target = cwd.join("add.py");
-        let value = write_text_to_target(&tool, &target, "print('ok')\n", false, None, None)
-            .expect("write");
+        let value = write_tool_impl_for_call(
+            tool,
+            None,
+            json!({"path": "add.py", "content": "print('ok')\n"}),
+        )
+        .expect("write");
         assert_eq!(value["error"], Value::Null);
         assert!(
             !marker.exists(),

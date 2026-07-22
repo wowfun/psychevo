@@ -14,7 +14,7 @@ impl ToolBinding for WriteTool {
     }
 
     fn description(&self) -> &str {
-        "Create or completely replace an authorized UTF-8 text file. Relative paths resolve from the working directory; writes outside it pause for harness approval unless already covered by policy or a scoped grant. Use write instead of shell redirection when writing project files. Creates missing parent directories when allowed, then returns lint and LSP diagnostics when available."
+        "Create or completely replace a text file. Existing files must be read completely and remain unchanged before replacement."
     }
 
     fn parameters(&self) -> Value {
@@ -24,7 +24,7 @@ impl ToolBinding for WriteTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Authorized file path to create or replace; relative paths resolve from the working directory"
+                    "description": "File path to create or replace; relative paths resolve from the working directory"
                 },
                 "content": {
                     "type": "string",
@@ -68,32 +68,50 @@ pub(crate) fn write_tool_impl_for_call(
     let content = required_string(&args, "content")?;
     let (target, dirs_created) = tool.resolve_write_target(path)?;
     tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
+    let initially_existed = target.exists();
     let _locks = acquire_path_locks(std::slice::from_ref(&target));
-    let warning = stale_file_warning(tool.task_id(), &target);
-    let pre_content = if target.exists() {
-        Some(
-            String::from_utf8(fs::read(&target)?)
-                .map_err(|_| Error::Message("invalid UTF-8".to_string()))?,
-        )
+    let (pre_content, persisted_content, baseline) = if initially_existed {
+        if !target.exists() {
+            return Err(MutationConflict::TargetMissing {
+                path: target.clone(),
+            }
+            .into());
+        }
+        let expected = require_fresh_read(tool.task_id(), &target)?;
+        let (text, snapshot_version) = read_text_snapshot(&LOCAL_FILE_MUTATION, &target)?;
+        if snapshot_version != expected {
+            return Err(MutationConflict::Modified {
+                path: target.clone(),
+            }
+            .into());
+        }
+        let normalized = normalize_lf(content.trim_start_matches('\u{feff}'));
+        let persisted = restore_text_file(&text, &normalized);
+        let baseline = snapshot_lsp_baseline(&tool, &target, Some(&text.original));
+        LOCAL_FILE_MUTATION
+            .replace(tool.task_id(), &target, expected, persisted.as_bytes())
+            .map_err(Error::from)?;
+        (Some(text.original), persisted, baseline)
     } else {
-        None
+        let baseline = snapshot_lsp_baseline(&tool, &target, None);
+        LOCAL_FILE_MUTATION
+            .create(tool.task_id(), &target, content.as_bytes())
+            .map_err(Error::from)?;
+        (None, content.to_string(), baseline)
     };
-    let result = write_text_to_target(
+    tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
+        path: tool.relative(&target),
+        before: pre_content.clone(),
+        after: Some(persisted_content.clone()),
+    });
+    Ok(write_success_value(
         &tool,
         &target,
-        content,
+        &persisted_content,
         dirs_created,
         pre_content.as_deref(),
-        warning,
-    );
-    if result.is_ok() {
-        tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
-            path: tool.relative(&target),
-            before: pre_content,
-            after: Some(content.to_string()),
-        });
-    }
-    result
+        baseline,
+    ))
 }
 
 #[cfg(test)]
@@ -246,12 +264,10 @@ pub(crate) mod write_tool_tests {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("notes.txt"), "before\n").expect("seed");
         let mutations = Arc::new(Mutex::new(Vec::new()));
+        let tool = cwd_tool_with_mutations(temp.path(), mutations.clone());
+        read_tool_impl(tool.clone(), json!({"path": "notes.txt"})).expect("read");
 
-        write_tool_impl(
-            cwd_tool_with_mutations(temp.path(), mutations.clone()),
-            json!({"path": "notes.txt", "content": "after\n"}),
-        )
-        .expect("write");
+        write_tool_impl(tool, json!({"path": "notes.txt", "content": "after\n"})).expect("write");
 
         assert_eq!(
             *mutations.lock().expect("mutations poisoned"),
@@ -264,19 +280,30 @@ pub(crate) mod write_tool_tests {
     }
 
     #[test]
-    fn write_tool_rejects_invalid_utf8_existing_file() {
+    fn write_tool_rejects_unread_existing_file_without_inspecting_or_changing_it() {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("bad.txt"), [0xff, 0xfe]).expect("seed");
         let err = write_tool_impl(
             cwd_tool(temp.path()),
             json!({"path": "bad.txt", "content": "replacement\n"}),
         )
-        .expect_err("invalid preexisting utf8");
-        assert!(err.to_string().contains("invalid UTF-8"));
+        .expect_err("unread existing file");
+        assert!(
+            err.to_string().starts_with(&format!(
+                "{} already exists",
+                temp.path().join("bad.txt").display()
+            )),
+            "unexpected conflict: {err}"
+        );
+        assert!(err.to_string().contains("Read the complete existing file"));
+        assert_eq!(
+            fs::read(temp.path().join("bad.txt")).expect("unchanged"),
+            [0xff, 0xfe]
+        );
     }
 
     #[test]
-    fn write_tool_warns_after_partial_read() {
+    fn write_tool_fails_after_partial_read_without_modifying_the_file() {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("partial.txt"), "one\ntwo\nthree\n").expect("seed");
         let tool = cwd_tool_with_task(temp.path(), "partial-read-test");
@@ -285,26 +312,120 @@ pub(crate) mod write_tool_tests {
             json!({"path": "partial.txt", "offset": 1, "limit": 1}),
         )
         .expect("read");
-        let value = write_tool_impl(
+        let err = write_tool_impl(
             tool,
             json!({"path": "partial.txt", "content": "replacement\n"}),
         )
-        .expect("write");
-        assert!(value["warning"].as_str().unwrap().contains("partial"));
+        .expect_err("partial read conflict");
+        assert!(err.to_string().contains("partial or truncated"));
+        assert_eq!(
+            fs::read_to_string(temp.path().join("partial.txt")).expect("unchanged"),
+            "one\ntwo\nthree\n"
+        );
     }
 
     #[test]
-    fn write_tool_warns_after_sibling_write() {
+    fn write_tool_fails_after_sibling_write_even_when_mtime_is_restored() {
         let temp = tempfile::tempdir().expect("temp");
         fs::write(temp.path().join("shared.txt"), "one\n").expect("seed");
+        let path = temp.path().join("shared.txt");
+        let original_mtime = fs::metadata(&path)
+            .and_then(|metadata| metadata.modified())
+            .expect("mtime");
         let reader = cwd_tool_with_task(temp.path(), "reader-agent");
         let writer = cwd_tool_with_task(temp.path(), "writer-agent");
         read_tool_impl(reader.clone(), json!({"path": "shared.txt"})).expect("read");
+        read_tool_impl(writer.clone(), json!({"path": "shared.txt"})).expect("writer read");
         write_tool_impl(writer, json!({"path": "shared.txt", "content": "two\n"}))
             .expect("sibling write");
-        let value = write_tool_impl(reader, json!({"path": "shared.txt", "content": "three\n"}))
-            .expect("reader write");
-        assert!(value["warning"].as_str().unwrap().contains("sibling agent"));
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|file| file.set_times(fs::FileTimes::new().set_modified(original_mtime)))
+            .expect("restore mtime");
+        let err = write_tool_impl(reader, json!({"path": "shared.txt", "content": "three\n"}))
+            .expect_err("sibling conflict");
+        assert!(err.to_string().contains("sibling agent"));
+        assert_eq!(fs::read_to_string(path).expect("winner"), "two\n");
+    }
+
+    #[test]
+    fn write_tool_accepts_full_read_and_refreshes_its_own_version() {
+        let temp = tempfile::tempdir().expect("temp");
+        fs::write(temp.path().join("note.txt"), "one\n").expect("seed");
+        let tool = cwd_tool_with_task(temp.path(), "owner-agent");
+        read_tool_impl(tool.clone(), json!({"path": "note.txt"})).expect("read");
+        let first = write_tool_impl(
+            tool.clone(),
+            json!({"path": "note.txt", "content": "two\n"}),
+        )
+        .expect("first write");
+        assert!(first.get("warning").is_none());
+        write_tool_impl(tool, json!({"path": "note.txt", "content": "three\n"}))
+            .expect("own write refreshes version");
+        assert_eq!(
+            fs::read_to_string(temp.path().join("note.txt")).expect("file"),
+            "three\n"
+        );
+    }
+
+    #[test]
+    fn write_tool_rejects_changed_mtime_after_full_read() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("note.txt");
+        fs::write(&path, "one\n").expect("seed");
+        let tool = cwd_tool_with_task(temp.path(), "mtime-agent");
+        read_tool_impl(tool.clone(), json!({"path": "note.txt"})).expect("read");
+        fs::write(&path, "external\n").expect("external write");
+        let changed = SystemTime::now() + Duration::from_secs(2);
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|file| file.set_times(fs::FileTimes::new().set_modified(changed)))
+            .expect("change mtime");
+        let err = write_tool_impl(tool, json!({"path": "note.txt", "content": "agent\n"}))
+            .expect_err("mtime conflict");
+        assert!(err.to_string().contains("changed on disk"));
+        assert_eq!(
+            fs::read_to_string(path).expect("external wins"),
+            "external\n"
+        );
+    }
+
+    #[test]
+    fn write_tool_preserves_existing_bom_and_crlf() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("win.txt");
+        fs::write(&path, "\u{feff}one\r\ntwo\r\n").expect("seed");
+        let tool = cwd_tool_with_task(temp.path(), "style-agent");
+        read_tool_impl(tool.clone(), json!({"path": "win.txt"})).expect("read");
+        write_tool_impl(tool, json!({"path": "win.txt", "content": "uno\ndos\n"})).expect("write");
+        assert_eq!(
+            fs::read_to_string(path).expect("styled"),
+            "\u{feff}uno\r\ndos\r\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_tool_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("script.sh");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").expect("seed");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+        let tool = cwd_tool_with_task(temp.path(), "mode-agent");
+        read_tool_impl(tool.clone(), json!({"path": "script.sh"})).expect("read");
+        write_tool_impl(
+            tool,
+            json!({"path": "script.sh", "content": "#!/bin/sh\nexit 1\n"}),
+        )
+        .expect("write");
+        assert_eq!(
+            fs::metadata(path).expect("metadata").permissions().mode() & 0o777,
+            0o755
+        );
     }
 
     #[test]

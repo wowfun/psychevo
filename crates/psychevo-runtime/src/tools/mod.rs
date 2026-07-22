@@ -411,10 +411,10 @@ pub(crate) fn mode_instruction_for_tool_availability(
 pub(crate) mod cwd;
 #[allow(unused_imports)]
 pub(crate) use cwd::*;
-#[path = "file_state.rs"]
-pub(crate) mod file_state;
+#[path = "file_mutation.rs"]
+pub(crate) mod file_mutation;
 #[allow(unused_imports)]
-pub(crate) use file_state::*;
+pub(crate) use file_mutation::*;
 #[path = "write_support.rs"]
 pub(crate) mod write_support;
 #[allow(unused_imports)]

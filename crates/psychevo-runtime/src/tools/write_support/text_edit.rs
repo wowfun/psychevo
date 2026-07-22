@@ -37,10 +37,8 @@ pub(crate) struct EditSuccess {
     pub(crate) files_modified: Vec<String>,
     pub(crate) files_created: Vec<String>,
     pub(crate) files_deleted: Vec<String>,
-    pub(crate) files_moved: Vec<Value>,
     pub(crate) lint: Option<Value>,
     pub(crate) lsp_diagnostics: Option<String>,
-    pub(crate) warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,14 +46,22 @@ pub(crate) enum V4aOperationKind {
     Add,
     Update,
     Delete,
-    Move,
+}
+
+impl V4aOperationKind {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Update => "update",
+            Self::Delete => "delete",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct V4aOperation {
     pub(crate) kind: V4aOperationKind,
     pub(crate) file_path: String,
-    pub(crate) new_path: Option<String>,
     pub(crate) hunks: Vec<V4aHunk>,
 }
 
@@ -71,8 +77,7 @@ pub(crate) struct V4aLine {
     pub(crate) content: String,
 }
 
-pub(crate) fn read_text_file(path: &Path) -> Result<TextFile> {
-    let bytes = fs::read(path)?;
+pub(crate) fn text_file_from_bytes(bytes: Vec<u8>) -> Result<TextFile> {
     if bytes.contains(&0) {
         return Err(Error::Message("binary files are not supported".to_string()));
     }
@@ -90,6 +95,15 @@ pub(crate) fn read_text_file(path: &Path) -> Result<TextFile> {
     })
 }
 
+pub(crate) fn read_text_snapshot(
+    backend: &dyn FileMutationBackend,
+    path: &Path,
+) -> Result<(TextFile, FileVersion)> {
+    let snapshot = backend.snapshot(path).map_err(Error::from)?;
+    let text = text_file_from_bytes(snapshot.bytes)?;
+    Ok((text, snapshot.version))
+}
+
 pub(crate) fn restore_text_file(text: &TextFile, normalized: &str) -> String {
     let restored = restore_line_endings(normalized, text.line_ending);
     if text.bom {
@@ -102,8 +116,8 @@ pub(crate) fn restore_text_file(text: &TextFile, normalized: &str) -> String {
 pub(crate) fn result_output(result: Result<Value>) -> ToolOutput {
     match result {
         Ok(value) if value_reports_error(&value) => ToolOutput {
+            model_content: partial_patch_failure_model_content(&value),
             json: value,
-            model_content: None,
             attachments: Vec::new(),
             is_error: true,
         },
@@ -112,28 +126,49 @@ pub(crate) fn result_output(result: Result<Value>) -> ToolOutput {
     }
 }
 
-pub(crate) fn write_text_to_target(
+pub(crate) fn partial_patch_failure_model_content(value: &Value) -> Option<String> {
+    let failed = value.get("failed_operation")?;
+    let index = failed.get("index")?.as_u64()?;
+    let kind = failed.get("kind")?.as_str()?;
+    let path = failed.get("path")?.as_str()?;
+    let committed = ["files_modified", "files_created", "files_deleted"]
+        .into_iter()
+        .filter_map(|field| value.get(field).and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let summary = if committed.is_empty() {
+        "No earlier operations were committed.".to_string()
+    } else {
+        format!("Committed before failure: {}.", committed.join(", "))
+    };
+    let reason = value
+        .get("error")
+        .and_then(Value::as_str)
+        .map(|error| bounded_model_error(error, 400))?;
+    Some(format!(
+        "Patch failed at operation {index} ({kind} {path}). Reason: {reason}. {summary}"
+    ))
+}
+
+fn bounded_model_error(error: &str, max_chars: usize) -> String {
+    let compact = error.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = compact.chars();
+    let mut bounded = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        bounded.push('…');
+    }
+    bounded
+}
+
+pub(crate) fn write_success_value(
     tool: &CwdTool,
     target: &Path,
     content: &str,
     dirs_created: bool,
     pre_content: Option<&str>,
-    warning: Option<String>,
-) -> Result<Value> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let baseline = snapshot_lsp_baseline(tool, target, pre_content);
-    fs::write(target, content)?;
-    let verify = String::from_utf8(fs::read(target)?)
-        .map_err(|_| Error::Message("invalid UTF-8 after write".to_string()))?;
-    if verify != content {
-        return Err(Error::Message(format!(
-            "post-write verification failed for {}",
-            target.display()
-        )));
-    }
-    note_file_write(tool.task_id(), target);
+    baseline: Option<LspBaseline>,
+) -> Value {
     let lint = check_lint_delta(target, pre_content, content);
     let lint_allows_lsp = lint_allows_lsp(&lint);
     let lsp_diagnostics = if lint_allows_lsp {
@@ -141,15 +176,14 @@ pub(crate) fn write_text_to_target(
     } else {
         None
     };
-    Ok(json!({
+    json!({
         "path": tool.relative(target),
         "bytes_written": content.len(),
         "dirs_created": dirs_created,
         "lint": lint,
         "lsp_diagnostics": lsp_diagnostics,
-        "warning": warning,
         "error": null
-    }))
+    })
 }
 
 pub(crate) fn edit_success_value(result: EditSuccess) -> Value {
@@ -159,10 +193,8 @@ pub(crate) fn edit_success_value(result: EditSuccess) -> Value {
         "files_modified": result.files_modified,
         "files_created": result.files_created,
         "files_deleted": result.files_deleted,
-        "files_moved": result.files_moved,
         "lint": result.lint,
         "lsp_diagnostics": result.lsp_diagnostics,
-        "warning": result.warning,
         "error": null
     })
 }
@@ -207,29 +239,13 @@ pub(crate) fn git_patch_delete(path: &str, content: &str) -> String {
     patch
 }
 
-pub(crate) fn git_patch_move(source_path: &str, dest_path: &str) -> String {
-    format!(
-        "diff --git a/{source_path} b/{dest_path}\nsimilarity index 100%\nrename from {source_path}\nrename to {dest_path}\n"
-    )
-}
-
-pub(crate) fn write_edit_text(
+pub(crate) fn post_write_feedback(
     tool: &CwdTool,
     target: &Path,
     content: &str,
     pre_content: Option<&str>,
+    baseline: Option<LspBaseline>,
 ) -> Result<(Option<Value>, Option<String>)> {
-    let baseline = snapshot_lsp_baseline(tool, target, pre_content);
-    fs::write(target, content)?;
-    let verify = String::from_utf8(fs::read(target)?)
-        .map_err(|_| Error::Message("invalid UTF-8 after write".to_string()))?;
-    if normalize_lf(&verify) != normalize_lf(content) {
-        return Err(Error::Message(format!(
-            "post-write verification failed for {}",
-            target.display()
-        )));
-    }
-    note_file_write(tool.task_id(), target);
     let lint = check_lint_delta(target, pre_content, content);
     let lsp = if lint_allows_lsp(&lint) {
         lsp_diagnostics_after(tool, target, pre_content, content, baseline)
@@ -406,6 +422,9 @@ pub(crate) fn fuzzy_find_and_replace(
         if matches.is_empty() {
             continue;
         }
+        if matches!(strategy, "block_anchor" | "context_aware") {
+            return Err(candidate_only_error(content, strategy, &matches));
+        }
         if matches.len() > 1 && !replace_all {
             return Err(format!(
                 "Found {} matches for old_string. Provide more context to make it unique, or use replace_all=true.",
@@ -418,7 +437,7 @@ pub(crate) fn fuzzy_find_and_replace(
             return Err(err);
         }
         return Ok(FuzzyOutcome {
-            content: apply_replacements(content, &matches, new_string),
+            content: apply_fuzzy_replacements(content, &matches, old_string, new_string, strategy),
         });
     }
     Err(format!(
@@ -436,7 +455,7 @@ pub(crate) fn strategy_exact(content: &str, pattern: &str) -> Vec<MatchRange> {
             start: abs,
             end: abs + pattern.len(),
         });
-        start = abs.saturating_add(1);
+        start = abs.saturating_add(pattern.len().max(1));
         if start > content.len() {
             break;
         }
@@ -729,18 +748,195 @@ pub(crate) fn norm_matches_to_original(
     out
 }
 
-pub(crate) fn apply_replacements(
+pub(crate) fn apply_fuzzy_replacements(
     content: &str,
     matches: &[MatchRange],
+    old_string: &str,
     new_string: &str,
+    strategy: &str,
 ) -> String {
     let mut result = content.to_string();
     let mut matches = matches.to_vec();
     matches.sort_by_key(|m| std::cmp::Reverse(m.start));
     for m in matches {
-        result.replace_range(m.start..m.end, new_string);
+        let region = &content[m.start..m.end];
+        let mut replacement = maybe_unescape_new_string(new_string, region);
+        if strategy == "unicode_normalized" {
+            replacement = preserve_unicode_in_replacement(region, old_string, &replacement);
+        }
+        if !matches!(strategy, "exact" | "escape_normalized") {
+            replacement = reindent_replacement(region, old_string, &replacement);
+        }
+        result.replace_range(m.start..m.end, &replacement);
     }
     result
+}
+
+pub(crate) fn candidate_only_error(
+    content: &str,
+    strategy: &str,
+    matches: &[MatchRange],
+) -> String {
+    let shown = matches
+        .iter()
+        .take(3)
+        .map(|range| {
+            let start = content[..range.start]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+                + 1;
+            let end = start
+                + content[range.start..range.end]
+                    .bytes()
+                    .filter(|byte| *byte == b'\n')
+                    .count();
+            if start == end {
+                start.to_string()
+            } else {
+                format!("{start}-{end}")
+            }
+        })
+        .collect::<Vec<_>>();
+    let remaining = matches.len().saturating_sub(shown.len());
+    let suffix = if remaining == 0 {
+        String::new()
+    } else {
+        format!(" (+{remaining} more)")
+    };
+    format!(
+        "No changes were applied: {strategy} found candidate line range(s) {}{suffix}. Read the file and retry with a more precise old_string.",
+        shown.join(", ")
+    )
+}
+
+pub(crate) fn maybe_unescape_new_string(new_string: &str, file_region: &str) -> String {
+    let mut out = new_string.to_string();
+    if out.contains("\\t") && file_region.contains('\t') {
+        out = out.replace("\\t", "\t");
+    }
+    if out.contains("\\r") && file_region.contains('\r') {
+        out = out.replace("\\r", "\r");
+    }
+    out
+}
+
+pub(crate) fn reindent_replacement(
+    file_region: &str,
+    old_string: &str,
+    new_string: &str,
+) -> String {
+    let Some(old_first) = old_string.lines().find(|line| !line.trim().is_empty()) else {
+        return new_string.to_string();
+    };
+    let Some(file_first) = file_region.lines().find(|line| !line.trim().is_empty()) else {
+        return new_string.to_string();
+    };
+    let old_indent = leading_whitespace(old_first);
+    let file_indent = leading_whitespace(file_first);
+    if old_indent == file_indent || new_string.is_empty() {
+        return new_string.to_string();
+    }
+    new_string
+        .split('\n')
+        .map(|line| {
+            if line.trim().is_empty() {
+                return line.to_string();
+            }
+            if let Some(remainder) = line.strip_prefix(old_indent) {
+                format!("{file_indent}{remainder}")
+            } else {
+                format!("{file_indent}{}", line.trim_start_matches([' ', '\t']))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn leading_whitespace(line: &str) -> &str {
+    let end = line
+        .char_indices()
+        .find_map(|(idx, ch)| (!matches!(ch, ' ' | '\t')).then_some(idx))
+        .unwrap_or(line.len());
+    &line[..end]
+}
+
+pub(crate) fn preserve_unicode_in_replacement(
+    file_region: &str,
+    old_string: &str,
+    new_string: &str,
+) -> String {
+    let normalized_old = unicode_normalize(old_string);
+    if normalized_old != unicode_normalize(file_region) {
+        return new_string.to_string();
+    }
+    let new_string = new_string.to_string();
+    let diff = TextDiff::from_chars(&normalized_old, &new_string);
+    let new_chars = new_string.chars().collect::<Vec<_>>();
+    let boundaries = normalized_char_boundaries(file_region);
+    let mut out = String::new();
+    for operation in diff.ops() {
+        let (tag, old_range, new_range) = operation.as_tag_tuple();
+        match tag {
+            similar::DiffTag::Equal => {
+                push_unicode_equal_segment(
+                    &mut out,
+                    file_region,
+                    &boundaries,
+                    old_range,
+                    new_range,
+                    &new_chars,
+                );
+            }
+            similar::DiffTag::Insert | similar::DiffTag::Replace => {
+                out.extend(&new_chars[new_range]);
+            }
+            similar::DiffTag::Delete => {}
+        }
+    }
+    out
+}
+
+fn push_unicode_equal_segment(
+    out: &mut String,
+    original: &str,
+    boundaries: &[(usize, usize)],
+    old_range: std::ops::Range<usize>,
+    new_range: std::ops::Range<usize>,
+    new_chars: &[char],
+) {
+    for boundary in boundaries.windows(2) {
+        let [
+            (original_start, normalized_start),
+            (original_end, normalized_end),
+        ] = boundary
+        else {
+            continue;
+        };
+        let retained_start = (*normalized_start).max(old_range.start);
+        let retained_end = (*normalized_end).min(old_range.end);
+        if retained_start >= retained_end {
+            continue;
+        }
+        if retained_start == *normalized_start && retained_end == *normalized_end {
+            out.push_str(&original[*original_start..*original_end]);
+        } else {
+            let new_start = new_range.start + retained_start - old_range.start;
+            let new_end = new_range.start + retained_end - old_range.start;
+            out.extend(&new_chars[new_start..new_end]);
+        }
+    }
+}
+
+pub(crate) fn normalized_char_boundaries(text: &str) -> Vec<(usize, usize)> {
+    let mut boundaries = Vec::new();
+    let mut normalized = 0usize;
+    for (byte, ch) in text.char_indices() {
+        boundaries.push((byte, normalized));
+        normalized += unicode_normalize(&ch.to_string()).chars().count();
+    }
+    boundaries.push((text.len(), normalized));
+    boundaries
 }
 
 pub(crate) fn detect_escape_drift(

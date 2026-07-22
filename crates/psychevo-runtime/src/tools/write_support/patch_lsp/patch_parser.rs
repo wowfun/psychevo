@@ -31,7 +31,6 @@ pub(crate) fn parse_v4a_patch(patch: &str) -> Result<Vec<V4aOperation>> {
             current = Some(V4aOperation {
                 kind: V4aOperationKind::Update,
                 file_path: path,
-                new_path: None,
                 hunks: Vec::new(),
             });
         } else if let Some(path) = marker_value(line, "*** Add File:") {
@@ -39,7 +38,6 @@ pub(crate) fn parse_v4a_patch(patch: &str) -> Result<Vec<V4aOperation>> {
             current = Some(V4aOperation {
                 kind: V4aOperationKind::Add,
                 file_path: path,
-                new_path: None,
                 hunks: Vec::new(),
             });
             current_hunk = Some(V4aHunk {
@@ -51,30 +49,15 @@ pub(crate) fn parse_v4a_patch(patch: &str) -> Result<Vec<V4aOperation>> {
             operations.push(V4aOperation {
                 kind: V4aOperationKind::Delete,
                 file_path: path,
-                new_path: None,
                 hunks: Vec::new(),
             });
-        } else if let Some(rest) = marker_value(line, "*** Move File:") {
-            push_v4a_current(&mut operations, &mut current, &mut current_hunk);
-            let Some((src, dst)) = rest.split_once("->") else {
-                return Err(Error::Message(format!(
-                    "invalid move marker: expected '*** Move File: old -> new', got {line}"
-                )));
-            };
-            operations.push(V4aOperation {
-                kind: V4aOperationKind::Move,
-                file_path: src.trim().to_string(),
-                new_path: Some(dst.trim().to_string()),
-                hunks: Vec::new(),
-            });
-        } else if let Some(path) = marker_value(line, "*** Move to:") {
-            let Some(op) = current.as_mut() else {
-                return Err(Error::Message(
-                    "*** Move to without current file".to_string(),
-                ));
-            };
-            op.new_path = Some(path);
-            op.kind = V4aOperationKind::Move;
+        } else if marker_value(line, "*** Move File:").is_some()
+            || marker_value(line, "*** Move to:").is_some()
+        {
+            return Err(Error::Message(
+                "patch moves are not supported; use Add/Delete or an explicit shell operation"
+                    .to_string(),
+            ));
         } else if line.starts_with("@@") {
             if let Some(op) = current.as_mut()
                 && let Some(hunk) = current_hunk.take()
@@ -127,14 +110,6 @@ pub(crate) fn parse_v4a_patch(patch: &str) -> Result<Vec<V4aOperation>> {
         if op.kind == V4aOperationKind::Update && op.hunks.is_empty() {
             return Err(Error::Message(format!(
                 "update operation has no hunks: {}",
-                op.file_path
-            )));
-        }
-        if op.kind == V4aOperationKind::Move
-            && op.new_path.as_deref().unwrap_or_default().trim().is_empty()
-        {
-            return Err(Error::Message(format!(
-                "move operation missing destination: {}",
                 op.file_path
             )));
         }

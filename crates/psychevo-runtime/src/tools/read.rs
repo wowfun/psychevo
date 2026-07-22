@@ -14,7 +14,7 @@ impl ToolBinding for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read an authorized UTF-8 text file from the host filesystem. Relative paths resolve from the working directory. Use read instead of shell cat/head/tail/sed for file contents. Output is bounded to 50KB or 2000 lines; use offset and limit to continue through large files."
+        "Read a UTF-8 text file, returning at most 50KB or 2000 lines. Use offset to continue."
     }
 
     fn parameters(&self) -> Value {
@@ -24,17 +24,17 @@ impl ToolBinding for ReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Authorized UTF-8 text file path; relative paths resolve from the working directory"
+                    "description": "UTF-8 text file path; relative paths resolve from the working directory"
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "1-based line number to start reading from; values below 1 are treated as 1",
+                    "description": "1-based line number to start reading from",
                     "default": 1,
                     "minimum": 1
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of lines to read; values below 1 become 1 and values above 2000 become 2000",
+                    "description": "Maximum number of lines to read, from 1 to 2000",
                     "minimum": 1,
                     "maximum": READ_MAX_LINES
                 }
@@ -94,7 +94,9 @@ pub(crate) fn read_tool_impl(tool: CwdTool, args: Value) -> Result<Value> {
         }
         Err(err) => return Err(err),
     };
-    let bytes = fs::read(&target)?;
+    let _locks = acquire_path_locks(std::slice::from_ref(&target));
+    let snapshot = LOCAL_FILE_MUTATION.snapshot(&target).map_err(Error::from)?;
+    let bytes = snapshot.bytes;
     let file_size = bytes.len();
     if bytes.contains(&0) {
         return Err(Error::Message("binary files are not supported".to_string()));
@@ -124,6 +126,7 @@ pub(crate) fn read_tool_impl(tool: CwdTool, args: Value) -> Result<Value> {
     record_file_read(
         tool.task_id(),
         &target,
+        snapshot.version,
         offset > 1 || truncated_by.is_some(),
     );
     let next_offset = if truncated_by.is_some() {
@@ -319,7 +322,7 @@ pub(crate) mod read_tool_tests {
 
         assert!(tool.description().contains("50KB"));
         assert!(tool.description().contains("2000 lines"));
-        assert!(tool.description().contains("cat/head/tail/sed"));
+        assert!(tool.description().contains("Use offset to continue"));
 
         let parameters = tool.parameters();
         assert_eq!(parameters["required"], json!(["path"]));
@@ -335,6 +338,11 @@ pub(crate) mod read_tool_tests {
         assert_eq!(
             parameters["properties"]["limit"]["maximum"],
             json!(READ_MAX_LINES)
+        );
+        assert!(
+            parameters["properties"]["limit"]["description"]
+                .as_str()
+                .is_some_and(|description| description.contains("1 to 2000"))
         );
     }
 
