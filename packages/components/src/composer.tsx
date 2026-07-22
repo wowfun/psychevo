@@ -15,6 +15,7 @@ export interface ComposerProps {
   modeControlVisible?: boolean;
   planModeAvailable?: boolean;
   preActionControls?: ReactNode;
+  placeholder?: string;
   promptSubmitBlockReason?: string | undefined;
   promptSubmitDisabled?: boolean;
   promptTextUnavailableReason?: string | null;
@@ -67,6 +68,7 @@ export function Composer({
   modeControlVisible = true,
   planModeAvailable = true,
   preActionControls,
+  placeholder = "Ask Psychevo...",
   promptSubmitBlockReason,
   promptSubmitDisabled = false,
   promptTextUnavailableReason,
@@ -420,6 +422,7 @@ export function Composer({
   const actionButton = running ? (
     <IconButton
       className="pevo-primaryButton pevo-sendButton is-interrupt"
+      disabled={disabled}
       icon={<span className="pevo-stopGlyph" />}
       label="Interrupt active turn"
       onClick={onInterrupt}
@@ -479,7 +482,7 @@ export function Composer({
           onBlur={cancelCompletion}
           onPaste={handlePaste}
           onSelect={(event) => scheduleCompletion(event.currentTarget.value, event.currentTarget.selectionStart)}
-          placeholder={shellMode ? "shell command" : "Ask Psychevo..."}
+          placeholder={shellMode ? "shell command" : placeholder}
           rows={1}
           disabled={disabled}
         />

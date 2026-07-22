@@ -24,6 +24,7 @@ export function ComposerRuntimeControls({
   targetId,
   contextError,
   contextLoading,
+  preparing = false,
   onTargetChange,
   onControlChange
 }: {
@@ -36,6 +37,7 @@ export function ComposerRuntimeControls({
   targetId: string;
   contextError: string | null;
   contextLoading: boolean;
+  preparing?: boolean;
   onTargetChange(targetId: string): void;
   onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
@@ -51,6 +53,7 @@ export function ComposerRuntimeControls({
         disabled={disabled}
         targetId={targetId}
         contextLoading={contextLoading}
+        preparing={preparing}
         onTargetChange={onTargetChange}
         onControlChange={onControlChange}
       />
@@ -74,6 +77,7 @@ function AgentRuntimeSelector({
   disabled,
   targetId,
   contextLoading,
+  preparing,
   onTargetChange,
   onControlChange
 }: {
@@ -85,6 +89,7 @@ function AgentRuntimeSelector({
   disabled: boolean;
   targetId: string;
   contextLoading: boolean;
+  preparing: boolean;
   onTargetChange(targetId: string): void;
   onControlChange(control: ThreadControlDescriptorView, value: unknown): void;
 }) {
@@ -92,9 +97,11 @@ function AgentRuntimeSelector({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedTarget = targets.find((target) => target.targetId === targetId) ?? null;
-  const agentLabel = selectedTarget?.agentLabel || "Select Agent";
-  const profileLabel = selectedTarget?.profileLabel || "Runtime Profile";
-  const displayLabel = selectedTarget ? agentTargetDisplayLabel(selectedTarget, profiles) : agentLabel;
+  const agentLabel = preparing ? "Preparing…" : selectedTarget?.agentLabel || "Select Agent";
+  const profileLabel = preparing ? "Preparing…" : selectedTarget?.profileLabel || "Runtime Profile";
+  const displayLabel = preparing
+    ? "Preparing…"
+    : selectedTarget ? agentTargetDisplayLabel(selectedTarget, profiles) : agentLabel;
   const optionControls = controls.filter((control) => (
     control.surfaceRole === "advanced" && control.id !== "permissionMode"
   ));

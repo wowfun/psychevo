@@ -123,7 +123,6 @@ export function shouldRetainFirstTurnDraftContext(
     || !threadId
     || !current
     || current.binding
-    || current.selectionState !== "draft"
     || !current.selectedTargetId
   ) {
     return false;

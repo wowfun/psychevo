@@ -56,6 +56,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     commandFeedback,
     commands,
     composerPresentationReady,
+    composerShellVisible,
     contextUsage,
     controls,
     copyText,
@@ -190,7 +191,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
     onReadAloudText,
     onVoiceAutoSpeakToggle,
     onVoiceDictationToggle,
-    onVoiceRealtimeToggle
+    onVoiceRealtimeToggle,
+    onComposerRetry
   } = props;
 
   const workspaceFileLinks: WorkspaceFileLinkContext | undefined = workspaceFiles
@@ -254,11 +256,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
   const [deleteSessionPending, setDeleteSessionPending] = useState(false);
   const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
   const draftSession = showSessionChrome && !currentThreadId;
+  const composerInteractionDisabled = disabled || !composerPresentationReady;
   const composerJourneyState = currentThreadId
     ? "bound"
     : runtimeOptionsError
       ? "blocked"
-      : runtimeOptionsLoading || !contextMatchesTarget
+      : !composerPresentationReady || runtimeOptionsLoading || !contextMatchesTarget
         ? "opening"
         : turnSendable
           ? "ready"
@@ -696,7 +699,25 @@ export function WorkbenchLayout(props: Record<string, any>) {
               />
             )}
           </div>
-          {showSessionChrome && composerPresentationReady && <div className="composerDock" ref={composerDockRef}>
+          {showSessionChrome && composerShellVisible && <div
+            aria-busy={!composerPresentationReady}
+            className="composerDock"
+            ref={composerDockRef}
+          >
+            {!composerPresentationReady && runtimeOptionsError && (
+              <div className="composerPreparingError" role="alert">
+                <span>{runtimeOptionsError}</span>
+                <ActionButton
+                  disabled={runtimeOptionsLoading}
+                  onClick={() => void runAction(async () => onComposerRetry?.())}
+                  size="compact"
+                  type="button"
+                  variant="caution"
+                >
+                  Retry
+                </ActionButton>
+              </div>
+            )}
             {snapshot.historyEditing?.kind === "conversationEdit" && (
               <div className="historyEditingStrip" role="status">
                 <span>{snapshot.historyEditing.hiddenEntryCount} hidden {snapshot.historyEditing.hiddenEntryCount === 1 ? "entry" : "entries"}</span>
@@ -741,8 +762,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   ))
                 };
               }}
-              disabled={disabled}
+              disabled={composerInteractionDisabled}
               draftPatch={props.composerDraftPatch ?? undefined}
+              placeholder={composerPresentationReady ? "Ask Psychevo..." : "Preparing runtime environment…"}
               leftControls={(
                 <>
                   <ComposerRuntimeControls
@@ -751,10 +773,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     profiles={runtimeContext?.profiles ?? []}
                     targets={runtimeContext?.compatibleTargets ?? []}
                     controlValues={runtimeControlDrafts}
-                    disabled={disabled}
+                    disabled={composerInteractionDisabled}
                     targetId={selectedTargetId}
                     contextError={runtimeOptionsError}
                     contextLoading={runtimeOptionsLoading}
+                    preparing={!composerPresentationReady}
                     onTargetChange={(value) => void runAction(async () => changeRunnableTarget(value))}
                     onControlChange={(control, value) => void runAction(async () => changeRuntimeControl(control, value))}
                   />
@@ -763,7 +786,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               addMenuOptions={(
                 <ComposerVoiceOptionSwitches
                   autoSpeak={Boolean(voiceAutoSpeak)}
-                  disabled={disabled}
+                  disabled={composerInteractionDisabled}
                   realtimeActive={Boolean(voiceRealtimeActive)}
                   onToggleAutoSpeak={onVoiceAutoSpeakToggle}
                   onToggleRealtime={onVoiceRealtimeToggle}
@@ -774,13 +797,13 @@ export function WorkbenchLayout(props: Record<string, any>) {
               planModeAvailable={false}
               preActionControls={(
                 <ComposerDictationButton
-                  disabled={disabled}
+                  disabled={composerInteractionDisabled}
                   listening={Boolean(voiceListening)}
                   onToggle={onVoiceDictationToggle}
                 />
               )}
               promptSubmitBlockReason={turnBlockReason}
-              promptSubmitDisabled={!turnSendable}
+              promptSubmitDisabled={!turnSendable || !composerPresentationReady}
               promptTextUnavailableReason={promptTextUnavailableReason}
               retainDraftUntilAccepted
               rightControls={(
@@ -790,7 +813,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                     controls={controls}
                     usage={sessionUsage}
                     controlValues={runtimeControlDrafts}
-                    disabled={disabled || runtimeOptionsLoading}
+                    disabled={composerInteractionDisabled || runtimeOptionsLoading}
                     modelControl={modelControl}
                     reasoningControl={reasoningControl}
                     onContextOpen={() => void refreshObservability(
@@ -908,8 +931,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
               controlValues={runtimeControlDrafts}
               controls={activeRuntimeControls}
               cwd={activeWorkbenchCwd}
-              disabled={disabled || runtimeOptionsLoading}
+              disabled={composerInteractionDisabled || runtimeOptionsLoading}
               draft={draftSession}
+              preparing={!composerPresentationReady}
               path={settings?.cwd === activeWorkbenchCwd
                 ? settings?.project?.displayPath ?? activeWorkbenchCwd
                 : init?.scope.cwd === activeWorkbenchCwd

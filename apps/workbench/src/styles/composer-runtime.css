@@ -7,6 +7,24 @@
   gap: 6px;
 }
 
+.composerPreparingError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  padding: 4px 10px;
+  color: var(--pevo-danger-ink, var(--pevo-muted-strong));
+  background: var(--pevo-panel-muted);
+  border: 1px solid var(--pevo-border);
+  border-radius: var(--pevo-radius-sm);
+  font-size: var(--pevo-font-size-small);
+}
+
+.composerPreparingStatus {
+  color: var(--pevo-muted-strong);
+}
+
 @container composer-dock (max-width: 620px) {
   .pevo-composer.is-running .pevo-composerFooter {
     flex-wrap: wrap;

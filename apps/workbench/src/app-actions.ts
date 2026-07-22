@@ -72,6 +72,7 @@ import type { ComposerSessionCoordinator } from "./composer-session-coordinator"
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
 type StartNewThreadOptions = {
+  rejectProblem?: boolean;
   refreshHistory?: boolean;
   targetId?: string;
 };
@@ -247,6 +248,9 @@ export function createAppActions(params: AppActionsParams) {
     }
     if (params.viewEpochRef.current === epoch) {
       params.setRuntimeOptionsLoading(false);
+    }
+    if (opened.problem && options.rejectProblem) {
+      throw new Error(opened.problem.message);
     }
     if (options.refreshHistory === true) {
       await params.refreshHistory(params.client);

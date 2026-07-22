@@ -250,6 +250,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const pendingTargetSelectionRef = useRef<string | null>(null);
   const runtimeTargetTransitionRef = useRef(false);
   const runtimeMutationSequenceRef = useRef(0);
+  const startupRetryRef = useRef(false);
 
   function setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) {
     const current = threadController.snapshot() ?? EMPTY_SNAPSHOT;
@@ -272,6 +273,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const visibleDraftSession = visibleHistoryDraftSession(draftSession, false);
   const hasSelectedSession = Boolean(currentThreadId || visibleDraftSession);
   const showSessionChrome = mainView === "transcript" && hasSelectedSession;
+  const composerShellVisible = Boolean(
+    showSessionChrome
+      && client
+      && (activeScope?.cwd ?? init?.scope.cwd ?? "").trim()
+  );
   const commandContextKey = `${activeScope?.cwd ?? ""}:${currentThreadId ?? visibleDraftSession?.id ?? "none"}`;
   const activeWorkbenchCwd = activeScope?.cwd ?? init?.scope.cwd ?? settings?.cwd ?? fallbackCwd;
   const activeRightTab = rightTabs.find((tab) =>
@@ -305,7 +311,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     ) {
       return;
     }
-    if (!client || !startupStable) {
+    if (!client || (!startupStable && !startupRetryRef.current)) {
       setRuntimeContext(null);
       threadController.setContext(null);
       return;
@@ -886,6 +892,27 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     updateMainView
   });
 
+  async function retryComposerStartup() {
+    if (!client) {
+      return;
+    }
+    setRuntimeOptionsError(null);
+    setError(null);
+    startupRetryRef.current = true;
+    try {
+      await startNewThread(undefined, {
+        refreshHistory: false,
+        rejectProblem: true
+      });
+      setStartupStable(true);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setRuntimeOptionsError(message);
+    } finally {
+      startupRetryRef.current = false;
+    }
+  }
+
   async function changeRunnableTarget(targetId: string) {
     const target = compatibleTargets.find((candidate) => candidate.targetId === targetId) ?? null;
     if (!target?.ready) {
@@ -1305,7 +1332,10 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     voiceAutoSpeak, voiceListening, voiceRealtimeActive: Boolean(voiceRealtimeSessionId),
     onReadAloudText: readAloudText, onVoiceAutoSpeakToggle: toggleVoiceAutoSpeak,
     onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,
-    composerPresentationReady: startupStable, workspaceBranch, workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
+    composerPresentationReady: startupStable,
+    composerShellVisible,
+    onComposerRetry: retryComposerStartup,
+    workspaceBranch, workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;
 }
 

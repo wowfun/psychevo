@@ -19,6 +19,7 @@ import {
   waitForBrowserJourneyRequestsSettled,
   waitForBrowserJourneyRunnerMark
 } from "./journey-websocket-probe";
+import type { BrowserJourneyMark } from "./journey-websocket-probe";
 import { repoRoot, startPevoWeb } from "./harness";
 import {
   startDeterministicNativeModel,
@@ -314,6 +315,7 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
       }
     });
     const browserMarks = await readBrowserJourneyMarks(page);
+    const startupDurations = browserStartupDurations(browserMarks, navigationMark);
     writeJsonLines(artifacts.workbenchBrowserMarks, browserMarks.map((mark) => ({
       clock: mark.clock,
       data: mark.data,
@@ -346,11 +348,12 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
         workbench: {
           ...workbenchProfile,
           startup: {
-          ...workbenchProfile.startup,
+            ...workbenchProfile.startup,
             clockDomainId: "browser:performance",
             navigationToComposerShellCommitMs: composerShellMark.monotonicMs - navigationMark.monotonicMs,
             navigationToGuiReadyMs: inputReadyMark.monotonicMs - navigationMark.monotonicMs,
-            navigationToDraftReadyMs: draftReadyMark.monotonicMs - navigationMark.monotonicMs
+            navigationToDraftReadyMs: draftReadyMark.monotonicMs - navigationMark.monotonicMs,
+            ...startupDurations
           }
         }
       }
@@ -928,6 +931,39 @@ function gatewayDuration(start: GatewayTraceRecord, end: GatewayTraceRecord): nu
   const duration = Number(BigInt(end.monotonicNs) - BigInt(start.monotonicNs)) / 1_000_000;
   if (duration < 0) throw new Error(`Gateway duration ${start.event} -> ${end.event} is negative`);
   return duration;
+}
+
+function browserStartupDurations(
+  marks: BrowserJourneyMark[],
+  navigation: BrowserJourneyMark
+): Record<string, number> {
+  const durationForRpc = (method: string): number | null => {
+    const request = marks.find((mark) => (
+      mark.id === "rpc_request_sent"
+      && mark.data.method === method
+    ));
+    if (!request || typeof request.data.requestId !== "string") return null;
+    const response = marks.find((mark) => (
+      mark.id === "rpc_response_arrived"
+      && mark.data.method === method
+      && mark.data.requestId === request.data.requestId
+    ));
+    return response ? response.monotonicMs - request.monotonicMs : null;
+  };
+  const values: Record<string, number> = {};
+  for (const [name, id] of [
+    ["navigationToComposerShell", "composer_shell_dom_committed"],
+    ["navigationToGuiReady", "gui_ready_dom_committed"],
+    ["navigationToFirstToken", "gateway_first_nonempty_assistant_received"]
+  ] as const) {
+    const mark = marks.find((candidate) => candidate.id === id);
+    if (mark) values[name] = mark.monotonicMs - navigation.monotonicMs;
+  }
+  const draftOpenDuration = durationForRpc("thread/draft/open");
+  if (draftOpenDuration !== null) values.draftOpenDuration = draftOpenDuration;
+  const branchReadDuration = durationForRpc("workspace/git/branches");
+  if (branchReadDuration !== null) values.branchReadDuration = branchReadDuration;
+  return values;
 }
 
 function tuiSurfaceBreakdown(

@@ -324,7 +324,167 @@ describe("TranscriptPanel write argument previews", () => {
 
     expect(screen.getByRole("button", { name: /write report\.md/ }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("unfinished body")).toBeTruthy();
-    expect(screen.getAllByText("permission denied").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("permission denied")).toHaveLength(1);
+    expect(screen.getByText("Error")).toBeTruthy();
+    expect(screen.queryByText("Change")).toBeNull();
+    expect(screen.queryByText("Status")).toBeNull();
+  });
+});
+
+describe("tool error evidence", () => {
+  it.each([
+    ["read", { path: "note.md" }],
+    ["write", { path: "note.md", content: "replacement" }],
+    ["edit", { path: "note.md", old_string: "old", new_string: "new" }],
+    ["apply_patch", { patch: "*** Begin Patch\n*** End Patch" }],
+    ["exec_command", { cmd: "false" }],
+    ["write_stdin", { session_id: 7, chars: "x" }],
+    ["web_fetch", { url: "https://example.com" }],
+    ["web_search", { query: "example" }],
+    ["clarify", { questions: [] }],
+    ["spawn_agent", { task_name: "example", message: "inspect" }],
+    ["mcp__example__lookup", { query: "example" }],
+    ["custom_tool", { value: "example" }]
+  ])("renders one concrete error without synthetic failure status for %s", (toolName, args) => {
+    const block = transcriptBlock({
+      status: "failed",
+      title: toolName,
+      metadata: {
+        projection: "tool",
+        tool_name: toolName,
+        tool_call_id: `call-${toolName}`,
+        args,
+        outcome: "failed"
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "failed",
+        content: JSON.stringify({ error: "operation failed" }),
+        isError: true,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const display = evidenceDisplay(block, "");
+    const errorSections = display.sections.filter((section) => (
+      section.kind === "text" && section.title === "Error" && section.text === "operation failed"
+    ));
+    const syntheticFailureRows = display.sections.flatMap((section) => (
+      section.kind === "kv" && section.title === "Status"
+        ? section.rows.filter((row) => row.label === "outcome" || row.label === "status")
+        : []
+    ));
+    const errorMentions = [
+      display.summary,
+      ...display.sections.flatMap((section) => (
+        section.kind === "text" ? [section.text] : section.kind === "kv" ? section.rows.map((row) => row.value) : []
+      ))
+    ].filter((value) => value?.includes("operation failed"));
+
+    expect(errorSections).toHaveLength(1);
+    expect(errorMentions).toHaveLength(1);
+    expect(syntheticFailureRows).toHaveLength(0);
+    expect(display.summary ?? "").not.toContain("operation failed");
+    expect(display.defaultOpen).toBe(true);
+  });
+
+  it("keeps an exec exit code as independent status beside one concrete error", () => {
+    const block = transcriptBlock({
+      kind: "shell",
+      status: "failed",
+      title: "exec_command false",
+      metadata: {
+        projection: "tool",
+        tool_name: "exec_command",
+        tool_call_id: "call-exec-error",
+        args: { cmd: "false" },
+        outcome: "failed"
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "failed",
+        content: JSON.stringify({ error: "command failed", exit_code: 1 }),
+        isError: true,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const display = evidenceDisplay(block, "");
+    const status = display.sections.find((section) => section.kind === "kv" && section.title === "Status");
+
+    expect(display.sections.filter((section) => section.kind === "text" && section.title === "Error")).toHaveLength(1);
+    expect(status?.kind === "kv" ? status.rows : []).toEqual([{ label: "exit", value: "1" }]);
+  });
+
+  it("uses a failed scalar result as the single concrete error", () => {
+    const block = transcriptBlock({
+      status: "failed",
+      title: "custom_tool",
+      metadata: {
+        projection: "tool",
+        tool_name: "custom_tool",
+        tool_call_id: "call-scalar-error",
+        args: {},
+        outcome: "failed"
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "failed",
+        content: "plain failure",
+        isError: true,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const display = evidenceDisplay(block, "");
+
+    expect(display.defaultOpen).toBe(true);
+    expect(display.summary).toBeNull();
+    expect(display.sections).toEqual([
+      { kind: "text", text: "plain failure", title: "Error", tone: "error" }
+    ]);
+  });
+
+  it("promotes MCP error content without repeating it as Content or Status", () => {
+    const block = transcriptBlock({
+      status: "failed",
+      title: "mcp__example__lookup",
+      metadata: {
+        projection: "tool",
+        tool_name: "mcp__example__lookup",
+        tool_call_id: "call-mcp-content-error",
+        args: { query: "example" },
+        outcome: "failed"
+      },
+      result: {
+        resultMessageSeq: 2,
+        status: "failed",
+        content: JSON.stringify({
+          content: [{ type: "text", text: "remote lookup failed" }],
+          is_error: true
+        }),
+        isError: true,
+        metadata: null,
+        createdAtMs: 2,
+        updatedAtMs: 2
+      }
+    });
+
+    const display = evidenceDisplay(block, "");
+
+    expect(display.defaultOpen).toBe(true);
+    expect(display.sections.filter((section) => section.title === "Error")).toEqual([
+      { kind: "text", text: "remote lookup failed", title: "Error", tone: "error" }
+    ]);
+    expect(display.sections.some((section) => section.title === "Content")).toBe(false);
+    expect(display.sections.some((section) => section.title === "Result")).toBe(false);
+    expect(display.sections.some((section) => section.title === "Status")).toBe(false);
   });
 });
 
@@ -734,6 +894,7 @@ describe("TranscriptPanel read evidence", () => {
     const block = transcriptBlock({
       id: "block-read-error",
       kind: "file",
+      status: "failed",
       title: "read",
       metadata: {
         projection: "tool",
@@ -758,8 +919,8 @@ describe("TranscriptPanel read evidence", () => {
 
     render(<TranscriptPanel entries={[transcriptEntry([block])]} />);
 
-    const row = screen.getByRole("button", { name: `read ${readPath}` });
-    fireEvent.click(row);
+    const row = screen.getByText(`read ${readPath}`).closest("button");
+    expect(row?.getAttribute("aria-expanded")).toBe("true");
 
     expect(screen.getByText("No such file or directory")).toBeTruthy();
     expect(screen.queryByText("Input")).toBeNull();

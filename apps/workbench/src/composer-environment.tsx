@@ -19,6 +19,7 @@ export function ComposerEnvironment({
   disabled,
   draft,
   path,
+  preparing = false,
   profile,
   runtimeSafetyLabel,
   workspaces,
@@ -37,6 +38,7 @@ export function ComposerEnvironment({
   disabled: boolean;
   draft: boolean;
   path: string;
+  preparing?: boolean;
   profile: InitializeResult["profile"] | null;
   runtimeSafetyLabel?: string | null;
   workspaces: Array<{ cwd: string; displayPath?: string }>;
@@ -133,6 +135,9 @@ export function ComposerEnvironment({
   return (
     <>
       <div className="composerStatusLine" aria-label="Composer environment">
+        {preparing ? (
+          <span className="composerPreparingStatus" role="status">Preparing runtime environment…</span>
+        ) : null}
         {runtimeSafetyLabel ? (
           <span className="profileStatusPill" aria-label="Runtime Profile safety policy" title={runtimeSafetyLabel}>
             <span>{runtimeSafetyLabel}</span>
@@ -197,7 +202,7 @@ export function ComposerEnvironment({
             </EnvironmentMenu>
           ) : null}
         </div>
-        {draft || visibleBranch ? (
+        {(!preparing && draft) || visibleBranch ? (
           <div className="composerEnvironmentControl is-branch" ref={branchRootRef}>
             <button
               aria-expanded={branchMenuOpen}

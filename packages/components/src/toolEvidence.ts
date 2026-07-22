@@ -62,7 +62,12 @@ type WriteArgumentPreview = {
   truncated: boolean;
 };
 
-const BODY_KEYS = new Set(["body", "chars", "content", "diff", "input", "metadata", "output", "result"]);
+type ToolErrorDetail = {
+  source: "content" | "error" | "raw";
+  text: string;
+};
+
+const BODY_KEYS = new Set(["body", "chars", "content", "diff", "error", "input", "metadata", "output", "result"]);
 const INTERNAL_KEYS = new Set([
   "arguments",
   "arguments_json",
@@ -70,6 +75,8 @@ const INTERNAL_KEYS = new Set([
   "content_index",
   "display",
   "hidden",
+  "is_error",
+  "isError",
   "metadata",
   "projection",
   "result",
@@ -107,6 +114,7 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
   const invocation = explicitTitle ? null : execCommandInvocation(toolName, title, args, block.preview ?? "");
   const inlineDiff = inlineDiffDisplay(spec, result, block);
   const writePreview = writeArgumentPreview(toolName, metadata);
+  const error = toolErrorDetail(result, block);
   const displayTitle = inlineDiff?.title ?? explicitTitle ?? invocation ?? toolTitle(toolName, title, spec, args, result);
   const summary = writePreviewSummary(writePreview) ?? (
     inlineDiff || invocation || explicitTitle ? null : toolSummary(spec, result, args)
@@ -116,7 +124,7 @@ export function evidenceDisplay(block: TranscriptBlock, fallbackText: string): E
 
   return {
     category: spec.category,
-    defaultOpen: Boolean(inlineDiff || writePreview?.text),
+    defaultOpen: Boolean(inlineDiff || writePreview?.text || error?.text),
     sections,
     singleTitle,
     summary,
@@ -381,6 +389,9 @@ function toolSummary(spec: ToolDisplaySpec, result: unknown, args: unknown): str
   const argRecord = asRecord(args);
   const parts: string[] = [];
   for (const key of spec.summaryKeys) {
+    if (key === "error") {
+      continue;
+    }
     const value = resultRecord[key] ?? argRecord[key];
     const display = summaryValue(key, value);
     if (!display) {
@@ -397,9 +408,6 @@ function toolSummary(spec: ToolDisplaySpec, result: unknown, args: unknown): str
 function summaryValue(key: string, value: unknown): string | null {
   if (value === null || value === undefined || value === false) {
     return null;
-  }
-  if (key === "error") {
-    return compactText(String(value), 120);
   }
   if (key === "exit_code") {
     return `exit ${String(value)}`;
@@ -437,7 +445,7 @@ function toolSections(
     return execCommandSections(args, result, metadata, block);
   }
   if (toolName === "write_stdin") {
-    return writeStdinSections(args, result, metadata);
+    return writeStdinSections(args, result, metadata, block);
   }
   if (inlineDiff) {
     return [{ files: inlineDiff.files, kind: "diff", title: "Diff" }];
@@ -462,17 +470,22 @@ function toolSections(
   if (inputs.length > 0) {
     sections.push({ kind: "kv", rows: inputs, title: "Input" });
   }
-  const resultRows = visibleRows(result, "result", EMPTY_KEYS);
+  const resultRows = visibleRows(result, "result", new Set(spec.bodyKeys));
   if (resultRows.length > 0) {
     sections.push({ kind: "kv", rows: resultRows, title: resultTitle(toolName) });
   }
-  const bodySections = bodyTextSections(spec, result, toolName);
+  const error = toolErrorDetail(result, block);
+  const bodySections = error?.source === "content" ? [] : bodyTextSections(spec, result, toolName);
   sections.push(...bodySections);
+  const errorText = error?.text ?? null;
+  if (errorText && !bodySections.some((section) => section.title === "Error")) {
+    sections.push({ kind: "text", text: errorText, title: "Error", tone: "error" });
+  }
   const outcome = stringValue(metadata.outcome);
-  if (outcome && outcome !== "normal") {
+  if (!errorText && outcome && outcome !== "normal") {
     sections.push({ kind: "kv", rows: [{ label: "outcome", value: outcome }], title: "Status", tone: "error" });
   }
-  if (block.result?.isError && !sections.some((section) => section.tone === "error")) {
+  if (!errorText && block.result?.isError && !sections.some((section) => section.tone === "error")) {
     sections.push({ kind: "kv", rows: [{ label: "status", value: "error" }], title: "Status", tone: "error" });
   }
   return sections;
@@ -541,13 +554,14 @@ function execCommandSections(
   if (inputRows.length > 0) {
     sections.push({ kind: "kv", rows: inputRows, title: "Input" });
   }
-  const output = textFromValue(resultRecord.output) ?? textFromValue(result);
+  const error = toolErrorDetail(result, block);
+  const output = error && error.source !== "error" ? null : commandOutputText(resultRecord, result);
   if (output) {
     sections.push({ code: true, kind: "text", text: output, title: "Output" });
   }
-  const error = stringValue(resultRecord.error);
-  if (error) {
-    sections.push({ kind: "text", text: error, title: "Error", tone: "error" });
+  const errorText = error?.text ?? null;
+  if (errorText) {
+    sections.push({ kind: "text", text: errorText, title: "Error", tone: "error" });
   }
   const statusRows = visibleRowsFromKeys(resultRecord, [
     ["exit_code", "exit"],
@@ -555,19 +569,24 @@ function execCommandSections(
     ["wall_time_seconds", "wall time"]
   ]);
   const outcome = stringValue(metadata.outcome);
-  if (outcome && outcome !== "normal") {
+  if (!errorText && outcome && outcome !== "normal") {
     statusRows.push({ label: "outcome", value: outcome });
   }
-  if (block.result?.isError && !statusRows.some((row) => row.label === "outcome")) {
+  if (!errorText && block.result?.isError && !statusRows.some((row) => row.label === "outcome")) {
     statusRows.push({ label: "status", value: "error" });
   }
   if (statusRows.length > 0) {
-    sections.push({ kind: "kv", rows: statusRows, title: "Status", tone: error || block.result?.isError ? "error" : "default" });
+    sections.push({ kind: "kv", rows: statusRows, title: "Status", tone: errorText || block.result?.isError ? "error" : "default" });
   }
   return sections;
 }
 
-function writeStdinSections(args: unknown, result: unknown, metadata: Record<string, unknown>): ToolDetailSection[] {
+function writeStdinSections(
+  args: unknown,
+  result: unknown,
+  metadata: Record<string, unknown>,
+  block: TranscriptBlock
+): ToolDetailSection[] {
   const sections: ToolDetailSection[] = [];
   const argsRecord = asRecord(args);
   const chars = stringValue(argsRecord.chars);
@@ -575,13 +594,18 @@ function writeStdinSections(args: unknown, result: unknown, metadata: Record<str
     sections.push({ code: true, kind: "text", text: chars, title: "Input" });
   }
   const resultRecord = asRecord(result);
-  const output = textFromValue(resultRecord.output) ?? textFromValue(result);
+  const error = toolErrorDetail(result, block);
+  const output = error && error.source !== "error" ? null : commandOutputText(resultRecord, result);
   if (output) {
     sections.push({ code: true, kind: "text", text: output, title: "Output" });
   }
+  const errorText = error?.text ?? null;
+  if (errorText) {
+    sections.push({ kind: "text", text: errorText, title: "Error", tone: "error" });
+  }
   const rows = visibleRowsFromKeys(resultRecord, [["exit_code", "exit"], ["duration_ms", "duration"]]);
   const outcome = stringValue(metadata.outcome);
-  if (outcome && outcome !== "normal") {
+  if (!errorText && outcome && outcome !== "normal") {
     rows.push({ label: "outcome", value: outcome });
   }
   if (rows.length > 0) {
@@ -592,15 +616,15 @@ function writeStdinSections(args: unknown, result: unknown, metadata: Record<str
 
 function readSections(result: unknown, block: TranscriptBlock): ToolDetailSection[] {
   const resultRecord = asRecord(result);
+  const error = toolErrorDetail(result, block);
+  if (error?.text) {
+    return [{ kind: "text", text: error.text, title: "Error", tone: "error" }];
+  }
   if (Object.prototype.hasOwnProperty.call(resultRecord, "content")) {
     const text = readContentText(resultRecord.content);
     if (text !== null) {
       return [{ code: true, kind: "text", text, title: "" }];
     }
-  }
-  const error = stringValue(resultRecord.error);
-  if (error) {
-    return [{ kind: "text", text: error, title: "Error", tone: "error" }];
   }
   if (block.result?.isError) {
     const fallback = textFromValue(result);
@@ -634,7 +658,8 @@ function bodyTextSections(spec: ToolDisplaySpec, result: unknown, toolName: stri
       code: key === "diff" || key === "output" || toolName === "read",
       kind: "text",
       text,
-      title: sectionTitleForKey(key)
+      title: sectionTitleForKey(key),
+      tone: key === "error" ? "error" : "default"
     });
   }
   if (sections.length === 0 && isMcpTool(toolName)) {
@@ -773,6 +798,34 @@ function textFromValue(value: unknown): string | null {
     })
     .filter((item): item is string => Boolean(item));
   return rows.length > 0 ? rows.join("\n") : null;
+}
+
+function commandOutputText(resultRecord: Record<string, unknown>, result: unknown): string | null {
+  const explicit = textFromValue(resultRecord.output) ?? textFromValue(resultRecord.content);
+  if (explicit) {
+    return explicit;
+  }
+  return Object.keys(resultRecord).length === 0 ? textFromValue(result) : null;
+}
+
+function toolErrorDetail(result: unknown, block: TranscriptBlock): ToolErrorDetail | null {
+  const explicit = stringValue(asRecord(result).error);
+  if (explicit) {
+    return { source: "error", text: explicit };
+  }
+  if (!block.result?.isError) {
+    return null;
+  }
+  const content = asRecord(result).content;
+  const contentText = stringValue(content) ?? mcpContentText(content);
+  if (contentText) {
+    return { source: "content", text: contentText };
+  }
+  if (typeof result === "string" || typeof result === "number" || typeof result === "boolean" || Array.isArray(result)) {
+    const raw = textFromValue(result);
+    return raw ? { source: "raw", text: raw } : null;
+  }
+  return null;
 }
 
 function mcpContentText(value: unknown): string | null {

@@ -223,9 +223,9 @@ describe("runtime context projection", () => {
     expect(context.suggestedTargetId).toBeNull();
   });
 
-  it("rejects only the non-effective context observed during first-turn binding", () => {
+  it("rejects only the non-effective context observed after an exact first-turn selection", () => {
     const current = parseThreadContext({
-      selectionState: "draft",
+      selectionState: "prospective",
       compatibleTargets: [{
         targetId: "target:test",
         agentRef: null,

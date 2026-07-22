@@ -14,7 +14,9 @@ describe("Workbench journey diagnostics", () => {
 
     const shell = shellElement();
     await waitFor(() => expect(shell.dataset.gatewayStatus).toBe("connected"));
-    expect(screen.queryByPlaceholderText("Ask Psychevo...")).toBeNull();
+    const preparingInput = await screen.findByPlaceholderText("Preparing runtime environment…") as HTMLTextAreaElement;
+    expect(preparingInput.disabled).toBe(true);
+    expect(document.querySelector(".composerDock")?.getAttribute("aria-busy")).toBe("true");
     expect(window.__psychevoJourneyTiming?.["psychevo:gui_ready"]).toBeUndefined();
     expect(shell.dataset.composerState).toBe("opening");
     expect(shell.dataset.turnState).toBe("idle");
@@ -45,6 +47,66 @@ describe("Workbench journey diagnostics", () => {
       }
     });
     await waitFor(() => expect(shell.dataset.turnState).toBe("running"));
+  });
+
+  it("keeps a blocked shell recoverable without accepting stale startup results", async () => {
+    let attempts = 0;
+    gatewayMock.draftOpen = () => {
+      attempts += 1;
+      return attempts === 1
+        ? Promise.reject(new Error("runtime preparation failed"))
+        : draftOpenResult();
+    };
+
+    render(<App />);
+
+    await screen.findByPlaceholderText("Preparing runtime environment…");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(shellElement().dataset.composerState).toBe("blocked");
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]?.textContent).toContain("runtime preparation failed");
+    expect(document.querySelector(".errorBand")).toBeNull();
+
+    await act(async () => {
+      retry.click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Ask Psychevo...")).toBeTruthy();
+      expect(shellElement().dataset.composerState).toBe("ready");
+    });
+    expect(attempts).toBe(2);
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "turn/start")).toHaveLength(0);
+  });
+
+  it("keeps a retry preparation failure in the single Composer alert", async () => {
+    let attempts = 0;
+    gatewayMock.draftOpen = () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          ...draftOpenResult(),
+          problem: { message: "initial preparation failed" }
+        };
+      }
+      return Promise.reject(new Error("retry preparation failed"));
+    };
+
+    render(<App />);
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    await act(async () => {
+      retry.click();
+    });
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole("alert");
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]?.textContent).toContain("retry preparation failed");
+      expect(document.querySelector(".errorBand")).toBeNull();
+    });
+    expect(attempts).toBe(2);
   });
 });
 

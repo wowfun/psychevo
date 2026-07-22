@@ -9,6 +9,25 @@ afterEach(() => {
 });
 
 describe("Composer attachments", () => {
+  it("renders a disabled preparing shell with an explicit placeholder", () => {
+    const onSubmit = vi.fn();
+    render(
+      <Composer
+        disabled
+        placeholder="Preparing runtime environment…"
+        running={false}
+        onInterrupt={vi.fn()}
+        onSteer={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const input = screen.getByPlaceholderText("Preparing runtime environment…") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("renders image attachments with thumbnails", () => {
     const { container } = render(
       <Composer

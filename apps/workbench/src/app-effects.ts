@@ -459,6 +459,8 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
 
     async function boot() {
       let startupDraftOpenToken: DraftOpenToken | null = null;
+      let initialized = false;
+      let startupEpoch: number | null = null;
       try {
         const runtime = await params.createRuntime();
         if (!alive) {
@@ -497,7 +499,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         }
         params.setStatus("connected");
         params.setClient(runtime.client);
-        const startupEpoch = params.viewEpochRef.current;
+        startupEpoch = params.viewEpochRef.current;
         const initializeRequest = runtime.client.request("initialize")
           .then((value) => InitializeResultSchema.parse(value));
         const sessionsRequest = params.refreshHistory(runtime.client)
@@ -517,6 +519,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             return [];
           });
         const initialize = await initializeRequest;
+        initialized = true;
         const nextSessions = initialize.scope.cwd.trim()
           ? []
           : await sessionsRequest;
@@ -584,7 +587,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           if (params.mainViewRef.current === "transcript") {
             params.updateMainView("transcript");
           }
-          params.setStartupStable(true);
+          params.setStartupStable(!opened.problem);
           if (opened.problem) {
             params.composerSessionCoordinator.failDraftOpen(startupDraftOpenToken);
           } else {
@@ -598,9 +601,14 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         }
         if (alive) {
           params.setRuntimeOptionsLoading(false);
-          params.setHistoryLoading(false);
-          params.setStatus("error");
-          params.setError(err instanceof Error ? err.message : String(err));
+          if (initialized && (startupEpoch === null || params.viewEpochRef.current === startupEpoch)) {
+            const message = err instanceof Error ? err.message : String(err);
+            params.setRuntimeOptionsError(message);
+          } else {
+            params.setHistoryLoading(false);
+            params.setStatus("error");
+            params.setError(err instanceof Error ? err.message : String(err));
+          }
         }
       }
     }

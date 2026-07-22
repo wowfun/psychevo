@@ -51,7 +51,8 @@ describe("Workbench public Thread Application interactions", () => {
       draftOpen.resolve(draftOpenResult());
       await draftOpen.promise;
     });
-    expect(screen.queryByRole("button", { name: "Agent target" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Agent target" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Git branch" })).toBeNull();
 
     await act(async () => {
       branches.resolve(gatewayMock.workspaceGitBranchesResult);

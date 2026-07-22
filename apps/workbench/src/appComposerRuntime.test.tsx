@@ -827,7 +827,7 @@ describe("Workbench first-class Agent runtime controls", () => {
       const threadId = (params as { threadId?: string | null } | null)?.threadId ?? null;
       return threadId === "thread-1"
         ? postStartContext.promise
-        : firstClassContext("native");
+        : firstClassContext("native", { selectionState: "prospective" });
     };
     render(<App />);
 
