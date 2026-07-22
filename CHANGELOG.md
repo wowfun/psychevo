@@ -9,8 +9,12 @@
 - Hardened self-hosted Excalidraw assets against Windows cross-volume escapes.
 - Stabilized Composer model and history interactions, deterministic Workbench
   gateways, visual journeys, and responsive voice/control feedback.
+- Hardened Workbench cold-start readiness, draft preparation, retry-safe states,
+  and Composer-scoped failure feedback with deterministic profiling.
 - Unified filesystem identity and external-write approvals across runtime,
   Gateway, ACP, CLI, TUI, and Workbench with clearer target-level UI.
+- Hardened coding-core mutations, tool declarations, and failure evidence with
+  safer conflicts, concise capability contracts, and actionable status.
 - Hardened request token estimation and ACP draft projection, and kept passing
   CI output-capture summaries free of synthetic fixture noise.
 

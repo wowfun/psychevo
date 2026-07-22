@@ -80,6 +80,10 @@ gate.
   chain across live updates and history reload.
 - Failed `write_stdin` calls that target an existing yielded `exec_command`
   session do not render as standalone primary transcript rows.
+- A failed tool result opens and renders its concrete error exactly once.
+  Body-selected fields do not repeat as Result or Change rows, and a concrete
+  error suppresses synthetic failed/error-only Status detail while preserving
+  independent facts such as an exit code and any failed `write` content preview.
 - Empty reasoning completions close existing Thinking rows without creating
   placeholder rows.
 - Running Thinking defaults to a visible body or bounded live preview, then

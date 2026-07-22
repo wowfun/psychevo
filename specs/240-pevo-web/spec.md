@@ -248,11 +248,16 @@ the selected Transcript or Composer controls.
 After the first Turn of a detached draft is accepted, the durable Thread may be
 visible before its runtime binding has materialized. During that interval,
 Workbench keeps the last authoritative, target-matched draft context as its
-current state; an unbound default observation for the same suggested target is
-not a new effective context and must not blank Mode, Model, Reasoning,
-Permission, or the other Composer controls. The first authoritative bound
-context replaces that retained context atomically. Retaining the prior context
-is presentation continuity only and does not manufacture a durable binding.
+current state. That exact context may carry `selectionState: prospective` when
+it was projected from the explicit target used by `thread/draft/open`, or
+`selectionState: draft` when it was projected from the stored source draft;
+Workbench must not use that descriptive state name to decide whether the exact
+selection remains authoritative. An unbound default observation for the same
+suggested target is not a new effective context and must not blank Mode, Model,
+Reasoning, Permission, or the other Composer controls. The first authoritative
+bound context replaces that retained context atomically. Retaining the prior
+context is presentation continuity only and does not manufacture a durable
+binding.
 
 Workbench boot treats initialization and the first global session browse as
 one bounded transaction. It starts `initialize` and the single initial
@@ -572,9 +577,10 @@ work remains a shared TUI/Workbench stage. Latency p50/p95 stays report-only
 until three stable canonical-runner baselines are explicitly approved for a
 separate ratchet.
 
-Workbench does not paint a cold-start Composer with placeholder Agent or empty
-runtime controls. Session history never gates Composer visibility, but the
-initial atomic draft context does: the first visible editable Composer is one
+Workbench does not paint a cold-start Composer as editable with a placeholder
+Agent or empty authoritative runtime controls. Session history never gates
+Composer shell visibility, but the initial atomic draft context does gate
+editing: the first visible editable Composer is one
 committed environment containing Agent, Mode, Model, Reasoning, Permission,
 Workspace, and current branch. That commit defines both `gui_ready` and the
 initial `draft_context_ready`; the app shell may paint earlier without claiming
@@ -585,6 +591,36 @@ committed Composer environment while replacement readiness is pending. The
 active scope, rather than a stale Settings snapshot, owns the visible workspace
 path. Runtime and environment controls are disabled during that interval, and
 the replacement context commits atomically when ready.
+
+Cold startup uses a two-stage Composer presentation. After Gateway transport is
+connected and initialization has supplied a usable launch scope, Workbench
+mounts the Composer shell in `preparing` state without waiting for
+`thread/draft/open` or `workspace/git/branches`. The shell exposes the real
+Composer layout, but its textarea, submit/interrupt actions, runtime controls,
+Workspace, Branch, attachment, and context actions are disabled. It uses the
+explicit `Preparing runtime environment…` status and must not display a
+placeholder Agent, Model, Branch, or Permission as an authoritative value.
+`preparing` is presentation-only and does not define `gui_ready`.
+
+The Composer lifecycle is `hidden → preparing → ready` or
+`hidden → preparing → blocked`. `ready` requires one atomic environment commit
+containing Agent, Mode, Model, Reasoning, Permission, Workspace, and current
+branch; only then may `gui_ready` and `draft_context_ready` be recorded. A
+failed draft open keeps the disabled shell mounted in `blocked` state and
+exposes Retry. Retry starts a new request epoch, and late results from the
+failed attempt cannot replace the current Composer state. Cold startup does
+not automatically claim focus; focus remains user initiated.
+
+A blocked Composer exposes its preparation failure once through the
+Composer-scoped alert beside Retry. The same preparation error is not mirrored
+into the global error band. Transport or initialization failures that prevent a
+usable launch scope continue to use the global error channel.
+
+Draft context and the current branch continue to load concurrently. Their
+results are applied together or not at all. Existing New Session behavior is
+unchanged: when a complete environment already exists, it remains visible and
+input-backed pending Send semantics remain usable while replacement readiness
+is pending. Session history remains independent of Composer shell visibility.
 
 Submitting a ready draft performs one local Thread transaction before network
 delivery: it appends the optimistic user entry and sets provisional activity to

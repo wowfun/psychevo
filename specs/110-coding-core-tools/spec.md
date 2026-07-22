@@ -113,13 +113,36 @@ out-of-range pagination values before reading, but type errors remain failures.
 
 `write` creates missing parent directories when the resource boundary allows it.
 
+Creating a new target must not overwrite a target that appears before commit.
+Replacing an existing target requires a complete, non-truncated read by the
+same in-process task, or a successful prior write by that task. Runtime records
+the target modification time and an in-process writer sequence with that
+freshness evidence. Replacement fails without modifying the target when its
+modification time changed, when a sibling task wrote it after the evidence was
+recorded, or when the latest read was partial. Freshness evidence is
+process-local and is not restored after runtime restart.
+
+When replacement is rejected because freshness evidence is absent, the error
+must state that the target already exists before explaining the required
+complete read. The message must distinguish this case from creation of a
+missing target and identify the next safe action without exposing runtime
+bookkeeping terminology.
+
+Successful file-content replacement is atomically visible: the previous
+content remains visible until a completely prepared same-directory replacement
+is committed. This contract does not require power-loss durability. Existing
+UTF-8 BOM, dominant line-ending style, and file permissions are preserved when
+the target is replaced. Modification time is the external filesystem version
+signal in this slice; an external writer that changes content while preserving
+the same modification time is not detected unless it also participates in the
+runtime's writer sequence.
+
 Successful writes return a JSON object with stable fields:
 - `path`: target path or equivalent target identifier
 - `bytes_written`: number of bytes written when known
 - `dirs_created`: whether parent directories were created
 - `lint`: optional post-write syntax/lint summary
 - `lsp_diagnostics`: optional diagnostics introduced by the write
-- `warning`: optional stale-content or partial-read warning
 - `error`: failure explanation when the write fails
 
 Lint and LSP diagnostics are post-write feedback. They must not change the
@@ -136,10 +159,18 @@ successful write.
 - `replace`: replace target text in an existing file or resource
 - `patch`: apply a patch to files or resources
 
-The `patch` mode may update, create, delete, or move files or equivalent
-resources when the resource boundary and permission policy allow every target.
-Patch application must validate all planned operations before writing so
-validation failures do not leave partial changes behind.
+The `patch` mode may update, create, or delete files or equivalent resources
+when the resource boundary and permission policy allow every target. Move is
+not supported. Patch application must resolve and validate every planned
+operation before writing, including rejecting duplicate or overlapping
+canonical targets. Validation failures leave no file changes behind.
+
+Validated patch operations commit sequentially without rollback. Add uses
+no-clobber creation, Update checks the validated modification time immediately
+before replacement, and Delete additionally requires complete freshness
+evidence from the current task and checks its modification time immediately
+before removal. If a later operation fails, earlier committed operations remain
+applied and the failure reports that committed prefix explicitly.
 
 Successful edits return a JSON object with stable fields:
 - `success`: true when the edit was applied
@@ -147,10 +178,8 @@ Successful edits return a JSON object with stable fields:
 - `files_modified`: modified paths or equivalent target identifiers
 - `files_created`: created paths or equivalent target identifiers
 - `files_deleted`: deleted paths or equivalent target identifiers
-- `files_moved`: moved path pairs or equivalent target identifiers
 - `lint`: optional post-edit syntax/lint summary
 - `lsp_diagnostics`: optional diagnostics introduced by the edit
-- `warning`: optional stale-content or partial-read warning
 - `error`: failure explanation when the edit fails
 
 Lint and LSP diagnostics are post-edit feedback. They must not turn an
@@ -160,13 +189,30 @@ broken, timed out, or not configured for the edited file.
 
 Ambiguous matches, not-found targets, no-change edits, stale content conflicts,
 partial-read overwrite risk, sibling-agent write conflicts, and resource-denied
-writes must be observable in the JSON result. Same-resource mutations must be
-ordered or conflicts must be visible.
+writes are failed tool outcomes with a non-empty `error`; they are not warnings
+on otherwise successful mutations. Same-resource mutations must be ordered or
+conflicts must be visible.
+
+When a patch fails after committing an earlier prefix, its failed result also
+contains the prefix `diff`, `files_modified`, `files_created`, and
+`files_deleted`, plus `failed_operation` with the 1-based operation `index`,
+operation `kind`, and target `path`. The model-facing projection may summarize
+these structured facts compactly but must identify the failure point, include a
+bounded concrete failure reason with safe recovery guidance, and name the paths
+that remain committed. The compact projection must not hide the structured
+`error` merely because it replaces the full JSON in model context.
+
+Unicode-normalized fuzzy replacement may preserve an original typographic
+character only when an equal diff segment covers that character's complete
+normalized expansion. If an edit keeps only part of an expansion such as `--`
+for an em dash or `...` for an ellipsis, the retained part comes from the new
+normalized text instead of restoring the entire original character. A fuzzy
+replacement must not report success while silently retaining deleted expansion
+characters.
 
 The `diff` field remains model-visible. It should use one parseable Git patch
 block per changed file. Update, add, and delete blocks include `diff --git`,
-`---`/`+++`, and unified hunks. Pure moves use `diff --git`, `similarity index
-100%`, `rename from`, and `rename to` without inventing content hunks.
+`---`/`+++`, and unified hunks.
 
 This spec defines semantic modes and result material. The first implementation
 slice's concrete parameter names and patch syntax are defined by [Tool I/O](tool-io.md).

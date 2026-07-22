@@ -136,6 +136,15 @@ render a muted `interrupted` marker in the existing row rather than moving to a
 separate generic error log. `exec_command` timeouts render an explicit timeout
 line in the failed command row even when partial output exists.
 
+A concrete tool-result error opens its evidence row and renders once as an
+`Error` detail rather than repeating the message in its summary. A field
+selected for text detail must not also appear as an ordinary Result or Change
+key/value row. When that error already explains the failure, the row must not
+add a synthetic Status section containing only `failed` or `error`;
+independent facts such as a process exit code remain useful status detail.
+Failed `write` rows may retain their bounded proposed-content preview, but the
+preview must not obscure or duplicate the error.
+
 When the overall turn outcome is `normal`, tool failures are summarized by the
 failed tool row and turn metadata, not by an additional red error transcript
 row. A red terminal error row is reserved for non-normal turn outcomes.

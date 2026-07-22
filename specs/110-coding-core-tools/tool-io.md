@@ -92,6 +92,20 @@ workspace, profile, or temporary directory grant and completely replaces the
 target UTF-8 text file. It should be used instead of shell redirection for
 complete-file writes.
 
+When the target does not exist, `write` commits through no-clobber creation and
+fails if the target appears before commit. When the target exists, the current
+task must have completed an untruncated `read` of that version or successfully
+written that version earlier in the same runtime process. Runtime compares the
+recorded modification time and in-process writer sequence immediately before
+commit. Missing, partial, stale, or sibling-invalidated evidence is a failed
+tool outcome and does not modify the file.
+
+Existing targets retain their UTF-8 BOM, dominant line-ending style, and file
+permissions. File replacement is atomically visible through a prepared
+same-directory temporary file but is not required to synchronize file or
+directory data for power-loss durability. External changes that preserve mtime
+and do not participate in the writer sequence are outside this conflict check.
+
 Successful result fields:
 
 - `path`
@@ -99,7 +113,6 @@ Successful result fields:
 - `dirs_created`
 - `lint`
 - `lsp_diagnostics`
-- `warning`
 - `error`
 
 `lsp_diagnostics` is `null` when no introduced diagnostics are available. A
@@ -122,29 +135,53 @@ For `replace`:
 
 `old_string` must be non-empty and must differ from `new_string`. With
 `replace_all=false`, matching must resolve to exactly one location; ambiguous,
-missing, stale, partial-read, or conflicting edits return JSON errors or
-warnings as appropriate. With `replace_all=true`, every matched occurrence is
-replaced.
+missing, stale, partial-read, or conflicting edits return failed JSON results.
+With `replace_all=true`, every accepted matched occurrence is replaced.
 
 Replacement matching strips an initial BOM from matching material, normalizes
 line endings to LF for matching, and writes back using the original file's
 dominant line ending. Matching tries exact text first, then bounded fuzzy
 strategies for trimmed lines, whitespace, indentation, escaped newlines/tabs,
 trimmed boundaries, Unicode quote/dash/space normalization, anchored blocks,
-and context-aware line similarity. Fuzzy replacement must guard against
-transport escape drift and include bounded "did you mean" context when no match
-is found.
+and context-aware line similarity. Exact matching and the first six fuzzy
+strategies may commit after preserving target indentation and Unicode and after
+rejecting transport escape drift. Anchored-block and context-aware matches are
+candidate-only: they return a failed result stating that no mutation occurred,
+the strategy used, and a bounded set of 1-based candidate line ranges. The task
+must read and retry with more precise `old_string` material.
+
+Unicode preservation applies only to complete normalized character expansions.
+For example, an equal segment that covers both hyphens normalized from one em
+dash may restore that dash, while a segment retaining only one hyphen must emit
+one hyphen. The same rule applies to shortening the three-dot expansion of an
+ellipsis.
+
+Replace mode snapshots the target modification time before matching and checks
+it again immediately before atomically visible replacement. A changed mtime is
+a hard conflict. A same-mtime external content change remains outside the
+contract unless it participates in the in-process writer sequence.
 
 For `patch`:
 
 - `patch`: string, required V4A patch text
 
 Patch mode accepts V4A patch text with `*** Begin Patch`, `*** Update File`,
-`*** Add File`, `*** Delete File`, `*** Move File`, and `*** End Patch`
-markers. It may update, create, delete, or move multiple files. Runtime
-validates all operations before applying them. Update hunks apply through the
-same fuzzy matching chain used by replace mode. Canonical external mutation
-targets require the same harness approval as `write` and replace mode.
+`*** Add File`, `*** Delete File`, and `*** End Patch` markers. Move markers are
+rejected. It may update, create, or delete multiple files. Runtime validates all
+operations and rejects duplicate or overlapping canonical targets before
+applying them. Update hunks apply through the same matching tiers used by
+replace mode. Delete requires complete current-task read evidence. Canonical
+external mutation targets require the same harness approval as `write` and
+replace mode.
+
+Validated operations apply sequentially without rollback. Add uses no-clobber
+creation; Update and Delete compare their validated mtime immediately before
+commit. When a later operation fails, earlier committed operations remain and
+the failed result contains their `diff` and file lists plus
+`failed_operation: { index, kind, path }`, where `index` is 1-based. The
+model-facing result uses a compact failure summary naming the failed operation
+and the paths that remain committed. That summary also includes a bounded form
+of the concrete `error`, including any safe retry or no-clobber guidance.
 
 Successful result fields:
 
@@ -153,14 +190,12 @@ Successful result fields:
 - `files_modified`
 - `files_created`
 - `files_deleted`
-- `files_moved`
 - `lint`
 - `lsp_diagnostics`
-- `warning`
 - `error`
 
 Diffs are Git patch blocks. Update, add, and delete operations include
-`diff --git`, file headers, and unified hunks; pure moves use Git rename headers.
+`diff --git`, file headers, and unified hunks.
 
 `lsp_diagnostics` follows the same best-effort rule as `write`: it is populated
 only when the runtime has introduced diagnostics ready for the edited files,
