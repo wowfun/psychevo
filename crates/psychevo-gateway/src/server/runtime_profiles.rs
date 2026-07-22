@@ -13,6 +13,14 @@ pub(super) struct RunnableTargetCatalog {
     target_revisions: BTreeMap<String, String>,
 }
 
+pub(super) struct ThreadDraftPrepareWork {
+    pub(super) target_catalog: Arc<RunnableTargetCatalog>,
+    pub(super) target: wire::RunnableTargetView,
+    pub(super) context: wire::ThreadContextReadResult,
+    pub(super) configured: Vec<psychevo_runtime::ConfiguredModel>,
+    pub(super) source_lane_prepared: bool,
+}
+
 #[derive(Clone)]
 pub(super) struct ImportableAcpProfile {
     pub(super) config: RuntimeProfileConfig,
@@ -75,7 +83,10 @@ pub(super) struct ValidatedRunnableTarget {
 }
 
 impl RunnableTargetCatalog {
-    fn load(state: &WebState, scope: &ResolvedScope) -> psychevo_runtime::Result<Arc<Self>> {
+    pub(super) fn load(
+        state: &WebState,
+        scope: &ResolvedScope,
+    ) -> psychevo_runtime::Result<Arc<Self>> {
         let generation = state
             .inner
             .runnable_target_catalog_generation
@@ -183,10 +194,39 @@ impl RunnableTargetCatalog {
             })
     }
 
-    fn by_id(&self, target_id: &str) -> Option<&wire::RunnableTargetView> {
+    pub(super) fn by_id(&self, target_id: &str) -> Option<&wire::RunnableTargetView> {
         self.compatible_targets
             .iter()
             .find(|candidate| candidate.target_id == target_id)
+    }
+
+    pub(super) fn default_draft_target(
+        &self,
+        state: &WebState,
+        scope: &ResolvedScope,
+    ) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+        let source_lane = state
+            .inner
+            .state
+            .store()
+            .gateway_source_lane(&scope.source.source_key().0)?;
+        if let Some(lane) = source_lane.as_ref()
+            && let Some(runtime_profile_ref) = lane.draft_profile_ref.as_deref()
+        {
+            return self
+                .compatible_pair(&wire::RunnableTargetInput {
+                    agent_ref: lane.draft_agent_ref.clone(),
+                    runtime_profile_ref: runtime_profile_ref.to_string(),
+                })
+                .cloned();
+        }
+        self.compatible_targets
+            .iter()
+            .find(|target| target.agent_ref.is_none() && target.runtime_profile_ref == "native")
+            .or_else(|| self.compatible_targets.iter().find(|target| target.ready))
+            .or_else(|| self.compatible_targets.first())
+            .cloned()
+            .ok_or_else(|| Error::Message("No default Agent target is available.".to_string()))
     }
 
     fn target_revision(&self, target_id: &str) -> Option<&str> {
@@ -253,7 +293,9 @@ impl WebState {
     }
 }
 
-fn runnable_target_input(target: &wire::RunnableTargetView) -> wire::RunnableTargetInput {
+pub(super) fn runnable_target_input(
+    target: &wire::RunnableTargetView,
+) -> wire::RunnableTargetInput {
     wire::RunnableTargetInput {
         agent_ref: target.agent_ref.clone(),
         runtime_profile_ref: target.runtime_profile_ref.clone(),
@@ -442,6 +484,19 @@ fn thread_context_read_result_with_configured_models(
     wire::ThreadContextReadResult,
     Vec<psychevo_runtime::ConfiguredModel>,
 )> {
+    let target_catalog = RunnableTargetCatalog::load(state, scope)?;
+    thread_context_read_result_with_catalog(state, scope, params, target_catalog)
+}
+
+fn thread_context_read_result_with_catalog(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadContextReadParams,
+    target_catalog: Arc<RunnableTargetCatalog>,
+) -> psychevo_runtime::Result<(
+    wire::ThreadContextReadResult,
+    Vec<psychevo_runtime::ConfiguredModel>,
+)> {
     let requested_target = params.target.clone();
     let thread_id = match params.thread_id {
         Some(thread_id) => Some(thread_id),
@@ -483,7 +538,6 @@ fn thread_context_read_result_with_configured_models(
         .state
         .store()
         .gateway_source_lane(&scope.source.source_key().0)?;
-    let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     let requested_target_view = requested_target
         .as_ref()
         .map(|target| target_catalog.compatible_pair(target).cloned())
@@ -837,12 +891,41 @@ pub(super) async fn thread_context_read_result_live(
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
 ) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+    let target_catalog = RunnableTargetCatalog::load(state, scope)?;
+    thread_context_read_result_live_with_catalog(state, scope, params, target_catalog).await
+}
+
+pub(super) async fn thread_context_read_result_live_with_catalog(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadContextReadParams,
+    target_catalog: Arc<RunnableTargetCatalog>,
+) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+    thread_context_read_result_live_with_catalog_and_configured(
+        state,
+        scope,
+        params,
+        target_catalog,
+    )
+    .await
+    .map(|(context, _)| context)
+}
+
+pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadContextReadParams,
+    target_catalog: Arc<RunnableTargetCatalog>,
+) -> psychevo_runtime::Result<(
+    wire::ThreadContextReadResult,
+    Vec<psychevo_runtime::ConfiguredModel>,
+)> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
         None => state.inner.gateway.resolve_source_thread(&scope.source)?,
     };
     let (mut context, configured) =
-        thread_context_read_result_with_configured_models(state, scope, params)?;
+        thread_context_read_result_with_catalog(state, scope, params, target_catalog)?;
     let Some(thread_id) = thread_id else {
         let source_key = scope.source.source_key();
         if let Some(target_id) = context.selected_target_id.as_deref()
@@ -854,7 +937,7 @@ pub(super) async fn thread_context_read_result_live(
         {
             apply_prepared_acp_snapshot(state, scope, &configured, &mut context, &snapshot)?;
         }
-        return Ok(context);
+        return Ok((context, configured));
     };
     let Some(binding) = state
         .inner
@@ -862,15 +945,15 @@ pub(super) async fn thread_context_read_result_live(
         .store()
         .gateway_runtime_binding(&thread_id)?
     else {
-        return Ok(context);
+        return Ok((context, configured));
     };
     if binding.status != GatewayRuntimeBindingStatus::Resolved
         || binding.native_kind.as_deref() != Some(RuntimeProfileKind::Acp.as_str())
     {
-        return Ok(context);
+        return Ok((context, configured));
     }
     let Some(native_session_id) = binding.native_session_id.clone() else {
-        return Ok(context);
+        return Ok((context, configured));
     };
     let resident_snapshot = state
         .inner
@@ -882,7 +965,7 @@ pub(super) async fn thread_context_read_result_live(
         Some(snapshot) => snapshot,
         None => match persisted_acp_session_snapshot(state, &thread_id)? {
             Some(snapshot) => snapshot,
-            None => return Ok(context),
+            None => return Ok((context, configured)),
         },
     };
     let profile_capability_revision = context
@@ -938,7 +1021,7 @@ pub(super) async fn thread_context_read_result_live(
         context.context_revision =
             combined_thread_revision(&[&context.context_revision, "process-ephemeral-unavailable"]);
     }
-    Ok(context)
+    Ok((context, configured))
 }
 
 fn apply_prepared_acp_snapshot(
@@ -974,51 +1057,11 @@ fn apply_prepared_acp_snapshot(
     Ok(())
 }
 
-pub(super) async fn thread_draft_prepare_result(
+pub(super) fn prepare_draft_source_lane(
     state: &WebState,
     scope: &ResolvedScope,
-    params: wire::ThreadDraftPrepareParams,
-) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
-    if state
-        .inner
-        .gateway
-        .resolve_source_thread(&scope.source)?
-        .is_some()
-    {
-        return Err(runtime_rpc_error(
-            "immutable_binding",
-            "binding",
-            wire::RuntimeRetryClassView::UserAction,
-            "Start a new Thread before preparing a different Agent target.".to_string(),
-            None,
-        ));
-    }
-    let target = runnable_target_by_id(state, scope, &params.target_id)?;
-    if !target.ready {
-        let problem = wire::RuntimeErrorView {
-            code: "runtime_unavailable".to_string(),
-            stage: "configuration".to_string(),
-            retry_class: wire::RuntimeRetryClassView::UserAction,
-            message: target
-                .unavailable_reason
-                .clone()
-                .unwrap_or_else(|| "The selected Agent target is not ready.".to_string()),
-            diagnostic_ref: None,
-        };
-        let context = thread_context_read_result(
-            state,
-            scope,
-            wire::ThreadContextReadParams {
-                thread_id: None,
-                target: Some(runnable_target_input(&target)),
-                scope: Some(params.scope),
-            },
-        )?;
-        return Ok(wire::ThreadDraftPrepareResult {
-            context,
-            problem: Some(problem),
-        });
-    }
+    target: &wire::RunnableTargetView,
+) -> psychevo_runtime::Result<()> {
     let source_key = scope.source.source_key();
     let existing_lane = state
         .inner
@@ -1053,19 +1096,144 @@ pub(super) async fn thread_draft_prepare_result(
             lineage: Some(json!({"reason": "thread_draft_prepare"})),
         })?;
     state.inner.gateway.bump_source_generation_key(&source_key);
+    Ok(())
+}
 
-    let target_input = runnable_target_input(&target);
-    let (mut context, configured) = thread_context_read_result_with_configured_models(
+fn ensure_draft_source_unbound(
+    state: &WebState,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<()> {
+    if state
+        .inner
+        .gateway
+        .resolve_source_thread(&scope.source)?
+        .is_some()
+    {
+        return Err(runtime_rpc_error(
+            "immutable_binding",
+            "binding",
+            wire::RuntimeRetryClassView::UserAction,
+            "Start a new Thread before preparing a different Agent target.".to_string(),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn thread_draft_prepare_result(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadDraftPrepareParams,
+) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+    let target_catalog = RunnableTargetCatalog::load(state, scope)?;
+    thread_draft_prepare_result_with_catalog(state, scope, params, target_catalog).await
+}
+
+pub(super) async fn thread_draft_prepare_result_with_catalog(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadDraftPrepareParams,
+    target_catalog: Arc<RunnableTargetCatalog>,
+) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+    ensure_draft_source_unbound(state, scope)?;
+    let target = target_catalog
+        .by_id(&params.target_id)
+        .cloned()
+        .ok_or_else(|| {
+            agent_session_error(
+                "target_not_found",
+                AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
+                "The selected Agent target is no longer present in this workspace catalog. Refresh Thread Context and select another target.",
+                None,
+            )
+        })?;
+    let source_lane_prepared = if target.ready {
+        prepare_draft_source_lane(state, scope, &target)?;
+        true
+    } else {
+        false
+    };
+    let (context, configured) = thread_context_read_result_live_with_catalog_and_configured(
         state,
         scope,
         wire::ThreadContextReadParams {
             thread_id: None,
-            target: Some(target_input),
-            scope: Some(scope.to_wire_scope()),
+            target: Some(runnable_target_input(&target)),
+            scope: Some(params.scope.clone()),
         },
-    )?;
-    let catalog = RunnableTargetCatalog::load(state, scope)?;
-    let record = catalog
+        target_catalog.clone(),
+    )
+    .await?;
+    thread_draft_prepare_result_with_work(
+        state,
+        scope,
+        params,
+        ThreadDraftPrepareWork {
+            target_catalog,
+            target,
+            context,
+            configured,
+            source_lane_prepared,
+        },
+    )
+    .await
+}
+
+pub(super) async fn thread_draft_prepare_result_with_work(
+    state: &WebState,
+    scope: &ResolvedScope,
+    params: wire::ThreadDraftPrepareParams,
+    work: ThreadDraftPrepareWork,
+) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+    ensure_draft_source_unbound(state, scope)?;
+    let ThreadDraftPrepareWork {
+        target_catalog,
+        target,
+        mut context,
+        configured,
+        source_lane_prepared,
+    } = work;
+    if target.target_id != params.target_id {
+        return Err(agent_session_error(
+            "target_not_found",
+            AgentErrorStage::Binding,
+            "user_action",
+            "not_delivered",
+            "The selected Agent target is no longer present in this workspace catalog. Refresh Thread Context and select another target.",
+            None,
+        ));
+    }
+    if !target.ready {
+        let problem = wire::RuntimeErrorView {
+            code: "runtime_unavailable".to_string(),
+            stage: "configuration".to_string(),
+            retry_class: wire::RuntimeRetryClassView::UserAction,
+            message: target
+                .unavailable_reason
+                .clone()
+                .unwrap_or_else(|| "The selected Agent target is not ready.".to_string()),
+            diagnostic_ref: None,
+        };
+        return Ok(wire::ThreadDraftPrepareResult {
+            context,
+            problem: Some(problem),
+        });
+    }
+    if !source_lane_prepared {
+        prepare_draft_source_lane(state, scope, &target)?;
+    }
+    let source_key = scope.source.source_key();
+    let draft_control_values = state
+        .inner
+        .state
+        .store()
+        .gateway_source_lane(&source_key.0)?
+        .map(|lane| lane.draft_control_values)
+        .unwrap_or_default();
+
+    let record = target_catalog
         .profile_records
         .get(&target.runtime_profile_ref)
         .ok_or_else(|| {
@@ -1078,12 +1246,23 @@ pub(super) async fn thread_draft_prepare_result(
             )
         })?;
     if record.config.runtime == RuntimeProfileKind::Acp {
+        gateway_profile_mark(
+            "thread_draft_acp_handshake_started",
+            None,
+            None,
+            GatewayProfileFields {
+                request_method: Some("thread/draft/open"),
+                runtime_source: Some("web"),
+                ..GatewayProfileFields::default()
+            },
+        );
         let preparation = async {
-            let peer = resolve_runtime_target_peer_turn(
+            let peer = resolve_runtime_target_peer_turn_with_catalog(
                 state,
                 scope,
                 &target.runtime_profile_ref,
                 target.agent_ref.as_deref(),
+                &target_catalog,
             )?
             .ok_or_else(|| {
                 runtime_rpc_error(
@@ -1110,6 +1289,16 @@ pub(super) async fn thread_draft_prepare_result(
                 .await
         }
         .await;
+        gateway_profile_mark(
+            "thread_draft_acp_handshake_completed",
+            None,
+            None,
+            GatewayProfileFields {
+                request_method: Some("thread/draft/open"),
+                runtime_source: Some("web"),
+                ..GatewayProfileFields::default()
+            },
+        );
         match preparation {
             Ok(snapshot) => {
                 apply_prepared_acp_snapshot(state, scope, &configured, &mut context, &snapshot)?
@@ -1123,15 +1312,7 @@ pub(super) async fn thread_draft_prepare_result(
                     &draft_control_values,
                     &problem,
                 )?;
-                context = thread_context_read_result(
-                    state,
-                    scope,
-                    wire::ThreadContextReadParams {
-                        thread_id: None,
-                        target: Some(runnable_target_input(&target)),
-                        scope: Some(scope.to_wire_scope()),
-                    },
-                )?;
+                apply_draft_preparation_problem(&mut context, &problem);
                 return Ok(wire::ThreadDraftPrepareResult {
                     context,
                     problem: Some(problem),
@@ -1143,6 +1324,20 @@ pub(super) async fn thread_draft_prepare_result(
         context,
         problem: None,
     })
+}
+
+fn apply_draft_preparation_problem(
+    context: &mut wire::ThreadContextReadResult,
+    problem: &wire::RuntimeErrorView,
+) {
+    let preparation_revision = format!("draft-prepare:{}:{}", problem.code, problem.message);
+    context.context_revision =
+        combined_thread_revision(&[&context.context_revision, &preparation_revision]);
+    context.sendability = wire::ThreadSendabilityView {
+        allowed: false,
+        reason: Some(problem.message.clone()),
+        recovery_action: Some("thread/draft/prepare".to_string()),
+    };
 }
 
 const DRAFT_PREPARATION_PROBLEM_KEY: &str = "draftPreparationProblem";
@@ -1708,11 +1903,21 @@ pub(super) fn resolve_runtime_target_peer_turn(
     runtime_ref: &str,
     agent_ref: Option<&str>,
 ) -> psychevo_runtime::Result<Option<crate::ResolvedPeerTurn>> {
+    let catalog = RunnableTargetCatalog::load(state, scope)?;
+    resolve_runtime_target_peer_turn_with_catalog(state, scope, runtime_ref, agent_ref, &catalog)
+}
+
+fn resolve_runtime_target_peer_turn_with_catalog(
+    state: &WebState,
+    scope: &ResolvedScope,
+    runtime_ref: &str,
+    agent_ref: Option<&str>,
+    catalog: &RunnableTargetCatalog,
+) -> psychevo_runtime::Result<Option<crate::ResolvedPeerTurn>> {
     let runtime_ref = runtime_ref.trim();
     if runtime_ref.is_empty() || runtime_ref == "native" {
         return Ok(None);
     }
-    let catalog = RunnableTargetCatalog::load(state, scope)?;
     let Some(record) = catalog.profile_records.get(runtime_ref) else {
         return Ok(None);
     };

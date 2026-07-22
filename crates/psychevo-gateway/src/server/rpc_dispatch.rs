@@ -47,6 +47,16 @@ async fn handle_rpc(
         "thread/draft/open" => {
             let params = request.required_params::<wire::ThreadDraftOpenParams>()?;
             let scope = resolve_start_scope(&state, &auth, params.origin.clone())?;
+            gateway_profile_mark(
+                "thread_draft_open_received",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
             let _source_mutation = state
                 .inner
                 .gateway
@@ -66,33 +76,131 @@ async fn handle_rpc(
                 &snapshot_scope,
                 None,
             )?)?;
-            let target_id = match params.target_intent {
+            let target_catalog = RunnableTargetCatalog::load(&state, &snapshot_scope)?;
+            gateway_profile_mark(
+                "thread_draft_catalog_loaded",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            let target = match params.target_intent {
                 wire::ThreadDraftTargetIntent::Default => {
-                    let discovery = thread_context_read_result_live(
-                        &state,
-                        &snapshot_scope,
-                        wire::ThreadContextReadParams {
-                            thread_id: None,
-                            target: None,
-                            scope: Some(snapshot_scope.to_wire_scope()),
+                    gateway_profile_mark(
+                        "thread_draft_target_discovery_started",
+                        None,
+                        None,
+                        GatewayProfileFields {
+                            request_method: Some("thread/draft/open"),
+                            runtime_source: Some("web"),
+                            ..GatewayProfileFields::default()
                         },
-                    )
-                    .await?;
-                    discovery.suggested_target_id.ok_or_else(|| {
-                        Error::Message("No default Agent target is available.".to_string())
-                    })?
+                    );
+                    let target = target_catalog.default_draft_target(&state, &snapshot_scope)?;
+                    gateway_profile_mark(
+                        "thread_draft_target_discovery_completed",
+                        None,
+                        None,
+                        GatewayProfileFields {
+                            request_method: Some("thread/draft/open"),
+                            runtime_source: Some("web"),
+                            ..GatewayProfileFields::default()
+                        },
+                    );
+                    target
                 }
-                wire::ThreadDraftTargetIntent::Exact { target_id } => target_id,
+                wire::ThreadDraftTargetIntent::Exact { target_id } => {
+                    gateway_profile_mark(
+                        "thread_draft_target_discovery_skipped",
+                        None,
+                        None,
+                        GatewayProfileFields {
+                            request_method: Some("thread/draft/open"),
+                            runtime_source: Some("web"),
+                            ..GatewayProfileFields::default()
+                        },
+                    );
+                    target_catalog
+                        .by_id(&target_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            agent_session_error(
+                                "target_not_found",
+                                AgentErrorStage::Binding,
+                                "user_action",
+                                "not_delivered",
+                                "The selected Agent target is no longer present in this workspace catalog. Refresh Thread Context and select another target.",
+                                None,
+                            )
+                        })?
+                }
             };
-            let prepared = thread_draft_prepare_result(
+            let source_lane_prepared = if target.ready {
+                prepare_draft_source_lane(&state, &snapshot_scope, &target)?;
+                true
+            } else {
+                false
+            };
+            let (context, configured) = thread_context_read_result_live_with_catalog_and_configured(
+                &state,
+                &snapshot_scope,
+                wire::ThreadContextReadParams {
+                    thread_id: None,
+                    target: Some(runnable_target_input(&target)),
+                    scope: Some(snapshot_scope.to_wire_scope()),
+                },
+                target_catalog.clone(),
+            )
+            .await?;
+            gateway_profile_mark(
+                "thread_draft_prepare_started",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            let prepared = thread_draft_prepare_result_with_work(
                 &state,
                 &snapshot_scope,
                 wire::ThreadDraftPrepareParams {
-                    target_id,
                     scope: snapshot_scope.to_wire_scope(),
+                    target_id: target.target_id.clone(),
+                },
+                ThreadDraftPrepareWork {
+                    target_catalog,
+                    target,
+                    context,
+                    configured,
+                    source_lane_prepared,
                 },
             )
             .await?;
+            gateway_profile_mark(
+                "thread_draft_prepare_completed",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            gateway_profile_mark(
+                "thread_draft_open_completed",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
             Ok(serde_json::to_value(wire::ThreadDraftOpenResult {
                 snapshot,
                 context: prepared.context,
@@ -689,7 +797,28 @@ async fn handle_rpc(
         "workspace/git/branches" => {
             let params = request.required_params::<wire::WorkspaceGitBranchesParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
-            workspace_git_branches_value(&scope)
+            gateway_profile_mark(
+                "workspace_git_branches_started",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("workspace/git/branches"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            let result = workspace_git_branches_value(&scope);
+            gateway_profile_mark(
+                "workspace_git_branches_completed",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("workspace/git/branches"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            result
         }
         "workspace/git/checkout" => {
             let params = request.required_params::<wire::WorkspaceGitCheckoutParams>()?;

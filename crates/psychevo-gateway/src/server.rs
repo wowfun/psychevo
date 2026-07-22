@@ -141,19 +141,21 @@ use commands::{
 #[cfg(test)]
 use completion::active_completion_token;
 use completion::completion_list_value;
+use runtime_profiles::{
+    RunnableTargetCatalog, ThreadDraftPrepareWork, apply_thread_control_precedence,
+    cached_thread_history_descriptor, delete_runtime_profile,
+    ensure_turn_runtime_profile_supported, prepare_draft_source_lane, runnable_target_for_source,
+    runnable_target_for_source_profile, runnable_target_input, runtime_backend_kind,
+    runtime_profile_list_result, runtime_profile_read_result, selected_context_target_id,
+    set_runtime_profile_enabled, thread_context_read_result_for_target_id,
+    thread_context_read_result_live, thread_context_read_result_live_with_catalog_and_configured,
+    thread_control_override_string_value, thread_control_set_result, thread_draft_prepare_result,
+    thread_draft_prepare_result_with_work, validate_and_capture_team_runtime_members,
+    validate_turn_runnable_target, write_runtime_profile,
+};
 #[cfg(test)]
 use runtime_profiles::{
     acp_session_mode_control_descriptor, combined_thread_revision, generated_runtime_profiles,
-};
-use runtime_profiles::{
-    apply_thread_control_precedence, cached_thread_history_descriptor, delete_runtime_profile,
-    ensure_turn_runtime_profile_supported, runnable_target_for_source,
-    runnable_target_for_source_profile, runtime_backend_kind, runtime_profile_list_result,
-    runtime_profile_read_result, selected_context_target_id, set_runtime_profile_enabled,
-    thread_context_read_result_for_target_id, thread_context_read_result_live,
-    thread_control_override_string_value, thread_control_set_result, thread_draft_prepare_result,
-    validate_and_capture_team_runtime_members, validate_turn_runnable_target,
-    write_runtime_profile,
 };
 use session_lifecycle::{
     archive_thread, delete_thread, fork_acp_thread, fork_native_thread, import_agent_session,
