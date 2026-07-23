@@ -352,6 +352,179 @@ pub(crate) async fn openai_provider_abort_wakes_pending_sse_chunk() {
     server.join().expect("server thread");
 }
 
+#[tokio::test]
+pub(crate) async fn openai_provider_keepalives_do_not_reset_inference_idle_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        read_http_headers(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
+            .expect("write headers");
+        stream.flush().expect("flush headers");
+        for _ in 0..20 {
+            thread::sleep(Duration::from_millis(100));
+            if stream.write_all(b": keepalive\n\n").is_err() {
+                break;
+            }
+            let _ = stream.flush();
+        }
+    });
+    let provider = OpenAiChatProvider::new(format!("http://{addr}/v1"), "test-key", "mock")
+        .with_inference_idle_timeout_secs(1);
+    let (_abort_tx, abort_rx) = watch::channel(false);
+    let mut stream = provider
+        .stream(basic_generation_request(), AbortSignal::new(abort_rx))
+        .await
+        .expect("stream");
+
+    let error = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .expect("idle guard fired")
+        .expect("error event")
+        .expect_err("keepalive must not count as inference progress");
+    assert!(
+        error
+            .to_string()
+            .contains("no inference progress for 1 seconds")
+    );
+    server.join().expect("server thread");
+}
+
+#[tokio::test]
+pub(crate) async fn openai_provider_meaningful_delta_resets_inference_idle_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        read_http_headers(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
+            .expect("write headers");
+        stream.flush().expect("flush headers");
+        thread::sleep(Duration::from_millis(700));
+        stream
+            .write_all(
+                b"data: {\"id\":\"chat-1\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
+            )
+            .expect("write delta");
+        stream.flush().expect("flush delta");
+        thread::sleep(Duration::from_millis(700));
+        stream.write_all(b"data: [DONE]\n\n").expect("write done");
+    });
+    let provider = OpenAiChatProvider::new(format!("http://{addr}/v1"), "test-key", "mock")
+        .with_inference_idle_timeout_secs(1);
+    let (_abort_tx, abort_rx) = watch::channel(false);
+    let events = provider
+        .stream(basic_generation_request(), AbortSignal::new(abort_rx))
+        .await
+        .expect("stream")
+        .collect::<Vec<_>>()
+        .await;
+
+    assert!(events.iter().all(Result::is_ok), "events: {events:?}");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(StreamEvent::TextDelta { text }) if text == "hello"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(StreamEvent::Done {
+            outcome: Outcome::Normal,
+            ..
+        })
+    )));
+    server.join().expect("server thread");
+}
+
+#[tokio::test]
+pub(crate) async fn openai_provider_caps_error_response_body() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        read_http_request(&mut stream);
+        let body = format!("{}TAIL", "x".repeat(70 * 1024));
+        stream
+            .write_all(&http_response(
+                "500 Internal Server Error",
+                "text/plain",
+                &body,
+            ))
+            .expect("response");
+    });
+    let provider = OpenAiChatProvider::new(format!("http://{addr}/v1"), "test-key", "mock");
+    let (_abort_tx, abort_rx) = watch::channel(false);
+
+    let error = match provider
+        .stream(basic_generation_request(), AbortSignal::new(abort_rx))
+        .await
+    {
+        Ok(_) => panic!("expected provider error"),
+        Err(error) => error,
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains("response body truncated after 65536 bytes"),
+        "{message}"
+    );
+    assert!(!message.contains("TAIL"));
+    assert!(message.len() < 66 * 1024);
+    server.join().expect("server thread");
+}
+
+#[tokio::test]
+pub(crate) async fn responses_background_job_has_no_whole_job_idle_deadline() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("create accept");
+        let create_request = read_http_request(&mut stream);
+        assert!(create_request.starts_with("POST /v1/responses HTTP/1.1"));
+        stream
+            .write_all(&http_response(
+                "200 OK",
+                "application/json",
+                r#"{"id":"resp_1","status":"in_progress"}"#,
+            ))
+            .expect("create response");
+
+        let (mut stream, _) = listener.accept().expect("poll accept");
+        let poll_request = read_http_request(&mut stream);
+        assert!(poll_request.starts_with("GET /v1/responses/resp_1 HTTP/1.1"));
+        stream
+            .write_all(&http_response(
+                "200 OK",
+                "application/json",
+                r#"{"id":"resp_1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}"#,
+            ))
+            .expect("poll response");
+    });
+    let mut request = basic_generation_request();
+    request.tools = vec![GenerationTool::WebSearch(HostedWebSearchTool {
+        config: json!({"return_token_budget":"unlimited"}),
+    })];
+    let provider = OpenAiResponsesProvider::new(format!("http://{addr}/v1"), "test-key")
+        .with_inference_idle_timeout_secs(1);
+    let (_abort_tx, abort_rx) = watch::channel(false);
+
+    let stream = tokio::time::timeout(
+        Duration::from_secs(4),
+        provider.stream(request, AbortSignal::new(abort_rx)),
+    )
+    .await
+    .expect("background job completed beyond one exchange timeout")
+    .expect("stream");
+    let events = stream.collect::<Vec<_>>().await;
+    assert!(events.iter().all(Result::is_ok), "events: {events:?}");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(StreamEvent::TextDelta { text }) if text == "done"
+    )));
+    server.join().expect("server thread");
+}
+
 #[test]
 pub(crate) fn chat_request_maps_messages_and_tools() {
     let request = GenerationRequest {

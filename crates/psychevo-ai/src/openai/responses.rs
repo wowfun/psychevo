@@ -2,21 +2,36 @@
 pub(crate) use super::*;
 
 use futures::StreamExt;
+use std::time::Duration;
+
+use crate::openai_http::{
+    GuardedHttpError, checked_response, generation_http_client, inference_event_is_progress,
+    inference_idle_timeout, response_json_guarded, send_guarded, wait_for_deadline,
+};
 
 #[derive(Debug, Clone)]
 pub struct OpenAiResponsesProvider {
     client: reqwest::Client,
     base_url: String,
     api_key: String,
+    inference_idle_timeout: Option<Duration>,
 }
 
 impl OpenAiResponsesProvider {
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: generation_http_client(),
             base_url: base_url.into(),
             api_key: api_key.into(),
+            inference_idle_timeout: inference_idle_timeout(
+                crate::openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
+            ),
         }
+    }
+
+    pub fn with_inference_idle_timeout_secs(mut self, seconds: u64) -> Self {
+        self.inference_idle_timeout = inference_idle_timeout(seconds);
+        self
     }
 
     #[cfg(test)]
@@ -52,17 +67,41 @@ impl OpenAiResponsesProvider {
         body: Value,
         mut abort: AbortSignal,
     ) -> Result<GenerationStream> {
-        let response = tokio::select! {
-            _ = abort.wait_for_abort() => return Ok(aborted_generation_stream()),
-            response = self.authorized(self.client.post(responses_endpoint(&self.base_url))).json(&body).send() => response?,
+        let response = match send_guarded(
+            self.authorized(self.client.post(responses_endpoint(&self.base_url)))
+                .json(&body),
+            &mut abort,
+            self.inference_idle_timeout,
+            "OpenAI Responses",
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+            Err(GuardedHttpError::Failed(error)) => return Err(error),
         };
-        let response = checked_response(response, "OpenAI Responses").await?;
+        let response = match checked_response(
+            response,
+            &mut abort,
+            self.inference_idle_timeout,
+            "OpenAI Responses",
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+            Err(GuardedHttpError::Failed(error)) => return Err(error),
+        };
         let state = ResponsesStreamState {
             bytes: Box::pin(response.bytes_stream()),
             parser: ResponsesSseParser::default(),
             pending: VecDeque::new(),
             abort,
             done: false,
+            inference_idle_timeout: self.inference_idle_timeout,
+            inference_deadline: self
+                .inference_idle_timeout
+                .map(|timeout| tokio::time::Instant::now() + timeout),
         };
         let output = stream::unfold(state, |mut state| async move {
             loop {
@@ -73,9 +112,18 @@ impl OpenAiResponsesProvider {
                     return None;
                 }
                 let next = tokio::select! {
+                    biased;
                     _ = state.abort.wait_for_abort() => {
                         state.done = true;
                         return Some((Ok(StreamEvent::Done { outcome: Outcome::Aborted, finish_reason: Some("aborted".into()) }), state));
+                    }
+                    _ = wait_for_deadline(state.inference_deadline) => {
+                        state.done = true;
+                        let timeout = state.inference_idle_timeout.expect("deadline timeout");
+                        return Some((Err(Error::Provider(format!(
+                            "OpenAI Responses made no inference progress for {} seconds",
+                            timeout.as_secs(),
+                        ))), state));
                     }
                     next = state.bytes.next() => next,
                 };
@@ -83,9 +131,7 @@ impl OpenAiResponsesProvider {
                     Some(Ok(bytes)) => match state.parser.push(&bytes) {
                         Ok(values) => {
                             for value in values {
-                                state
-                                    .pending
-                                    .extend(normalize_response_event(&value).into_iter().map(Ok));
+                                state.push_normalized(normalize_response_event(&value));
                             }
                         }
                         Err(error) => {
@@ -102,9 +148,7 @@ impl OpenAiResponsesProvider {
                         match state.parser.finish() {
                             Ok(values) => {
                                 for value in values {
-                                    state.pending.extend(
-                                        normalize_response_event(&value).into_iter().map(Ok),
-                                    );
+                                    state.push_normalized(normalize_response_event(&value));
                                 }
                             }
                             Err(error) => return Some((Err(error), state)),
@@ -126,14 +170,43 @@ impl OpenAiResponsesProvider {
         body: Value,
         mut abort: AbortSignal,
     ) -> Result<GenerationStream> {
-        let response = tokio::select! {
-            _ = abort.wait_for_abort() => return Ok(aborted_generation_stream()),
-            response = self.authorized(self.client.post(responses_endpoint(&self.base_url))).json(&body).send() => response?,
+        let response = match send_guarded(
+            self.authorized(self.client.post(responses_endpoint(&self.base_url)))
+                .json(&body),
+            &mut abort,
+            self.inference_idle_timeout,
+            "OpenAI background create",
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+            Err(GuardedHttpError::Failed(error)) => return Err(error),
         };
-        let mut response_value: Value = checked_response(response, "OpenAI background response")
-            .await?
-            .json()
-            .await?;
+        let response = match checked_response(
+            response,
+            &mut abort,
+            self.inference_idle_timeout,
+            "OpenAI background create",
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+            Err(GuardedHttpError::Failed(error)) => return Err(error),
+        };
+        let mut response_value = match response_json_guarded(
+            response,
+            &mut abort,
+            self.inference_idle_timeout,
+            "OpenAI background create body",
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+            Err(GuardedHttpError::Failed(error)) => return Err(error),
+        };
         let id = response_value
             .get("id")
             .and_then(Value::as_str)
@@ -143,23 +216,61 @@ impl OpenAiResponsesProvider {
             response_value.get("status").and_then(Value::as_str)
         {
             tokio::select! {
+                biased;
                 _ = abort.wait_for_abort() => {
-                    let _ = self.authorized(self.client.post(response_cancel_endpoint(&self.base_url, &id))).send().await;
+                    self.cancel_background_response(id.clone());
                     return Ok(aborted_generation_stream());
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
             }
-            let response = self
-                .authorized(
+            let response = match send_guarded(
+                self.authorized(
                     self.client
                         .get(response_retrieve_endpoint(&self.base_url, &id)),
-                )
-                .send()
-                .await?;
-            response_value = checked_response(response, "OpenAI background poll")
-                .await?
-                .json()
-                .await?;
+                ),
+                &mut abort,
+                self.inference_idle_timeout,
+                "OpenAI background poll",
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(GuardedHttpError::Aborted) => {
+                    self.cancel_background_response(id.clone());
+                    return Ok(aborted_generation_stream());
+                }
+                Err(GuardedHttpError::Failed(error)) => return Err(error),
+            };
+            let response = match checked_response(
+                response,
+                &mut abort,
+                self.inference_idle_timeout,
+                "OpenAI background poll",
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(GuardedHttpError::Aborted) => {
+                    self.cancel_background_response(id.clone());
+                    return Ok(aborted_generation_stream());
+                }
+                Err(GuardedHttpError::Failed(error)) => return Err(error),
+            };
+            response_value = match response_json_guarded(
+                response,
+                &mut abort,
+                self.inference_idle_timeout,
+                "OpenAI background poll body",
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(GuardedHttpError::Aborted) => {
+                    self.cancel_background_response(id.clone());
+                    return Ok(aborted_generation_stream());
+                }
+                Err(GuardedHttpError::Failed(error)) => return Err(error),
+            };
         }
         let events = normalize_complete_response(&response_value)
             .into_iter()
@@ -173,6 +284,19 @@ impl OpenAiResponsesProvider {
         } else {
             request.bearer_auth(&self.api_key)
         }
+    }
+
+    fn cancel_background_response(&self, id: String) {
+        let request = self.authorized(
+            self.client
+                .post(response_cancel_endpoint(&self.base_url, &id)),
+        );
+        let timeout = self
+            .inference_idle_timeout
+            .unwrap_or_else(|| Duration::from_secs(10));
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(timeout, request.send()).await;
+        });
     }
 }
 
@@ -312,17 +436,6 @@ fn response_message(role: &str, content: Value) -> Value {
         other => other,
     };
     json!({"role": role, "content": content})
-}
-
-async fn checked_response(response: reqwest::Response, label: &str) -> Result<reqwest::Response> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(response);
-    }
-    let body = response.text().await.unwrap_or_default();
-    Err(Error::Provider(format!(
-        "{label} returned HTTP {status}: {body}"
-    )))
 }
 
 #[derive(Default)]
@@ -753,6 +866,19 @@ struct ResponsesStreamState {
     pending: VecDeque<Result<StreamEvent>>,
     abort: AbortSignal,
     done: bool,
+    inference_idle_timeout: Option<Duration>,
+    inference_deadline: Option<tokio::time::Instant>,
+}
+
+impl ResponsesStreamState {
+    fn push_normalized(&mut self, events: Vec<StreamEvent>) {
+        if events.iter().any(inference_event_is_progress) {
+            self.inference_deadline = self
+                .inference_idle_timeout
+                .map(|timeout| tokio::time::Instant::now() + timeout);
+        }
+        self.pending.extend(events.into_iter().map(Ok));
+    }
 }
 
 #[cfg(test)]

@@ -1,11 +1,19 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+use std::time::Duration;
+
+use crate::openai_http::{
+    GuardedHttpError, error_body_guarded, generation_http_client, inference_event_is_progress,
+    inference_idle_timeout, send_guarded, wait_for_deadline,
+};
+
 #[derive(Debug, Clone)]
 pub struct OpenAiChatProvider {
     pub(crate) client: reqwest::Client,
     pub(crate) base_url: String,
     pub(crate) api_key: String,
     pub(crate) provider_name: String,
+    pub(crate) inference_idle_timeout: Option<Duration>,
 }
 
 impl OpenAiChatProvider {
@@ -15,11 +23,19 @@ impl OpenAiChatProvider {
         provider_name: impl Into<String>,
     ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: generation_http_client(),
             base_url: base_url.into(),
             api_key: api_key.into(),
             provider_name: provider_name.into(),
+            inference_idle_timeout: inference_idle_timeout(
+                crate::openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
+            ),
         }
+    }
+
+    pub fn with_inference_idle_timeout_secs(mut self, seconds: u64) -> Self {
+        self.inference_idle_timeout = inference_idle_timeout(seconds);
+        self
     }
 
     #[cfg(test)]
@@ -39,6 +55,7 @@ impl GenerationProvider for OpenAiChatProvider {
         let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let provider_name = self.provider_name.clone();
+        let inference_idle_timeout = self.inference_idle_timeout;
         Box::pin(async move {
             let mut abort = abort;
             if abort.aborted() {
@@ -61,21 +78,35 @@ impl GenerationProvider for OpenAiChatProvider {
                 if !api_key.trim().is_empty() {
                     http_request = http_request.bearer_auth(&api_key);
                 }
-                let send = http_request.send();
-                let response = tokio::select! {
-                    biased;
-                    _ = abort.wait_for_abort() => return Ok(aborted_generation_stream()),
-                    response = send => response?,
+                let response = match send_guarded(
+                    http_request,
+                    &mut abort,
+                    inference_idle_timeout,
+                    &provider_name,
+                )
+                .await
+                {
+                    Ok(response) => response,
+                    Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+                    Err(GuardedHttpError::Failed(error)) => return Err(error),
                 };
 
                 let status = response.status();
                 if status.is_success() {
                     break response;
                 }
-                let body = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|err| format!("<failed to read error body: {err}>"));
+                let body = match error_body_guarded(
+                    response,
+                    &mut abort,
+                    inference_idle_timeout,
+                    &provider_name,
+                )
+                .await
+                {
+                    Ok(body) => body,
+                    Err(GuardedHttpError::Aborted) => return Ok(aborted_generation_stream()),
+                    Err(GuardedHttpError::Failed(error)) => return Err(error),
+                };
                 if should_retry_image_rejection_as_text(
                     status,
                     &body,
@@ -98,6 +129,10 @@ impl GenerationProvider for OpenAiChatProvider {
                 pending: VecDeque::new(),
                 done: false,
                 abort,
+                inference_idle_timeout,
+                inference_deadline: inference_idle_timeout
+                    .map(|timeout| tokio::time::Instant::now() + timeout),
+                provider_name,
             };
             let output = stream::unfold(state, |mut state| async move {
                 loop {
@@ -129,6 +164,15 @@ impl GenerationProvider for OpenAiChatProvider {
                                 state,
                             ));
                         }
+                        _ = wait_for_deadline(state.inference_deadline) => {
+                            state.done = true;
+                            let timeout = state.inference_idle_timeout.expect("deadline timeout");
+                            return Some((Err(Error::Provider(format!(
+                                "{} made no inference progress for {} seconds",
+                                state.provider_name,
+                                timeout.as_secs(),
+                            ))), state));
+                        }
                         next = state.bytes.next() => next,
                     };
                     match next {
@@ -148,7 +192,7 @@ impl GenerationProvider for OpenAiChatProvider {
                                         return Some((Err(err), state));
                                     }
                                 };
-                                state.pending.extend(normalized.into_iter().map(Ok));
+                                state.push_normalized(normalized);
                             }
                         }
                         Some(Err(err)) => {
@@ -162,7 +206,7 @@ impl GenerationProvider for OpenAiChatProvider {
                                     for event in events {
                                         match state.normalizer.ingest(event) {
                                             Ok(events) => {
-                                                state.pending.extend(events.into_iter().map(Ok));
+                                                state.push_normalized(events);
                                             }
                                             Err(err) => {
                                                 return Some((Err(err), state));
@@ -243,4 +287,18 @@ pub(crate) struct OpenAiChatStreamState {
     pub(crate) pending: VecDeque<Result<StreamEvent>>,
     pub(crate) done: bool,
     pub(crate) abort: AbortSignal,
+    pub(crate) inference_idle_timeout: Option<Duration>,
+    pub(crate) inference_deadline: Option<tokio::time::Instant>,
+    pub(crate) provider_name: String,
+}
+
+impl OpenAiChatStreamState {
+    fn push_normalized(&mut self, events: Vec<StreamEvent>) {
+        if events.iter().any(inference_event_is_progress) {
+            self.inference_deadline = self
+                .inference_idle_timeout
+                .map(|timeout| tokio::time::Instant::now() + timeout);
+        }
+        self.pending.extend(events.into_iter().map(Ok));
+    }
 }

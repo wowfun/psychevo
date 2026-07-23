@@ -26,6 +26,9 @@ pub use control::*;
 #[path = "openai/provider.rs"]
 pub(crate) mod openai_provider;
 pub use openai_provider::*;
+#[path = "openai/http.rs"]
+pub(crate) mod openai_http;
+pub use openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS;
 #[path = "openai/responses.rs"]
 pub(crate) mod openai_responses;
 pub use openai_responses::*;
