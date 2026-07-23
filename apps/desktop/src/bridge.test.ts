@@ -19,7 +19,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  tauriCore.invoke.mockResolvedValue(undefined);
+  let generation = 0;
+  tauriCore.invoke.mockImplementation(async (command: string) => (
+    command === "gateway_connect" ? ++generation : undefined
+  ));
   tauriEvent.listen.mockResolvedValue(vi.fn());
 });
 
@@ -44,10 +47,12 @@ describe("DesktopGatewayTransport", () => {
 
     expect(first.connectionId).not.toBe(second.connectionId);
     expect(tauriCore.invoke).toHaveBeenCalledWith("gateway_disconnect", {
-      connectionId: first.connectionId
+      connectionId: first.connectionId,
+      generation: 1
     });
     expect(tauriCore.invoke).toHaveBeenCalledWith("gateway_send", {
       connectionId: second.connectionId,
+      generation: 2,
       message: '{"jsonrpc":"2.0","id":"1","method":"initialize"}'
     });
   });
@@ -71,49 +76,44 @@ describe("DesktopGatewayTransport", () => {
     expect(() => transport.send("{}")).toThrow("Gateway bridge is not connected");
   });
 
-  it("delivers notification broadcasts from other bridge connections", async () => {
+  it("delivers only messages from the active native generation", async () => {
     const listeners = installTauriListeners();
     const transport = new DesktopGatewayTransport("workbench");
     const received: string[] = [];
     await transport.connect();
     transport.onMessage((message) => received.push(String(message)));
-    const notification = JSON.stringify({
-      jsonrpc: "2.0",
-      method: "gateway/event",
-      params: { type: "turnStarted", threadId: "thread-floating", turnId: "turn-1" }
-    });
-
-    listeners.get("gateway-broadcast")?.({
+    listeners.get("gateway-message")?.({
       payload: {
-        message: notification,
-        originConnectionId: "floating:origin"
+        connectionId: transport.connectionId,
+        generation: 0,
+        message: "stale"
+      }
+    });
+    listeners.get("gateway-message")?.({
+      payload: {
+        connectionId: transport.connectionId,
+        generation: 1,
+        message: "current"
       }
     });
 
-    expect(received).toEqual([notification]);
+    expect(received).toEqual(["current"]);
   });
 
-  it("ignores own-origin broadcasts and response frames", async () => {
-    const listeners = installTauriListeners();
+  it("registers native listeners once while reconnecting by generation", async () => {
+    installTauriListeners();
     const transport = new DesktopGatewayTransport("workbench");
-    const received: string[] = [];
     await transport.connect();
-    transport.onMessage((message) => received.push(String(message)));
+    transport.close();
+    await transport.connect();
+    transport.send("second generation");
 
-    listeners.get("gateway-broadcast")?.({
-      payload: {
-        message: JSON.stringify({ jsonrpc: "2.0", method: "gateway/event", params: {} }),
-        originConnectionId: transport.connectionId
-      }
+    expect(tauriEvent.listen).toHaveBeenCalledTimes(2);
+    expect(tauriCore.invoke).toHaveBeenCalledWith("gateway_send", {
+      connectionId: transport.connectionId,
+      generation: 2,
+      message: "second generation"
     });
-    listeners.get("gateway-broadcast")?.({
-      payload: {
-        message: JSON.stringify({ jsonrpc: "2.0", id: "1", result: { accepted: true } }),
-        originConnectionId: "floating:origin"
-      }
-    });
-
-    expect(received).toEqual([]);
   });
 });
 

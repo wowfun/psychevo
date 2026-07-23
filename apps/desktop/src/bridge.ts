@@ -13,12 +13,8 @@ import type { FloatingActivation } from "@psychevo/floating";
 
 interface GatewayBridgePayload {
   connectionId: string;
+  generation: number;
   message: string;
-}
-
-interface GatewayBridgeBroadcastPayload {
-  message: string;
-  originConnectionId: string;
 }
 
 export interface DesktopDownloadSessionResult {
@@ -33,73 +29,65 @@ export interface DesktopDownloadSessionRequest extends SessionDownloadOptions {
 }
 
 export class DesktopGatewayTransport implements GatewayTransport {
-  private broadcastUnlisten: UnlistenFn | null = null;
   private connected = false;
+  private connecting: Promise<void> | null = null;
+  private connectEpoch = 0;
   private disconnectUnlisten: UnlistenFn | null = null;
+  private generation: number | null = null;
+  private listenersPromise: Promise<void> | null = null;
   private messageUnlisten: UnlistenFn | null = null;
   private readonly disconnectHandlers = new Set<(message: string) => void>();
   private readonly messageHandlers = new Set<GatewayRawMessageHandler>();
   readonly connectionId: string;
 
-  constructor(label: string) {
-    this.connectionId = desktopGatewayConnectionId(label);
+  constructor(private readonly ownerWindow: string) {
+    this.connectionId = desktopGatewayConnectionId(ownerWindow);
   }
 
   async connect(): Promise<void> {
     if (this.connected) {
       return;
     }
-    this.messageUnlisten = await listen<GatewayBridgePayload>("gateway-message", (event) => {
-      if (event.payload.connectionId !== this.connectionId) {
-        return;
-      }
-      for (const handler of this.messageHandlers) {
-        handler(event.payload.message);
-      }
-    });
-    this.broadcastUnlisten = await listen<GatewayBridgeBroadcastPayload>("gateway-broadcast", (event) => {
-      if (event.payload.originConnectionId === this.connectionId) {
-        return;
-      }
-      if (!isBroadcastGatewayNotification(event.payload.message)) {
-        return;
-      }
-      for (const handler of this.messageHandlers) {
-        handler(event.payload.message);
-      }
-    });
-    this.disconnectUnlisten = await listen<GatewayBridgePayload>("gateway-disconnect", (event) => {
-      if (event.payload.connectionId !== this.connectionId) {
-        return;
-      }
-      this.connected = false;
-      for (const handler of this.disconnectHandlers) {
-        handler(event.payload.message || "Gateway bridge disconnected");
-      }
-    });
-    try {
-      await invoke("gateway_connect", { connectionId: this.connectionId });
-      this.connected = true;
-    } catch (error) {
-      this.messageUnlisten?.();
-      this.broadcastUnlisten?.();
-      this.disconnectUnlisten?.();
-      this.messageUnlisten = null;
-      this.broadcastUnlisten = null;
-      this.disconnectUnlisten = null;
-      throw error;
+    if (this.connecting) {
+      return this.connecting;
     }
+    const epoch = ++this.connectEpoch;
+    const connecting = this.ensureListeners()
+      .then(() => invoke<number>("gateway_connect", {
+        connectionId: this.connectionId,
+        ownerWindow: this.ownerWindow
+      }))
+      .then(async (generation) => {
+        if (epoch !== this.connectEpoch) {
+          await invoke("gateway_disconnect", {
+            connectionId: this.connectionId,
+            generation
+          }).catch(() => undefined);
+          throw new Error("Gateway bridge connection was replaced");
+        }
+        this.generation = generation;
+        this.connected = true;
+      });
+    const wrapped = connecting.finally(() => {
+      if (this.connecting === wrapped) {
+        this.connecting = null;
+      }
+    });
+    this.connecting = wrapped;
+    return wrapped;
   }
 
   close(): void {
+    const generation = this.generation;
+    this.connectEpoch += 1;
     this.connected = false;
-    void invoke("gateway_disconnect", { connectionId: this.connectionId }).catch(() => undefined);
-    this.messageUnlisten?.();
-    this.broadcastUnlisten?.();
-    this.disconnectUnlisten?.();
-    this.messageUnlisten = null;
-    this.broadcastUnlisten = null;
-    this.disconnectUnlisten = null;
+    this.generation = null;
+    if (generation !== null) {
+      void invoke("gateway_disconnect", {
+        connectionId: this.connectionId,
+        generation
+      }).catch(() => undefined);
+    }
   }
 
   onDisconnect(handler: (message: string) => void): () => void {
@@ -113,16 +101,69 @@ export class DesktopGatewayTransport implements GatewayTransport {
   }
 
   send(data: string): void {
-    if (!this.connected) {
+    const generation = this.generation;
+    if (!this.connected || generation === null) {
       throw new Error("Gateway bridge is not connected");
     }
-    void invoke("gateway_send", { connectionId: this.connectionId, message: data }).catch((error) => {
+    void invoke("gateway_send", {
+      connectionId: this.connectionId,
+      generation,
+      message: data
+    }).catch((error) => {
+      if (this.generation !== generation) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.connected = false;
+      this.generation = null;
       for (const handler of this.disconnectHandlers) {
         handler(message);
       }
     });
+  }
+
+  private ensureListeners(): Promise<void> {
+    if (this.listenersPromise) {
+      return this.listenersPromise;
+    }
+    this.listenersPromise = Promise.all([
+      listen<GatewayBridgePayload>("gateway-message", (event) => {
+        if (
+          event.payload.connectionId !== this.connectionId
+          || event.payload.generation !== this.generation
+        ) {
+          return;
+        }
+        for (const handler of this.messageHandlers) {
+          handler(event.payload.message);
+        }
+      }).then((unlisten) => {
+        this.messageUnlisten = unlisten;
+      }),
+      listen<GatewayBridgePayload>("gateway-disconnect", (event) => {
+        if (
+          event.payload.connectionId !== this.connectionId
+          || event.payload.generation !== this.generation
+        ) {
+          return;
+        }
+        this.connected = false;
+        this.generation = null;
+        for (const handler of this.disconnectHandlers) {
+          handler(event.payload.message || "Gateway bridge disconnected");
+        }
+      }).then((unlisten) => {
+        this.disconnectUnlisten = unlisten;
+      })
+    ]).then(() => undefined).catch((error) => {
+      this.messageUnlisten?.();
+      this.disconnectUnlisten?.();
+      this.messageUnlisten = null;
+      this.disconnectUnlisten = null;
+      this.listenersPromise = null;
+      throw error;
+    });
+    return this.listenersPromise;
   }
 }
 
@@ -190,20 +231,4 @@ export async function listenOpenThreadInWorkbench(
       handler(threadId);
     }
   });
-}
-
-const BROADCAST_GATEWAY_NOTIFICATIONS = new Set([
-  "gateway/event"
-]);
-
-function isBroadcastGatewayNotification(message: string): boolean {
-  try {
-    const parsed = JSON.parse(message) as Record<string, unknown>;
-    return parsed?.jsonrpc === "2.0" &&
-      !Object.prototype.hasOwnProperty.call(parsed, "id") &&
-      typeof parsed.method === "string" &&
-      BROADCAST_GATEWAY_NOTIFICATIONS.has(parsed.method);
-  } catch {
-    return false;
-  }
 }

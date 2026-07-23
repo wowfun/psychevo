@@ -2,12 +2,157 @@ use std::env;
 #[cfg(all(feature = "linux-capture", target_os = "linux"))]
 use std::time::{Duration, Instant};
 
-use super::{
-    CapabilityFailureReason, CapabilityResult, CapabilitySnapshot, CaptureCapabilities,
-    DesktopPlatformCapabilities, Rect, RegionCapture, capability_failure, capability_success,
-    desktop_os, detect_linux_session, observed_display_variables,
-    platform_capture_unavailable_message,
-};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Rect {
+    pub(crate) height: f64,
+    pub(crate) width: f64,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum CapabilityFailureReason {
+    Unsupported,
+    Unavailable,
+    PermissionDenied,
+    Canceled,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityFailure {
+    capability: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    ok: bool,
+    reason: CapabilityFailureReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilitySuccess<T> {
+    ok: bool,
+    pub(crate) value: T,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub(crate) enum CapabilityResult<T> {
+    Success(CapabilitySuccess<T>),
+    Failure(CapabilityFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RegionCapture {
+    data_url: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DesktopPlatformCapabilities {
+    capture: CaptureCapabilities,
+    display_variables: Vec<String>,
+    os: &'static str,
+    session: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureCapabilities {
+    pointer: CapabilitySnapshot,
+    portal_screenshot: CapabilitySnapshot,
+    region_screenshot: CapabilitySnapshot,
+    selection: CapabilitySnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CapabilitySnapshot {
+    available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<CapabilityFailureReason>,
+}
+
+fn desktop_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    }
+}
+
+fn detect_linux_session(
+    xdg_session_type: Option<&str>,
+    wayland_display: Option<&str>,
+    display: Option<&str>,
+) -> &'static str {
+    match xdg_session_type.map(|value| value.to_ascii_lowercase()) {
+        Some(value) if value == "wayland" => "wayland",
+        Some(value) if value == "x11" => "x11",
+        _ if wayland_display.is_some_and(|value| !value.trim().is_empty()) => "wayland",
+        _ if display.is_some_and(|value| !value.trim().is_empty()) => "x11",
+        _ => "unknown",
+    }
+}
+
+fn observed_display_variables() -> Vec<String> {
+    [
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XDG_SESSION_TYPE",
+        "XDG_CURRENT_DESKTOP",
+        "DESKTOP_SESSION",
+        "WSL_DISTRO_NAME",
+        "WSL_INTEROP",
+    ]
+    .into_iter()
+    .filter(|name| env::var(name).is_ok_and(|value| !value.trim().is_empty()))
+    .map(str::to_string)
+    .collect()
+}
+
+fn platform_capture_unavailable_message() -> String {
+    match (desktop_os(), linux_session_from_env()) {
+        ("linux", "x11") => {
+            "Linux X11 capture adapter is detected but native selection/screenshot capture is not available in this build.".to_string()
+        }
+        ("linux", "wayland") => {
+            "Linux Wayland capture requires portal/AT-SPI support that is not available in this deterministic build.".to_string()
+        }
+        ("linux", _) => "Linux display capture is unavailable because no supported X11 or Wayland session was detected.".to_string(),
+        ("macos", _) => "macOS selection and screenshot capture require native permissions and are not available in this deterministic build.".to_string(),
+        ("windows", _) => "Windows selection and screenshot capture require native foreground capture support and are not available in this deterministic build.".to_string(),
+        _ => "Native capture is unavailable on this platform.".to_string(),
+    }
+}
+
+fn capability_success<T>(value: T) -> CapabilityResult<T> {
+    CapabilityResult::Success(CapabilitySuccess { ok: true, value })
+}
+
+fn capability_failure<T>(
+    capability: &'static str,
+    reason: CapabilityFailureReason,
+    message: impl Into<String>,
+) -> CapabilityResult<T> {
+    CapabilityResult::Failure(CapabilityFailure {
+        capability,
+        message: Some(message.into()),
+        ok: false,
+        reason,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SelectionCapture {
@@ -16,7 +161,7 @@ pub(crate) struct SelectionCapture {
     pub(crate) text: Option<String>,
 }
 
-pub(crate) trait DesktopCaptureBackend {
+trait DesktopCaptureBackend {
     fn begin_region_picker(&self) -> CapabilityResult<Option<Rect>>;
     fn capture_region(&self, bounds: Rect) -> CapabilityResult<RegionCapture>;
     fn capabilities(&self) -> CaptureCapabilities;
@@ -998,10 +1143,10 @@ fn linux_session_from_env() -> &'static str {
 }
 
 #[cfg(test)]
-pub(crate) struct FakeCaptureBackend {
-    pub(crate) pointer: Option<Rect>,
-    pub(crate) region_data_url: Option<String>,
-    pub(crate) selection_text: Option<String>,
+struct FakeCaptureBackend {
+    pointer: Option<Rect>,
+    region_data_url: Option<String>,
+    selection_text: Option<String>,
 }
 
 #[cfg(test)]
@@ -1077,6 +1222,42 @@ mod tests {
             unknown.backend,
             DesktopCaptureBackendKind::Unsupported(_)
         ));
+    }
+
+    #[test]
+    fn linux_session_detection_prefers_explicit_session_type() {
+        assert_eq!(
+            detect_linux_session(Some("wayland"), None, Some(":0")),
+            "wayland"
+        );
+        assert_eq!(
+            detect_linux_session(Some("x11"), Some("wayland-0"), None),
+            "x11"
+        );
+        assert_eq!(
+            detect_linux_session(None, Some("wayland-0"), Some(":0")),
+            "wayland"
+        );
+        assert_eq!(detect_linux_session(None, None, Some(":0")), "x11");
+        assert_eq!(detect_linux_session(None, None, None), "unknown");
+    }
+
+    #[test]
+    fn platform_capability_results_serialize_reason_taxonomy() {
+        let failed: CapabilityResult<()> = capability_failure(
+            "floating.captureRegion",
+            CapabilityFailureReason::PermissionDenied,
+            "Screen capture permission was denied.",
+        );
+        assert_eq!(
+            serde_json::to_value(failed).expect("json"),
+            serde_json::json!({
+                "capability": "floating.captureRegion",
+                "message": "Screen capture permission was denied.",
+                "ok": false,
+                "reason": "permissionDenied"
+            })
+        );
     }
 
     #[test]
