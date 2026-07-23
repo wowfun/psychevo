@@ -30,6 +30,37 @@ api = "http://home.example/v1"
     assert_eq!(resolved.model, "deepseek-chat");
     assert_eq!(resolved.base_url, "http://home.example/v1");
     assert_eq!(resolved.api_key, "home-key");
+    assert_eq!(
+        resolved.inference_idle_timeout_secs,
+        psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS
+    );
+}
+
+#[test]
+pub(crate) fn provider_inference_idle_timeout_accepts_zero_to_disable() {
+    let temp = tempdir().expect("temp");
+    let options = base_options(&temp);
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(
+        config_dir.join("config.toml"),
+        r#"
+model = "deepseek/deepseek-chat"
+
+[provider.deepseek]
+api = "http://127.0.0.1:9/v1"
+no_auth = true
+inference_idle_timeout_secs = 0
+
+[provider.deepseek.models.deepseek-chat]
+"#,
+    )
+    .expect("config");
+
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
+    let resolved = resolve_run_provider(&options, &loaded).expect("provider");
+    assert_eq!(resolved.inference_idle_timeout_secs, 0);
 }
 
 #[test]

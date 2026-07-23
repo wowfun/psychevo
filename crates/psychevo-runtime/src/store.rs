@@ -373,6 +373,12 @@ pub struct GatewayActivityRecord {
     pub intent: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayTurnStartReceiptRecord {
+    pub client_turn_id: String,
+    pub turn_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionListProjection {
     pub summary: SessionSummary,

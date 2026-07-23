@@ -592,6 +592,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             id: Some(json!("bound-hidden-follow-up")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-bound-hidden-follow-up",
                 "scope": wire_scope,
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": "follow up"}],
@@ -1165,6 +1166,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
             id: Some(json!("turn-after-control")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-turn-after-control",
                 "scope": wire_scope,
                 "threadId": null,
                 "target": {"agentRef": "native-peer", "runtimeProfileRef": "native"},
@@ -1228,6 +1230,7 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
                 id: Some(json!("invalid-target")),
                 method: "turn/start".to_string(),
                 params: Some(json!({
+                    "clientTurnId": "client-invalid-target",
                     "scope": scope.clone(),
                     "target": target,
                     "input": [{"type": "text", "text": "must not deliver"}]
@@ -1284,6 +1287,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
             id: Some(json!("revision-missing")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-revision-missing",
                 "scope": scope,
                 "target": {"agentRef": null, "runtimeProfileRef": "native"},
                 "input": [{"type": "text", "text": "must not deliver"}]
@@ -1308,6 +1312,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
             id: Some(json!("revision-stale")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-revision-stale",
                 "scope": scope,
                 "target": {"agentRef": null, "runtimeProfileRef": "native"},
                 "input": [{"type": "text", "text": "must not deliver"}],
@@ -1539,6 +1544,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
             id: Some(json!("agent-change")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-agent-change",
                 "scope": scope,
                 "threadId": thread_id,
                 "target": {"agentRef": null, "runtimeProfileRef": "native"},
@@ -2833,6 +2839,7 @@ name = "Configured default"
             id: Some(json!("turn-with-prepared-session")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-prepared-session",
                 "scope": scope,
                 "threadId": null,
                 "target": {"agentRef": "opencode", "runtimeProfileRef": "opencode"},
@@ -3131,6 +3138,7 @@ name = "Configured default"
             id: Some(json!("turn-with-legacy-model")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-legacy-model",
                 "scope": scope,
                 "threadId": null,
                 "target": {

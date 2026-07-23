@@ -327,6 +327,9 @@ pub(crate) fn resolve_one_provider(
         base_url,
         api_key_env,
         api_key,
+        inference_idle_timeout_secs: config_entry
+            .and_then(|entry| entry.inference_idle_timeout_secs)
+            .unwrap_or(psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS),
         reasoning_effort,
         context_limit: metadata.context_limit(),
         metadata,

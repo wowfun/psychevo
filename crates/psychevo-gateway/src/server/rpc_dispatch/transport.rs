@@ -97,20 +97,14 @@ async fn create_launch(
                 .into_response();
         }
     };
-    let source = source_from_input(
-        params.source,
-        &cwd,
-        wire::GatewaySourceLifetime::Persistent,
-    );
+    let source = source_from_input(params.source, &cwd, wire::GatewaySourceLifetime::Persistent);
     let launch_id = Uuid::now_v7().to_string();
     let open_token = Uuid::now_v7().to_string();
     let expires_at_ms = now_ms() + 30_000;
-    state
-        .inner
-        .launches
-        .lock()
-        .expect("web launches poisoned")
-        .insert(
+    {
+        let mut launches = state.inner.launches.lock().expect("web launches poisoned");
+        prune_expired_launches(&mut launches, now_ms());
+        launches.insert(
             launch_id.clone(),
             LaunchEntry {
                 open_token: open_token.clone(),
@@ -119,6 +113,7 @@ async fn create_launch(
                 source,
             },
         );
+    }
     let host = headers
         .get("host")
         .and_then(|value| value.to_str().ok())
@@ -138,9 +133,12 @@ async fn consume_launch(
     Query(query): Query<LaunchQuery>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    let now = now_ms();
     let entry = {
         let mut launches = state.inner.launches.lock().expect("web launches poisoned");
-        let Some(entry) = launches.remove(&launch_id) else {
+        let entry = launches.remove(&launch_id);
+        prune_expired_launches(&mut launches, now);
+        let Some(entry) = entry else {
             if state.auth_from_headers(&headers).is_some() {
                 return shell_redirect().into_response();
             }
@@ -148,7 +146,7 @@ async fn consume_launch(
         };
         entry
     };
-    if entry.expires_at_ms < now_ms() || entry.open_token != query.open_token {
+    if entry.expires_at_ms < now || entry.open_token != query.open_token {
         if state.auth_from_headers(&headers).is_some() {
             return shell_redirect().into_response();
         }
@@ -189,17 +187,55 @@ fn shell_redirect() -> Response<Body> {
     response
 }
 
+fn prune_expired_launches(launches: &mut HashMap<String, LaunchEntry>, now_ms: i64) {
+    launches.retain(|_, entry| entry.expires_at_ms >= now_ms);
+}
+
 async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     let (mut sender, mut receiver) = socket.split();
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
-    let relay = tokio::spawn(spawn_gateway_live_event_relay(
-        state.clone(),
-        out_tx.clone(),
-    ));
+    let (out_tx, mut out_rx) = connection_outbox();
+    let relay_out_tx = out_tx.clone();
+    let mut event_rx = state.inner.event_hub.subscribe();
+    let relay = tokio::spawn(async move {
+        loop {
+            match event_rx.recv().await {
+                Ok(frame) => {
+                    if relay_out_tx.send_gateway_event(frame).is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    relay_out_tx.close("gateway event stream lagged; snapshot recovery required");
+                    return;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    relay_out_tx.close("gateway event stream closed");
+                    return;
+                }
+            }
+        }
+    });
     let writer = tokio::spawn(async move {
-        while let Some(message) = out_rx.recv().await {
-            if sender.send(WsMessage::Text(message.into())).await.is_err() {
-                break;
+        loop {
+            match out_rx.recv().await {
+                OutboxReceive::Frame(message) => {
+                    if sender
+                        .send(WsMessage::Text(message.as_ref().to_string().into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                OutboxReceive::Closed(reason) => {
+                    let _ = sender
+                        .send(WsMessage::Close(Some(axum::extract::ws::CloseFrame {
+                            code: axum::extract::ws::close_code::AGAIN,
+                            reason: reason.into(),
+                        })))
+                        .await;
+                    break;
+                }
             }
         }
     });
@@ -208,10 +244,16 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     let mut pending = std::collections::VecDeque::new();
 
     loop {
-        let input = if pending.is_empty() {
-            SocketInput::Message(next_socket_message(&mut receiver, &mut requests).await)
-        } else {
-            next_socket_message_or_permit(&mut receiver, &mut requests, permits.clone()).await
+        let next_input = async {
+            if pending.is_empty() {
+                SocketInput::Message(next_socket_message(&mut receiver, &mut requests).await)
+            } else {
+                next_socket_message_or_permit(&mut receiver, &mut requests, permits.clone()).await
+            }
+        };
+        let input = tokio::select! {
+            _ = out_tx.closed() => break,
+            input = next_input => input,
         };
         match input {
             SocketInput::Message(Some(Ok(WsMessage::Text(text)))) => {
@@ -230,20 +272,9 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
                 let request_auth = auth.clone();
                 let request_out_tx = out_tx.clone();
                 let response_out_tx = out_tx.clone();
-                spawn_bounded_rpc_response(
-                    &mut requests,
-                    permit,
-                    response_out_tx,
-                    async move {
-                        handle_rpc_text(
-                            &request_state,
-                            &request_auth,
-                            request_out_tx,
-                            &text,
-                        )
-                        .await
-                    },
-                );
+                spawn_bounded_rpc_response(&mut requests, permit, response_out_tx, async move {
+                    handle_rpc_text(&request_state, &request_auth, request_out_tx, &text).await
+                });
             }
             SocketInput::Message(Some(Ok(WsMessage::Close(_))))
             | SocketInput::Message(Some(Err(_)))
@@ -255,7 +286,7 @@ async fn handle_socket(socket: WebSocket, state: WebState, auth: AuthContext) {
     requests.abort_all();
     while requests.join_next().await.is_some() {}
     relay.abort();
-    drop(out_tx);
+    out_tx.close("gateway connection closed");
     let _ = relay.await;
     let _ = writer.await;
 }
@@ -308,14 +339,16 @@ where
     }
 }
 
-fn spawn_bounded_rpc_response<F>(
+fn spawn_bounded_rpc_response<F, T>(
     requests: &mut JoinSet<()>,
     permit: OwnedSemaphorePermit,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: T,
     response: F,
 ) where
     F: Future<Output = Option<String>> + Send + 'static,
+    T: Into<ConnectionSender>,
 {
+    let out_tx = out_tx.into();
     requests.spawn(async move {
         let _permit = permit;
         if let Some(response) = response.await {
@@ -324,97 +357,97 @@ fn spawn_bounded_rpc_response<F>(
     });
 }
 
-async fn spawn_gateway_live_event_relay(state: WebState, out_tx: mpsc::UnboundedSender<String>) {
+fn spawn_gateway_live_event_tailer(state: WebState) {
     let mut last_seq = state
         .inner
         .state
         .store()
         .latest_gateway_live_event_seq()
         .unwrap_or_default();
-    let mut snapshot_revisions: HashMap<String, i64> = HashMap::new();
-    let mut last_cleanup_ms = gateway_now_ms();
-    let mut tick = tokio::time::interval(Duration::from_millis(250));
-    loop {
-        tick.tick().await;
-        let events = match state
-            .inner
-            .state
-            .store()
-            .list_gateway_live_events_after(last_seq, 100)
-        {
-            Ok(events) => events,
-            Err(_) => continue,
-        };
-        for record in events {
-            last_seq = last_seq.max(record.seq);
-            if record.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
-                continue;
-            }
-            let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event.clone()) else {
-                continue;
-            };
-            let context = state.pending_context_for_live_event(&record);
-            state.record_event_with_context(&event, context.clone());
-            let display_event = state.event_with_pending_context(event, &context);
-            if out_tx
-                .send(rpc_notification("gateway/event", json!(display_event)))
-                .is_err()
-            {
+    let weak_state = Arc::downgrade(&state.inner);
+    tokio::spawn(async move {
+        let mut snapshot_revisions: HashMap<String, i64> = HashMap::new();
+        let mut last_cleanup_ms = gateway_now_ms();
+        let mut tick = tokio::time::interval(Duration::from_millis(250));
+        loop {
+            tick.tick().await;
+            let Some(inner) = weak_state.upgrade() else {
                 return;
-            }
-        }
-        let now = gateway_now_ms();
-        let snapshots = match state.inner.state.store().list_gateway_live_snapshots(1000) {
-            Ok(snapshots) => snapshots,
-            Err(_) => continue,
-        };
-        for snapshot in snapshots {
-            if snapshot.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
-                continue;
-            }
-            if snapshot_revisions
-                .get(&snapshot.snapshot_key)
-                .is_some_and(|revision| *revision >= snapshot.revision)
+            };
+            let state = WebState { inner };
+            let events = match state
+                .inner
+                .state
+                .store()
+                .list_gateway_live_events_after(last_seq, 100)
             {
-                continue;
-            }
-            if let Some(activity_id) = snapshot.activity_id.as_deref() {
-                let Ok(Some(activity)) = state.inner.state.store().gateway_activity(activity_id)
-                else {
+                Ok(events) => events,
+                Err(_) => continue,
+            };
+            for record in events {
+                last_seq = last_seq.max(record.seq);
+                if record.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
+                    continue;
+                }
+                let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event.clone()) else {
                     continue;
                 };
-                if !matches!(activity.status.as_str(), "running" | "queued")
-                    || activity.lease_expires_at_ms < now
+                let context = state.pending_context_for_live_event(&record);
+                state.publish_gateway_event_with_context(event, context, None);
+            }
+            let now = gateway_now_ms();
+            let snapshots = match state.inner.state.store().list_gateway_live_snapshots(1000) {
+                Ok(snapshots) => snapshots,
+                Err(_) => continue,
+            };
+            for snapshot in snapshots {
+                if snapshot.owner_id.as_deref() == Some(state.inner.gateway.owner_id()) {
+                    continue;
+                }
+                if snapshot_revisions
+                    .get(&snapshot.snapshot_key)
+                    .is_some_and(|revision| *revision >= snapshot.revision)
                 {
                     continue;
                 }
+                if let Some(activity_id) = snapshot.activity_id.as_deref() {
+                    let Ok(Some(activity)) =
+                        state.inner.state.store().gateway_activity(activity_id)
+                    else {
+                        continue;
+                    };
+                    if !matches!(activity.status.as_str(), "running" | "queued")
+                        || activity.lease_expires_at_ms < now
+                    {
+                        continue;
+                    }
+                }
+                let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event.clone())
+                else {
+                    continue;
+                };
+                snapshot_revisions.insert(snapshot.snapshot_key, snapshot.revision);
+                state.publish_gateway_event_with_context(
+                    event,
+                    PendingInteractionContext::default(),
+                    None,
+                );
             }
-            let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event.clone()) else {
-                continue;
-            };
-            snapshot_revisions.insert(snapshot.snapshot_key, snapshot.revision);
-            state.record_event_with_context(&event, PendingInteractionContext::default());
-            if out_tx
-                .send(rpc_notification("gateway/event", json!(event)))
-                .is_err()
-            {
-                return;
+            if now.saturating_sub(last_cleanup_ms) > 60_000 {
+                let _ = state
+                    .inner
+                    .state
+                    .store()
+                    .cleanup_gateway_live_events_before(now - 10 * 60_000);
+                let _ = state
+                    .inner
+                    .state
+                    .store()
+                    .cleanup_gateway_live_snapshots_before(now - 10 * 60_000);
+                last_cleanup_ms = now;
             }
         }
-        if now.saturating_sub(last_cleanup_ms) > 60_000 {
-            let _ = state
-                .inner
-                .state
-                .store()
-                .cleanup_gateway_live_events_before(now - 10 * 60_000);
-            let _ = state
-                .inner
-                .state
-                .store()
-                .cleanup_gateway_live_snapshots_before(now - 10 * 60_000);
-            last_cleanup_ms = now;
-        }
-    }
+    });
 }
 
 #[cfg(test)]
@@ -436,7 +469,11 @@ mod transport_tests {
             first_held.notified().await;
             Some("first".to_string())
         });
-        let second_permit = permits.clone().acquire_owned().await.expect("second permit");
+        let second_permit = permits
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("second permit");
         spawn_bounded_rpc_response(&mut requests, second_permit, out_tx.clone(), async {
             Some("second".to_string())
         });
@@ -454,7 +491,11 @@ mod transport_tests {
         let (out_tx, _out_rx) = mpsc::unbounded_channel();
         let mut requests = JoinSet::new();
         for _ in 0..RPC_IN_FLIGHT_LIMIT {
-            let permit = permits.clone().acquire_owned().await.expect("bounded permit");
+            let permit = permits
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("bounded permit");
             spawn_bounded_rpc_response(&mut requests, permit, out_tx.clone(), async {
                 std::future::pending::<Option<String>>().await
             });
@@ -506,7 +547,7 @@ mod transport_tests {
 async fn handle_rpc_text(
     state: &WebState,
     auth: &AuthContext,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
     text: &str,
 ) -> Option<String> {
     let request = match serde_json::from_str::<RpcRequest>(text) {
@@ -530,12 +571,9 @@ async fn handle_rpc_text(
     let result = handle_rpc(state.clone(), auth.clone(), out_tx, request).await;
     Some(match result {
         Ok(value) => rpc_result(id, value),
-        Err(err) => rpc_error_with_data(
-            id,
-            -32000,
-            err.to_string(),
-            err.structured_data().cloned(),
-        ),
+        Err(err) => {
+            rpc_error_with_data(id, -32000, err.to_string(), err.structured_data().cloned())
+        }
     })
 }
 use std::future::Future;

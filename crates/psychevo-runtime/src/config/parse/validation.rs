@@ -122,6 +122,10 @@ pub(crate) fn parse_config_provider_entry(
         api: optional_string_field(object, "api")?,
         api_key_env,
         no_auth: optional_bool_field(object, "no_auth")?.unwrap_or(false),
+        inference_idle_timeout_secs: optional_nonnegative_u64_field(
+            object,
+            "inference_idle_timeout_secs",
+        )?,
         ..Default::default()
     };
     if object.contains_key("api_key") || object.contains_key("apiKey") {
@@ -299,6 +303,20 @@ pub(crate) fn optional_u64_field(
                 .as_u64()
                 .filter(|value| *value > 0)
                 .ok_or_else(|| Error::Config(format!("{key} must be a positive integer")))
+        })
+        .transpose()
+}
+
+pub(crate) fn optional_nonnegative_u64_field(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Result<Option<u64>> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_u64()
+                .ok_or_else(|| Error::Config(format!("{key} must be a non-negative integer")))
         })
         .transpose()
 }

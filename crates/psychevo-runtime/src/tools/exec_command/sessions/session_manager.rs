@@ -8,7 +8,9 @@ use serde_json::json;
 
 pub(crate) struct ExecCommandTool(CwdTool);
 
-pub(crate) struct WriteStdinTool;
+pub(crate) struct WriteStdinTool {
+    task_id: String,
+}
 
 pub(crate) static EXEC_SESSIONS: LazyLock<Mutex<ExecSessionRegistry>> =
     LazyLock::new(|| Mutex::new(ExecSessionRegistry::default()));
@@ -24,8 +26,8 @@ impl ExecCommandTool {
 }
 
 impl WriteStdinTool {
-    pub(crate) fn new() -> Self {
-        Self
+    pub(crate) fn new(task_id: String) -> Self {
+        Self { task_id }
     }
 }
 
@@ -159,8 +161,9 @@ impl ToolBinding for WriteStdinTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
+        let task_id = self.task_id.clone();
         Box::pin(async move {
-            match write_stdin_tool_impl_with_call(tool_call_id, args, abort).await {
+            match write_stdin_tool_impl_with_call(task_id, tool_call_id, args, abort).await {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -273,10 +276,17 @@ pub(crate) async fn exec_command_tool_impl_with_context(
 
 #[cfg(test)]
 pub(crate) async fn write_stdin_tool_impl(args: Value, abort: AbortSignal) -> Result<Value> {
-    write_stdin_tool_impl_with_call("write_stdin".to_string(), args, abort).await
+    write_stdin_tool_impl_with_call(
+        "default".to_string(),
+        "write_stdin".to_string(),
+        args,
+        abort,
+    )
+    .await
 }
 
 pub(crate) async fn write_stdin_tool_impl_with_call(
+    task_id: String,
     tool_call_id: String,
     args: Value,
     abort: AbortSignal,
@@ -299,7 +309,7 @@ pub(crate) async fn write_stdin_tool_impl_with_call(
         )
     };
     let max_output_tokens = output_token_limit(optional_i64(&args, "max_output_tokens")?)?;
-    let session = get_exec_session(session_id)
+    let session = get_exec_session_for_task(session_id, &task_id)
         .ok_or_else(|| Error::Message(format!("unknown exec_command session_id: {session_id}")))?;
     if !chars.is_empty() {
         session.write_stdin(chars.as_bytes())?;

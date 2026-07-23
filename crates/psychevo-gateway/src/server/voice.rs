@@ -178,7 +178,7 @@ pub(super) fn voice_policy_update_value(
 pub(super) async fn voice_realtime_start_value(
     state: &WebState,
     auth: &AuthContext,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
     params: wire::ThreadRealtimeStartParams,
 ) -> psychevo_runtime::Result<Value> {
     authorize_thread(state, auth, &params.thread_id)?;
@@ -289,7 +289,7 @@ pub(super) fn voice_realtime_append_speech_value(
 
 pub(super) fn voice_realtime_stop_value(
     state: &WebState,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
     params: wire::ThreadRealtimeSessionParams,
 ) -> psychevo_runtime::Result<Value> {
     let removed = state

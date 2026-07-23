@@ -9,10 +9,87 @@ use crate::error::{Error, Result};
 use super::{
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
-    GatewayLiveSnapshotRecord, GatewayTurnTerminalInput, GatewayTurnTerminalRecord, SqliteStore,
+    GatewayLiveSnapshotRecord, GatewayTurnStartReceiptRecord, GatewayTurnTerminalInput,
+    GatewayTurnTerminalRecord, SqliteStore,
 };
 
+const TURN_START_RECEIPTS_METADATA_KEY: &str = "gatewayTurnStartReceipts";
+const MAX_TURN_START_RECEIPTS: usize = 32;
+
 impl SqliteStore {
+    pub fn record_gateway_turn_start_receipt(
+        &self,
+        thread_id: &str,
+        client_turn_id: &str,
+        turn_id: &str,
+    ) -> Result<()> {
+        let changed = self.write_retry(|conn| {
+            let metadata_json = conn
+                .query_row(
+                    "SELECT metadata_json FROM sessions WHERE id = ?1",
+                    params![thread_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?;
+            let Some(metadata_json) = metadata_json else {
+                return Ok(0);
+            };
+            let mut metadata = metadata_json
+                .as_deref()
+                .map(serde_json::from_str::<serde_json::Map<String, Value>>)
+                .transpose()
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+                .unwrap_or_default();
+            let mut receipts = metadata
+                .remove(TURN_START_RECEIPTS_METADATA_KEY)
+                .and_then(|value| value.as_array().cloned())
+                .unwrap_or_default();
+            receipts.retain(|receipt| {
+                receipt.get("clientTurnId").and_then(Value::as_str) != Some(client_turn_id)
+            });
+            receipts.push(serde_json::json!({
+                "clientTurnId": client_turn_id,
+                "turnId": turn_id,
+            }));
+            if receipts.len() > MAX_TURN_START_RECEIPTS {
+                receipts.drain(..receipts.len() - MAX_TURN_START_RECEIPTS);
+            }
+            metadata.insert(
+                TURN_START_RECEIPTS_METADATA_KEY.to_string(),
+                Value::Array(receipts),
+            );
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+                params![Value::Object(metadata).to_string(), now_ms(), thread_id],
+            )
+        })?;
+        if changed == 0 {
+            return Err(Error::Message(format!("session not found: {thread_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn gateway_turn_start_receipts(
+        &self,
+        thread_id: &str,
+    ) -> Result<Vec<GatewayTurnStartReceiptRecord>> {
+        let Some(metadata) = self.session_metadata(thread_id)? else {
+            return Ok(Vec::new());
+        };
+        Ok(metadata
+            .get(TURN_START_RECEIPTS_METADATA_KEY)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|receipt| {
+                Some(GatewayTurnStartReceiptRecord {
+                    client_turn_id: receipt.get("clientTurnId")?.as_str()?.to_string(),
+                    turn_id: receipt.get("turnId")?.as_str()?.to_string(),
+                })
+            })
+            .collect())
+    }
+
     pub fn claim_gateway_activity(
         &self,
         input: GatewayActivityClaimInput<'_>,

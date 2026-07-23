@@ -13,6 +13,7 @@ pub(crate) struct ConfigProviderEntry {
     pub(crate) api: Option<String>,
     pub(crate) api_key_env: Option<String>,
     pub(crate) no_auth: bool,
+    pub(crate) inference_idle_timeout_secs: Option<u64>,
     pub(crate) models: BTreeMap<String, ConfigModelEntry>,
 }
 
@@ -615,6 +616,7 @@ pub(crate) struct ResolvedRunProvider {
     pub(crate) base_url: String,
     pub(crate) api_key_env: Option<String>,
     pub(crate) api_key: String,
+    pub(crate) inference_idle_timeout_secs: u64,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) context_limit: Option<u64>,
     pub(crate) metadata: ModelMetadata,

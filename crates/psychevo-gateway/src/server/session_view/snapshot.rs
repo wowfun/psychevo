@@ -27,6 +27,22 @@ fn thread_snapshot(
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
     let pending_actions = prune_pending_actions(state, &selector, thread_id)?;
     let activity = snapshot_activity(state, &scope.source, thread_id)?;
+    let turn_start_receipts = thread_id
+        .map(|thread_id| {
+            store
+                .gateway_turn_start_receipts(thread_id)
+                .map(|receipts| {
+                    receipts
+                        .into_iter()
+                        .map(|receipt| wire::TurnStartReceipt {
+                            client_turn_id: receipt.client_turn_id,
+                            turn_id: receipt.turn_id,
+                        })
+                        .collect::<Vec<_>>()
+                })
+        })
+        .transpose()?
+        .unwrap_or_default();
     let entries = thread_id
         .map(|thread_id| authoritative_history_projection(state, scope, thread_id))
         .transpose()?
@@ -43,6 +59,7 @@ fn thread_snapshot(
         "history": history,
         "entries": entries,
         "activity": activity,
+        "turnStartReceipts": turn_start_receipts,
         "pendingActions": pending_actions,
         "historyEditing": history_editing,
     }))

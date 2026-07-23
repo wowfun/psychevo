@@ -2814,6 +2814,7 @@ dependencies = [
  "futures",
  "getrandom 0.3.4",
  "http",
+ "percent-encoding",
  "portable-pty",
  "psychevo-agent-core",
  "psychevo-ai",

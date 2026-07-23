@@ -367,7 +367,7 @@ fn enqueue_channel_compaction(
                 thread_id,
                 action: wire::ThreadActionInput::Compact { instructions },
             },
-            out_tx,
+            out_tx.into(),
         )
         .await
     }))

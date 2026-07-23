@@ -111,11 +111,12 @@ pub(crate) async fn run_live_internal(
         options.mode,
         &loaded.config.tools,
         &loaded.config.toolsets,
-    ).iter().any(|name| name == "web_search");
-    let image_generation = crate::config::resolve_image_generation_config_from_loaded(
-        &loaded, None, None, None, None,
     )
-    .ok();
+    .iter()
+    .any(|name| name == "web_search");
+    let image_generation =
+        crate::config::resolve_image_generation_config_from_loaded(&loaded, None, None, None, None)
+            .ok();
     let image_input_enabled =
         !crate::prompt_image::model_metadata_explicitly_disallows_image_input(&resolved.metadata);
     let managed_tools = ensure_rg(&loaded.env).await?;
@@ -360,12 +361,14 @@ pub(crate) async fn run_live_internal(
         resolved.base_url.clone(),
         resolved.api_key.clone(),
         resolved.provider.clone(),
+        resolved.inference_idle_timeout_secs,
     );
     let title_resolved = resolve_title_generation_provider(&resolved_options, &loaded, &resolved)?;
     let provider_for_title: Arc<dyn GenerationProvider> = crate::run::generation_provider(
         title_resolved.base_url.clone(),
         title_resolved.api_key.clone(),
         title_resolved.provider.clone(),
+        title_resolved.inference_idle_timeout_secs,
     );
     let context_recorder = ContextRecorder::default();
     let provider: Arc<dyn GenerationProvider> = Arc::new(ContextRecordingProvider::new(
@@ -472,8 +475,8 @@ pub(crate) async fn run_live_internal(
                 options.state.store(),
                 &session_id,
             )
-                .ok()
-                .flatten(),
+            .ok()
+            .flatten(),
             external_delegate: options.external_agent_delegate.clone(),
         })
     } else {

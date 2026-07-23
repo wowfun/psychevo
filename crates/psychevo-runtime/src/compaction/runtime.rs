@@ -193,6 +193,7 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         compression.provider.base_url.clone(),
         compression.provider.api_key.clone(),
         compression.provider.provider.clone(),
+        compression.provider.inference_idle_timeout_secs,
     );
     let summary_text = generate_summary(
         provider,
@@ -590,9 +591,15 @@ pub(crate) fn message_summary_text(message: &Message) -> String {
                 AssistantBlock::Text { text } => Some(text.clone()),
                 AssistantBlock::Reasoning { .. } => None,
                 AssistantBlock::ToolCall(call) => Some(tool_call_summary(call)),
-                AssistantBlock::ProviderTool(call) => Some(format!("Hosted {} ({})", call.name, call.status)),
-                AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => Some(format!("Source: {}", source.url)),
-                AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => Some(format!("Image source: {}", source.source_website_url)),
+                AssistantBlock::ProviderTool(call) => {
+                    Some(format!("Hosted {} ({})", call.name, call.status))
+                }
+                AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => {
+                    Some(format!("Source: {}", source.url))
+                }
+                AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => {
+                    Some(format!("Image source: {}", source.source_website_url))
+                }
                 AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { .. }) => None,
             })
             .collect::<Vec<_>>()

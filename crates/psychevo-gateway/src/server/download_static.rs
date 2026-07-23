@@ -209,23 +209,39 @@ async fn static_asset(
     let Some(static_dir) = &state.inner.static_dir else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let request_path = uri.path().trim_start_matches('/');
-    let candidate = if request_path.is_empty() {
-        static_dir.join("index.html")
-    } else {
-        static_dir.join(request_path)
+    let Some(request_path) = static_request_path(uri.path()) else {
+        return StatusCode::NOT_FOUND.into_response();
     };
-    let candidate_is_file = tokio::fs::metadata(&candidate)
-        .await
-        .is_ok_and(|metadata| metadata.is_file());
+    let canonical_static_dir = tokio::fs::canonicalize(static_dir).await.ok();
+    let candidate_path = if request_path.is_empty() {
+        "index.html"
+    } else {
+        &request_path
+    };
+    let candidate = match &canonical_static_dir {
+        Some(root) => contained_static_file(root, candidate_path).await,
+        None => StaticFileLookup::Missing,
+    };
+    if matches!(candidate, StaticFileLookup::Rejected) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let candidate_is_file = matches!(candidate, StaticFileLookup::File(_));
     let serves_shell = request_path.is_empty() || request_path == "index.html" || !candidate_is_file;
     if serves_shell && state.auth_from_headers(&headers).is_none() {
         return launch_required_page().into_response();
     }
-    let path = if candidate_is_file {
-        candidate
-    } else {
-        static_dir.join("index.html")
+    let path = match candidate {
+        StaticFileLookup::File(path) => path,
+        StaticFileLookup::Missing => match &canonical_static_dir {
+            Some(root) => match contained_static_file(root, "index.html").await {
+                StaticFileLookup::File(path) => path,
+                StaticFileLookup::Missing | StaticFileLookup::Rejected => {
+                    return workbench_assets_not_found();
+                }
+            },
+            None => return workbench_assets_not_found(),
+        },
+        StaticFileLookup::Rejected => unreachable!("rejected static paths return above"),
     };
     match tokio::fs::read(&path).await {
         Ok(bytes) => {
@@ -236,7 +252,7 @@ async fn static_asset(
             );
             response.headers_mut().insert(
                 CACHE_CONTROL,
-                HeaderValue::from_static(if candidate_is_file && is_fingerprinted_asset(request_path) {
+                HeaderValue::from_static(if candidate_is_file && is_fingerprinted_asset(&request_path) {
                     "public, max-age=31536000, immutable"
                 } else {
                     "no-store"
@@ -244,12 +260,56 @@ async fn static_asset(
             );
             response.into_response()
         }
-        Err(_) => (
-            StatusCode::NOT_FOUND,
-            "Workbench assets not found. Run `pnpm --filter @psychevo/workbench build` or pass --static-dir.",
-        )
-            .into_response(),
+        Err(_) => workbench_assets_not_found(),
     }
+}
+
+enum StaticFileLookup {
+    File(PathBuf),
+    Missing,
+    Rejected,
+}
+
+fn static_request_path(uri_path: &str) -> Option<String> {
+    let request_path = uri_path.strip_prefix('/')?;
+    let decoded = percent_encoding::percent_decode_str(request_path)
+        .decode_utf8()
+        .ok()?;
+    if decoded.contains(['\0', '\\'])
+        || Path::new(decoded.as_ref()).components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+    Some(decoded.into_owned())
+}
+
+async fn contained_static_file(root: &Path, relative: &str) -> StaticFileLookup {
+    let candidate = match tokio::fs::canonicalize(root.join(relative)).await {
+        Ok(path) => path,
+        Err(_) => return StaticFileLookup::Missing,
+    };
+    if !candidate.starts_with(root) {
+        return StaticFileLookup::Rejected;
+    }
+    match tokio::fs::metadata(&candidate).await {
+        Ok(metadata) if metadata.is_file() => StaticFileLookup::File(candidate),
+        _ => StaticFileLookup::Missing,
+    }
+}
+
+fn workbench_assets_not_found() -> Response<Body> {
+    (
+        StatusCode::NOT_FOUND,
+        "Workbench assets not found. Run `pnpm --filter @psychevo/workbench build` or pass --static-dir.",
+    )
+        .into_response()
 }
 
 fn is_fingerprinted_asset(path: &str) -> bool {

@@ -106,13 +106,20 @@ pub(crate) fn generation_provider(
     base_url: impl Into<String>,
     api_key: impl Into<String>,
     provider: impl Into<String>,
+    inference_idle_timeout_secs: u64,
 ) -> Arc<dyn GenerationProvider> {
     let base_url = base_url.into();
     let api_key = api_key.into();
     let provider = provider.into();
     if crate::config::normalize_provider_id(&provider) == "openai" {
-        Arc::new(OpenAiResponsesProvider::new(base_url, api_key))
+        Arc::new(
+            OpenAiResponsesProvider::new(base_url, api_key)
+                .with_inference_idle_timeout_secs(inference_idle_timeout_secs),
+        )
     } else {
-        Arc::new(OpenAiChatProvider::new(base_url, api_key, provider))
+        Arc::new(
+            OpenAiChatProvider::new(base_url, api_key, provider)
+                .with_inference_idle_timeout_secs(inference_idle_timeout_secs),
+        )
     }
 }

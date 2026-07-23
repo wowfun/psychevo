@@ -79,6 +79,44 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
 }
 
 #[test]
+fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
+    let temp = tempdir().expect("tempdir");
+    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let thread_id = store.create_session(temp.path()).expect("thread");
+
+    for index in 0..34 {
+        store
+            .record_gateway_turn_start_receipt(
+                &thread_id,
+                &format!("client-{index}"),
+                &format!("turn-{index}"),
+            )
+            .expect("record receipt");
+    }
+    store
+        .record_gateway_turn_start_receipt(&thread_id, "client-10", "turn-10-replaced")
+        .expect("replace receipt");
+
+    let receipts = store
+        .gateway_turn_start_receipts(&thread_id)
+        .expect("read receipts");
+    assert_eq!(receipts.len(), 32);
+    assert_eq!(
+        receipts
+            .first()
+            .map(|receipt| receipt.client_turn_id.as_str()),
+        Some("client-2")
+    );
+    assert_eq!(
+        receipts.last(),
+        Some(&GatewayTurnStartReceiptRecord {
+            client_turn_id: "client-10".to_string(),
+            turn_id: "turn-10-replaced".to_string(),
+        })
+    );
+}
+
+#[test]
 fn gateway_activity_release_is_generation_guarded() {
     let temp = tempdir().expect("tempdir");
     let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");

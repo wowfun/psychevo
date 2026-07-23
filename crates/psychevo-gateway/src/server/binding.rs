@@ -207,6 +207,7 @@ pub async fn bind_gateway_web_server(
         config,
         managed.then_some(managed_shutdown_tx),
     );
+    spawn_gateway_live_event_tailer(state.clone());
     let mut app = Router::new()
         .route("/readyz", get(readyz))
         .route("/health", get(readyz))
@@ -350,6 +351,7 @@ struct WebState {
 struct WebStateInner {
     gateway: Gateway,
     state: StateRuntime,
+    event_hub: GatewayEventHub,
     home: PathBuf,
     cwd: PathBuf,
     config_path: Option<PathBuf>,
@@ -531,6 +533,7 @@ impl WebState {
             inner: Arc::new(WebStateInner {
                 gateway: config.gateway,
                 state,
+                event_hub: GatewayEventHub::default(),
                 home: config.home,
                 cwd: config.cwd,
                 config_path: config.config_path,
@@ -706,6 +709,33 @@ impl WebState {
             }
             _ => {}
         }
+    }
+
+    fn publish_gateway_event_with_context(
+        &self,
+        event: GatewayEvent,
+        context: PendingInteractionContext,
+        review_cwd: Option<&Path>,
+    ) {
+        self.publish_gateway_event_for_connection(event, context, review_cwd, None);
+    }
+
+    fn publish_gateway_event_for_connection(
+        &self,
+        event: GatewayEvent,
+        context: PendingInteractionContext,
+        review_cwd: Option<&Path>,
+        connection: Option<&ConnectionSender>,
+    ) {
+        self.record_event_with_context(&event, context.clone());
+        if let Some(cwd) = review_cwd {
+            self.record_review_event(&event, cwd);
+        }
+        let display_event = self.event_with_pending_context(event, &context);
+        if let Some(connection) = connection.filter(|sender| sender.is_internal_adapter()) {
+            let _ = connection.send(rpc_notification("gateway/event", json!(display_event)));
+        }
+        self.inner.event_hub.publish(&display_event);
     }
 
     fn pending_context_for_live_event(

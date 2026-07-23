@@ -685,7 +685,7 @@ pub(super) async fn run_channel_thread_action(
             thread_id,
             action,
         },
-        out_tx,
+        out_tx.into(),
     )
     .await
 }

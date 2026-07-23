@@ -178,6 +178,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             id: Some(json!(1)),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-automation-first-turn",
                 "scope": scope,
                 "threadId": null,
                 "target": {"agentRef": null, "runtimeProfileRef": "native"},
@@ -195,6 +196,17 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         .as_str()
         .expect("accepted turn thread id")
         .to_string();
+    let accepted_turn_id = accepted["turnId"].as_str().expect("accepted turn id");
+    let resumed_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let resumed = thread_snapshot(&state, &resumed_scope, Some(&accepted_thread_id))
+        .expect("accepted Thread snapshot");
+    assert_eq!(
+        resumed["turnStartReceipts"],
+        json!([{
+            "clientTurnId": "client-automation-first-turn",
+            "turnId": accepted_turn_id,
+        }])
+    );
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {

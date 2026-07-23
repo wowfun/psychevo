@@ -1,5 +1,446 @@
 use super::*;
 
+pub(super) fn prewarm_codex_runtime_inventory(state: &WebState, cwd: PathBuf) {
+    let warm_state = state.clone();
+    tokio::spawn(async move {
+        let _ = warm_state
+            .inner
+            .codex_capability_broker
+            .refresh_runtime_inventory(&cwd)
+            .await;
+    });
+}
+
+pub(super) async fn open_thread_draft(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadDraftOpenParams,
+) -> psychevo_runtime::Result<wire::ThreadDraftOpenResult> {
+    let scope = resolve_start_scope(state, auth, params.origin.clone())?;
+    gateway_profile_mark(
+        "thread_draft_open_received",
+        None,
+        None,
+        GatewayProfileFields {
+            request_method: Some("thread/draft/open"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    let _source_mutation = state
+        .inner
+        .gateway
+        .lock_source_mutation(&canonical_source_mutation_key(&scope.source))
+        .await;
+    state
+        .inner
+        .gateway
+        .release_prepared_agent_session(&scope.source.source_key().0)
+        .await?;
+    state.inner.gateway.clear_source_binding(&scope.source)?;
+    prewarm_codex_runtime_inventory(state, scope.cwd.clone());
+    let snapshot_scope = detached_draft_scope(&scope, auth);
+    update_browser_session_for_draft_scope(state, auth, &snapshot_scope)?;
+    let snapshot = serde_json::from_value(thread_snapshot(state, &snapshot_scope, None)?)?;
+    let target_catalog = RunnableTargetCatalog::load(state, &snapshot_scope)?;
+    gateway_profile_mark(
+        "thread_draft_catalog_loaded",
+        None,
+        None,
+        GatewayProfileFields {
+            request_method: Some("thread/draft/open"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    let target = match params.target_intent {
+        wire::ThreadDraftTargetIntent::Default => {
+            gateway_profile_mark(
+                "thread_draft_target_discovery_started",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            let target = target_catalog.default_draft_target(state, &snapshot_scope)?;
+            gateway_profile_mark(
+                "thread_draft_target_discovery_completed",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            target
+        }
+        wire::ThreadDraftTargetIntent::Exact { target_id } => {
+            gateway_profile_mark(
+                "thread_draft_target_discovery_skipped",
+                None,
+                None,
+                GatewayProfileFields {
+                    request_method: Some("thread/draft/open"),
+                    runtime_source: Some("web"),
+                    ..GatewayProfileFields::default()
+                },
+            );
+            target_catalog.by_id(&target_id).cloned().ok_or_else(|| {
+                agent_session_error(
+                    "target_not_found",
+                    AgentErrorStage::Binding,
+                    "user_action",
+                    "not_delivered",
+                    "The selected Agent target is no longer present in this workspace catalog. Refresh Thread Context and select another target.",
+                    None,
+                )
+            })?
+        }
+    };
+    let source_lane_prepared = if target.ready {
+        prepare_draft_source_lane(state, &snapshot_scope, &target)?;
+        true
+    } else {
+        false
+    };
+    let (context, configured) = thread_context_read_result_live_with_catalog_and_configured(
+        state,
+        &snapshot_scope,
+        wire::ThreadContextReadParams {
+            thread_id: None,
+            target: Some(runnable_target_input(&target)),
+            scope: Some(snapshot_scope.to_wire_scope()),
+        },
+        target_catalog.clone(),
+    )
+    .await?;
+    gateway_profile_mark(
+        "thread_draft_prepare_started",
+        None,
+        None,
+        GatewayProfileFields {
+            request_method: Some("thread/draft/open"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    let prepared = thread_draft_prepare_result_with_work(
+        state,
+        &snapshot_scope,
+        wire::ThreadDraftPrepareParams {
+            scope: snapshot_scope.to_wire_scope(),
+            target_id: target.target_id.clone(),
+        },
+        ThreadDraftPrepareWork {
+            target_catalog,
+            target,
+            context,
+            configured,
+            source_lane_prepared,
+        },
+    )
+    .await?;
+    gateway_profile_mark(
+        "thread_draft_prepare_completed",
+        None,
+        None,
+        GatewayProfileFields {
+            request_method: Some("thread/draft/open"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    gateway_profile_mark(
+        "thread_draft_open_completed",
+        None,
+        None,
+        GatewayProfileFields {
+            request_method: Some("thread/draft/open"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    Ok(wire::ThreadDraftOpenResult {
+        snapshot,
+        context: prepared.context,
+        problem: prepared.problem,
+    })
+}
+
+pub(super) async fn start_thread_turn(
+    state: &WebState,
+    auth: &AuthContext,
+    out_tx: ConnectionSender,
+    params: wire::TurnStartParams,
+) -> psychevo_runtime::Result<wire::TurnStartResult> {
+    gateway_profile_mark(
+        "turn_start_received",
+        None,
+        params.thread_id.as_deref(),
+        GatewayProfileFields {
+            request_method: Some("turn/start"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    if params.client_turn_id.trim().is_empty() {
+        return Err(Error::Message(
+            "turn/start requires a non-empty `clientTurnId`".to_string(),
+        ));
+    }
+    let input = params.input_parts()?;
+    let requested_thread_id = match params.thread_id.clone() {
+        Some(thread_id) => {
+            authorize_thread(state, auth, &thread_id)?;
+            Some(thread_id)
+        }
+        None => None,
+    };
+    let existing_binding = requested_thread_id
+        .as_deref()
+        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .transpose()?
+        .flatten();
+    let validated_target = params
+        .target
+        .as_ref()
+        .map(|target| validate_turn_runnable_target(state, &scope, target))
+        .transpose()?;
+    if let (Some(binding), Some(target)) = (existing_binding.as_ref(), validated_target.as_ref()) {
+        if binding.runtime_ref.as_deref() != Some(target.runtime_profile_ref.as_str()) {
+            return Err(agent_session_error(
+                "immutable_binding",
+                AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
+                format!(
+                    "Thread is bound to Runtime Profile `{bound}`; start a new thread to use `{}`.",
+                    target.runtime_profile_ref,
+                    bound = binding.runtime_ref.as_deref().unwrap_or("unresolved"),
+                ),
+                requested_thread_id
+                    .as_ref()
+                    .map(|thread_id| format!("agent-binding:{thread_id}")),
+            ));
+        }
+        if binding.agent_ref != target.agent_ref {
+            return Err(agent_session_error(
+                "immutable_binding",
+                AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
+                format!(
+                    "Thread is bound to Agent target `{}`; start a new thread to use `{}`.",
+                    binding.agent_ref.as_deref().unwrap_or("Default Agent"),
+                    target.agent_ref.as_deref().unwrap_or("Default Agent"),
+                ),
+                requested_thread_id
+                    .as_ref()
+                    .map(|thread_id| format!("agent-binding:{thread_id}")),
+            ));
+        }
+    }
+    let runtime_profile_ref = match (
+        existing_binding
+            .as_ref()
+            .and_then(|binding| binding.runtime_ref.as_deref()),
+        validated_target.as_ref(),
+    ) {
+        (Some(bound), _) => bound.to_string(),
+        (None, Some(target)) => target.runtime_profile_ref.clone(),
+        (None, _) => {
+            return Err(agent_session_error(
+                "target_required",
+                AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
+                "An unbound turn requires `target.runtimeProfileRef`.",
+                None,
+            ));
+        }
+    };
+    if existing_binding.is_none() {
+        ensure_turn_runtime_profile_supported(state, &scope, Some(runtime_profile_ref.as_str()))?;
+    }
+    let turn_context = validate_turn_revisions(
+        state,
+        &scope,
+        requested_thread_id.clone(),
+        params.target.clone(),
+        params.expected_context_revision.as_deref(),
+        params.expected_control_revision.as_deref(),
+    )
+    .await?;
+    validate_turn_admission(
+        &turn_context,
+        &input,
+        &params.mentions,
+        &params.turn_overrides,
+    )?;
+    let mut control_values = BTreeMap::new();
+    apply_thread_control_precedence(
+        state,
+        &scope,
+        requested_thread_id.as_deref(),
+        &mut control_values,
+    )?;
+    let initial_thread_preferences = source_draft_control_values(&turn_context)?;
+    control_values.extend(initial_thread_preferences.clone());
+    let response_backend_kind = validated_target
+        .as_ref()
+        .map(|target| target.backend_kind)
+        .map(Ok)
+        .unwrap_or_else(|| {
+            turn_context
+                .binding
+                .as_ref()
+                .map(|binding| match binding.backend_kind.as_str() {
+                    "native" => Ok(wire::BackendKind::Native),
+                    "acp" => Ok(wire::BackendKind::Acp),
+                    _ => Err(agent_session_error(
+                        "bound_backend_kind_invalid",
+                        AgentErrorStage::Binding,
+                        "never",
+                        "not_delivered",
+                        "The captured Thread binding has an invalid backend kind.",
+                        Some(format!("agent-binding:{}", binding.thread_id)),
+                    )),
+                })
+                .unwrap_or_else(|| runtime_backend_kind(state, &scope, &runtime_profile_ref))
+        })?;
+    let requested_side_conversation_thread = requested_thread_id
+        .as_deref()
+        .map(|thread_id| {
+            state
+                .inner
+                .state
+                .store()
+                .session_summary(thread_id)?
+                .map(|summary| side_conversation_session_source(&summary.source))
+                .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let thread_id = if requested_side_conversation_thread {
+        requested_thread_id
+    } else {
+        ensure_turn_start_thread(state, &scope, requested_thread_id)?
+    };
+    let source = (!requested_side_conversation_thread).then(|| scope.source.clone());
+    let event_selector = thread_id
+        .as_ref()
+        .map(GatewayThreadSelector::thread_id)
+        .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
+    let event_thread_id = thread_id.clone();
+    let event_state = state.clone();
+    let review_cwd = scope.cwd.clone();
+    let event_tx = out_tx.clone();
+    let event_sink: GatewayEventSink = Arc::new(move |event| {
+        let context =
+            event_state.pending_context_for_selector(&event_selector, event_thread_id.as_deref());
+        event_state.publish_gateway_event_for_connection(
+            event,
+            context,
+            Some(&review_cwd),
+            Some(&event_tx),
+        );
+    });
+    let bind_source = (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
+    let response_thread_id = thread_id.clone().ok_or_else(|| {
+        agent_session_error(
+            "thread_creation_failed",
+            AgentErrorStage::Binding,
+            "retry",
+            "not_delivered",
+            "Gateway accepted turn preparation without creating a public Thread.",
+            None,
+        )
+    })?;
+    let requested_turn_id = Uuid::now_v7().to_string();
+    let response_turn_id = requested_turn_id.clone();
+    let mutation_turn_id = requested_turn_id.clone();
+    let mutation_cwd = scope.cwd.clone();
+    let review = state.inner.review.clone();
+    let workspace_mutations = WorkspaceMutationSink::new(move |mutation| {
+        review.observe_mutation(&mutation_turn_id, &mutation_cwd, mutation);
+    });
+    gateway_profile_mark(
+        "turn_start_admitted",
+        Some(&requested_turn_id),
+        Some(&response_thread_id),
+        GatewayProfileFields {
+            request_method: Some("turn/start"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    state
+        .inner
+        .state
+        .store()
+        .record_gateway_turn_start_receipt(
+            &response_thread_id,
+            &params.client_turn_id,
+            &requested_turn_id,
+        )?;
+    let turn_state = state.clone();
+    let turn_scope = scope.clone();
+    tokio::spawn(async move {
+        let _ = run_routed_turn(
+            &turn_state,
+            &turn_scope,
+            RoutedThreadTurn {
+                thread_id,
+                context: turn_context,
+                control_values,
+                initial_thread_preferences,
+                input,
+                mentions: params.mentions,
+                turn_overrides: params.turn_overrides,
+                runtime_source: "web".to_string(),
+                continue_sources: vec!["run".to_string(), "tui".to_string(), "web".to_string()],
+                event_sink: Some(event_sink),
+                workspace_mutations: Some(workspace_mutations),
+                lineage: None,
+                source,
+                bind_source,
+                turn_id: Some(requested_turn_id.clone()),
+            },
+        )
+        .await;
+    });
+    gateway_profile_mark(
+        "turn_start_accepted",
+        Some(&response_turn_id),
+        Some(&response_thread_id),
+        GatewayProfileFields {
+            request_method: Some("turn/start"),
+            runtime_source: Some("web"),
+            ..GatewayProfileFields::default()
+        },
+    );
+    Ok(wire::TurnStartResult {
+        accepted: true,
+        thread_id: response_thread_id.clone(),
+        turn_id: response_turn_id,
+        thread: wire::GatewayThread {
+            id: response_thread_id,
+            backend: wire::GatewayBackendInfo {
+                kind: response_backend_kind,
+                runtime_ref: Some(runtime_profile_ref),
+                native_id: None,
+            },
+            source_key: Some(scope.source.source_key()),
+            forked_from_thread_id: None,
+        },
+    })
+}
+
 pub(super) struct RoutedThreadTurn {
     pub(super) thread_id: Option<String>,
     pub(super) context: wire::ThreadContextReadResult,
@@ -464,7 +905,7 @@ pub(super) async fn run_action(
     auth: &AuthContext,
     requested_scope: &ResolvedScope,
     params: wire::ThreadActionRunParams,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
 ) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
     authorize_thread(state, auth, &params.thread_id)?;
     let scope = resolved_scope_for_thread(state, &params.thread_id)?;
@@ -488,7 +929,7 @@ pub(super) async fn run_routed_action(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadActionRunParams,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
 ) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
     let context = thread_context_read_result_live(
         state,

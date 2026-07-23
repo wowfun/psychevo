@@ -12,10 +12,9 @@ use psychevo_runtime::{
     resolve_input_path, terminate_pty_child_tree,
 };
 use serde_json::json;
-use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use super::{ResolvedScope, rpc_notification};
+use super::{ConnectionSender, ResolvedScope, rpc_notification};
 
 #[derive(Clone, Default)]
 pub(super) struct TerminalManager {
@@ -35,7 +34,7 @@ impl TerminalManager {
         scope: &ResolvedScope,
         params: wire::TerminalStartParams,
         inherited_env: &BTreeMap<String, String>,
-        out_tx: mpsc::UnboundedSender<String>,
+        out_tx: ConnectionSender,
     ) -> psychevo_runtime::Result<wire::TerminalStartResult> {
         let cwd = resolve_terminal_cwd(&scope.cwd, params.cwd.as_deref())?;
         let rows = params.rows.clamp(4, 200);
@@ -133,7 +132,7 @@ impl TerminalManager {
     pub(super) fn terminate(
         &self,
         params: wire::TerminalTerminateParams,
-        out_tx: mpsc::UnboundedSender<String>,
+        out_tx: ConnectionSender,
     ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
         let Some(session) = self
             .sessions
@@ -178,7 +177,7 @@ impl TerminalManager {
 fn spawn_terminal_reader(
     terminal_id: String,
     mut reader: Box<dyn Read + Send>,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
 ) {
     thread::spawn(move || {
         let mut chunk = [0u8; 8192];
@@ -206,7 +205,7 @@ fn spawn_terminal_waiter(
     terminal_id: String,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     manager: TerminalManager,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
 ) {
     thread::spawn(move || {
         loop {

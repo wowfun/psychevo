@@ -1834,6 +1834,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             id: Some(json!("2")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-side-thread-follow-up",
                 "scope": resolved_scope.to_wire_scope(),
                 "threadId": side_thread_id.clone(),
                 "input": [{"type": "text", "text": "explain this"}],

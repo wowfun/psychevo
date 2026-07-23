@@ -105,6 +105,7 @@ mod channels;
 mod codex_capability_broker;
 mod commands;
 mod completion;
+mod event_delivery;
 mod runtime_profiles;
 mod session_lifecycle;
 mod terminal;
@@ -141,6 +142,7 @@ use commands::{
 #[cfg(test)]
 use completion::active_completion_token;
 use completion::completion_list_value;
+use event_delivery::{ConnectionSender, GatewayEventHub, OutboxReceive, connection_outbox};
 use runtime_profiles::{
     RunnableTargetCatalog, ThreadDraftPrepareWork, apply_thread_control_precedence,
     cached_thread_history_descriptor, delete_runtime_profile,
@@ -165,15 +167,14 @@ use session_lifecycle::{
 use terminal::TerminalManager;
 use thread_application::{
     RoutedThreadTurn, action_descriptors as thread_action_descriptors,
-    authoritative_history_projection, authoritative_history_view,
-    pending_interactions as thread_pending_interactions,
+    authoritative_history_projection, authoritative_history_view, open_thread_draft,
+    pending_interactions as thread_pending_interactions, prewarm_codex_runtime_inventory,
     read_history as thread_history_read_result,
     read_history_draft as thread_history_draft_read_result,
     respond_to_interaction as thread_interaction_respond_result,
     respond_to_routed_interaction_for_selector as thread_routed_interaction_respond_for_selector,
     run_action as thread_action_run_result, run_routed_action as run_routed_thread_action,
-    run_routed_turn as run_routed_thread_turn, source_draft_control_values,
-    validate_turn_admission, validate_turn_revisions,
+    run_routed_turn as run_routed_thread_turn, source_draft_control_values, start_thread_turn,
 };
 use voice::{
     RealtimeSessionState, update_voice_policy_for_source, voice_asr_transcribe_value,

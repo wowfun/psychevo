@@ -368,7 +368,7 @@ pub(crate) fn tool_by_name(
         "write" => Some(Arc::new(WriteTool::new(cwd.to_path_buf(), context))),
         "edit" => Some(Arc::new(EditTool::new(cwd.to_path_buf(), context))),
         "exec_command" => Some(Arc::new(ExecCommandTool::new(cwd.to_path_buf(), context))),
-        "write_stdin" => Some(Arc::new(WriteStdinTool::new())),
+        "write_stdin" => Some(Arc::new(WriteStdinTool::new(context.task_id))),
         "web_fetch" => Some(Arc::new(WebFetchTool::new())),
         "web_search" => (context.web_search.execution != crate::config::WebSearchExecution::Hosted)
             .then(|| {

@@ -145,8 +145,12 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let model_metadata = session_model_metadata(&metadata);
     let agent_tools = if !options.no_agents {
-        let provider: Arc<dyn GenerationProvider> =
-            crate::run::generation_provider(String::new(), String::new(), summary.provider.clone());
+        let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
+            String::new(),
+            String::new(),
+            summary.provider.clone(),
+            psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
+        );
         Some(AgentToolContext {
             provider,
             model_provider: summary.provider.clone(),
@@ -514,6 +518,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         resolved.base_url.clone(),
         resolved.api_key.clone(),
         resolved.provider.clone(),
+        resolved.inference_idle_timeout_secs,
     );
     let context = AgentToolContext {
         provider,

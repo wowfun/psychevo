@@ -237,7 +237,7 @@ pub(super) fn automation_run_result(
     state: WebState,
     auth: &AuthContext,
     params: wire::AutomationRunParams,
-    out_tx: mpsc::UnboundedSender<String>,
+    out_tx: ConnectionSender,
 ) -> psychevo_runtime::Result<Value> {
     recover_stale_automation_runs(&state)?;
     let task = automation_task_for_request(&state, auth, &params.automation_id)?;

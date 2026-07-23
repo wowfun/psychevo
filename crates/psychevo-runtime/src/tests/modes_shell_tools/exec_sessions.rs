@@ -327,6 +327,64 @@ pub(crate) async fn write_stdin_unknown_session_fails() {
     assert!(err.to_string().contains("unknown exec_command session_id"));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn write_stdin_rejects_session_owned_by_another_task() {
+    let temp = tempdir().expect("temp");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let owner_tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &cwd,
+        RunMode::Default,
+        crate::tools::ToolRuntimeContext {
+            task_id: "exec-owner-a".to_string(),
+            ..crate::tools::ToolRuntimeContext::default()
+        },
+    );
+    let other_tools = crate::tools::coding_core_tools_for_mode_with_context(
+        &cwd,
+        RunMode::Default,
+        crate::tools::ToolRuntimeContext {
+            task_id: "exec-owner-b".to_string(),
+            ..crate::tools::ToolRuntimeContext::default()
+        },
+    );
+    let exec = owner_tools
+        .iter()
+        .find(|tool| tool.name() == "exec_command")
+        .expect("exec_command");
+    let write_stdin = other_tools
+        .iter()
+        .find(|tool| tool.name() == "write_stdin")
+        .expect("write_stdin");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let start = exec
+        .execute(
+            "exec-owner-start".to_string(),
+            json!({"cmd": "sleep 30", "yield_time_ms": 250}),
+            receivers.abort_signal(),
+        )
+        .await;
+    assert!(!start.is_error, "{:?}", start.json);
+    let session_id = start.json["session_id"].as_u64().expect("session id");
+
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let result = write_stdin
+        .execute(
+            "exec-owner-cross-task".to_string(),
+            json!({"session_id": session_id, "chars": "x"}),
+            receivers.abort_signal(),
+        )
+        .await;
+    crate::tools::interrupt_exec_sessions_for_task("exec-owner-a");
+
+    assert!(result.is_error, "{:?}", result.json);
+    assert_eq!(
+        result.json["error"],
+        format!("unknown exec_command session_id: {session_id}")
+    );
+}
+
 pub(crate) fn configured_user_shell_context(
     temp: &tempfile::TempDir,
     _cwd: &std::path::Path,

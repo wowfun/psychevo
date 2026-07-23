@@ -218,13 +218,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         .inner
         .state
         .store()
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
+        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
     let (tx, _rx) = mpsc::unbounded_channel();
     let list = handle_rpc(
@@ -717,6 +711,7 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
             id: Some(json!("1")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-empty-input",
                 "scope": scope,
                 "input": [],
                 "threadId": null
@@ -822,7 +817,10 @@ async fn static_shell_without_browser_session_returns_launch_required_page() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
-        response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
         Some("no-store")
     );
     let body = response_text(response).await;
@@ -853,13 +851,20 @@ async fn static_shell_with_browser_session_serves_workbench_index() {
         HeaderValue::from_str(&format!("psychevo_gateway_session={session_id}")).expect("cookie"),
     );
 
-    let response = static_asset(State(state.clone()), headers.clone(), axum::http::Uri::from_static("/"))
-        .await
-        .into_response();
+    let response = static_asset(
+        State(state.clone()),
+        headers.clone(),
+        axum::http::Uri::from_static("/"),
+    )
+    .await
+    .into_response();
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
         Some("no-store")
     );
     let body = response_text(response).await;
@@ -874,10 +879,17 @@ async fn static_shell_with_browser_session_serves_workbench_index() {
     .into_response();
     assert_eq!(fallback.status(), StatusCode::OK);
     assert_eq!(
-        fallback.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        fallback
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
         Some("no-store")
     );
-    assert!(response_text(fallback).await.contains("<title>workbench</title>"));
+    assert!(
+        response_text(fallback)
+            .await
+            .contains("<title>workbench</title>")
+    );
 }
 
 #[tokio::test]
@@ -885,8 +897,11 @@ async fn fingerprinted_static_asset_is_immutable_cacheable() {
     let (temp, state) = web_state_with_static();
     let assets = temp.path().join("static/assets");
     std::fs::create_dir_all(&assets).expect("assets dir");
-    std::fs::write(assets.join("index-C0FFEE42.js"), "export const ready = true;")
-        .expect("asset");
+    std::fs::write(
+        assets.join("index-C0FFEE42.js"),
+        "export const ready = true;",
+    )
+    .expect("asset");
 
     let response = static_asset(
         State(state),
@@ -898,11 +913,17 @@ async fn fingerprinted_static_asset_is_immutable_cacheable() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get("cache-control").and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
         Some("public, max-age=31536000, immutable")
     );
     assert_eq!(
-        response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
         Some("text/javascript; charset=utf-8")
     );
 }
@@ -910,7 +931,9 @@ async fn fingerprinted_static_asset_is_immutable_cacheable() {
 #[tokio::test]
 async fn module_worker_static_asset_uses_javascript_content_type() {
     let (temp, state) = web_state_with_static();
-    let worker = temp.path().join("static/file-viewer/vendor/pdf/pdf.worker.mjs");
+    let worker = temp
+        .path()
+        .join("static/file-viewer/vendor/pdf/pdf.worker.mjs");
     std::fs::create_dir_all(worker.parent().expect("worker parent")).expect("worker dir");
     std::fs::write(&worker, "export const WorkerMessageHandler = {};").expect("worker");
 
@@ -924,9 +947,56 @@ async fn module_worker_static_asset_uses_javascript_content_type() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
         Some("text/javascript; charset=utf-8")
     );
+}
+
+#[tokio::test]
+async fn static_asset_rejects_traversal_before_spa_fallback() {
+    let (temp, state) = web_state_with_static();
+    std::fs::write(temp.path().join("outside.txt"), "outside-secret").expect("outside file");
+
+    for uri in [
+        axum::http::Uri::from_static("/../outside.txt"),
+        axum::http::Uri::from_static("/%2e%2e/outside.txt"),
+        axum::http::Uri::from_static("/%2Foutside.txt"),
+        axum::http::Uri::from_static("/..%5Coutside.txt"),
+    ] {
+        let response = static_asset(State(state.clone()), HeaderMap::new(), uri)
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = response_text(response).await;
+        assert!(!body.contains("outside-secret"), "{body}");
+        assert!(!body.contains("<title>workbench</title>"), "{body}");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn static_asset_rejects_symlink_escape() {
+    let (temp, state) = web_state_with_static();
+    let outside = temp.path().join("outside.txt");
+    std::fs::write(&outside, "outside-secret").expect("outside file");
+    std::os::unix::fs::symlink(&outside, temp.path().join("static/escape.txt"))
+        .expect("static symlink");
+
+    let response = static_asset(
+        State(state),
+        HeaderMap::new(),
+        axum::http::Uri::from_static("/escape.txt"),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = response_text(response).await;
+    assert!(!body.contains("outside-secret"), "{body}");
+    assert!(!body.contains("<title>workbench</title>"), "{body}");
 }
 
 #[tokio::test]
@@ -936,13 +1006,7 @@ async fn download_session_honors_export_query_options() {
         .inner
         .state
         .store()
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
+        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state
         .inner
@@ -995,13 +1059,7 @@ async fn download_session_defaults_to_markdown_artifact() {
         .inner
         .state
         .store()
-        .create_session_with_metadata(
-            &state.inner.cwd,
-            "web",
-            "fake-model",
-            "fake-provider",
-            None,
-        )
+        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state
         .inner
@@ -1051,12 +1109,9 @@ async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(psychevo_ai::DEFAULT_FAKE_IMAGE_BASE64)
         .expect("png fixture");
-    let artifact = psychevo_runtime::write_generated_image_artifact(
-        &state.inner.home,
-        &bytes,
-        "image/png",
-    )
-    .expect("artifact");
+    let artifact =
+        psychevo_runtime::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
+            .expect("artifact");
 
     let unauthorized = read_media_artifact(
         State(state.clone()),
@@ -1109,6 +1164,46 @@ async fn consumed_launch_without_browser_session_returns_recovery_page() {
     let body = response_text(response).await;
     assert!(body.contains("pevo launch link expired"), "{body}");
     assert!(body.contains("pevo web --print-url"), "{body}");
+}
+
+#[test]
+fn expired_launch_pruning_preserves_live_entries() {
+    let source = GatewaySource::new("web", "launch-test").persistent();
+    let mut launches = HashMap::from([
+        (
+            "expired".to_string(),
+            LaunchEntry {
+                open_token: "expired-token".to_string(),
+                expires_at_ms: 99,
+                cwd: PathBuf::from("/expired"),
+                source: source.clone(),
+            },
+        ),
+        (
+            "boundary".to_string(),
+            LaunchEntry {
+                open_token: "boundary-token".to_string(),
+                expires_at_ms: 100,
+                cwd: PathBuf::from("/boundary"),
+                source: source.clone(),
+            },
+        ),
+        (
+            "live".to_string(),
+            LaunchEntry {
+                open_token: "live-token".to_string(),
+                expires_at_ms: 101,
+                cwd: PathBuf::from("/live"),
+                source,
+            },
+        ),
+    ]);
+
+    prune_expired_launches(&mut launches, 100);
+
+    assert!(!launches.contains_key("expired"));
+    assert!(launches.contains_key("boundary"));
+    assert!(launches.contains_key("live"));
 }
 
 #[tokio::test]

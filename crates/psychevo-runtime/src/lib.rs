@@ -210,11 +210,11 @@ pub use store::{
     GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
     GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, GatewaySourceBindingInput,
     GatewaySourceBindingRecord, GatewaySourceLaneInput, GatewaySourceLaneRecord,
-    GatewayTurnDeliveryInput, GatewayTurnDeliveryRecord, GatewayTurnTerminalInput,
-    GatewayTurnTerminalRecord, NativeSessionForkInput, SessionBrowserRequest,
-    SessionBrowserWorkspaceProjection, SessionCompactionInput, SessionCompactionRecord,
-    SessionListProjection, SessionMessageRecord, SessionRevertKind, SessionRevertState,
-    SqliteStore,
+    GatewayTurnDeliveryInput, GatewayTurnDeliveryRecord, GatewayTurnStartReceiptRecord,
+    GatewayTurnTerminalInput, GatewayTurnTerminalRecord, NativeSessionForkInput,
+    SessionBrowserRequest, SessionBrowserWorkspaceProjection, SessionCompactionInput,
+    SessionCompactionRecord, SessionListProjection, SessionMessageRecord, SessionRevertKind,
+    SessionRevertState, SqliteStore,
 };
 pub use thread_lineage::{
     SIDE_CONVERSATION_METADATA_KEY, SIDE_CONVERSATION_SESSION_SOURCES, SIDE_INHERITED_METADATA_KEY,

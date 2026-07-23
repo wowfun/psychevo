@@ -72,7 +72,7 @@ fn start_automation_run(
     state: WebState,
     task: AutomationTaskRecord,
     trigger: &str,
-    out_tx: Option<mpsc::UnboundedSender<String>>,
+    out_tx: Option<ConnectionSender>,
 ) -> psychevo_runtime::Result<Option<AutomationRunRecord>> {
     let Some(run) = state
         .inner
@@ -93,7 +93,7 @@ async fn execute_automation_run(
     state: WebState,
     task: AutomationTaskRecord,
     run: AutomationRunRecord,
-    out_tx: Option<mpsc::UnboundedSender<String>>,
+    out_tx: Option<ConnectionSender>,
 ) {
     let result = send_automation_turn(&state, &task, out_tx.clone()).await;
     match result {
@@ -147,7 +147,7 @@ async fn execute_automation_run(
 async fn send_automation_turn(
     state: &WebState,
     task: &AutomationTaskRecord,
-    out_tx: Option<mpsc::UnboundedSender<String>>,
+    out_tx: Option<ConnectionSender>,
 ) -> psychevo_runtime::Result<GatewayTurnResult> {
     let cwd = PathBuf::from(&task.cwd);
     let (thread_id, source, bind_source) = match automation_kind_from_str(&task.kind)? {
@@ -163,6 +163,18 @@ async fn send_automation_turn(
             (Some(thread_id), None, None)
         }
     };
+    let event_selector = thread_id
+        .as_ref()
+        .map(GatewayThreadSelector::thread_id)
+        .or_else(|| {
+            source
+                .as_ref()
+                .map(|source| GatewayThreadSelector::source(source.source_key()))
+        });
+    let event_thread_id = thread_id.clone();
+    let event_state = state.clone();
+    let event_cwd = cwd.clone();
+    let event_tx = out_tx.clone();
     let mut request = state.thread_turn_request(
         cwd,
         thread_id,
@@ -192,10 +204,19 @@ async fn send_automation_turn(
         "automation".to_string(),
     ];
     request.lineage = Some(json!({"automationId": task.id}));
-    if let Some(out_tx) = out_tx {
-        request.event_sink = Some(Arc::new(move |event| {
-            let _ = out_tx.send(rpc_notification("gateway/event", json!(event)));
-        }));
-    }
+    request.event_sink = Some(Arc::new(move |event| {
+        let context = event_selector
+            .as_ref()
+            .map(|selector| {
+                event_state.pending_context_for_selector(selector, event_thread_id.as_deref())
+            })
+            .unwrap_or_default();
+        event_state.publish_gateway_event_for_connection(
+            event,
+            context,
+            Some(&event_cwd),
+            event_tx.as_ref(),
+        );
+    }));
     state.inner.gateway.run_turn(request).await
 }

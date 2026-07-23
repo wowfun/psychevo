@@ -616,6 +616,7 @@ pub(crate) fn resolved_title_provider() -> ResolvedRunProvider {
         base_url: "http://127.0.0.1:9/v1".to_string(),
         api_key_env: None,
         api_key: "test-key".to_string(),
+        inference_idle_timeout_secs: psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
         reasoning_effort: None,
         context_limit: None,
         metadata: Default::default(),

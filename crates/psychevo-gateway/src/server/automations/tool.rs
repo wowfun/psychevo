@@ -124,7 +124,7 @@ impl AutomationTool {
                         automation_id,
                         trigger: Some("tool".to_string()),
                     },
-                    tx,
+                    tx.into(),
                 )?;
                 Ok(tool_result(action, value))
             }

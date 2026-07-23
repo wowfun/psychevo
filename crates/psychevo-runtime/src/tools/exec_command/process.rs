@@ -69,7 +69,7 @@ pub(crate) fn truncate_output_tokens(output: &str, max_tokens: usize) -> (String
     let start = original.saturating_sub(max_tokens);
     let truncated = enc
         .decode_to_string(&tokens[start..])
-        .unwrap_or_else(|_| output.chars().rev().take(max_tokens * 4).collect());
+        .unwrap_or_else(|_| truncate_output_chars(output, max_tokens).0);
     (truncated, original)
 }
 
@@ -150,6 +150,13 @@ pub(crate) fn get_exec_session(session_id: u64) -> Option<Arc<ExecSession>> {
         .lock()
         .ok()
         .and_then(|registry| registry.sessions.get(&session_id).cloned())
+}
+
+pub(crate) fn get_exec_session_for_task(
+    session_id: u64,
+    task_id: &str,
+) -> Option<Arc<ExecSession>> {
+    get_exec_session(session_id).filter(|session| session.task_id == task_id)
 }
 
 pub(crate) fn remove_exec_session(session_id: u64) {
@@ -367,10 +374,22 @@ pub(crate) fn terminate_std_child_tree(child: &mut std::process::Child) {
 
 #[cfg(test)]
 mod tests {
+    use super::{truncate_output_chars, truncate_output_tokens};
+
     #[test]
     fn exec_command_cwd_normalizer_removes_windows_verbatim_prefix() {
         let cwd = crate::paths::normalize_canonical_cwd(std::path::PathBuf::from(r"\\?\C:\repo"));
 
         assert_eq!(cwd, std::path::PathBuf::from(r"C:\repo"));
+    }
+
+    #[test]
+    fn exec_output_tail_truncation_preserves_unicode_order() {
+        let (chars, _) = truncate_output_chars("甲乙丙丁戊己", 1);
+        assert_eq!(chars, "丙丁戊己");
+
+        let (tokens, original) = truncate_output_tokens("abcdef🙂", 1);
+        assert!(original > 1);
+        assert_eq!(tokens, "def🙂");
     }
 }

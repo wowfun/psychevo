@@ -489,6 +489,7 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
             id: Some(json!("history-review-follow-up")),
             method: "turn/start".to_string(),
             params: Some(json!({
+                "clientTurnId": "client-history-review-follow-up",
                 "scope": wire_scope,
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": "continue imported history"}],

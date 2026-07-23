@@ -352,6 +352,7 @@ pub(crate) fn reconstructed_tool_declarations(
         base_url.clone(),
         String::new(),
         summary.provider.clone(),
+        psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
     );
     let tools = assemble_tool_surface(ToolSurfaceAssembly {
         cwd: cwd.to_path_buf(),
