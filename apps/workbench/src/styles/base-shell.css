@@ -163,6 +163,19 @@ html[data-pevo-appearance="warm"] .brandGlyph img {
   border-radius: var(--pevo-radius);
 }
 
+.connectionBand {
+  align-items: center;
+  background: color-mix(in srgb, var(--pevo-accent) 8%, var(--pevo-surface));
+  border-bottom: 1px solid var(--pevo-border);
+  color: var(--pevo-text-muted);
+  display: flex;
+  font-size: 0.78rem;
+  gap: 0.65rem;
+  justify-content: center;
+  min-height: 34px;
+  padding: 4px 12px;
+}
+
 .modalBackdrop {
   position: fixed;
   inset: 0;

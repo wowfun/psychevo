@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { ThreadController } from "@psychevo/client";
+import { GatewayClientError, ThreadController } from "@psychevo/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deferred, gatewayMock, sessionSummary } from "./appComposerAgent.fixture";
 import { App } from "./App";
@@ -288,6 +288,149 @@ describe("Workbench public Thread Application interactions", () => {
     await act(async () => {
       history.resolve({ workspaces: [] });
       await history.promise;
+    });
+  });
+
+  it("keeps the Workbench and draft visible while reconnecting, then rehydrates on Retry", async () => {
+    render(<App />);
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "keep this draft" } });
+
+    act(() => {
+      gatewayMock.connectionState = "reconnecting";
+      for (const callback of gatewayMock.connectionSubscribers) {
+        callback({
+          state: "reconnecting",
+          generation: 1,
+          attempt: 1,
+          nextRetryAtMs: Date.now() + 250,
+          lastError: "bridge closed"
+        });
+      }
+    });
+
+    expect(screen.getByText("Connection interrupted. Reconnecting…")).toBeTruthy();
+    expect(input.value).toBe("keep this draft");
+    expect(input.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/resume")).toBe(true);
+      expect(screen.queryByText("Connection interrupted. Reconnecting…")).toBeNull();
+    });
+    expect(input.value).toBe("keep this draft");
+  });
+
+  it("preserves an unknown Send until reconnect proves it was not accepted", async () => {
+    gatewayMock.turnStart = () => Promise.reject(new GatewayClientError(
+      "disconnected",
+      "unknown",
+      "bridge closed after send"
+    ));
+    render(<App />);
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "verify this send" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText(/Send status is unknown/)).toBeTruthy();
+    expect(input.value).toBe("verify this send");
+
+    act(() => {
+      gatewayMock.connectionState = "reconnecting";
+      for (const callback of gatewayMock.connectionSubscribers) {
+        callback({
+          state: "reconnecting",
+          generation: 1,
+          attempt: 1,
+          nextRetryAtMs: Date.now() + 250,
+          lastError: "bridge closed"
+        });
+      }
+      gatewayMock.snapshot.thread = null as never;
+      gatewayMock.snapshot.activity = { running: false, activeTurnId: null, queuedTurns: 0 };
+      gatewayMock.snapshot.entries = [];
+      gatewayMock.connectionGeneration = 2;
+      gatewayMock.connectionState = "connected";
+      for (const callback of gatewayMock.connectionSubscribers) {
+        callback({
+          state: "connected",
+          generation: 2,
+          attempt: 1,
+          nextRetryAtMs: null,
+          lastError: null
+        });
+      }
+    });
+
+    expect(await screen.findByText(/did not accept that Send/)).toBeTruthy();
+    expect(input.value).toBe("verify this send");
+  });
+
+  it("immediately verifies an unknown timeout on the connected generation", async () => {
+    let clientTurnId: string | null = null;
+    gatewayMock.turnStart = (params) => {
+      clientTurnId = (params as { clientTurnId?: string }).clientTurnId ?? null;
+      gatewayMock.snapshot.turnStartReceipts = clientTurnId
+        ? [{ clientTurnId, turnId: "turn-accepted" }]
+        : [];
+      return Promise.reject(new GatewayClientError(
+        "request_timeout",
+        "unknown",
+        "turn/start timed out after send"
+      ));
+    };
+    render(<App />);
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "verify this timeout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog.some((entry) => entry.method === "thread/resume")).toBe(true);
+    });
+    expect(clientTurnId).toEqual(expect.any(String));
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("keeps a failed generation recovery retryable until it succeeds", async () => {
+    let resumeAttempts = 0;
+    gatewayMock.threadResume = () => {
+      resumeAttempts += 1;
+      if (resumeAttempts === 1) {
+        return Promise.reject(new Error("transient resume failure"));
+      }
+      return gatewayMock.snapshot;
+    };
+    render(<App />);
+    const input = await screen.findByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+
+    act(() => {
+      gatewayMock.connectionGeneration = 2;
+      gatewayMock.connectionState = "connected";
+      for (const callback of gatewayMock.connectionSubscribers) {
+        callback({
+          state: "connected",
+          generation: 2,
+          attempt: 1,
+          nextRetryAtMs: null,
+          lastError: null
+        });
+      }
+    });
+
+    expect(await screen.findByText("Thread recovery failed. Retry to refresh authoritative state."))
+      .toBeTruthy();
+    expect(resumeAttempts).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
+
+    await waitFor(() => expect(resumeAttempts).toBe(2));
+    await waitFor(() => {
+      expect(screen.queryByText("Thread recovery failed. Retry to refresh authoritative state."))
+        .toBeNull();
+      expect(input.disabled).toBe(false);
     });
   });
 

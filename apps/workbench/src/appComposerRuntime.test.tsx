@@ -216,6 +216,7 @@ describe("Workbench first-class Agent runtime controls", () => {
 
     const params = await turnStartParams();
     expect(params).toEqual(expect.objectContaining({
+      clientTurnId: expect.any(String),
       target: { agentRef: null, runtimeProfileRef: "native" },
       input: [{ type: "text", text: "plan through the native Agent" }],
       mentions: [],
@@ -224,6 +225,7 @@ describe("Workbench first-class Agent runtime controls", () => {
       expectedControlRevision: "201"
     }));
     expect(Object.keys(params).sort()).toEqual([
+      "clientTurnId",
       "expectedContextRevision",
       "expectedControlRevision",
       "input",
@@ -307,6 +309,7 @@ describe("Workbench first-class Agent runtime controls", () => {
 
     const params = await turnStartParams();
     expect(params).toEqual(expect.objectContaining({
+      clientTurnId: expect.any(String),
       target: { agentRef: runtimeProfileRef, runtimeProfileRef },
       input: [{ type: "text", text: `run through ${runtimeProfileRef}` }],
       mentions: [],
@@ -315,6 +318,7 @@ describe("Workbench first-class Agent runtime controls", () => {
       expectedControlRevision: runtimeProfileRef === "codex" ? "202" : "203"
     }));
     expect(Object.keys(params).sort()).toEqual([
+      "clientTurnId",
       "expectedContextRevision",
       "expectedControlRevision",
       "input",

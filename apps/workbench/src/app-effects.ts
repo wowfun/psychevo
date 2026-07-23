@@ -50,6 +50,7 @@ import {
   type ComposerSessionCoordinator,
   type DraftOpenToken
 } from "./composer-session-coordinator";
+import type { PendingUnknownTurnStart } from "./app-actions";
 
 const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
 const TURN_SETTLEMENT_CONTEXT_ACTIONS = new Set([
@@ -108,12 +109,14 @@ type AppEffectsParams = {
   draftSession: unknown;
   gatewayEventQueueRef: MutableRefObject<GatewayEvent[]>;
   gatewayEventRafRef: MutableRefObject<number | null>;
+  gatewayRecoveryRef: MutableRefObject<() => void>;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
   mainView: MainView;
   mobilePanel: "history" | "transcript" | "status";
   pinnedSessionIds: string[];
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
+  pendingUnknownTurnStartRef: MutableRefObject<PendingUnknownTurnStart | null>;
   firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   rightTabs: RightWorkspaceTab[];
   rightWorkspaceOpen: boolean;
@@ -334,8 +337,174 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     let alive = true;
     let activeClient: GatewayClient | null = null;
     let openThreadUnlisten: (() => void) | null = null;
+    let connectionUnlisten: (() => void) | null = null;
+    let initialized = false;
+    let lastRecoveredGeneration = 0;
+    let recoveringGeneration: number | null = null;
+
+    async function rehydrate(
+      runtimeClient: GatewayClient,
+      generation: number
+    ): Promise<"success" | "stale" | "failed"> {
+      const current = latestParamsRef.current;
+      const epoch = current.viewEpochRef.current;
+      const scope = current.scopeRef.current ?? current.initScope;
+      if (!scope) {
+        return "success";
+      }
+      const threadId = current.selectedThreadIdRef.current;
+      try {
+        const pendingUnknown = current.pendingUnknownTurnStartRef.current;
+        if (pendingUnknown && pendingUnknown.epoch === epoch) {
+          const request = threadId ? { threadId, scope } : { scope };
+          const incoming = normalizeSnapshot(parseThreadSnapshot(
+            await runtimeClient.request("thread/resume", request)
+          ));
+          if (
+            !alive
+            || current.viewEpochRef.current !== epoch
+            || runtimeClient.connectionSnapshot().generation !== generation
+          ) {
+            return "stale";
+          }
+          const reconciled = current.threadController.reconcileUncertainTurnStart(
+            pendingUnknown.prepared,
+            incoming
+          );
+          current.selectedThreadIdRef.current = reconciled.snapshot.thread?.id ?? null;
+          await current.adoptSnapshotScope(runtimeClient, reconciled.snapshot);
+          if (
+            !alive
+            || current.viewEpochRef.current !== epoch
+            || runtimeClient.connectionSnapshot().generation !== generation
+          ) {
+            return "stale";
+          }
+          current.pendingUnknownTurnStartRef.current = null;
+          current.firstTurnContextRefreshPendingRef.current = false;
+          if (reconciled.accepted) {
+            pendingUnknown.clearInput();
+          } else {
+            current.setCommandFeedback({
+              accepted: false,
+              command: "turn/start",
+              message: "The recovered Thread did not accept that Send. Your draft was preserved.",
+              feedbackAnchor: "composer"
+            });
+          }
+        } else {
+          await current.refreshSnapshot(
+            runtimeClient,
+            threadId ?? undefined,
+            scope,
+            false,
+            epoch
+          );
+        }
+        if (
+          !alive
+          || current.viewEpochRef.current !== epoch
+          || runtimeClient.connectionSnapshot().generation !== generation
+        ) {
+          return "stale";
+        }
+        current.refreshRuntimeContext();
+        await current.refreshHistory(runtimeClient);
+        if (
+          !alive
+          || current.viewEpochRef.current !== epoch
+          || runtimeClient.connectionSnapshot().generation !== generation
+        ) {
+          return "stale";
+        }
+        refreshVisibleWorkspace(
+          current,
+          runtimeClient,
+          current.scopeRef.current ?? scope,
+          current.selectedThreadIdRef.current,
+          epoch
+        );
+        return "success";
+      } catch (error) {
+        current.pushDebugEvent("gateway/rehydrate-error", {
+          generation,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return "failed";
+      }
+    }
+
+    function recoverGeneration(runtimeClient: GatewayClient, generation: number) {
+      if (!alive || !initialized || recoveringGeneration === generation) {
+        return;
+      }
+      const current = latestParamsRef.current;
+      const pendingUnknown = current.pendingUnknownTurnStartRef.current;
+      if (generation <= lastRecoveredGeneration && !pendingUnknown) {
+        return;
+      }
+      recoveringGeneration = generation;
+      current.setStatus("recovering");
+      void rehydrate(runtimeClient, generation).then((result) => {
+        if (recoveringGeneration === generation) {
+          recoveringGeneration = null;
+        }
+        if (
+          !alive
+          || runtimeClient.connectionSnapshot().state !== "connected"
+          || runtimeClient.connectionSnapshot().generation !== generation
+        ) {
+          return;
+        }
+        const latest = latestParamsRef.current;
+        if (result === "success") {
+          lastRecoveredGeneration = Math.max(lastRecoveredGeneration, generation);
+          latest.setStatus("connected");
+        } else if (result === "failed") {
+          latest.setStatus("recovery-error");
+        } else {
+          latest.setStatus("connected");
+        }
+      });
+    }
 
     function attachRuntime(runtimeClient: GatewayClient) {
+      const retryRecovery = () => {
+        const snapshot = runtimeClient.connectionSnapshot();
+        if (snapshot.state === "connected") {
+          recoverGeneration(runtimeClient, snapshot.generation);
+        } else {
+          void runtimeClient.reconnectNow();
+        }
+      };
+      latestParamsRef.current.gatewayRecoveryRef.current = retryRecovery;
+      connectionUnlisten = runtimeClient.subscribeConnectionState((snapshot) => {
+        if (!alive) return;
+        if (snapshot.state === "connected") {
+          if (
+            initialized
+            && snapshot.generation > 1
+            && snapshot.generation > lastRecoveredGeneration
+          ) {
+            recoverGeneration(runtimeClient, snapshot.generation);
+          } else {
+            lastRecoveredGeneration = Math.max(lastRecoveredGeneration, snapshot.generation);
+            latestParamsRef.current.setStatus("connected");
+          }
+          return;
+        }
+        if (snapshot.state === "reconnecting") {
+          latestParamsRef.current.setStatus("reconnecting");
+          return;
+        }
+        if (snapshot.state === "connecting" || snapshot.state === "idle") {
+          latestParamsRef.current.setStatus("connecting");
+          return;
+        }
+        if (snapshot.state === "error") {
+          latestParamsRef.current.setStatus("error");
+        }
+      });
       runtimeClient.subscribe((notification) => {
       const params = latestParamsRef.current;
       params.pushDebugEvent(notification.method, notification.params);
@@ -459,7 +628,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
 
     async function boot() {
       let startupDraftOpenToken: DraftOpenToken | null = null;
-      let initialized = false;
       let startupEpoch: number | null = null;
       try {
         const runtime = await params.createRuntime();
@@ -622,6 +790,8 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         params.gatewayEventRafRef.current = null;
       }
       openThreadUnlisten?.();
+      connectionUnlisten?.();
+      params.gatewayRecoveryRef.current = () => undefined;
       activeClient?.close();
     };
   }, []);

@@ -192,6 +192,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     onVoiceAutoSpeakToggle,
     onVoiceDictationToggle,
     onVoiceRealtimeToggle,
+    onGatewayRetry,
     onComposerRetry
   } = props;
 
@@ -281,6 +282,24 @@ export function WorkbenchLayout(props: Record<string, any>) {
         <div className="errorBand" role="alert">
           <AlertTriangle size={17} aria-hidden />
           <span>{error}</span>
+        </div>
+      )}
+      {["reconnecting", "recovering", "recovery-error"].includes(status) && (
+        <div className="connectionBand" role="status">
+          <span>{status === "reconnecting"
+            ? "Connection interrupted. Reconnecting…"
+            : status === "recovering"
+              ? "Refreshing authoritative Thread state…"
+              : "Thread recovery failed. Retry to refresh authoritative state."}</span>
+          {status !== "recovering" && (
+            <ActionButton
+              onClick={() => void onGatewayRetry?.()}
+              size="compact"
+              type="button"
+            >
+              Retry now
+            </ActionButton>
+          )}
         </div>
       )}
       {workspaceDialogOpen && (

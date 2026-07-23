@@ -210,6 +210,7 @@ afterEach(() => {
   gatewayMock.threadBrowser = null;
   gatewayMock.draftOpen = null;
   gatewayMock.turnStart = null;
+  gatewayMock.threadResume = null;
   gatewayMock.settingsRead = null;
   gatewayMock.workspaceGitCheckout = null;
   gatewayMock.workspaceGitBranches = null;
@@ -311,6 +312,9 @@ afterEach(() => {
   gatewayMock.pluginInstallResult = null;
   gatewayMock.xtermTerminalOptions.length = 0;
   gatewayMock.subscribers = [];
+  gatewayMock.connectionGeneration = 1;
+  gatewayMock.connectionState = "connected";
+  gatewayMock.connectionSubscribers = [];
   gatewayMock.archivedSessionSummaries = [];
   gatewayMock.browserWorkspaces = null;
   gatewayMock.agentRecords = [];
@@ -403,6 +407,7 @@ afterEach(() => {
   gatewayMock.snapshot.pendingActions = [];
   gatewayMock.snapshot.entries = [];
   gatewayMock.snapshot.activity = { running: false, activeTurnId: null, queuedTurns: 0 };
+  gatewayMock.snapshot.turnStartReceipts = [];
   gatewayMock.workspaceDiffResult = {
     isGitRepo: true,
     files: [],

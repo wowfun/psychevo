@@ -1,9 +1,11 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
+  GatewayClientError,
   parseThreadSnapshot,
   scopeForCwd,
   type GatewayClient,
-  type ThreadController
+  type ThreadController,
+  type ThreadTurnPreparation
 } from "@psychevo/client";
 import {
   SettingsReadResultSchema,
@@ -71,6 +73,13 @@ import type { ComposerSessionCoordinator } from "./composer-session-coordinator"
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
+export type PendingUnknownTurnStart = {
+  epoch: number;
+  prepared: ThreadTurnPreparation;
+  isInputCurrent: () => boolean;
+  clearInput(): void;
+};
+
 type StartNewThreadOptions = {
   rejectProblem?: boolean;
   refreshHistory?: boolean;
@@ -106,6 +115,8 @@ type AppActionsParams = {
   fallbackCwd: string;
   turnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
+  pendingUnknownTurnStartRef: MutableRefObject<PendingUnknownTurnStart | null>;
+  gatewayRecoveryRef: MutableRefObject<() => void>;
   firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   runtimeControls: ThreadControlDescriptorView[];
   runtimeControlDrafts: Record<string, unknown>;
@@ -147,6 +158,7 @@ type AppActionsParams = {
   setTraceState: Dispatch<SetStateAction<TraceState>>;
   setWorkspaceChanges: Dispatch<SetStateAction<WorkspaceChangesResult | null>>;
   setWorkspaceDiff: Dispatch<SetStateAction<WorkspaceDiffResult | null>>;
+  patchComposerDraft(text: string): void;
   updateMainView(value: MainView): void;
 };
 
@@ -412,6 +424,26 @@ export function createAppActions(params: AppActionsParams) {
       threadId: liveSnapshot.thread?.id ?? null
     });
     const result = await params.client.request("turn/start", plan.params).catch((error) => {
+      if (error instanceof GatewayClientError && error.delivery === "unknown") {
+        params.pendingUnknownTurnStartRef.current = {
+          epoch: turnEpoch,
+          prepared: plan.prepared,
+          isInputCurrent,
+          clearInput: () => {
+            if (!isInputCurrent()) return;
+            params.patchComposerDraft("");
+            params.setAttachments([]);
+          }
+        };
+        params.setCommandFeedback({
+          accepted: false,
+          command: "turn/start",
+          message: "Send status is unknown. Verifying the Thread; the draft is preserved.",
+          feedbackAnchor: "composer"
+        });
+        params.gatewayRecoveryRef.current();
+        return null;
+      }
       if (params.viewEpochRef.current === turnEpoch) {
         params.threadController.rejectTurnStart(plan.prepared);
         params.firstTurnContextRefreshPendingRef.current = false;
@@ -419,6 +451,9 @@ export function createAppActions(params: AppActionsParams) {
       }
       throw error;
     });
+    if (!result) {
+      return false;
+    }
     if (params.viewEpochRef.current === turnEpoch) {
       const accepted = params.threadController.acceptTurnStart(result, plan.prepared);
       params.selectedThreadIdRef.current = accepted.threadId;

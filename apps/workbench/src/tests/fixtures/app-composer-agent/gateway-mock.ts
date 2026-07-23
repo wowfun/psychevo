@@ -30,6 +30,7 @@ const gatewayMock = vi.hoisted(() => {
     history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     activity: { running: false, activeTurnId: null as string | null, queuedTurns: 0 },
+    turnStartReceipts: [] as Array<{ clientTurnId: string; turnId: string }>,
     pendingActions: [] as Array<Record<string, unknown>>,
     historyEditing: null as Record<string, unknown> | null
   };
@@ -65,6 +66,7 @@ const gatewayMock = vi.hoisted(() => {
     completionResult: { items: [], replacement: null } as Record<string, unknown>,
     commandList: [] as Array<Record<string, unknown>>,
     turnStart: null as null | ((params: unknown) => unknown | Promise<unknown>),
+    threadResume: null as null | ((params: unknown) => unknown | Promise<unknown>),
     draftOpen: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadBrowser: null as null | ((params: unknown) => unknown | Promise<unknown>),
     threadHistoryRead: null as null | ((params: unknown) => unknown | Promise<unknown>),
@@ -108,6 +110,9 @@ const gatewayMock = vi.hoisted(() => {
     pluginInstallResult: null as Record<string, unknown> | null,
     xtermTerminalOptions: [] as Array<Record<string, unknown>>,
     subscribers: [] as Array<(notification: { method: string; params?: unknown }) => void>,
+    connectionGeneration: 1,
+    connectionState: "connected",
+    connectionSubscribers: [] as Array<(snapshot: Record<string, unknown>) => void>,
     archivedSessionSummaries: [] as Array<Record<string, unknown>>,
     browserWorkspaces: null as Array<Record<string, unknown>> | null,
     agentRecords: [] as Array<Record<string, unknown>>,

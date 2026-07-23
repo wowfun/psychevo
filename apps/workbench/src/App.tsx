@@ -6,6 +6,7 @@ import {
   type HistoryDraftSession
 } from "@psychevo/components";
 import {
+  GatewayClientError,
   GatewayClient,
   latestAssistantTranscriptText,
   parseThreadSnapshot,
@@ -36,7 +37,7 @@ import {
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
 import { createCommandActions } from "./command-actions";
-import { createAppActions } from "./app-actions";
+import { createAppActions, type PendingUnknownTurnStart } from "./app-actions";
 import { useWorkbenchEffects } from "./app-effects";
 import { ComposerSessionCoordinator } from "./composer-session-coordinator";
 import { useAutomations } from "./app-automations";
@@ -243,6 +244,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const commandContextKeyRef = useRef<string | null>(null);
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
+  const pendingUnknownTurnStartRef = useRef<PendingUnknownTurnStart | null>(null);
+  const gatewayRecoveryRef = useRef<() => void>(() => undefined);
   const firstTurnContextRefreshPendingRef = useRef(false);
   const skipNextPinnedPersistRef = useRef(false);
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
@@ -635,12 +638,14 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     draftSession,
     gatewayEventQueueRef,
     gatewayEventRafRef,
+    gatewayRecoveryRef,
     host,
     initScope: init?.scope ?? null,
     mainView,
     mainViewRef,
     mobilePanel,
     pendingDetachedShellRef,
+    pendingUnknownTurnStartRef,
     firstTurnContextRefreshPendingRef,
     pinnedSessionIds,
     rightTabs,
@@ -713,6 +718,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     pendingTargetSelectionRef.current = null;
     viewEpochRef.current += 1;
     pendingDetachedShellRef.current = null;
+    pendingUnknownTurnStartRef.current = null;
     clearCommandTransientUi();
     setDraftSession(null);
     selectedThreadIdRef.current = null;
@@ -847,6 +853,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     initScope: init?.scope ?? null,
     isThreadArchived: (threadId: string) => archivedSessions.some((session) => session.id === threadId),
     pendingDetachedShellRef,
+    pendingUnknownTurnStartRef,
+    gatewayRecoveryRef,
     firstTurnContextRefreshPendingRef,
     runtimeControls,
     runtimeControlDrafts,
@@ -888,6 +896,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setTraceState,
     setWorkspaceChanges,
     setWorkspaceDiff,
+    patchComposerDraft,
     threadController,
     updateMainView
   });
@@ -1098,12 +1107,31 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       threadId
     });
     const result = await client.request("turn/start", plan.params).catch((error) => {
+      if (error instanceof GatewayClientError && error.delivery === "unknown") {
+        pendingUnknownTurnStartRef.current = {
+          epoch: turnEpoch,
+          prepared: plan.prepared,
+          isInputCurrent: () => true,
+          clearInput: () => undefined
+        };
+        setCommandFeedback({
+          accepted: false,
+          command: "turn/start",
+          message: "Send status is unknown. Verifying the Thread.",
+          feedbackAnchor: "composer"
+        });
+        gatewayRecoveryRef.current();
+        return null;
+      }
       targetController.rejectTurnStart(plan.prepared);
       if (selectedAtStart && viewEpochRef.current === turnEpoch) {
         setRuntimeContextRefreshRevision((current) => current + 1);
       }
       throw error;
     });
+    if (!result) {
+      return;
+    }
     if (selectedAtStart && viewEpochRef.current !== turnEpoch) {
       await refreshHistory();
       return;
@@ -1334,6 +1362,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,
     composerPresentationReady: startupStable,
     composerShellVisible,
+    onGatewayRetry: () => gatewayRecoveryRef.current(),
     onComposerRetry: retryComposerStartup,
     workspaceBranch, workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;

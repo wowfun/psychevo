@@ -621,6 +621,35 @@ vi.mock("@psychevo/client", async () => {
         gatewayMock.subscribers = gatewayMock.subscribers.filter((item) => item !== callback);
       };
     });
+    subscribeConnectionState = vi.fn((callback: (snapshot: Record<string, unknown>) => void) => {
+      gatewayMock.connectionSubscribers.push(callback);
+      callback({
+        state: gatewayMock.connectionState,
+        generation: gatewayMock.connectionGeneration,
+        attempt: 1,
+        nextRetryAtMs: null,
+        lastError: null
+      });
+      return () => {
+        gatewayMock.connectionSubscribers = gatewayMock.connectionSubscribers.filter(
+          (item) => item !== callback
+        );
+      };
+    });
+    connectionSnapshot = vi.fn(() => ({
+      state: gatewayMock.connectionState,
+      generation: gatewayMock.connectionGeneration,
+      attempt: 1,
+      nextRetryAtMs: null,
+      lastError: null
+    }));
+    reconnectNow = vi.fn(async () => {
+      gatewayMock.connectionGeneration += 1;
+      gatewayMock.connectionState = "connected";
+      for (const callback of gatewayMock.connectionSubscribers) {
+        callback(this.connectionSnapshot());
+      }
+    });
     close = vi.fn();
 
     async connect() {
@@ -644,6 +673,9 @@ vi.mock("@psychevo/client", async () => {
         };
       }
       if (method === "thread/resume" || method === "thread/read") {
+        if (method === "thread/resume" && gatewayMock.threadResume) {
+          return gatewayMock.threadResume(params);
+        }
         const record = params as { threadId?: string | null } | undefined;
         const threadId = record?.threadId ?? gatewayMock.snapshot.thread?.id ?? null;
         return {
@@ -2752,6 +2784,7 @@ vi.mock("@psychevo/client", async () => {
 
   return {
     GatewayClient,
+    GatewayClientError: actual.GatewayClientError,
     ThreadController: actual.ThreadController,
     acceptThreadTurn: actual.acceptThreadTurn,
     appendOptimisticPrompt: (current: unknown, text: string) => {
