@@ -45,6 +45,7 @@ import { threadSnapshotSchemas } from './thread/snapshot';
 import { threadTraceSchemas } from './thread/trace';
 import { transcriptSchemas } from './transcript';
 import { turnControlSchemas } from './turn/control';
+import { turnResultSchemas } from './turn/result';
 import { turnRuntimeSchemas } from './turn/runtime';
 import { usageSchemas } from './usage';
 import { voiceSchemas } from './voice';
@@ -83,6 +84,7 @@ export const gatewaySchemas = {
   TranscriptEntry: transcriptSchemas.TranscriptEntry,
   GatewayActivityView: threadSessionSchemas.GatewayActivityView,
   PendingActionView: interactionSchemas.PendingActionView,
+  TurnStartReceipt: turnResultSchemas.TurnStartReceipt,
   ThreadSnapshot: threadSnapshotSchemas.ThreadSnapshot,
   ThreadHistoryOwnerView: threadControlSchemas.ThreadHistoryOwnerView,
   ThreadHistoryFidelityView: threadControlSchemas.ThreadHistoryFidelityView,

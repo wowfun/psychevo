@@ -300,6 +300,13 @@ pub struct PendingActionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TurnStartReceipt {
+    pub client_turn_id: String,
+    pub turn_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub source: GatewaySource,
     pub scope: GatewayRequestScope,
@@ -308,6 +315,9 @@ pub struct ThreadSnapshot {
     pub history: ThreadHistoryView,
     pub entries: Vec<TranscriptEntry>,
     pub activity: GatewayActivityView,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_start_receipts: Option<Vec<TurnStartReceipt>>,
     pub pending_actions: Vec<PendingActionView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

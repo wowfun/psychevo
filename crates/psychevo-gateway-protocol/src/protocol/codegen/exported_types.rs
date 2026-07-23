@@ -31,6 +31,7 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(TranscriptEntry),
         exported_type!(GatewayActivityView),
         exported_type!(PendingActionView),
+        exported_type!(TurnStartReceipt),
         exported_type!(ThreadSnapshot),
         exported_type!(ThreadHistoryOwnerView),
         exported_type!(ThreadHistoryFidelityView),

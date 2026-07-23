@@ -456,6 +456,9 @@ export const turnControlSchemas = {
     }
   },
   "properties": {
+    "clientTurnId": {
+      "type": "string"
+    },
     "expectedContextRevision": {
       "default": null,
       "type": [
@@ -512,6 +515,7 @@ export const turnControlSchemas = {
     }
   },
   "required": [
+    "clientTurnId",
     "scope"
   ],
   "title": "TurnStartParams",

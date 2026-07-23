@@ -317,6 +317,72 @@ describe("thread transcript controller helpers", () => {
     expect(controller.snapshot()?.entries).toHaveLength(1);
   });
 
+  it("removes an uncertain optimistic turn when the recovered snapshot proves non-acceptance", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    const controller = new ThreadController(initial);
+    controller.setContext(threadContext("native", null));
+    const plan = controller.beginTurn({
+      controls: { targetId: "target:default:native", turnOverrides: {} },
+      input: [{ type: "text", text: "maybe sent" }],
+      optimisticText: "maybe sent",
+      scope: floatingScope(),
+      threadId: "thread-current"
+    });
+
+    const recovered = controller.reconcileUncertainTurnStart(plan.prepared, initial);
+
+    expect(recovered.accepted).toBe(false);
+    expect(recovered.snapshot.entries).toHaveLength(0);
+    expect(recovered.snapshot.activity.running).toBe(false);
+  });
+
+  it("rejects unrelated running activity while reconciling an uncertain turn", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    const controller = new ThreadController(initial);
+    controller.setContext(threadContext("native", null));
+    const plan = controller.beginTurn({
+      controls: { targetId: "target:default:native", turnOverrides: {} },
+      input: [{ type: "text", text: "accepted remotely" }],
+      optimisticText: "accepted remotely",
+      scope: floatingScope(),
+      threadId: "thread-current"
+    });
+    const incoming = {
+      ...initial,
+      activity: { activeTurnId: "turn-remote", queuedTurns: 0, running: true }
+    };
+
+    const recovered = controller.reconcileUncertainTurnStart(plan.prepared, incoming);
+
+    expect(recovered.accepted).toBe(false);
+    expect(recovered.snapshot.entries).toHaveLength(0);
+    expect(controller.turnId()).toBe("turn-remote");
+  });
+
+  it("retains an uncertain optimistic turn only for its persisted turn/start receipt", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    const controller = new ThreadController(initial);
+    controller.setContext(threadContext("native", null));
+    const plan = controller.beginTurn({
+      controls: { targetId: "target:default:native", turnOverrides: {} },
+      input: [{ type: "text", text: "accepted remotely" }],
+      optimisticText: "accepted remotely",
+      scope: floatingScope(),
+      threadId: "thread-current"
+    });
+    const clientTurnId = (plan.params as { clientTurnId?: string }).clientTurnId;
+    const incoming = {
+      ...initial,
+      turnStartReceipts: [{ clientTurnId, turnId: "turn-accepted" }]
+    } as ThreadSnapshot;
+
+    const recovered = controller.reconcileUncertainTurnStart(plan.prepared, incoming);
+
+    expect(clientTurnId).toEqual(expect.any(String));
+    expect(recovered.accepted).toBe(true);
+    expect(recovered.snapshot.entries[0]?.source).toBe("client.optimistic");
+  });
+
   it("uses the original submission time for optimistic activity", () => {
     const controller = new ThreadController(emptyThreadSnapshot(floatingScope()));
     controller.setContext(threadContext("native", null));

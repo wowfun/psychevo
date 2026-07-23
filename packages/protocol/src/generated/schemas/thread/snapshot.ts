@@ -715,6 +715,21 @@ export const threadSnapshotSchemas = {
         "updatedAtMs"
       ],
       "type": "object"
+    },
+    "TurnStartReceipt": {
+      "properties": {
+        "clientTurnId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientTurnId",
+        "turnId"
+      ],
+      "type": "object"
     }
   },
   "properties": {
@@ -762,6 +777,15 @@ export const threadSnapshotSchemas = {
         }
       ],
       "default": null
+    },
+    "turnStartReceipts": {
+      "items": {
+        "$ref": "#/definitions/TurnStartReceipt"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     }
   },
   "required": [

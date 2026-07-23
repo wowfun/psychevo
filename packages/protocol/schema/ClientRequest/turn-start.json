@@ -434,6 +434,9 @@
     },
     "TurnStartParams": {
       "properties": {
+        "clientTurnId": {
+          "type": "string"
+        },
         "expectedContextRevision": {
           "default": null,
           "type": [
@@ -490,6 +493,7 @@
         }
       },
       "required": [
+        "clientTurnId",
         "scope"
       ],
       "type": "object"

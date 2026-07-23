@@ -1,5 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { GatewayEventSchema, ThreadSnapshotSchema, gatewaySchemas } from "./index";
+import {
+  ClientRequestSchema,
+  GatewayEventSchema,
+  ThreadSnapshotSchema,
+  gatewaySchemas
+} from "./index";
+
+describe("ClientRequestSchema", () => {
+  it("validates every corrected generated request signature", () => {
+    expect(ClientRequestSchema.safeParse({
+      method: "thread/history/draft/read",
+      params: {
+        scope: {
+          cwd: "/tmp/project",
+          source: { kind: "web", rawId: "thread-test" }
+        },
+        threadId: "thread-1",
+        messageId: "message:7"
+      }
+    }).success).toBe(true);
+    expect(ClientRequestSchema.safeParse({
+      method: "workspace/create",
+      params: { name: "research", parent: "/tmp/workspaces" }
+    }).success).toBe(true);
+  });
+
+  it("requires a client correlation id for turn/start", () => {
+    const params = {
+      scope: {
+        cwd: "/tmp/project",
+        source: { kind: "web", rawId: "thread-test" }
+      },
+      input: [{ type: "text", text: "hello" }]
+    };
+    expect(ClientRequestSchema.safeParse({
+      method: "turn/start",
+      params: { ...params, clientTurnId: "client-turn-1" }
+    }).success).toBe(true);
+    expect(ClientRequestSchema.safeParse({
+      method: "turn/start",
+      params
+    }).success).toBe(false);
+  });
+});
 
 describe("ThreadApplication hard-cut schemas", () => {
   it("projects an optional diagnostic reason on runtime capability facts", () => {
@@ -137,11 +180,15 @@ describe("ThreadSnapshotSchema", () => {
         }
       ],
       activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      turnStartReceipts: [{ clientTurnId: "client-turn-1", turnId: "turn-1" }],
       pendingActions: []
     });
 
     expect(parsed.thread?.id).toBe("s1");
     expect(parsed.history).toEqual({ owner: "psychevo", fidelity: "full", cursor: null, hint: null });
     expect(parsed.entries).toHaveLength(2);
+    expect(parsed.turnStartReceipts).toEqual([
+      { clientTurnId: "client-turn-1", turnId: "turn-1" }
+    ]);
   });
 });

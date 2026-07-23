@@ -436,6 +436,9 @@ export const clientRequestTurnStartSchema = {
     },
     "TurnStartParams": {
       "properties": {
+        "clientTurnId": {
+          "type": "string"
+        },
         "expectedContextRevision": {
           "default": null,
           "type": [
@@ -492,6 +495,7 @@ export const clientRequestTurnStartSchema = {
         }
       },
       "required": [
+        "clientTurnId",
         "scope"
       ],
       "type": "object"

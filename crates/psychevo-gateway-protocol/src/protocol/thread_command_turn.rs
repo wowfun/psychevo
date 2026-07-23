@@ -684,6 +684,7 @@ pub struct ThreadHistoryDraftReadResult {
 #[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
     pub scope: GatewayRequestScope,
+    pub client_turn_id: String,
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]

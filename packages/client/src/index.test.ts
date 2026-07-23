@@ -1,12 +1,37 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import type {
+  ThreadHistoryDraftReadParams,
+  ThreadHistoryDraftReadResult,
+  WorkspaceCreateParams,
+  WorkspaceCreateResult
+} from "@psychevo/protocol";
 import {
   GatewayClient,
   parseThreadSnapshot,
   runThreadInterrupt,
   scopeForCwd,
   type GatewayRawMessageHandler,
+  type GatewayRequestParams,
+  type GatewayRequestResults,
   type GatewayTransport
 } from "./index";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("generated request contracts", () => {
+  it("binds corrected methods to their params and results", () => {
+    expectTypeOf<GatewayRequestParams["thread/history/draft/read"]>()
+      .toEqualTypeOf<ThreadHistoryDraftReadParams>();
+    expectTypeOf<GatewayRequestResults["thread/history/draft/read"]>()
+      .toEqualTypeOf<ThreadHistoryDraftReadResult>();
+    expectTypeOf<GatewayRequestParams["workspace/create"]>()
+      .toEqualTypeOf<WorkspaceCreateParams>();
+    expectTypeOf<GatewayRequestResults["workspace/create"]>()
+      .toEqualTypeOf<WorkspaceCreateResult>();
+  });
+});
 
 describe("scopeForCwd", () => {
   it("creates a persistent web source scope", () => {
@@ -186,7 +211,111 @@ describe("GatewayClient transport", () => {
     const pending = client.request("thread/list", {});
     transport.disconnect("bridge closed");
 
-    await expect(pending).rejects.toThrow("bridge closed");
+    await expect(pending).rejects.toMatchObject({
+      code: "disconnected",
+      delivery: "unknown",
+      message: "bridge closed"
+    });
+  });
+
+  it("shares concurrent connect work and publishes a transport generation", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    const states: string[] = [];
+    client.subscribeConnectionState((snapshot) => {
+      states.push(`${snapshot.state}:${snapshot.generation}`);
+    });
+
+    await Promise.all([client.connect(), client.connect()]);
+
+    expect(transport.connectCalls).toBe(1);
+    expect(client.connectionSnapshot()).toMatchObject({
+      state: "connected",
+      generation: 1
+    });
+    expect(states).toContain("connecting:0");
+    expect(states).toContain("connected:1");
+  });
+
+  it("reconnects after a successful generation with capped-policy first delay", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    await client.connect();
+
+    transport.disconnect("bridge closed");
+    expect(client.connectionSnapshot()).toMatchObject({
+      state: "reconnecting",
+      attempt: 1
+    });
+    expect(transport.connectCalls).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(transport.connectCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transport.connectCalls).toBe(2);
+    expect(client.connectionSnapshot()).toMatchObject({
+      state: "connected",
+      generation: 2
+    });
+    client.close();
+  });
+
+  it("classifies request timeout and abort after send as unknown delivery", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    await client.connect();
+
+    const timedOut = client.request("thread/list", {}, { timeoutMs: 50 });
+    const timeoutExpectation = expect(timedOut).rejects.toMatchObject({
+      code: "request_timeout",
+      delivery: "unknown"
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    await timeoutExpectation;
+
+    const abort = new AbortController();
+    const aborted = client.request("thread/list", {}, { signal: abort.signal, timeoutMs: 0 });
+    const abortExpectation = expect(aborted).rejects.toMatchObject({
+      code: "request_aborted",
+      delivery: "unknown"
+    });
+    abort.abort();
+    await abortExpectation;
+    expect(transport.sent).toHaveLength(2);
+    client.close();
+  });
+
+  it("rejects a known disconnected request as not sent", async () => {
+    const client = new GatewayClient(new FakeGatewayTransport());
+    await expect(client.request("thread/list", {})).rejects.toMatchObject({
+      code: "not_connected",
+      delivery: "not_sent"
+    });
+  });
+
+  it("turns malformed frames into a protocol fault and isolates handler failures", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    const diagnostics: string[] = [];
+    const observed: string[] = [];
+    client.subscribeDiagnostics((diagnostic) => diagnostics.push(diagnostic.kind));
+    client.subscribe(() => {
+      throw new Error("broken observer");
+    });
+    client.subscribe((notification) => observed.push(notification.method));
+    await client.connect();
+
+    transport.emit(JSON.stringify({ jsonrpc: "2.0", method: "custom/event", params: null }));
+    expect(observed).toEqual(["custom/event"]);
+    expect(diagnostics).toContain("notification_handler");
+
+    transport.emit("{not-json");
+    expect(diagnostics).toContain("protocol");
+    expect(client.connectionSnapshot().state).toBe("reconnecting");
+    client.close();
   });
 
   it("sends the sealed Thread Application action, interaction, and history methods", async () => {
@@ -253,11 +382,13 @@ describe("GatewayClient transport", () => {
 
 class FakeGatewayTransport implements GatewayTransport {
   readonly sent: string[] = [];
+  connectCalls = 0;
   private connected = false;
   private readonly disconnectHandlers = new Set<(message: string) => void>();
   private readonly messageHandlers = new Set<GatewayRawMessageHandler>();
 
   async connect(): Promise<void> {
+    this.connectCalls += 1;
     this.connected = true;
   }
 
@@ -290,6 +421,7 @@ class FakeGatewayTransport implements GatewayTransport {
   }
 
   disconnect(message: string): void {
+    this.connected = false;
     for (const handler of this.disconnectHandlers) {
       handler(message);
     }

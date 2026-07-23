@@ -3301,6 +3301,15 @@ export const threadControlSchemas = {
             }
           ],
           "default": null
+        },
+        "turnStartReceipts": {
+          "items": {
+            "$ref": "#/definitions/TurnStartReceipt"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -3539,6 +3548,21 @@ export const threadControlSchemas = {
         "resultMessageSeq",
         "status",
         "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TurnStartReceipt": {
+      "properties": {
+        "clientTurnId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientTurnId",
+        "turnId"
       ],
       "type": "object"
     }
@@ -5240,6 +5264,15 @@ export const threadControlSchemas = {
             }
           ],
           "default": null
+        },
+        "turnStartReceipts": {
+          "items": {
+            "$ref": "#/definitions/TurnStartReceipt"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5478,6 +5511,21 @@ export const threadControlSchemas = {
         "resultMessageSeq",
         "status",
         "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TurnStartReceipt": {
+      "properties": {
+        "clientTurnId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientTurnId",
+        "turnId"
       ],
       "type": "object"
     }
@@ -7868,6 +7916,15 @@ export const threadControlSchemas = {
             }
           ],
           "default": null
+        },
+        "turnStartReceipts": {
+          "items": {
+            "$ref": "#/definitions/TurnStartReceipt"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -8106,6 +8163,21 @@ export const threadControlSchemas = {
         "resultMessageSeq",
         "status",
         "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    "TurnStartReceipt": {
+      "properties": {
+        "clientTurnId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientTurnId",
+        "turnId"
       ],
       "type": "object"
     }

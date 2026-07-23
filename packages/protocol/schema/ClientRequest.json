@@ -434,6 +434,9 @@
       "$ref": "ClientRequest/workspace-change-reject.json"
     },
     {
+      "$ref": "ClientRequest/workspace-create.json"
+    },
+    {
       "$ref": "ClientRequest/context-read.json"
     },
     {

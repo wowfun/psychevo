@@ -18,10 +18,12 @@ import type {
 } from "@psychevo/protocol";
 import {
   appendOptimisticPrompt,
-  applyLiveTranscriptEvent
+  applyLiveTranscriptEvent,
+  reconcileThreadSnapshot
 } from "./transcript";
 
 export interface ThreadTurnPreparation {
+  clientTurnId: string;
   previousSnapshot: ThreadSnapshot;
   requestedThreadId: string | null;
   snapshot: ThreadSnapshot;
@@ -266,11 +268,13 @@ export class ThreadController {
     }
     const snapshot = this.currentSnapshot ?? emptyThreadSnapshot(input.scope, input.threadId ?? null);
     const requestedThreadId = input.threadId ?? snapshot.thread?.id ?? null;
+    const clientTurnId = createClientTurnId();
     const prepared = prepareThreadTurn(
       snapshot,
       input.optimisticText,
       requestedThreadId,
-      input.startedAtMs ?? Date.now()
+      input.startedAtMs ?? Date.now(),
+      clientTurnId
     );
     this.activeThreadId = requestedThreadId;
     this.activeTurnId = prepared.snapshot.activity.activeTurnId;
@@ -285,7 +289,8 @@ export class ThreadController {
         input: input.input,
         mentions: input.mentions,
         scope: input.scope,
-        threadId: prepared.requestedThreadId
+        threadId: prepared.requestedThreadId,
+        clientTurnId
       }),
       prepared,
       snapshot: prepared.snapshot
@@ -339,6 +344,28 @@ export class ThreadController {
     this.settledBeforeAcceptanceTurnId = null;
     this.replaceSnapshot(prepared.previousSnapshot);
     return this.currentSnapshot;
+  }
+
+  reconcileUncertainTurnStart(
+    prepared: ThreadTurnPreparation,
+    incoming: ThreadSnapshot
+  ): { accepted: boolean; snapshot: ThreadSnapshot } {
+    const accepted = (incoming.turnStartReceipts ?? []).some((receipt) => (
+      receipt.clientTurnId === prepared.clientTurnId
+    ));
+    this.activeThreadId = incoming.thread?.id ?? null;
+    this.activeTurnId = incoming.activity.activeTurnId ?? null;
+    this.acceptingFirstTurn = false;
+    this.awaitingTurnStartAcceptance = false;
+    this.settledBeforeAcceptanceTurnId = null;
+    if (!incoming.thread) {
+      this.currentContext = null;
+    }
+    const snapshot = accepted
+      ? reconcileThreadSnapshot(prepared.snapshot, incoming)
+      : incoming;
+    this.replaceSnapshot(snapshot);
+    return { accepted, snapshot };
   }
 
   applyGatewayEvent(event: GatewayEvent): ThreadGatewayEventApplication {
@@ -482,6 +509,7 @@ export function emptyThreadSnapshot(
     history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     pendingActions: [],
+    turnStartReceipts: [],
     scope,
     source: sourceFromScope(scope),
     thread: threadId ? gatewayThread(threadId) : null
@@ -492,10 +520,12 @@ export function prepareThreadTurn(
   snapshot: ThreadSnapshot,
   prompt: string,
   requestedThreadId: string | null = snapshot.thread?.id ?? null,
-  now = Date.now()
+  now = Date.now(),
+  clientTurnId = createClientTurnId()
 ): ThreadTurnPreparation {
   const optimistic = appendOptimisticPrompt(snapshot, prompt, now);
   return {
+    clientTurnId,
     previousSnapshot: snapshot,
     requestedThreadId,
     snapshot: {
@@ -516,7 +546,8 @@ export function threadTurnStartParams({
   input,
   mentions,
   scope,
-  threadId
+  threadId,
+  clientTurnId = createClientTurnId()
 }: {
   controls?: ThreadTurnControls | undefined;
   context: ThreadContextReadResult | null;
@@ -524,6 +555,7 @@ export function threadTurnStartParams({
   mentions?: GatewayMention[] | undefined;
   scope: GatewayRequestScope;
   threadId: string | null;
+  clientTurnId?: string;
 }): TurnStartParams {
   const target = controls && !controls.omitTarget
     ? context?.compatibleTargets.find((candidate) => candidate.targetId === controls.targetId) ?? null
@@ -532,6 +564,7 @@ export function threadTurnStartParams({
     throw new Error("The selected Agent target is not present in the current Thread Context.");
   }
   return {
+    clientTurnId,
     input,
     mentions: mentions ?? [],
     scope,
@@ -544,6 +577,18 @@ export function threadTurnStartParams({
     expectedContextRevision: controls?.expectedContextRevision ?? null,
     expectedControlRevision: controls?.expectedControlRevision ?? null
   };
+}
+
+function createClientTurnId(): string {
+  const crypto = globalThis.crypto;
+  if (typeof crypto?.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto?.getRandomValues === "function") {
+    const words = crypto.getRandomValues(new Uint32Array(4));
+    return Array.from(words, (word) => word.toString(16).padStart(8, "0")).join("");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
 export function acceptThreadTurn(

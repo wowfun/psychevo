@@ -12,6 +12,7 @@ export type {
   SessionSummaryView as SessionSummary
 } from "./generated";
 import type {
+  ClientRequest,
   GatewayEvent,
   AutomationDraftResult,
   AutomationListResult,
@@ -68,6 +69,7 @@ export const RpcNotificationSchema = schema<JsonRpcNotification>("JsonRpcNotific
 export const JsonRpcSuccessSchema = schema<JsonRpcSuccess>("JsonRpcSuccess");
 export const JsonRpcErrorResponseSchema =
   schema<JsonRpcErrorResponse>("JsonRpcErrorResponse");
+export const ClientRequestSchema = schema<ClientRequest>("ClientRequest");
 export const GatewayEventSchema = schema<GatewayEvent>("GatewayEvent");
 export const ThreadSnapshotSchema = schema<ThreadSnapshot>("ThreadSnapshot");
 export const ThreadBrowserResultSchema =

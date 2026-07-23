@@ -16,6 +16,7 @@ include!("protocol/channels.rs");
 include!("protocol/voice.rs");
 include!("protocol/settings_workspace_context.rs");
 include!("protocol/agents_backend_rpc.rs");
+include!("protocol/request_registry.rs");
 include!("protocol/codegen.rs");
 
 #[cfg(test)]
@@ -91,6 +92,78 @@ mod thread_application_contract_tests {
                 "legacy or null target intent must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn turn_start_requires_client_correlation_and_snapshots_return_receipts() {
+        let request: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "turn/start",
+            "params": {
+                "scope": {
+                    "cwd": "/tmp/workspace",
+                    "source": { "kind": "web", "rawId": "composer" }
+                },
+                "clientTurnId": "client-turn-1",
+                "input": [{ "type": "text", "text": "hello" }]
+            }
+        }))
+        .expect("correlated turn/start request");
+        assert!(matches!(
+            request,
+            ClientRequest::TurnStart(TurnStartParams { ref client_turn_id, .. })
+                if client_turn_id == "client-turn-1"
+        ));
+        assert!(
+            serde_json::from_value::<ClientRequest>(serde_json::json!({
+                "method": "turn/start",
+                "params": {
+                    "scope": {
+                        "cwd": "/tmp/workspace",
+                        "source": { "kind": "web", "rawId": "composer" }
+                    },
+                    "input": [{ "type": "text", "text": "hello" }]
+                }
+            }))
+            .is_err()
+        );
+
+        let snapshot: ThreadSnapshot = serde_json::from_value(serde_json::json!({
+            "source": {
+                "kind": "web",
+                "rawId": "composer",
+                "lifetime": "persistent",
+                "rawIdentity": null,
+                "visibleName": null
+            },
+            "scope": {
+                "cwd": "/tmp/workspace",
+                "source": {
+                    "kind": "web",
+                    "rawId": "composer",
+                    "lifetime": "persistent",
+                    "rawIdentity": null,
+                    "visibleName": null
+                }
+            },
+            "thread": null,
+            "history": { "owner": "psychevo", "fidelity": "full" },
+            "entries": [],
+            "activity": { "running": false, "activeTurnId": null, "queuedTurns": 0 },
+            "turnStartReceipts": [{
+                "clientTurnId": "client-turn-1",
+                "turnId": "turn-1"
+            }],
+            "pendingActions": []
+        }))
+        .expect("Thread snapshot receipt");
+        assert_eq!(
+            snapshot
+                .turn_start_receipts
+                .as_deref()
+                .and_then(|receipts| receipts.first())
+                .map(|receipt| (receipt.client_turn_id.as_str(), receipt.turn_id.as_str())),
+            Some(("client-turn-1", "turn-1"))
+        );
     }
 
     #[test]
@@ -330,6 +403,22 @@ mod thread_application_contract_tests {
                 ref message_id,
                 ..
             }) if thread_id == "thread-1" && message_id == "message:7"
+        ));
+
+        let workspace: ClientRequest = serde_json::from_value(serde_json::json!({
+            "method": "workspace/create",
+            "params": {
+                "name": "research",
+                "parent": "/tmp/workspaces"
+            }
+        }))
+        .expect("typed Workspace create");
+        assert!(matches!(
+            workspace,
+            ClientRequest::WorkspaceCreate(WorkspaceCreateParams {
+                ref name,
+                parent: Some(ref parent),
+            }) if name == "research" && parent == "/tmp/workspaces"
         ));
 
         let open_command = serde_json::from_value::<ClientRequest>(serde_json::json!({

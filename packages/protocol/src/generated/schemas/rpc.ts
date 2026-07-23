@@ -144,6 +144,7 @@ import { clientRequestWorkspaceDiffSchema } from './rpc/client-request/workspace
 import { clientRequestWorkspaceChangesSchema } from './rpc/client-request/workspace-changes';
 import { clientRequestWorkspaceChangeAcceptSchema } from './rpc/client-request/workspace-change-accept';
 import { clientRequestWorkspaceChangeRejectSchema } from './rpc/client-request/workspace-change-reject';
+import { clientRequestWorkspaceCreateSchema } from './rpc/client-request/workspace-create';
 import { clientRequestContextReadSchema } from './rpc/client-request/context-read';
 import { clientRequestObservabilityReadSchema } from './rpc/client-request/observability-read';
 import { clientRequestUsageReadSchema } from './rpc/client-request/usage-read';
@@ -786,6 +787,9 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/workspace-change-reject.json"
     },
     {
+      "$ref": "ClientRequest/workspace-create.json"
+    },
+    {
       "$ref": "ClientRequest/context-read.json"
     },
     {
@@ -989,6 +993,7 @@ export const rpcSchemaRefs = [
   clientRequestWorkspaceChangesSchema,
   clientRequestWorkspaceChangeAcceptSchema,
   clientRequestWorkspaceChangeRejectSchema,
+  clientRequestWorkspaceCreateSchema,
   clientRequestContextReadSchema,
   clientRequestObservabilityReadSchema,
   clientRequestUsageReadSchema,
