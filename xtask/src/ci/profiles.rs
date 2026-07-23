@@ -60,28 +60,73 @@ const RUST_BROAD_STEPS: &[WorkflowStep] = &[
     },
 ];
 
+const DESKTOP_RUST_STEPS: &[WorkflowStep] = &[
+    WorkflowStep {
+        id: "desktop-format",
+        description: "Check Desktop Rust formatting",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "fmt",
+            "--manifest-path",
+            "apps/desktop/src-tauri/Cargo.toml",
+            "--all",
+            "--check",
+            "--quiet",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "desktop-clippy",
+        description: "Run Desktop Rust clippy for the shipped native runtime",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "clippy",
+            "--manifest-path",
+            "apps/desktop/src-tauri/Cargo.toml",
+            "--features",
+            "native-runtime",
+            "--all-targets",
+            "--quiet",
+            "--",
+            "-D",
+            "warnings",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "desktop-tests",
+        description: "Run Desktop Rust tests for the shipped native runtime",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "test",
+            "--manifest-path",
+            "apps/desktop/src-tauri/Cargo.toml",
+            "--features",
+            "native-runtime",
+            "--all-targets",
+            "--quiet",
+        ]),
+        live: false,
+    },
+];
+
 const WEB_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
-        id: "workbench-build",
-        description: "Build Workbench",
-        action: WorkflowStepAction::Command(&["pnpm", "--filter", "@psychevo/workbench", "build"]),
+        id: "workspace-tests",
+        description: "Run all JavaScript workspace unit tests sequentially",
+        action: WorkflowStepAction::Command(&["pnpm", "--workspace-concurrency=1", "-r", "test"]),
         live: false,
     },
     WorkflowStep {
-        id: "workbench-test",
-        description: "Run Workbench unit tests",
-        action: WorkflowStepAction::Command(&["pnpm", "--filter", "@psychevo/workbench", "test"]),
+        id: "workspace-typecheck",
+        description: "Typecheck all JavaScript workspaces",
+        action: WorkflowStepAction::Command(&["pnpm", "-r", "typecheck"]),
         live: false,
     },
     WorkflowStep {
-        id: "workbench-typecheck",
-        description: "Typecheck Workbench",
-        action: WorkflowStepAction::Command(&[
-            "pnpm",
-            "--filter",
-            "@psychevo/workbench",
-            "typecheck",
-        ]),
+        id: "workspace-builds",
+        description: "Build all JavaScript workspaces, including Workbench and Desktop",
+        action: WorkflowStepAction::Command(&["pnpm", "-r", "build"]),
         live: false,
     },
 ];
@@ -178,8 +223,16 @@ const PROFILES: &[WorkflowProfile] = &[
         steps: RUST_BROAD_STEPS,
     },
     WorkflowProfile {
+        id: "desktop-rust",
+        description: "Desktop native-runtime Rust gate",
+        kind: ProfileKind::Ci,
+        live: false,
+        artifact_only: false,
+        steps: DESKTOP_RUST_STEPS,
+    },
+    WorkflowProfile {
         id: "web",
-        description: "Workbench build, tests, and typecheck",
+        description: "Client, Workbench, and Desktop web-surface gates",
         kind: ProfileKind::Ci,
         live: false,
         artifact_only: false,
@@ -282,6 +335,7 @@ mod tests {
             vec![
                 "changed",
                 "rust-broad",
+                "desktop-rust",
                 "web",
                 "visual",
                 "surface-profile",
@@ -319,6 +373,20 @@ mod tests {
         assert_eq!(
             plan.steps[2].command,
             vec!["xtask-internal", "desktop-visual"]
+        );
+    }
+
+    #[test]
+    fn web_plan_covers_all_workspace_tests_typechecks_and_builds() {
+        let plan = plan_profile("web", None).expect("web profile");
+        let ids = plan.steps.iter().map(|step| step.id).collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec!["workspace-tests", "workspace-typecheck", "workspace-builds"]
+        );
+        assert_eq!(
+            plan.steps[0].command,
+            vec!["pnpm", "--workspace-concurrency=1", "-r", "test"]
         );
     }
 
@@ -393,5 +461,47 @@ mod tests {
                 step.command
             );
         }
+    }
+
+    #[test]
+    fn desktop_rust_plan_validates_the_shipped_native_runtime() {
+        let plan = plan_profile("desktop-rust", None).expect("desktop-rust profile");
+        assert_eq!(
+            plan.steps.iter().map(|step| step.id).collect::<Vec<_>>(),
+            vec!["desktop-format", "desktop-clippy", "desktop-tests"]
+        );
+
+        let manifest = "apps/desktop/src-tauri/Cargo.toml";
+        assert_eq!(
+            plan.steps[0].command,
+            vec![
+                "cargo",
+                "fmt",
+                "--manifest-path",
+                manifest,
+                "--all",
+                "--check",
+                "--quiet"
+            ]
+        );
+        for step in &plan.steps[1..] {
+            assert!(
+                step.command
+                    .windows(2)
+                    .any(|parts| parts == ["--manifest-path".to_string(), manifest.to_string()])
+            );
+            assert!(
+                step.command
+                    .windows(2)
+                    .any(|parts| parts == ["--features".to_string(), "native-runtime".to_string()])
+            );
+            assert!(step.command.iter().any(|part| part == "--all-targets"));
+            assert!(!step.command.iter().any(|part| part == "wdio-test"));
+        }
+        assert!(plan.steps[1].command.ends_with(&[
+            "--".to_string(),
+            "-D".to_string(),
+            "warnings".to_string()
+        ]));
     }
 }

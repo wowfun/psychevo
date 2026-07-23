@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0 action revision
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Run broad Rust gate
+        run: cargo xtask ci run --profile rust-broad
+
+      - name: Install Desktop Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libwebkit2gtk-4.1-dev
+
+      - name: Run Desktop Rust gate
+        run: cargo xtask ci run --profile desktop-rust
+
+      - name: Check Gateway protocol bindings
+        run: cargo xtask gateway-protocol generate --check
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0 action revision
+        with:
+          toolchain: 1.97.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Workbench gate
+        run: cargo xtask ci run --profile web

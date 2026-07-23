@@ -9,7 +9,7 @@
     "tauri:build": "tauri build --features native-runtime",
     "tauri:dev": "tauri dev --features native-runtime",
     "tauri:wdio-build": "tauri build --features wdio-test --no-bundle",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
     "wdio": "wdio run ./wdio.conf.ts"
   },
