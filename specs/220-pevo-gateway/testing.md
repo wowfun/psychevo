@@ -29,6 +29,9 @@ Define acceptance expectations and validation scenarios for the managed
 - Fingerprinted `/assets/` responses are immutable-cacheable, while HTML, SPA
   fallbacks, and non-fingerprinted files are `no-store`; static reads preserve
   existing content-type and authorization behavior.
+- Literal and encoded traversal requests, platform path prefixes, mixed path
+  separators, and static-root symlink or junction escapes never read files
+  outside the canonical static asset root or fall through to the SPA shell.
 - `stop` requests authenticated shutdown, waits for managed cleanup, uses only
   the verified process group or Windows Job Object as fallback, and proves both
   the managed server and an exercised fake ACP Agent child have exited before
@@ -77,6 +80,8 @@ Manual real-provider validation is not required for this lifecycle topic.
   browser-session cookie.
 - Direct visits to the managed base URL without a valid browser session show a
   launch-required diagnostic rather than mounting a broken Workbench.
+- Invalid static paths return `404`; valid anonymous fingerprinted assets and
+  authenticated shell fallback retain their existing responses.
 - A real managed `serve` subprocess starts a deterministic resident ACP Agent;
   `gateway stop` must leave neither process alive and must remove managed state
   only after the server exits.

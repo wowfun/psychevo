@@ -105,6 +105,26 @@ lane preserves Turn order and may coalesce replaceable entry updates, but it
 never drops or reorders lifecycle, action, entry-completed, or terminal events.
 Runtime callbacks enqueue into this lane in bounded constant work and never run
 filesystem, Git, Review, or auxiliary projection reads before local delivery.
+The Web server owns one process-level Event Hub per `WebState`, not one durable
+store tailer per WebSocket. Locally produced `gateway/event` notifications are
+recorded into pending-interaction and Review projections and published to that
+Hub immediately. One process-level tailer polls retained SQLite live events and
+snapshots for foreign owner ids and publishes those observations to the same
+Hub. The tailer uses the existing 250 ms poll interval, ten-minute retention
+window, and sixty-second cleanup cadence; this delivery change does not add a
+storage schema or make the durable store the local fast path.
+
+Every WebSocket subscribes to the shared Event Hub through a bounded connection
+outbox. The Hub retains at most 512 notifications. Each connection outbox
+retains at most 128 frames and 8 MiB of serialized payload. A required response
+larger than the byte budget may be admitted only when the outbox is empty.
+Only replaceable `EntryUpdated` notifications with the same Thread, Turn, and
+entry identity may replace an older queued frame in place. JSON-RPC responses,
+Turn lifecycle, action lifecycle, `EntryCompleted`, terminal, voice, and shell
+frames are delivery-required and preserve FIFO order. Hub lag or outbox
+saturation closes the affected connection so the client performs snapshot
+recovery; it never silently discards a required frame. Runtime event callbacks
+perform only fixed, bounded projection and enqueue work.
 This guarantee includes every error returned after the transport has accepted
 and detached Turn execution: the Turn shell persists and emits one failed
 `TurnCompleted`, unless a terminal for that Turn already exists, in which case
@@ -377,6 +397,21 @@ occupied, waiting for the next permit remains concurrent with polling socket
 Close/error and completed request tasks; a saturated connection therefore
 disconnects promptly without waiting for one of its requests to finish.
 
+The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
+calling the owning Application Module, and serializing its typed result. It
+does not assemble the `thread/draft/open` or `turn/start` workflows. Those two
+methods live in the existing thread Application Module, which owns their
+authorization, lock ordering, runtime prewarming, event delivery setup,
+asynchronous execution spawn, and response construction. This is a static
+module boundary, not a dynamic handler registry or a new crate; plugin method
+dispatch remains unchanged.
+
+JSON-RPC responses and connection-private terminal, voice, and shell frames are
+sent only to the initiating connection. Shared `gateway/event` notifications
+flow through the process-level Event Hub. A disconnected client never has an
+unknown request replayed by Gateway; it recovers authoritative Thread state
+through `thread/resume` and related snapshot reads.
+
 The unauthenticated HTTP readiness endpoint is `/readyz`. It returns only
 non-sensitive readiness and version information. WebSocket, download, and
 detailed status routes require authentication. Direct API clients authenticate
@@ -474,8 +509,14 @@ clipboard or download may return a structured client action for the surface to
 perform. Unsupported commands return structured feedback rather than silently
 falling back to prompt text.
 
-`turn/start` returns whether Gateway accepted the turn plus the required
-Gateway-allocated `turnId`, materialized thread id, and authoritative Thread.
+`turn/start` requires a caller-generated `clientTurnId` used only to correlate
+that submission across an unknown response; it does not make the request
+replayable or idempotent. Gateway persists a bounded receipt mapping the
+`clientTurnId` to its Gateway-allocated `turnId` before reporting acceptance,
+and `thread/read` and `thread/resume` include the retained receipts in the
+authoritative Thread snapshot. `turn/start` returns whether Gateway accepted
+the turn plus the required Gateway-allocated `turnId`, materialized thread id,
+and authoritative Thread.
 The materialized id is non-null and must equal the authoritative Thread's id;
 clients fail closed instead of selecting between conflicting identities.
 Source-started first turns may pass a null
@@ -491,8 +532,8 @@ public client RPC. `thread/resume`
 may resolve by source instead of by thread id; reconnecting clients use it to
 recover the current Gateway-owned snapshot after WebSocket reconnection. The
 snapshot is a transport projection of the current thread transcript, its
-explicit history owner/fidelity/cursor, active turn id, queued turn count, and
-pending permission/clarify requests. It is not
+explicit history owner/fidelity/cursor, active turn id, queued turn count,
+bounded `turn/start` receipts, and pending permission/clarify requests. It is not
 durable evidence.
 For source-started turns whose concrete thread id materializes before source
 binding is committed, Gateway must make pending interaction requests recoverable
@@ -609,6 +650,21 @@ as a JSON-RPC compatibility alias because this product surface has not shipped.
 The transport protocol is generated from Rust-owned Gateway wire types. Clients
 should consume generated TypeScript types and JSON Schema rather than
 maintaining a hand-written second schema.
+
+Fixed client request signatures have one Rust-owned registry. Each registry
+entry binds the wire method name to its request parameter and response result
+types. That registry generates the closed Rust `ClientRequest` union and the
+TypeScript `GatewayRequestParams`, `GatewayRequestResults`, and `GatewayMethod`
+maps. A response that is intentionally not yet structurally typed is declared
+explicitly as a JSON object in the registry instead of acquiring a fabricated
+wire type. Client packages must consume these generated maps rather than repeat
+the method inventory.
+
+The request-signature registry is a compile-time protocol source, not a runtime
+handler registry. Gateway keeps explicit method dispatch, authorization,
+Application Module calls, and error behavior in its transport implementation.
+Generating dispatcher handlers or changing JSON-RPC execution behavior is not
+required by this contract.
 
 Generated protocol validation must be free of `ts-rs` serde-attribute parse
 warnings. If a Rust wire field is omitted during serialization, the generated

@@ -232,6 +232,14 @@ required. They must not print tokens or secrets.
   per-connection in-flight permit. A saturated connection with 32 held requests
   must still observe the following WebSocket Close/error without first releasing
   a request permit.
+- Fake-clock client tests cover concurrent connect sharing, the 15-second
+  initial deadline, capped reconnect backoff, manual Retry, request timeout and
+  abort classification, unknown delivery without replay, stale-generation
+  suppression, malformed-frame recovery, and notification-handler isolation.
+- Workbench tests distinguish cold boot failure from post-boot disconnect,
+  preserve transcript and edited draft during reconnect, disable rather than
+  queue Send while disconnected, generation-guard rehydration, and reconcile an
+  unknown `turn/start` from the authoritative resumed snapshot.
 - Opt-in Windows Git Bash performance evidence records cached Native/default
   draft-open p95 at or below 40 ms and click-to-controls/send-ready p95 at or
   below 100 ms. Cold catalog bootstrap is tracked separately at or below 500 ms;

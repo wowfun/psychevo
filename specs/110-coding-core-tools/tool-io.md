@@ -279,6 +279,9 @@ Parameters:
 
 Non-empty `chars` writes to the session stdin. Sessions started without TTY and
 without PTY fallback reject non-empty stdin writes.
+The integer handle is owned by the task that created the corresponding
+`exec_command` session. A different task receives the same unknown-session
+failure as a missing or completed handle.
 
 Both exec tools return strict result fields:
 

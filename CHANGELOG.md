@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-23
+
+- Stabilized provider exchanges, Gateway orchestration, and Workbench recovery
+  with bounded diagnostics, abortable requests, per-Turn receipts, and
+  retryable disconnect handling.
+- Unified typed Gateway contracts and Desktop/Workbench build surfaces, adding
+  workspace and draft APIs, native-runtime coverage, modular host boundaries,
+  and broader Web CI validation.
+
+## 2026-07-22
+
+- Reworked Gateway delivery around one process event hub, bounded per-connection
+  backpressure, reconnect generations, and authoritative recovery while keeping
+  active Workbench content and drafts available through transient disconnects.
+- Hardened the Desktop Gateway bridge with bounded native queues and
+  generation-aware cleanup, and expanded the Web CI profile across Client,
+  Workbench, and Desktop adapter contracts.
+- Added minimal hosted Rust and Web CI gates for pull requests and `main`.
+- Contained Gateway static assets to their canonical root, including traversal
+  and symlink escapes.
+- Isolated yielded exec sessions by task and preserved Unicode output order
+  when token truncation falls back to character bounds.
+
 ## 2026-07-21
 
 - Hardened cross-platform Desktop and Gateway startup/build paths, including

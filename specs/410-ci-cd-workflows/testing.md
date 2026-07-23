@@ -3,9 +3,10 @@ name: 410. CI/CD Workflows Testing
 psychevo_self_edit: deny
 ---
 
-Define deterministic validation for the local CI/CD workflow runner. Tests for
-this topic must not require hosted CI providers, live credentials, publishing
-permissions, package registries, or external deployment targets.
+Define deterministic validation for the local CI/CD workflow runner and its
+hosted entrypoint. Local tests must not require a hosted CI provider, live
+credentials, publishing permissions, package registries, or external
+deployment targets.
 
 ## Deterministic Coverage
 
@@ -38,6 +39,7 @@ For command-shape smoke validation:
 ```sh
 cargo xtask ci list --json
 cargo xtask ci plan --profile changed --json
+cargo xtask ci plan --profile desktop-rust --json
 cargo xtask ci plan --profile visual --json
 cargo xtask live list --json
 cargo xtask live plan --json
@@ -51,13 +53,20 @@ cargo xtask ci plan --profile live --live-env isolated --json
 For Rust broad gate changes:
 
 ```sh
+cargo xtask ci run --profile desktop-rust
 cargo xtask ci run --profile rust-broad
 ```
 
 ## Scenario Coverage
 
-- `ci list` includes `changed`, `rust-broad`, `web`, `visual`, `live`, and
-  `package`.
+- `ci list` includes `changed`, `rust-broad`, `desktop-rust`, `web`, `visual`,
+  `live`, and `package`.
+- `ci plan --profile desktop-rust --json` contains exactly the Desktop format,
+  clippy, and test steps; clippy and tests address the independent Desktop
+  manifest, enable `native-runtime`, and cover all targets without enabling
+  `wdio-test`.
+- `ci plan --profile web --json` includes client tests/typecheck, Workbench
+  build/tests/typecheck, and Desktop renderer tests/typecheck.
 - `ci plan --profile changed --json` emits a parseable plan without executing
   steps.
 - `ci run --profile live` fails before provider work unless the caller passes
@@ -81,6 +90,11 @@ cargo xtask ci run --profile rust-broad
   includes no publish, deploy, upload, tag, or hosted-release step.
 - No legacy shell entrypoint exists for Rust broad validation; the
   `rust-broad` profile is selected through `cargo xtask ci` directly.
+- Hosted pull-request and `main` checks invoke the existing `rust-broad`,
+  `desktop-rust`, and `web` profiles rather than defining a second test
+  inventory. The Linux Rust job installs `libwebkit2gtk-4.1-dev` before the
+  Desktop profile so it validates the same Tauri feature used by production
+  builds.
 - Default CI artifact retention keeps the 10 newest numeric run directories
   under `.local/.psychevo-dev/ci/` and ignores non-numeric entries.
 - `ci plan --profile visual --json` exposes the runner-owned `tui-vhs-demo`

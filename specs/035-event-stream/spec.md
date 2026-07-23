@@ -95,7 +95,7 @@ execution Adapter but does not itself own conversation content. Public surfaces
 must preserve these owner values without branching on Native versus ACP
 implementation kind.
 
-Live entry events are previews. They may update an existing live entry or block
+Live entry events are replaceable previews. They may update an existing live entry or block
 by stable identity, and they may be coalesced into latest-entry snapshots.
 Previews must never create durable transcript facts by themselves. Completion
 or active-snapshot replay uses the same monotonic overlay merge as ordinary
@@ -199,11 +199,28 @@ transcript content.
 
 Streams must define delivery policy by category:
 
-- terminal turn, action resolution, and materialized snapshot signals are
-  delivery-required or recoverable through snapshot refresh
-- live previews are best-effort and may be coalesced or dropped with a gap signal
+- terminal turn, action resolution, entry completion, and materialized snapshot
+  signals are delivery-required; transport failure before delivery forces
+  reconnect and authoritative snapshot refresh rather than silent loss
+- live previews are best-effort and may be coalesced by stable preview identity;
+  a detected gap closes or marks the stream stale and forces snapshot refresh
 - optional mirrors may be lossy if they expose loss diagnostics or force a
   snapshot refresh on reconnect
+
+Request delivery and event recovery are separate contracts. A request that was
+definitely not sent may be retried by its caller. A request sent before timeout,
+abort, or disconnect has unknown delivery and must not be replayed automatically,
+because the server may already have accepted its side effects. Reconnection
+creates a new transport generation and rehydrates the current source or Thread
+from authoritative snapshots. Stale responses and events from an older
+generation cannot mutate the recovered view.
+
+For `turn/start`, the caller supplies a fresh correlation id and Gateway stores
+a bounded acceptance receipt on the materialized Thread before acknowledging
+the request. Unknown-delivery recovery checks that exact receipt; generic Thread
+activity and transcript growth cannot prove that a particular client's request
+was accepted. The correlation id authorizes neither automatic replay nor
+deduplication.
 
 ## Related Topics
 

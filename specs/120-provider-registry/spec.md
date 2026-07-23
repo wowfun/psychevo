@@ -98,6 +98,8 @@ Configuration may define:
 - optional per-provider `name` for display in human-facing selectors and
   status surfaces
 - per-provider `api`, the OpenAI Chat-compatible API URL
+- optional per-provider `inference_idle_timeout_secs`; it defaults to `300`
+  seconds and `0` disables inference-idle enforcement for that provider
 - optional per-provider `api_key_env` override; when absent, the provider uses
   the derived credential environment variable
 - per-provider `no_auth`
@@ -191,6 +193,23 @@ header.
 
 Provider names are display-only. They do not change provider identity,
 selection, config merge keys, or the `provider/model` model-spec form.
+
+Provider generation HTTP uses one process-shared connection pool with a
+10-second connection-establishment timeout. The provider inference timeout is
+an idle-progress guard, not a total turn deadline: response headers and each
+subsequent period without a meaningful normalized inference event are bounded
+by `inference_idle_timeout_secs`. Text, reasoning, tool-call, provider-tool,
+source, and completion events reset the guard. Transport keepalive bytes,
+empty deltas, metadata, and usage-only events do not. Explicit abort always
+wins over the idle guard.
+
+Responses background mode applies the same abortable idle bound independently
+to each create, poll, cancel, and result-body HTTP exchange, while allowing the
+background job as a whole to run for an unbounded duration as long as each
+exchange progresses. Non-success response diagnostics retain at most 64 KiB
+of body text and append an explicit truncation marker when more data exists.
+This transport policy does not introduce automatic request retries or a
+`Retry-After` scheduling state machine.
 
 Interactive clients and CLI config commands may create user-defined OpenAI
 Chat-compatible providers in the global config or the current cwd's local

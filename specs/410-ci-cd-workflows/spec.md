@@ -5,8 +5,8 @@ psychevo_self_edit: deny
 
 Define Psychevo's concrete local CI/CD workflow runner. This topic implements
 the provider-neutral CI/CD foundation from [065 CI/CD](../065-ci-cd/spec.md)
-through repo-local `xtask` commands and keeps hosted CI provider files out of
-scope for v1.
+through repo-local `xtask` commands and the minimal hosted workflow that invokes
+the same deterministic validation paths.
 
 ## Scope
 
@@ -18,10 +18,11 @@ This topic owns:
 - local artifact root conventions for workflow runs
 - live opt-in enforcement for workflow profiles
 - lower-level helper scripts used by profile steps
+- the required GitHub Actions workflow for pull requests and pushes to `main`
 
 Out of scope:
 
-- GitHub Actions or other hosted CI provider workflow files
+- hosted release, deployment, or registry workflows
 - public release publishing, hosted draft releases, deployments, update
   channels, or package registry upload
 - user-customizable workflow manifests
@@ -87,7 +88,17 @@ Initial profiles:
 - `changed`: lightweight local confidence for the current checkout; v1 plans
   format checking and lets future work add diff-aware selection.
 - `rust-broad`: Rust workspace broad gate; runs format, clippy, and tests.
-- `web`: Workbench build, tests, and typecheck.
+- `desktop-rust`: independent Desktop Rust workspace gate; checks formatting,
+  then runs clippy with warnings denied and tests for all targets using the
+  shipped `native-runtime` feature. It does not enable the test-only
+  `wdio-test` feature or duplicate Desktop renderer validation from `web`.
+- `web`: all JavaScript workspace unit tests, all workspace typechecks, and all
+  workspace production builds, including Workbench and Desktop. Workspace
+  tests execute with bounded workspace concurrency so packages that own process
+  state or browser-like globals do not race. This profile owns the Browser and
+  native Gateway Adapter contract together so reconnect behavior cannot pass
+  on only one surface. Package test scripts must fail when their configured
+  suite discovers no tests instead of using `--passWithNoTests`.
 - `visual`: deterministic visual diagnostics using fake/local providers; v1
   owns the TUI/VHS capture workflow and Workbench deterministic Playwright
   visual specs directly in `xtask`. Permanent visual filenames, suite labels,
@@ -102,6 +113,20 @@ Initial profiles:
 - `live`: opt-in live validation using explicit provider credentials.
 - `package`: artifact-only CD profile that builds local reviewable artifacts
   and checksums without publishing or creating hosted release objects.
+
+## Hosted CI
+
+The initial hosted workflow runs on pull requests and pushes to `main` with two
+Linux jobs. `rust` runs `cargo xtask ci run --profile rust-broad`, installs the
+Linux WebKit development package required to compile Tauri, runs
+`cargo xtask ci run --profile desktop-rust`, and checks generated Gateway
+protocol bindings. `web` installs the root `packageManager` version with a
+frozen lockfile and runs `cargo xtask ci run --profile web`.
+
+The initial workflow has no aggregate job, operating-system matrix, live
+provider work, Playwright, WDIO, nightly, fuzz, soak, package publishing, or
+host mutation. Those checks remain separate until a demonstrated coverage gap
+justifies adding them.
 
 Workflow definitions are code-owned in `xtask` for v1. Do not add a public
 TOML/YAML manifest until there are multiple real adapters or external

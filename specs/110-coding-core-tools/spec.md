@@ -257,6 +257,10 @@ a Windows legacy locale fallback.
 
 `write_stdin` polls an existing yielded session or writes text to its stdin.
 Empty `chars` is a poll. Non-empty `chars` requires a stdin-capable session.
+The numeric `session_id` is stable and readable, but it is scoped to the task
+that created the `exec_command` session. Polling or writing from another task
+fails as an unknown session without revealing the owner. User-initiated shell
+execution remains separate from model-tool session ownership.
 
 Execution sessions are in-process runtime state. They are not durable across
 runtime restarts, and the runtime must bound the number of active sessions.
@@ -303,7 +307,8 @@ stdin are failed tool results.
 
 `max_output_tokens` bounds the model-visible output. When output is truncated,
 `original_token_count` remains the count before truncation. The result does not
-include a full-output path.
+include a full-output path. Tokenizer decode fallback retains the selected tail
+in its original character order, including multi-byte Unicode text.
 
 ## `web_fetch`
 

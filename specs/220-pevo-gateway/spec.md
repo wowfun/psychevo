@@ -165,6 +165,11 @@ with a valid browser-session cookie redirects to the clean shell. Reopening it
 without a valid browser-session cookie returns a launch-expired diagnostic page
 with the recovery command.
 
+Creating or consuming a launch opportunistically removes other expired launch
+entries from the in-memory map. This bounded housekeeping requires no periodic
+task and does not add a TTL, logout flow, or background reaper to authenticated
+browser sessions.
+
 The managed cookie authorizes cwds granted by a launch/open flow in the
 current server process, cwds created by browser workspace-management RPCs,
 and cwds explicitly adopted from human-visible global session groups. A
@@ -194,6 +199,12 @@ non-fingerprinted files return `Cache-Control: no-store` so an updated managed
 server cannot reuse a stale shell. The local server does not add on-the-fly
 compression; Workbench's lazy initial graph and immutable repeat-load cache are
 the primary startup controls.
+
+Static request paths are resolved beneath the canonical static asset root.
+Absolute paths, parent traversal, platform path prefixes, and existing files
+whose canonical target escapes through a symlink or junction are rejected with
+`404` before SPA fallback or file reads. This containment does not change the
+authorization or cache behavior of valid assets and shell routes.
 
 The Web/Gateway implementation follows the architecture large-file limit from
 [001 Architecture](../001-architecture/spec.md). `server.rs` should remain a

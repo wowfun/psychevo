@@ -44,6 +44,10 @@ packages in the first slice:
 - `@psychevo/protocol`: generated strict JSON-RPC 2.0 envelopes, Gateway wire
   types, JSON Schema artifacts, and Ajv-backed runtime validators. Rust
   Gateway protocol types are the source of truth.
+  The generated surface includes the fixed Gateway method-to-params and
+  method-to-result maps. `@psychevo/client` may derive transport-specific
+  request helpers from those maps, but must not maintain a second method
+  inventory.
   Generated TypeScript schema modules are split by protocol domain under
   `src/generated/schemas/` and re-aggregated through `gatewaySchemas`; callers
   must not depend on a monolithic generated schema file. If schema artifacts
@@ -120,6 +124,27 @@ permissions as `permissionDenied`, report user-canceled chooser flows as
 `canceled`, and include a bounded message only when it helps the product surface
 show the next useful action.
 
+`@psychevo/client` owns the Gateway connection state machine for every host
+Adapter. Its public state is `idle`, `connecting`, `connected`, `reconnecting`,
+`error`, or `closed`, with a monotonically increasing transport generation,
+attempt number, next-retry time, and bounded last error. Initial connection
+performs one attempt with a 15-second deadline. After the first successful
+connection, unexpected loss retries indefinitely at 250 ms, 500 ms, 1 s, 2 s,
+4 s, 8 s, then 15 s capped; an explicit Retry starts the next attempt now.
+Concurrent callers share one connection promise and cannot create competing
+sockets.
+
+Requests default to a 120-second deadline and accept an explicit timeout and
+abort signal; timeout `0` disables the deadline. Client failures identify
+whether delivery is `not_sent` or `unknown`. Disconnect, timeout, or abort after
+send is `unknown` and is never automatically replayed. Malformed protocol
+frames are connection faults that close the current generation and enter
+recovery. One notification handler failure is isolated and reported through a
+bounded diagnostic subscription without preventing other handlers or frames.
+The injected `GatewayTransport` remains the narrow Adapter interface for
+connect, close, send, message, and disconnect operations; connection policy is
+not duplicated in browser or native transports.
+
 ## Web And PWA Builds
 
 The Web build may enable PWA installation and service-worker caching for static
@@ -146,6 +171,13 @@ If an upstream lazy dependency ships a single generated ESM module that cannot
 be split by maintainable package or feature boundaries, the warning limit may
 be raised narrowly to the smallest stable value that admits that module after
 all other large chunks have been split.
+
+Workbench and Desktop derive common production output and chunking behavior
+from one apps-level Vite configuration factory. Each target retains its own
+plugins, aliases, development server and test exclusions, and any target-only
+manual chunks; sharing configuration must not erase those observable
+differences or introduce a separate workspace package. Both targets must
+complete production builds in the deterministic Web validation profile.
 
 Native Desktop reuses Workbench through the host/runtime interface, but native
 packaging, Tauri bridge behavior, and Desktop window lifecycle belong to
@@ -615,6 +647,33 @@ A blocked Composer exposes its preparation failure once through the
 Composer-scoped alert beside Retry. The same preparation error is not mirrored
 into the global error band. Transport or initialization failures that prevent a
 usable launch scope continue to use the global error channel.
+
+After a successful boot, transport loss is not a second cold-start failure.
+Workbench retains the Transcript, draft, local navigation, and visible
+resources; disables network-dependent actions; and shows one compact reconnect
+status with Retry instead of replacing the product with a full-page error.
+Each recovered transport generation resumes the current source or Thread,
+refreshes its authoritative context, history, and currently visible resources,
+and applies results only when both the transport generation and view epoch are
+current.
+
+Send while known-disconnected is not queued: Workbench preserves the draft and
+waits for an explicit later Send. When `turn/start` was sent and delivery becomes
+unknown, Workbench retains the optimistic entry, blocks duplicate submission,
+and immediately requests an authoritative `thread/resume` when the current
+transport is still connected; a disconnected transport performs the same check
+after its next generation connects. Workbench treats the Send as accepted only
+when the snapshot contains the receipt for that submission's `clientTurnId`;
+unrelated running activity, queued counts, or user entries from another client
+are not acceptance evidence. It rolls back only when the authoritative snapshot
+omits that receipt, and restores captured input only if the user has not edited
+that draft since the original Send.
+
+Generation recovery is committed only after the authoritative snapshot,
+context, history, and visible-resource rehydration succeeds. A failed recovery
+keeps that generation retryable, prevents concurrent recovery of the same
+generation, and leaves a compact Retry action available even when the transport
+itself remains connected.
 
 Draft context and the current branch continue to load concurrently. Their
 results are applied together or not at all. Existing New Session behavior is

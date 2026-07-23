@@ -78,10 +78,12 @@ failure isolation should be covered with fake installers and fake LSP servers.
 - Non-zero process exits are successful tool results with `exit_code` set.
 - `exec_command` yields long-running commands with `session_id`; `write_stdin`
   can poll with empty `chars`.
+- The creating task can poll and write to a yielded session; another task sees
+  the same numeric `session_id` as unknown and cannot observe or mutate it.
 - `write_stdin` can send stdin to TTY or PTY-fallback sessions and rejects
   non-empty stdin for non-TTY pipe sessions.
 - `max_output_tokens` truncates model-visible output while preserving
-  `original_token_count`.
+  `original_token_count` and character order for tokenizer decode fallback.
 - Shell-level background wrappers are rejected; foreground long-running
   commands are allowed to yield.
 - `rg` resolution prefers a managed `$PSYCHEVO_HOME/tools/rg[.exe]` over a

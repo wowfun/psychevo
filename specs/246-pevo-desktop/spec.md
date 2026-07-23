@@ -77,6 +77,23 @@ The Desktop Cargo library and binary targets must retain distinct artifact
 names after Cargo normalizes hyphens to underscores. This prevents their MSVC
 debug-symbol outputs from resolving to the same `.pdb` path on Windows.
 
+The Tauri Rust crate remains one independent Cargo workspace, but its source
+must keep native responsibilities behind narrow crate-private interfaces:
+
+- the Gateway module owns managed endpoint resolution, authenticated HTTP and
+  WebSocket transport, connection state, and cleanup;
+- the Desktop host module owns Tauri-facing workspace, window, Floating, and
+  capture commands;
+- the capture module owns platform capability data and native capture
+  implementations;
+- the crate root owns only Tauri state assembly, lifecycle hooks, command
+  registration, and the public `run` entrypoint.
+
+Moving a responsibility out of the crate root must move its implementation and
+tests with it. The root must not retain the old logic behind forwarding
+functions, and this organization does not justify additional crates, dynamic
+handler registration, or adapter traits with only one implementation.
+
 ## Desktop Shell
 
 The first Desktop slice creates two native webview surfaces:
@@ -125,12 +142,22 @@ window label, so a stale renderer cleanup cannot remove a newer connection that
 uses the same surface.
 Request/response frames remain scoped to the initiating bridge connection, but
 thread-affecting Gateway notifications are shared across Desktop surfaces.
-Desktop fans out thread-affecting `gateway/event` notification frames to other
-bridge transports with an origin connection id so the sender can ignore its own
-copy. Accepted Turns have no parallel `turn/result` or `turn/error` broadcast;
-all surfaces settle from the single authoritative `TurnCompleted`. This keeps
-JSON-RPC pending requests isolated while allowing Workbench and Floating to
-reconcile the same thread through the shared client transcript pipeline.
+The Gateway server's process-level Event Hub supplies that shared notification
+stream; Desktop does not re-broadcast renderer frames. Accepted Turns have no
+parallel `turn/result` or `turn/error` broadcast; all surfaces settle from the
+single authoritative `TurnCompleted`. This keeps JSON-RPC pending requests
+isolated while allowing Workbench and Floating to reconcile the same thread
+through the shared client transcript pipeline.
+
+`gateway_connect` returns a monotonically increasing native generation, and
+message, disconnect, send, and explicit-disconnect payloads carry that
+generation. Each Rust bridge entry owns one bounded sender of 128 frames, a
+cancellation handle, its owner window label, and its generation. Replacement,
+remote close, explicit disconnect, window destruction, and application shutdown
+cancel the tasks and remove the entry. A stale task may delete an entry only if
+its generation still matches. Renderer listeners are registered once for the
+transport lifetime; reconnect replaces only the generation and ignores all
+older native events.
 
 Floating is a Desktop-specialized small window, not a second chat
 implementation. Desktop must wire Floating and Workbench to shared
@@ -296,11 +323,15 @@ the Browser session.
 
 Default validation is deterministic and local:
 
+- the independent Desktop Cargo workspace has a dedicated `desktop-rust` CI
+  profile that checks formatting and runs clippy plus tests for all targets
+  with the shipped `native-runtime` feature enabled
 - Desktop bridge tests for CLI-authoritative managed startup, owner-only token
   file handling, bearer WebSocket request construction, serialized/cached
   resolution with CLI re-delegation after health failure, explicit override
   fail-closed behavior, multi-window connection routing, per-instance bridge
-  id routing, and disconnect cleanup
+  id routing, bounded sender overload, generation-conditional replacement,
+  remote-close, explicit-disconnect, and window-destroy cleanup
 - Desktop host tests using fake Tauri command adapters
 - Workbench tests proving browser defaults still work and injected Desktop
   runtime can be supplied without forking Workbench UI
