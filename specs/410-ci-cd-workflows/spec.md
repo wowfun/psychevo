@@ -87,11 +87,14 @@ Initial profiles:
 
 - `changed`: lightweight local confidence for the current checkout; v1 plans
   format checking and lets future work add diff-aware selection.
-- `rust-broad`: Rust workspace broad gate; runs format, clippy, and tests.
-- `desktop-rust`: independent Desktop Rust workspace gate; checks formatting,
-  then runs clippy with warnings denied and tests for all targets using the
-  shipped `native-runtime` feature. It does not enable the test-only
-  `wdio-test` feature or duplicate Desktop renderer validation from `web`.
+- `rust-broad`: Rust workspace broad gate; checks generated Gateway protocol
+  bindings and the CLI no-default-features core graph before format, clippy,
+  and tests.
+- `desktop-rust`: independent Desktop Rust workspace gate; first checks root
+  and Desktop manifest parity, then checks formatting, runs clippy with warnings
+  denied, and tests all targets using the shipped `native-runtime` feature. It
+  does not enable the test-only `wdio-test` feature or duplicate Desktop
+  renderer validation from `web`.
 - `web`: all JavaScript workspace unit tests, all workspace typechecks, and all
   workspace production builds, including Workbench and Desktop. Workspace
   tests execute with bounded workspace concurrency so packages that own process
@@ -118,9 +121,9 @@ Initial profiles:
 
 The initial hosted workflow runs on pull requests and pushes to `main` with two
 Linux jobs. `rust` runs `cargo xtask ci run --profile rust-broad`, installs the
-Linux WebKit development package required to compile Tauri, runs
-`cargo xtask ci run --profile desktop-rust`, and checks generated Gateway
-protocol bindings. `web` installs the root `packageManager` version with a
+Linux WebKit development package required to compile Tauri, and runs
+`cargo xtask ci run --profile desktop-rust`. `web` installs the root
+`packageManager` version with a
 frozen lockfile and runs `cargo xtask ci run --profile web`.
 
 The initial workflow has no aggregate job, operating-system matrix, live
@@ -144,6 +147,11 @@ dependencies already require that line; for HTTP clients this means the
 workspace `reqwest` dependency follows the active `0.13.3` line instead of
 keeping a separate `0.12` build.
 
+Deterministic provider HTTP fixtures that close a streaming response must
+consume the complete request body before sending that response. A fixture must
+not leave unread request bytes that can reset the TCP connection and make a
+valid terminal SSE event appear to be missing.
+
 ## Live Registry
 
 Registered live checks:
@@ -155,15 +163,51 @@ Registered live checks:
 - `runtime-provider-read`: runtime ignored live provider read-tool check.
 - `runtime-model-fetch`: runtime ignored Xiaomi `/models` fetch/cache check.
 - `gateway-automation-live`: gateway automation ignored live check.
+- `codex-plugin-broker-live`: read installed Codex plugins through the
+  capability broker. A missing Codex executable is a `blocked` result for this
+  check, while failure to create its isolated profile is a `failed` result;
+  neither condition may abort result generation or prevent later checks.
 - `desktop-native-smoke-live`: native Desktop/Floating WebDriverIO smoke
-  without provider calls.
+  without provider calls. Every Desktop live check owns a check-local home,
+  state database, and managed Gateway even when the surrounding live run uses
+  shared mode. It must stop only that check-owned Gateway after WebDriverIO
+  exits, on both passing and failing runs. Cleanup failure fails the check;
+  isolated live artifacts must not leave listeners that consume later tests'
+  managed-Gateway fallback ports.
 - `desktop-floating-provider-live`: native Floating provider validation through
   Desktop. This check belongs to the Desktop live suite and is triggered with
   the other Desktop live checks by `cargo xtask live run --suite desktop`; it
   uses the live runner's normal live invocation and credential resolution
-  rather than a separate opt-in gate.
-- `web-composer-live`: Workbench real-provider composer check.
-- `web-automation-live`: Workbench GUI automation live check.
+  rather than a separate opt-in gate. The selected live provider model must be
+  written to a check-local config before Desktop starts. Inference environment
+  variables are fallback inputs and must not allow an unrelated model in the
+  developer config to make this check claim coverage for the wrong provider.
+  The selected-text probe and expected reply must use a benign natural-language
+  sentinel rather than a secret-shaped value described as a token; provider
+  refusal to reproduce apparent credentials is not a Desktop transport failure.
+  This provider-specific check records the common Desktop startup evidence and
+  then exercises Floating directly. Settings and native bridge inventory belong
+  to `desktop-native-smoke-live` and must not be reopened here, where a cold
+  model-catalog request can serialize ahead of the provider turn.
+- `web-composer-live`: Workbench real-provider composer check. The check must
+  use the live context timeout as its test timeout and observe an empty
+  `data-composer-state="ready"` draft before sending. The always-visible
+  Transcript region is not Composer readiness; a provider response persisted
+  by the Gateway but missed by an unbound browser projection is a failed GUI
+  check, not a provider timeout.
+- `web-composer-draft-open-first-send`: deterministic Workbench/Gateway check
+  for the first Composer send while `thread/draft/open` is pending at the
+  client protocol boundary. The harness delays only that RPC result while
+  forwarding every request to the real Gateway; it must not manufacture the
+  pending window by scaling a filesystem inventory or relying on machine
+  timing. It uses the check-local cwd, home, executable, and state database
+  supplied by the live runner, and retains bounded RPC/provider proof in the
+  check artifact so a missing rendered response can be distinguished from a
+  missing turn, provider request, or projection.
+- `web-automation-live`: Workbench GUI automation live check. After proving
+  creation and schedule projection, the check must delete the automation
+  through the rendered GUI before teardown so repeated live runs do not leave
+  interval jobs that can interfere with later checks.
 - `web-subagent-live`: Workbench live subagent GUI check. It proves that at
   least one provider-created child session is rendered and can be opened from
   its parent transcript. The provider's choice to split a request across one
@@ -176,19 +220,44 @@ Registered live checks:
   `apps/workbench/e2e/pevo-acp-server-live.spec.ts` and belongs to the `acp`
   suite so `cargo xtask live run --all --env shared` covers it.
 - `web-skill-live`: Workbench live-skill flow.
+  The check must wait for Workbench startup to settle, explicitly open a new
+  Session, and observe an empty `data-composer-state="ready"` draft before
+  sending the skill prompt. A provisional prompt and running Composer without
+  a Gateway activity are not evidence that the live turn started.
+  If the real skill reaches a Permission interaction, the check may answer only
+  through the rendered GUI and must choose the least-persistent `Once` action;
+  it must not seed, mutate, or persist trust policy to bypass the interaction.
   Completion checks for live skill flows must scope running/streaming DOM state
   to the active Transcript region so shell, sidebar, or history running
   affordances cannot mask a completed assistant response.
 - `opencode-acp-gui-live`: OpenCode ACP GUI live flow. The check must wait for
   the asynchronous ACP backend inventory before deciding whether OpenCode must
   be configured, and it must tolerate other locally materialized ACP backends;
-  an initially empty backend list is not a validation invariant.
+  an initially empty backend list is not a validation invariant. Before the
+  provider-backed turn, the check writes only its temporary Project Runtime
+  Profile and selects the OpenCode model whose model id matches the live
+  provider model. Because the live harness writes through a protocol-only
+  client outside the Workbench state container, it must then bootstrap a fresh
+  page and prove that the selected model is visible before sending the turn;
+  a stale generated-profile projection is not valid live coverage. After
+  page bootstrap, the check must first observe a settled composer state before
+  choosing New Session, then observe `data-composer-state="ready"` and zero
+  transcript rows before selecting controls or sending; the always-visible
+  Transcript region and its hidden empty-state node are not draft readiness.
+  Session context fidelity may be `exact` when complete
+  prompt usage is available or `partial` when only ACP context/usage evidence
+  is available; `unavailable` is a failure after a completed turn.
 - `opencode-acp-delegate-live`: `@opencode` delegate live flow. The check proves
   that the child streams before the parent finishes, the child and persisted
   delegate result contain the requested sentinel, and the parent reaches a
   non-empty normal terminal response. A provider may summarize that result
   instead of copying the child's sentinel verbatim into its final prose, so
-  verbatim parent repetition is not a validation invariant.
+  verbatim parent repetition is not a validation invariant. The generated
+  `@opencode` Agent must resolve the configurable public `opencode` Runtime
+  Profile when no Team member supplies another profile. The check configures
+  that exact temporary Project Runtime Profile with the same live model used by
+  the direct GUI check and fails if delegation bypasses it for an
+  unauthenticated generated fallback.
 - `agent-acp-session-lifecycle`: deterministic Workbench lifecycle flow covering
   explicit discovery, import/resume, fork/close/delete capability gating, and
   proof that ordinary Session reads do not initialize ACP processes.
@@ -309,9 +378,8 @@ profile entrypoints. TUI/VHS capture and live provider smoke are runner-owned
 and are not exposed through public shell scripts.
 
 Host prerequisite installation is not a CI/CD profile. The `visual` profile may
-fail fast when VHS or Playwright host tools are missing and point to
-`cargo xtask doctor deps install --only vhs` or
-`cargo xtask doctor deps install --only playwright`, but it must not install
+fail fast when VHS or Playwright host tools are missing and print the manual
+commands reported by `cargo xtask doctor deps check`, but it must not install
 packages implicitly.
 
 Workbench Playwright validation commands must avoid passing conflicting Node

@@ -14,12 +14,11 @@ enablement, diagnostics, static declarations, and Psychevo worker execution.
 - marketplace catalogs for local, Git, and npm sources
 - plugin package enablement overlay in `RunConfig`
 - static declaration loading
-- manifest-only and adapter-host foreign package inspection
-- package fingerprint trust state
+- static Hermes and OpenCode package inspection
 - default-off, profile-isolated Codex plugin authority
 - stdio JSON-RPC worker execution for tools
 - CLI- and Gateway-facing read, diagnostic, install, uninstall, enable,
-  disable, inspect, trust, and catalog operations
+  disable, inspect, and catalog operations
 
 Out of scope:
 - reimplementation of hosted marketplace accounts, reviews, ratings, or sharing
@@ -98,19 +97,10 @@ default. `--local` writes the current cwd `.psychevo/config.toml`.
 `--global` is an alias for the active profile scope and conflicts with
 `--local`.
 
-Adapter policy records framework default mode and per-plugin mode. Supported
-adapter modes are:
-
-- `adapter_host`: allow the framework adapter host after install, enablement,
-  and current fingerprint trust
-- `manifest_only`: inspect static metadata and report target lanes without
-  importing or executing foreign code
-- `disabled`: do not inspect beyond source/manifest detection
-
-Trust state is keyed by normalized plugin identity plus source identity and
-stores the package fingerprint last approved by the user. A mismatched
-fingerprint changes the readiness state to `Needs trust` and prevents adapter
-host execution.
+Hermes and OpenCode sources are inspection-only. They have no adapter mode,
+package trust state, installation record, enablement state, or runtime worker.
+Static inspection reports declared and unsupported lanes without importing or
+executing foreign code.
 
 Installed package identity is scope-qualified as `profile:name@source` or
 `project:name@source`; commands project and accept that canonical selector.
@@ -278,23 +268,17 @@ as deferred bindings by default; explicit invocation configuration may disable
 `tool_search` and expose otherwise direct worker tools directly. Plugin
 manifests do not decide direct model visibility by themselves.
 
-## Adapter Host V1
+## Foreign Inspection V1
 
-Foreign adapters run out of process and return a structured inspection result.
-Psychevo owns the host protocol and maps returned declarations into existing
-runtime lanes. Adapter host output must include stage diagnostics for
-`resolve/fetch`, `inspect manifest`, `compatibility`, `target lanes`, `policy`,
-`trust`, and `readiness`.
+Hermes and OpenCode inspection is static and returns the framework, source kind,
+canonical package identity, manifest path, declared lanes, unsupported lanes,
+diagnostics, and fixed support state `inspection_only`. Inspection never starts
+a Python or Node host and never imports package code. Unknown or malformed
+fields remain diagnostics and never become runtime declarations.
 
-Hermes uses a Python adapter host. OpenCode uses a Node adapter host. Adapter
-hosts may report supported tools, hooks, skills, and MCP/toolset declarations.
-They may also report unsupported provider, UI/TUI, dashboard/auth, theme, route,
-slot, and command-execution lanes. Unsupported lanes are displayed in read,
-doctor, CLI, Gateway, and Workbench diagnostics but are not executed.
-
-The default safe path is manifest-only inspection. Adapter host execution is
-allowed only after install, enablement, policy mode `adapter_host`, and matching
-package fingerprint trust.
+`plugin install` rejects a detected Hermes or OpenCode source before any store
+or configuration mutation and directs the caller to the corresponding ACP Agent
+runtime profile.
 
 ## CLI Operations
 
@@ -308,7 +292,6 @@ package fingerprint trust.
 - `uninstall`
 - `enable`
 - `disable`
-- `trust`
 - `marketplace list`
 - `marketplace add`
 - `marketplace remove`
@@ -320,33 +303,35 @@ developer, and capabilities.
 
 `plugin inspect` is a dry-run operation over a local path, Git source, npm
 source, or catalog row. It materializes into a temporary staging directory when
-needed, detects native, Codex, Hermes, and OpenCode package shapes, reports the
-canonical identity, source kind, adapter framework, package fingerprint, target
-lanes, unsupported lanes, readiness, and diagnostics, and does not install,
-enable, trust, import foreign code, or mutate profile/project state.
-
-`plugin trust` records trust for the current installed package fingerprint.
+needed, detects native, Codex, Hermes, and OpenCode package shapes, and does not
+install, enable, import foreign code, or mutate profile/project state. Hermes
+and OpenCode results expose only their inspection-only metadata and lane
+diagnostics.
 CLI commands never mutate the Codex authority, its packages, catalogs, binary,
 or connector sessions; Codex mutation and connection are GUI/Gateway operations.
 
 `plugin doctor` reports discovered packages, manifest path, supported and
 ignored fields, manifest resources, Psychevo extensions, install source, source
-kind, active version, fingerprint, enabled state, adapter policy/trust state,
-skipped reason, owning-surface policy state, worker failures, adapter stage
-diagnostics, and data root.
+kind, active version, enabled state, skipped reason, owning-surface policy
+state, worker failures, foreign inspection diagnostics, and data root.
 
 Gateway exposes plugin metadata and package-management methods for product
 surfaces: `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
 `plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
-`plugin/setTrust`, `plugin/authority/write`, `plugin/authority/refresh`,
+`plugin/authority/write`, `plugin/authority/refresh`,
+`plugin/authority/setTrust`,
 `plugin/catalog/list`, `plugin/catalog/add`, `plugin/catalog/remove`,
 `plugin/catalog/upgrade`, `plugin/connect/start`, and `plugin/connect/status`.
 `plugin/setEnabled.enabled` is `boolean | null`, where null deletes the selected
 scope override. Catalog requests are authority-qualified; Codex sources support
 source, ref, and sparse paths. These methods use the same runtime helpers as the CLI,
 honor resolved scope/profile rules, return typed interface metadata, and keep
-responses secret-free. GUI install overwrite, trust writes, and other
+responses secret-free. GUI install overwrite and other
 force-worthy actions require an explicit request supplied by the caller.
+`plugin/authority/setTrust` is restricted to a Codex authority selector and
+records or removes trust for that authority's current installed package
+fingerprint. It is not a generic plugin trust operation and has no Hermes,
+OpenCode, or Psychevo-package path.
 
 `plugin/list` returns authority views plus partitioned installed and catalog
 rows. `CodexAuthorityView` separates runtime (`disabled`, `starting`, `ready`,
@@ -375,4 +360,5 @@ and v1 provides no Codex logout UI.
 - [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines manifest loading.
 - [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution and trust-aware plugin hook loading.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines command spelling.
-- [150 Plugin Runtime Adapter Hosts](./adapter-hosts.md) defines foreign adapter host inspection boundaries.
+- [150 Foreign Plugin Inspection](./foreign-inspection.md) defines foreign
+  package inspection boundaries.

@@ -38,7 +38,13 @@ Out of scope:
   that seam; it is not Psychevo's internal application interface and Native is
   not lowered through ACP.
 - Transport is replaceable. CLI parsing, terminal rendering, stdin/stdout behavior, exit codes, and environment handling must remain outside the core runtime and lower layers.
-- Large crate implementations should be organized internally by owned responsibility instead of collecting unrelated behavior in a single root source file. Root crate files may act as facades that re-export stable public surfaces while private modules keep implementation details near their owning boundary.
+- Large crate implementations should be organized internally by owned responsibility instead of collecting unrelated behavior in a single root source file. Root crate files expose named module namespaces; they must not become item-level compatibility facades that obscure ownership.
+- Optional compilation seams must correspond to a real dependency or startup-cost difference. Product taxonomy alone is not a reason to introduce a Cargo feature.
+- `psychevo-gateway` owns one default-on `native-channels` seam for native
+  channel adapter dependencies. `psychevo-cli` forwards that feature and omits
+  the channel setup command when built without default features. The default
+  product remains complete; the no-default build is an executable dependency
+  graph invariant, not a separate edition.
 
 ## Internal Module Layout
 
@@ -62,16 +68,19 @@ public boundary. Generated artifacts may be split only by changing their
 generator or source schema organization; checked-in generated files are never
 manually edited as a refactor shortcut.
 
-Crate roots may act as facades. Established root-level re-exports should remain
-stable unless the owning topic intentionally changes the public interface.
-Private helper modules should use the narrowest practical visibility, normally
-`pub(super)` or `pub(crate)`.
+Crate roots expose named module namespaces and only the smallest truly
+crate-wide primitives, such as the crate error and result types. Public domain
+types remain in their owning modules instead of being item-re-exported from the
+crate root. Private helper modules use the narrowest practical visibility,
+normally `pub(super)` or `pub(crate)`.
 
-`psychevo-runtime` may expose public module namespaces for its runtime-owned
+`psychevo-runtime` exposes public module namespaces for its runtime-owned
 responsibility areas, such as run assembly, provider configuration resolution,
 SQLite-backed state, event projection, context pruning, and built-in tool
-assembly. Root-level re-exports may preserve established caller paths while the
-module layout makes ownership boundaries explicit.
+assembly. `psychevo_runtime::state::StateRuntime` is the single public state
+module interface. SQLite connections, schema helpers, and transaction helpers
+remain implementation details; no public store handle, repository family, or
+pass-through state facade is added.
 
 `psychevo-cli` should keep process and terminal concerns in transport-owned
 modules. CLI argument parsing, environment/path setup, command handlers, and

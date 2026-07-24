@@ -298,7 +298,10 @@ catalog. The first product turn promotes that same session into the public
 Thread binding; it must not create a replacement session. Cache-only context
 reads never perform this preparation. A prepared config mutation uses
 `session/set_config_option` and returns the Agent's updated options before the
-product reports the value as observed.
+product reports the value as observed. Runtime Profile model and mode defaults
+are initial prepared config mutations when the source draft has no explicit
+value; rejection blocks preparation instead of silently retaining an unrelated
+Agent default.
 
 ACP initializes and loads sessions with a model state derived from local config
 and cache-first model metadata. It must not fetch provider catalogs during ACP

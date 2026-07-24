@@ -37,7 +37,7 @@ A persisted fact is a durable representation of a semantic fact owned by another
 
 Durable evidence persistence is the baseline persistence requirement. Session continuity and memory may use persistence, but they are optional consumers and must not become required execution substrate.
 
-Runtime wires persistence boundaries into session coordination, agent-invocation assembly, and evidence sinks. This spec does not create a new crate boundary, storage service boundary, or ownership layer for semantic state.
+Runtime wires persistence boundaries into session coordination, agent-invocation assembly, and evidence sinks. This spec does not create a new crate boundary, storage service boundary, repository family, or ownership layer for semantic state. The first SQLite slice stays behind one runtime-owned state module interface so transactions that span session, evidence, gateway coordination, and automation records remain atomic.
 
 ## Persistable Facts
 

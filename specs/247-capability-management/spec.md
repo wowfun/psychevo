@@ -188,10 +188,11 @@ opened through the `Install plugin` action.
 
 The Plugins tab also supports compact catalog/import inspection. The scoped
 install panel can inspect a local path, Git source, npm source, or catalog row
-before installation. Inspection shows framework, canonical id, source kind,
-scope, adapter mode, trust state, target lanes, projected contributions,
-unsupported lanes, stage diagnostics, readiness, and whether changes affect the
-current session or the next run.
+before installation. Native and Codex inspection shows installable package
+details. Hermes and OpenCode inspection shows framework, metadata, manifest
+path, declared lanes, unsupported lanes, diagnostics, and `Inspection only`;
+the UI offers no install, trust, enablement, or execution action and points to
+the corresponding ACP Agent runtime profile.
 
 The built-in Browser plugin appears in the Plugins tab without requiring an
 installed package record. It is enabled by default unless profile/project plugin
@@ -224,7 +225,7 @@ For enablement writes, the selector identifies the installed package while
 `enablement_scope_name` and `scopeName` identify the effective policy layer to
 update; this preserves an explicit project policy targeting a profile-installed
 package. `scope_name` remains the installation layer used by package actions
-such as trust and uninstall. Uninstall requires that package mutation scope to
+such as uninstall. Uninstall requires that package mutation scope to
 match the selected package's installation scope. Config
 validation accepts `:` only as the `profile:` or `project:` canonical prefix,
 not as an arbitrary package-policy character.
@@ -371,7 +372,7 @@ Gateway exposes domain RPCs instead of a capability aggregate:
   `skill/setEnabled`, `skill/write`
 - `plugin/list`, `plugin/read`, `plugin/doctor`, `plugin/install`,
   `plugin/uninstall`, `plugin/setEnabled`, `plugin/import/inspect`,
-  `plugin/setTrust`, `plugin/authority/write`, `plugin/authority/refresh`,
+  `plugin/authority/write`, `plugin/authority/refresh`,
   `plugin/catalog/list`, `plugin/catalog/add`, `plugin/catalog/remove`,
   `plugin/catalog/upgrade`, `plugin/connect/start`, `plugin/connect/status`
 - `tool/list`, `tool/read`, `tool/setEnabled`, `tool/create`, `tool/remove`

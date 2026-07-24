@@ -24,7 +24,8 @@ Out of scope:
 ## Plugin Model
 
 A plugin package is a directory, materialized Git source, or materialized npm
-package with one recognized manifest or one recognized adapter descriptor.
+package with one recognized Psychevo or Codex manifest. A recognized Hermes or
+OpenCode descriptor is an inspection source, not an installable Psychevo plugin.
 Installing a Psychevo-owned plugin makes a package available to policy but does
 not enable or trust it. Installing a Codex-authority plugin is one explicit GUI
 operation whose successful result enables the authority-qualified package in
@@ -81,16 +82,10 @@ plugin that its profile did not allow. The Codex authority itself is a
 profile-only, default-off feature and project configuration must not contain its
 feature or binary selection.
 
-Adapter policy has two levels. Framework defaults declare whether foreign
-packages use `adapter_host`, `manifest_only`, or `disabled`. Per-plugin policy
-may downgrade an adapter to manifest-only or disabled, but it must not silently
-upgrade a disabled framework into execution. Before trust, foreign packages may
-only be inspected without importing or executing foreign runtime code.
-
-Plugin trust is package-content scoped. Trust binds a normalized plugin
-identity to a package fingerprint. A changed package fingerprint invalidates
-trust and returns the plugin to manifest-only inspection until the user trusts
-the new fingerprint.
+Hermes and OpenCode descriptors have no plugin execution policy or plugin trust
+state. They may be inspected statically without importing or executing foreign
+runtime code. Inspection does not make the source installable, enabled, or
+executable.
 
 An explicit Codex install or upgrade trusts only the fingerprint returned by
 that operation. Background content changes, externally performed mutations, or
@@ -170,19 +165,19 @@ third-party applications.
 Psychevo does not execute Codex, Claude Code, Hermes, Pi, or OpenCode in-process
 plugin interfaces directly.
 
-Hermes or OpenCode plugin business logic may be inspected by an independent
-Python or Node adapter host, then projected into Psychevo lanes. Supported v1
-adapter lanes are tools, hooks, skills, MCP/toolsets, manifest/status, and
-diagnostics. Provider execution, UI/TUI routes, slots, themes, dashboard auth,
-and arbitrary command execution remain unsupported or future-support
-diagnostics unless an owning Psychevo runtime module defines a safe acceptance
-path.
+Hermes or OpenCode manifests may be inspected as data. Inspection reports the
+framework, package metadata, manifest path, declared lanes, unsupported lanes,
+and diagnostics with fixed support state `inspection_only`. Psychevo does not
+materialize, install, enable, trust, import, execute, or project those foreign
+plugin declarations. Users who want to run Hermes or OpenCode use their
+separate ACP Agent runtime profiles.
 
 ## Related Topics
 
 - [155 Plugin Manifest](../155-plugin-manifest/spec.md) defines package manifest loading.
 - [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, worker, and declaration loading.
-- [150 Plugin Runtime Adapter Hosts](../150-plugin-runtime/adapter-hosts.md) defines foreign adapter inspection boundaries.
+- [150 Foreign Plugin Inspection](../150-plugin-runtime/foreign-inspection.md)
+  defines foreign package inspection boundaries.
 - [053 Hooks](../053-hooks/spec.md) defines the hook declaration boundary.
 - [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines

@@ -29,6 +29,8 @@ Define acceptance expectations and validation scenarios for plugin runtime.
   never depend on the user's `CODEX_HOME`, credentials, or network.
 - Codex-authority tests always use an isolated private `$PSYCHEVO_HOME/codex/`
   and prove that feature-off operation spawns no broker.
+- Hermes and OpenCode inspection never imports or executes package code, and
+  install rejects those sources before store or configuration mutation.
 
 ## Current Implementation Slice
 
@@ -71,6 +73,10 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - Gateway `plugin/list`, `plugin/read`, and `plugin/doctor` return the same
   read-only runtime plugin values as CLI JSON output and never mutate plugin
   policy or install records.
+- Hermes and OpenCode inspection returns `inspection_only`, declared and
+  unsupported lanes, and diagnostics without adapter/trust/readiness state.
+- Hermes and OpenCode install fails with ACP Agent guidance and leaves plugin
+  stores and profile/project configuration unchanged.
 - Plugin hook sources are listed but not executed when their normalized hook
   hashes are untrusted or modified.
 - Worker-provided hook handlers are routed through 140 Hook Runtime after
@@ -166,5 +172,12 @@ acceptance coverage should come from focused plugin runtime and CLI smoke tests.
 - The opt-in `codex-plugin-broker-live` check uses an explicitly selected Codex
   executable and an isolated private home only for conformance and read-only
   installed-plugin projection.
+  The live harness resolves the executable to an absolute path and writes an
+  enabled `codex_plugins` profile only inside that check's artifact home; it
+  never enables or rewrites the shared development profile.
+  Required-method conformance sends a null-parameter, read-only probe. A
+  reviewed app-server may prove a recognized typed request either with
+  invalid-params or with its typed-envelope `missing field params` invalid
+  request; an unknown method/variant still fails compatibility.
   It must not install, uninstall, enable, authenticate, or execute a plugin, and
   it does not require an LLM-provider credential.

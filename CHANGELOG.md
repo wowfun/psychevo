@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-24
+
+- Consolidated Runtime, Gateway, ACP, and CLI boundaries around owning
+  application and state modules while preserving existing wire, authorization,
+  ordering, and recovery behavior.
+- Hardened typed protocol, Desktop/Workbench contracts, and live validation
+  with JavaScript-safe integers, isolated Desktop Gateways, explicit ACP draft
+  controls, safer undo snapshots, and actionable blocked-check diagnostics.
+
 ## 2026-07-23
 
 - Stabilized provider exchanges, Gateway orchestration, and Workbench recovery

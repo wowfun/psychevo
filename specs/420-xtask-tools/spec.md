@@ -4,15 +4,15 @@ psychevo_self_edit: deny
 ---
 
 Define Psychevo's repo-owned `xtask` tooling outside CI/CD profiles. This topic
-owns local diagnostics and explicit host bootstrap commands that support local
-workflows without becoming CI workflow profiles.
+owns local diagnostics that support local workflows without becoming CI
+workflow profiles or mutating the host.
 
 ## Scope
 
 This topic owns:
 
 - `cargo xtask init dev-env` repo-local development home initialization
-- `cargo xtask doctor deps` host dependency checks and explicit installation
+- `cargo xtask doctor deps` read-only host dependency checks
 - `cargo xtask doctor large-files` repository structure diagnostics
 - development/test host prerequisite groups used by visual, browser, and live
   validation workflows
@@ -55,17 +55,11 @@ config and `.env`, but uses per-check runtime home and state paths.
 The host dependency interface is:
 
 - `cargo xtask doctor deps check [--only all|core|install|sqlite|vhs|playwright] [--json]`
-- `cargo xtask doctor deps install --only all|sqlite|vhs|playwright`
 
 `check` is non-mutating. It reports missing tools and install hints but exits
 successfully when dependencies are missing. It exits non-zero only for invalid
 arguments or internal errors. `--json` emits structured scope rows with status,
 missing commands, and install hints.
-
-`install` is explicit host mutation. It may install packages, configure package
-repositories, or install browser dependencies only after the caller selects the
-install subcommand. It supports Debian/Ubuntu `apt-get` systems for v1 and
-fails with a concise platform message elsewhere.
 
 Dependency groups:
 
@@ -81,15 +75,14 @@ Dependency groups:
   which is a product installer diagnostic rather than a CI/test prerequisite
   group.
 
-`cargo xtask doctor deps install --only install` must fail with a concise
-message explaining that source-install prerequisites must be installed by the
-user, platform package manager, or upstream installers. Hosted CI or future
-release automation may call the `check --only install` interface, but must not
-make the standalone product installer depend on `xtask`.
+Install hints are copyable manual commands only. `xtask` never invokes package
+managers, privilege escalation, repository/keyring configuration, or browser
+dependency installation. Hosted CI or release automation may call checks and
+perform its own explicit environment setup outside `doctor`.
 
-CI/CD profiles may consume these checks as host prerequisite guidance, but they
-must not invoke `install` implicitly. For example, the `visual` CI profile may
-fail preflight with a pointer to `cargo xtask doctor deps install --only vhs`.
+CI/CD profiles may consume these checks as host prerequisite guidance. For
+example, the `visual` profile may fail preflight while printing the manual VHS
+dependency commands returned by `doctor deps check`.
 
 ## Doctor Large Files Interface
 

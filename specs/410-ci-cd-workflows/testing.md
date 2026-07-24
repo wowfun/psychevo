@@ -61,10 +61,13 @@ cargo xtask ci run --profile rust-broad
 
 - `ci list` includes `changed`, `rust-broad`, `desktop-rust`, `web`, `visual`,
   `live`, and `package`.
-- `ci plan --profile desktop-rust --json` contains exactly the Desktop format,
-  clippy, and test steps; clippy and tests address the independent Desktop
+- `ci plan --profile desktop-rust --json` starts with Desktop manifest parity,
+  followed by Desktop format, clippy, and test steps; clippy and tests address
+  the independent Desktop
   manifest, enable `native-runtime`, and cover all targets without enabling
   `wdio-test`.
+- `ci plan --profile rust-broad --json` includes generated Gateway protocol
+  verification and `cargo check -p psychevo-cli --no-default-features`.
 - `ci plan --profile web --json` includes client tests/typecheck, Workbench
   build/tests/typecheck, and Desktop renderer tests/typecheck.
 - `ci plan --profile changed --json` emits a parseable plan without executing
@@ -92,7 +95,9 @@ cargo xtask ci run --profile rust-broad
   `rust-broad` profile is selected through `cargo xtask ci` directly.
 - Hosted pull-request and `main` checks invoke the existing `rust-broad`,
   `desktop-rust`, and `web` profiles rather than defining a second test
-  inventory. The Linux Rust job installs `libwebkit2gtk-4.1-dev` before the
+  inventory. Generated Gateway protocol verification belongs to `rust-broad`
+  rather than a duplicate hosted-only step. The Linux Rust job installs
+  `libwebkit2gtk-4.1-dev` before the
   Desktop profile so it validates the same Tauri feature used by production
   builds.
 - Default CI artifact retention keeps the 10 newest numeric run directories
@@ -109,8 +114,8 @@ and review artifacts under `.local/.psychevo-dev/ci/<run-id>/visual/`.
 Workbench visual screenshots should be under
 `.local/.psychevo-dev/ci/<run-id>/visual/workbench/screenshots/`. When host
 prerequisites are missing, report the blocked dependency set instead of
-treating the profile as product failure, and point to the relevant
-`cargo xtask doctor deps install --only ...` command.
+  treating the profile as product failure, and print the relevant manual
+  dependency install hints from `cargo xtask doctor deps check --only ...`.
 
 ## Broad Validation
 

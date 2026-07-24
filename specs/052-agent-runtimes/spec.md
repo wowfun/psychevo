@@ -73,7 +73,12 @@ The only Runtime Profile kinds are:
 The generated public profiles are `native`, `codex`, and `opencode`. `codex`
 references the managed `codex-acp` backend. `opencode` references the
 `opencode acp` backend. Arbitrary enabled ACP backends may generate profiles of
-the form `acp:<backend-id>`.
+the form `acp:<backend-id>`. A generated Agent Definition without an explicit
+Team profile uses the public `codex` or `opencode` Runtime Profile for those
+reserved backends and the generated `acp:<backend-id>` identity for every other
+backend. Catalog generation and delegation must use this one config-owned
+mapping so a configurable public Profile cannot be bypassed by a second
+unconfigurable identity.
 
 The profile catalog resolves compatible Agent Definition/Profile pairs and
 cached readiness. Workbench, Channels, and other callers never perform pairing
@@ -164,11 +169,26 @@ The public Gateway methods are:
 - `thread/action/run`
 - `thread/interaction/respond`
 - `thread/history/read`
+- `thread/history/draft/read`
 
 `runtime/options`, `runtime/context/read`, and `runtime/control/set` are removed.
 Backend administration remains a sibling management Module and keeps
 `backend/list`, `backend/write`, and `backend/doctor`; managed adapters add
 `backend/install`, `backend/repair`, and `backend/upgrade`.
+
+Thread-prefixed transport names do not define one implementation Module. The
+core Thread Application above owns interactive draft, context, control, turn,
+action, interaction, and history invariants. A sibling Session Application
+owns resume/read/trace/list/browser and rename/archive/restore/delete resource
+workflows. A sibling Session Import Application owns external Adapter
+discovery and import. `thread/realtime/*` remains part of the Voice
+Application.
+
+The central JSON-RPC dispatcher parses each registered params type, calls the
+owning Application Module, and serializes its registered result type. It does
+not repeat authorization, scope resolution, lock ordering, persistence,
+source-binding, event-delivery, or response-assembly policy from those
+Modules.
 
 ### Thread Context
 
@@ -229,6 +249,19 @@ Context is projected from the Agent's real config options. Prepared session
 identity remains process-local; only source target/control intent is durable.
 Replacing the target, resetting the source, process shutdown, or idle expiry
 releases the draft. Native preparation never creates a runtime session.
+
+When a newly prepared ACP session exposes controls corresponding to configured
+Runtime Profile defaults, Gateway applies `default_model` and `default_mode`
+through the Agent's standard control methods before returning the prospective
+Thread Context. The Agent's resulting config options remain authoritative.
+An unsupported or rejected configured default is a bounded draft-preparation
+problem; Gateway never reports the Agent's unrelated runtime default as though
+the Profile default had been honored. An explicit source-draft control value
+has precedence and is not reset by an idempotent prepare. ACP option ids are
+opaque: when an option declares category `model` or `mode`, either the canonical
+category id or that projected option id in source-draft state proves an
+explicit value. Gateway must not overwrite a value stored under an arbitrary
+Agent-provided option id such as `preferred-model`.
 
 Stable ACP `configOptions` are authoritative for session model controls. For an
 older ACP Agent that returns the deprecated `models` session field but no

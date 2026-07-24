@@ -10,7 +10,7 @@ Define plugin package manifest loading and validation.
 - recognized manifest paths
 - native required fields and compatibility loading
 - shared Codex-compatible manifest fields and Psychevo namespaced extensions
-- descriptive detection of Hermes and OpenCode package shapes for adapter inspection
+- descriptive detection of Hermes and OpenCode package shapes for static inspection
 - path safety for local package resources
 - diagnostics for supported, ignored, and invalid fields
 
@@ -32,9 +32,9 @@ The first existing base wins. If both exist, runtime loads the Codex base and
 reports the Claude-compatible base as shadowed. An optional root-level
 `psychevo.plugin.json` is a companion overlay, not an alternative base.
 Malformed recognized bases or overlays fail closed for that package.
-Hermes `plugin.yaml`/`plugin.yml` and OpenCode package descriptors are adapter
-descriptors, not native manifests, and are handled by plugin inspection rather
-than by the normal manifest loader.
+Hermes `plugin.yaml`/`plugin.yml` and OpenCode package descriptors are foreign
+inspection inputs, not native manifests, and are handled by plugin inspection
+rather than by the normal manifest loader.
 
 ## Codex Package Base
 
@@ -127,12 +127,11 @@ are retained in the raw document and reported as a newer-contract diagnostic;
 known components may still be inspected, but the package is not labeled fully
 compatible until the profile is upgraded and its conformance suite passes.
 
-Hermes `plugin.yaml` packages and OpenCode package descriptors are adapter
-inspection inputs, not executable compatibility packages in the manifest loader.
-If surfaced by diagnostics, their manifest fields are descriptive only until
-adapter policy, enablement, and fingerprint trust allow an out-of-process
-adapter host. Psychevo must not import or execute Hermes Python `register(ctx)`
-or OpenCode server/TUI modules in the Rust process.
+Hermes `plugin.yaml` packages and OpenCode package descriptors are static
+inspection inputs, not executable compatibility packages in the manifest
+loader. If surfaced by diagnostics, their manifest fields remain descriptive
+only. Psychevo must not install, enable, trust, import, or execute Hermes Python
+`register(ctx)` or OpenCode server/TUI modules through the plugin runtime.
 
 ## Path Safety
 
@@ -183,4 +182,5 @@ they are not permission grants.
 
 - [054 Plugins](../054-plugins/spec.md) defines plugin package boundaries.
 - [150 Plugin Runtime](../150-plugin-runtime/spec.md) defines store, policy, and worker behavior.
-- [150 Plugin Runtime Adapter Hosts](../150-plugin-runtime/adapter-hosts.md) defines foreign adapter inspection boundaries.
+- [150 Foreign Plugin Inspection](../150-plugin-runtime/foreign-inspection.md)
+  defines foreign package inspection boundaries.

@@ -399,12 +399,29 @@ disconnects promptly without waiting for one of its requests to finish.
 
 The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
 calling the owning Application Module, and serializing its typed result. It
-does not assemble the `thread/draft/open` or `turn/start` workflows. Those two
-methods live in the existing thread Application Module, which owns their
-authorization, lock ordering, runtime prewarming, event delivery setup,
-asynchronous execution spawn, and response construction. This is a static
-module boundary, not a dynamic handler registry or a new crate; plugin method
-dispatch remains unchanged.
+does not authorize, resolve request scope, acquire application locks, access
+the store, mutate source bindings, publish events, or assemble responses for
+Thread and Turn requests. Those responsibilities belong to these static
+Application Modules:
+
+- the core Thread Application owns `thread/draft/open`,
+  `thread/context/read`, `thread/draft/prepare`, `thread/control/set`,
+  `thread/action/run`, `thread/interaction/respond`, `thread/history/read`,
+  `thread/history/draft/read`, and `turn/start`;
+- the Session Application owns `thread/resume`, `thread/read`,
+  `thread/trace`, `thread/list`, `thread/browser`, `thread/rename`,
+  `thread/archive`, `thread/restore`, and `thread/delete`;
+- the Session Import Application owns `thread/import/list` and
+  `thread/import`;
+- the Voice Application owns `thread/realtime/*`.
+
+Each Application Module accepts protocol-typed params and returns the result
+type registered for that method. Connection output is passed only to methods
+that emit connection-private output or initiate event delivery. Existing
+session view, lifecycle, runtime-profile, and Adapter helpers remain private
+implementation details behind these Interfaces. This is a static module seam,
+not a dynamic handler registry, generic handler trait, parallel request enum,
+or a new crate; plugin method dispatch remains unchanged.
 
 JSON-RPC responses and connection-private terminal, voice, and shell frames are
 sent only to the initiating connection. Shared `gateway/event` notifications
@@ -672,6 +689,18 @@ TypeScript type and JSON Schema must also model that field as optional.
 Otherwise Gateway should serialize the field explicitly, using `null` for absent
 optional values and `[]` for empty collections, so Rust JSON, generated
 TypeScript, and generated schema describe the same wire shape.
+`thread/browser` therefore always emits each workspace's `nextCursor`; the last
+page uses an explicit `null`, matching its required nullable TypeScript field.
+
+Signed and unsigned wire integers use the JavaScript safe-integer boundary in
+both serialization directions. Generated JSON Schema carries the same minimum
+and maximum and generated TypeScript declares `number` directly from the Rust
+type metadata; generation must not repair field names or replace `bigint`
+strings after declaration. Opaque operating-system identifiers that require
+bit-exact transport, including executable inode values, use decimal strings.
+When a wire field is backed by a target-width Rust integer such as `usize`,
+deserialization must also reject values that fit the JSON-safe range but do not
+fit the current compilation target; conversion must never truncate.
 
 The transport facade passes session-scoped source inputs and dynamic tool
 candidates to Gateway; Gateway remains responsible for validation,

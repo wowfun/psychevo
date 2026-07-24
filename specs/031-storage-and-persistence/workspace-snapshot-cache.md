@@ -27,6 +27,21 @@ New snapshots for all sessions in the same canonical workspace write to the
 same workspace Git store. Snapshot restore reads from that workspace store.
 Session ids must not define the primary snapshot storage path.
 
+When the canonical workspace is a subdirectory of an enclosing Git worktree,
+snapshot track and restore remain limited to that workspace, but path and
+ignore semantics come from the enclosing worktree. In particular, repository
+ignore rules must continue to exclude generated build output, dependency
+caches, and other ignored material that happens to sit below the selected
+workspace. A snapshot store must not reinterpret the selected subdirectory as
+an independent Git root and thereby ingest files ignored by the real
+worktree.
+
+The snapshot index must nevertheless preserve every path below the selected
+workspace that is tracked by the enclosing worktree's real index, including a
+path that became ignored after it was tracked. Snapshot capture must seed those
+tracked paths explicitly before applying ordinary ignore-aware discovery.
+Truly untracked ignored paths remain excluded.
+
 Because the workspace Git store is shared across sessions and processes,
 snapshot track and restore operations must hold a cross-process operation lock
 for the workspace store. Lock contention should produce bounded waiting or a

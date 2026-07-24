@@ -46,14 +46,11 @@ cargo xtask doctor large-files --root xtask --json
 - `doctor deps check --only install --json` reports `git`, `cargo`,
   `cc|gcc|clang`, `node`, and `pnpm` readiness for source installs without
   mutating host state.
-- `doctor deps install --only core` is rejected because xtask does not install
-  Rust, Node.js, or pnpm.
-- `doctor deps install --only install` is rejected because xtask does not
-  bootstrap the standalone product install prerequisites.
-- Debian/Ubuntu install planning covers `sqlite`, `vhs`, and `playwright`
-  without being exercised by deterministic tests.
-- The visual CI profile missing-dependency message points to
-  `cargo xtask doctor deps install --only vhs`.
+- No `doctor deps install` subcommand exists.
+- Dependency checks never invoke package managers, privilege escalation,
+  repository/keyring configuration, or Playwright `--with-deps`.
+- The visual CI profile missing-dependency message includes copyable manual
+  install hints from `doctor deps check --only vhs`.
 - `doctor large-files` scans default roots including `tools`, classifies
   production, test, and generated files, ignores build/cache directories, emits
   stable JSON, and returns non-zero when oversized files are found.
