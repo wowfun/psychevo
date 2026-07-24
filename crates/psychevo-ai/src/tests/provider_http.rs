@@ -398,7 +398,7 @@ pub(crate) async fn openai_provider_meaningful_delta_resets_inference_idle_timeo
     let addr = listener.local_addr().expect("addr");
     let server = thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept");
-        read_http_headers(&mut stream);
+        read_http_request(&mut stream);
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
             .expect("write headers");
@@ -412,6 +412,7 @@ pub(crate) async fn openai_provider_meaningful_delta_resets_inference_idle_timeo
         stream.flush().expect("flush delta");
         thread::sleep(Duration::from_millis(700));
         stream.write_all(b"data: [DONE]\n\n").expect("write done");
+        stream.flush().expect("flush done");
     });
     let provider = OpenAiChatProvider::new(format!("http://{addr}/v1"), "test-key", "mock")
         .with_inference_idle_timeout_secs(1);
