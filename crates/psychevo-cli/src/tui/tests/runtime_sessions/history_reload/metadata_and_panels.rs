@@ -2,7 +2,7 @@
 pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -51,7 +51,7 @@ pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
 pub(crate) fn message_history_merges_write_stdin_into_exec_command_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -266,7 +266,7 @@ pub(crate) fn typed_write_stdin_completion_uses_cached_args_and_hides_row() {
 pub(crate) async fn sessions_panel_switches_without_status_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");

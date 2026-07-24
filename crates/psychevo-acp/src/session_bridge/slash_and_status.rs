@@ -197,7 +197,7 @@ impl PsychevoAcpAgent {
                 };
                 let title = self
                     .state
-                    .store()
+
                     .set_session_title(runtime_session_id, &title)
                     .map_err(acp_internal_error)?;
                 Ok(send_slash_text(
@@ -328,7 +328,7 @@ impl PsychevoAcpAgent {
         } else {
             let runtime_session_id = self
                 .state
-                .store()
+
                 .create_session_with_metadata(&session.cwd, "acp", "pending", "pending", None)
                 .map_err(acp_internal_error)?;
             let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
@@ -360,7 +360,7 @@ impl PsychevoAcpAgent {
                 .as_ref()
                 .map(|path| path.display().to_string());
             self.state
-                .store()
+
                 .create_agent_team_run(AgentTeamRunInput {
                     id: &team_id,
                     parent_session_id: &runtime_session_id,
@@ -376,7 +376,7 @@ impl PsychevoAcpAgent {
                 })
                 .map_err(acp_internal_error)?;
             self.state
-                .store()
+
                 .create_agent_mission_run(AgentMissionRunInput {
                     id: &mission_id,
                     parent_session_id: &runtime_session_id,
@@ -390,7 +390,7 @@ impl PsychevoAcpAgent {
                 .map_err(acp_internal_error)?;
         } else {
             self.state
-                .store()
+
                 .create_agent_mission_run(AgentMissionRunInput {
                     id: &mission_id,
                     parent_session_id: &runtime_session_id,
@@ -500,7 +500,7 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
-        let value = usage_stats(psychevo_runtime::StatsOptions {
+        let value = usage_stats(psychevo_runtime::types::StatsOptions {
             state: self.state.clone(),
             cwd: session.cwd.clone(),
             all: false,

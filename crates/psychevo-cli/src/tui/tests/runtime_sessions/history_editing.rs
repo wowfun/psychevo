@@ -4,8 +4,7 @@ pub(crate) use super::*;
 fn bind_native(app: &TuiApp, session_id: &str) {
     let cwd = app.cwd.display().to_string();
     app.state_runtime
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: session_id,
             agent_ref: None,
             agent_fingerprint: "test-agent",
@@ -20,7 +19,7 @@ fn bind_native(app: &TuiApp, session_id: &str) {
             profile_config_json: "{}",
             adapter_kind: "native",
             adapter_revision: "test",
-            ownership: psychevo_runtime::GatewayRuntimeBindingOwnership::ReadWrite,
+            ownership: psychevo_runtime::state::GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
         .expect("Native binding");
@@ -28,20 +27,19 @@ fn bind_native(app: &TuiApp, session_id: &str) {
 
 fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
     app.state_runtime
-        .store()
         .append_message_with_undo_snapshot_metadata_and_context_evidence(
             session_id,
-            &psychevo_runtime::Message::User {
+            &psychevo_agent_core::Message::User {
                 content: vec![
-                    psychevo_runtime::UserContentBlock::text("before hidden context after"),
-                    psychevo_runtime::UserContentBlock::image_url(
+                    psychevo_agent_core::UserContentBlock::text("before hidden context after"),
+                    psychevo_agent_core::UserContentBlock::image_url(
                         "https://example.test/history.png",
                     ),
                 ],
                 timestamp_ms: 1,
             },
             Some(serde_json::json!({
-                psychevo_runtime::EDITABLE_INPUT_METADATA_KEY: {
+                psychevo_runtime::types::EDITABLE_INPUT_METADATA_KEY: {
                     "version": 1,
                     "parts": [
                         {"type": "text", "text": "before "},
@@ -78,19 +76,19 @@ pub(crate) fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope() {
     assert_eq!(
         metadata.editable_input.expect("exact envelope").parts,
         vec![
-            psychevo_runtime::StoredEditableInputPart::Text {
+            psychevo_runtime::types::StoredEditableInputPart::Text {
                 text: "before ".to_string(),
             },
-            psychevo_runtime::StoredEditableInputPart::Image {
+            psychevo_runtime::types::StoredEditableInputPart::Image {
                 image_block_index: 0,
             },
-            psychevo_runtime::StoredEditableInputPart::Text {
+            psychevo_runtime::types::StoredEditableInputPart::Text {
                 text: " middle ".to_string(),
             },
-            psychevo_runtime::StoredEditableInputPart::Image {
+            psychevo_runtime::types::StoredEditableInputPart::Image {
                 image_block_index: 1,
             },
-            psychevo_runtime::StoredEditableInputPart::Text {
+            psychevo_runtime::types::StoredEditableInputPart::Text {
                 text: " after".to_string(),
             },
         ]
@@ -103,7 +101,6 @@ pub(crate) async fn persisted_user_row_keyboard_and_mouse_open_same_message_acti
     let mut app = test_app(&temp);
     let session_id = app
         .state_runtime
-        .store()
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("session");
     bind_native(&app, &session_id);
@@ -180,7 +177,6 @@ pub(crate) fn point_fork_editor_preserves_ordered_images_and_prefills_empty_chil
     let mut app = test_app(&temp);
     let source = app
         .state_runtime
-        .store()
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("source");
     bind_native(&app, &source);
@@ -207,7 +203,6 @@ pub(crate) fn point_fork_editor_preserves_ordered_images_and_prefills_empty_chil
     assert_ne!(child, source);
     assert!(
         app.state_runtime
-            .store()
             .load_messages(&child)
             .expect("child messages")
             .is_empty()
@@ -217,7 +212,6 @@ pub(crate) fn point_fork_editor_preserves_ordered_images_and_prefills_empty_chil
     assert!(ui.sidebar.title.contains("forked from"));
     assert_eq!(
         app.state_runtime
-            .store()
             .session_metadata(&child)
             .expect("metadata")
             .and_then(|metadata| metadata.get("forkedFromThreadId").cloned()),
@@ -231,7 +225,6 @@ pub(crate) fn unchanged_tui_update_is_a_structural_no_op() {
     let mut app = test_app(&temp);
     let source = app
         .state_runtime
-        .store()
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("source");
     bind_native(&app, &source);
@@ -253,7 +246,6 @@ pub(crate) fn unchanged_tui_update_is_a_structural_no_op() {
     assert!(ui.history_message_edit.is_none());
     assert!(
         app.state_runtime
-            .store()
             .session_revert_state(&source)
             .expect("revert")
             .is_none()
@@ -267,7 +259,6 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     let mut app = test_app(&temp);
     let source = app
         .state_runtime
-        .store()
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("source");
     bind_native(&app, &source);
@@ -292,7 +283,6 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     assert_ne!(child, source);
     assert_eq!(
         app.state_runtime
-            .store()
             .load_messages(&child)
             .expect("messages")
             .len(),
@@ -300,7 +290,6 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     );
     assert_eq!(
         app.state_runtime
-            .store()
             .session_summary(&child)
             .expect("summary")
             .and_then(|summary| summary.parent_session_id),

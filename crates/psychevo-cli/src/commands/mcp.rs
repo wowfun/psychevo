@@ -7,7 +7,10 @@ use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
 use psychevo_gateway::{Gateway, GatewayInputPart, GatewaySource, ThreadTurnRequest};
-use psychevo_runtime::{PermissionMode, ProjectContextInstructionMode, RunMode, StateRuntime};
+use psychevo_runtime::state::StateRuntime;
+use psychevo_runtime::{
+    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
+};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

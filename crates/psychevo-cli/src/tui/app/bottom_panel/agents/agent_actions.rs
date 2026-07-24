@@ -297,7 +297,7 @@ impl TuiApp {
             return Ok(());
         }
         let next_agent = if let Some(session_id) = self.current_session.as_deref() {
-            let store = self.state_runtime.store();
+            let store = &self.state_runtime;
             let metadata = match store.session_metadata(session_id) {
                 Ok(metadata) => metadata,
                 Err(err) => {
@@ -358,7 +358,7 @@ impl TuiApp {
         };
         let metadata = main_agent_metadata(&input, &name, source, path.as_ref());
         if let Some(session_id) = self.current_session.as_deref()
-            && let Err(err) = self.state_runtime.store().set_session_metadata_field(
+            && let Err(err) = self.state_runtime.set_session_metadata_field(
                 session_id,
                 SESSION_MAIN_AGENT_METADATA_KEY,
                 Some(metadata.clone()),
@@ -402,7 +402,7 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         id: &str,
     ) -> Result<()> {
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let _ = stop_agent_id_with_grace(id, Some(store), Duration::from_millis(1200))?;
         let mut panel = self.agent_panel();
         panel.tab = AgentTab::Running;

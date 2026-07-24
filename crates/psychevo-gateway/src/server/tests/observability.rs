@@ -96,11 +96,11 @@
         state
             .inner
             .state
-            .store()
+
             .append_message_with_metrics(
                 session_id,
                 &RuntimeMessage::Assistant {
-                    content: vec![psychevo_runtime::AssistantBlock::Text {
+                    content: vec![psychevo_agent_core::AssistantBlock::Text {
                         text: "done".to_string(),
                     }],
                     timestamp_ms: 1,
@@ -207,7 +207,7 @@
         let session_id = state
             .inner
             .state
-            .store()
+
             .create_session_with_metadata(
                 &state.inner.cwd,
                 "web",
@@ -266,7 +266,7 @@
         let session_id = state
             .inner
             .state
-            .store()
+
             .create_session_with_metadata(
                 &state.inner.cwd,
                 "peer_agent",
@@ -324,7 +324,7 @@
         let session_id = state
             .inner
             .state
-            .store()
+
             .create_session_with_metadata(
                 &state.inner.cwd,
                 "web",
@@ -389,7 +389,7 @@
         let session_id = state
             .inner
             .state
-            .store()
+
             .create_session_with_metadata(
                 &other_cwd,
                 "web",
@@ -453,7 +453,7 @@
             state
                 .inner
                 .state
-                .store()
+
                 .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
                 .expect("sessions")
                 .len(),
@@ -477,7 +477,7 @@
         let session_id = state
             .inner
             .state
-            .store()
+
             .create_session_with_metadata(
                 &state.inner.cwd,
                 "web",
@@ -502,7 +502,7 @@
         let active_ids = state
             .inner
             .state
-            .store()
+
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("active sessions")
             .into_iter()

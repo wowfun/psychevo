@@ -27,8 +27,8 @@ fn thread_browser_value(
         .as_ref()
         .map(|cursor| cursor.offset)
         .unwrap_or(0);
-    let projections = state.inner.state.store().browse_human_sessions(
-        psychevo_runtime::SessionBrowserRequest {
+    let projections = state.inner.state.browse_human_sessions(
+        psychevo_runtime::state::SessionBrowserRequest {
             cwd: cwd.as_deref(),
             archived: params.archived.unwrap_or(false),
             cursor_cwd,

@@ -6,10 +6,10 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-use super::SqliteStore;
+use super::StateRuntime;
 use super::store_schema_helpers::is_busy;
 
-impl SqliteStore {
+impl StateRuntime {
     pub(crate) fn write_retry<T>(
         &self,
         mut f: impl FnMut(&Connection) -> rusqlite::Result<T>,

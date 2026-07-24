@@ -288,7 +288,7 @@ fn write_managed_state(
         executable_path: Some(executable.path),
         executable_modified_ms: Some(executable.modified_ms),
         executable_size: Some(executable.size),
-        executable_inode: executable.inode,
+        executable_inode: executable.inode.map(|value| value.to_string()),
         static_dir: config
             .static_dir
             .as_deref()
@@ -740,7 +740,7 @@ impl WebState {
 
     fn pending_context_for_live_event(
         &self,
-        record: &psychevo_runtime::GatewayLiveEventRecord,
+        record: &psychevo_runtime::state::GatewayLiveEventRecord,
     ) -> PendingInteractionContext {
         let mut context = PendingInteractionContext {
             thread_id: record.thread_id.clone(),
@@ -751,7 +751,7 @@ impl WebState {
             lease_expires_at_ms: None,
         };
         if let Some(activity_id) = &record.activity_id
-            && let Ok(Some(activity)) = self.inner.state.store().gateway_activity(activity_id)
+            && let Ok(Some(activity)) = self.inner.state.gateway_activity(activity_id)
         {
             if context.thread_id.is_none() {
                 context.thread_id = activity.thread_id;

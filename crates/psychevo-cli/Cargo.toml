@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+default = ["native-channels"]
+native-channels = ["psychevo-gateway/native-channels", "dep:qrcode"]
+
 [[bin]]
 name = "pevo"
 path = "src/main.rs"
@@ -16,11 +20,12 @@ crossterm.workspace = true
 futures.workspace = true
 ignore.workspace = true
 psychevo-ai = { path = "../psychevo-ai" }
+psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-acp = { path = "../psychevo-acp" }
-psychevo-gateway = { path = "../psychevo-gateway" }
+psychevo-gateway = { path = "../psychevo-gateway", default-features = false }
 psychevo-runtime = { path = "../psychevo-runtime" }
 pulldown-cmark.workspace = true
-qrcode.workspace = true
+qrcode = { workspace = true, optional = true }
 ratatui.workspace = true
 ratatui-textarea.workspace = true
 regex-lite.workspace = true

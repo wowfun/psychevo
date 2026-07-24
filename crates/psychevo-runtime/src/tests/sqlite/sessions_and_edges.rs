@@ -16,7 +16,7 @@ pub(crate) fn sqlite_schema_v28_rejects_legacy_state_databases_with_reset_guidan
                 .expect("version");
         }
 
-        let err = match SqliteStore::open(&db) {
+        let err = match StateRuntime::open(&db) {
             Ok(_) => panic!("v{version} db opened successfully"),
             Err(err) => err,
         };
@@ -41,7 +41,7 @@ pub(crate) fn sqlite_schema_v28_rejects_unknown_state_database() {
             .expect("schema");
     }
 
-    let err = match SqliteStore::open(&db) {
+    let err = match StateRuntime::open(&db) {
         Ok(_) => panic!("old db opened successfully"),
         Err(err) => err,
     };
@@ -54,7 +54,7 @@ pub(crate) fn sqlite_schema_v28_creates_current_gateway_coordination_schema() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
@@ -181,7 +181,7 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
         .expect("session");
@@ -260,7 +260,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
         .expect("session");
@@ -367,7 +367,7 @@ pub(crate) fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
         .expect("first session");
@@ -398,7 +398,7 @@ pub(crate) fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
 pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
 
     let draft_control_values = BTreeMap::from([
         ("model".to_string(), "gpt-fixture".to_string()),
@@ -462,7 +462,7 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
 pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
         .expect("session");
@@ -678,7 +678,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
 pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
         .expect("session");
@@ -815,7 +815,7 @@ pub(crate) fn sqlite_agent_team_and_mission_runs_round_trip() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
@@ -871,7 +871,7 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let first_session = store
         .create_session_with_metadata(&cwd, "acp", "model", "provider", None)
         .expect("first session");
@@ -969,7 +969,7 @@ pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let wechat_session = store
         .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
         .expect("wechat session");
@@ -1039,7 +1039,7 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
@@ -1120,7 +1120,7 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
@@ -1173,7 +1173,7 @@ pub(crate) fn sqlite_resume_session_is_non_mutating_and_append_updates_recency()
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
@@ -1208,7 +1208,7 @@ pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
@@ -1244,7 +1244,7 @@ pub(crate) fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("first");
@@ -1291,7 +1291,7 @@ pub(crate) fn set_session_times(
     .expect("set session times");
 }
 
-pub(crate) fn session_updated_at(store: &SqliteStore, session_id: &str) -> i64 {
+pub(crate) fn session_updated_at(store: &StateRuntime, session_id: &str) -> i64 {
     store
         .session_summary(session_id)
         .expect("summary")
@@ -1304,7 +1304,7 @@ pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages(
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
@@ -1385,7 +1385,7 @@ pub(crate) fn sqlite_user_message_display_metadata_overrides_content_text() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -1435,7 +1435,7 @@ pub(crate) fn sqlite_agent_edges_round_trip_and_close_subtree() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let parent = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("parent");
@@ -1479,7 +1479,7 @@ pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");

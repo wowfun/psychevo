@@ -17,7 +17,7 @@ fn session_summary_by_id(state: &WebState, session_id: &str) -> psychevo_runtime
     let projection = state
         .inner
         .state
-        .store()
+
         .session_list_projection(session_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
     let activity = state

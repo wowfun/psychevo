@@ -11,6 +11,81 @@ pub(super) fn prewarm_codex_runtime_inventory(state: &WebState, cwd: PathBuf) {
     });
 }
 
+pub(super) async fn inspect_thread(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadContextReadParams,
+) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+    let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
+    if let Some(thread_id) = params.thread_id.as_deref() {
+        authorize_thread(state, auth, thread_id)?;
+    }
+    thread_context_read_result_live(state, &scope, params).await
+}
+
+pub(super) async fn prepare_thread_draft(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadDraftPrepareParams,
+) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    let _source_mutation = state
+        .inner
+        .gateway
+        .lock_source_mutation(&canonical_source_mutation_key(&scope.source))
+        .await;
+    thread_draft_prepare_result(state, &scope, params).await
+}
+
+pub(super) async fn set_thread_control(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadControlSetParams,
+) -> psychevo_runtime::Result<wire::ThreadControlSetResult> {
+    let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
+    if let Some(thread_id) = params.thread_id.as_deref() {
+        authorize_thread(state, auth, thread_id)?;
+    }
+    thread_control_set_result(state, &scope, params).await
+}
+
+pub(super) async fn run_thread_action(
+    state: &WebState,
+    auth: &AuthContext,
+    out_tx: ConnectionSender,
+    params: wire::ThreadActionRunParams,
+) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    run_action(state, auth, &scope, params, out_tx).await
+}
+
+pub(super) fn respond_to_thread_interaction(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadInteractionRespondParams,
+) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
+    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    respond_to_interaction(state, auth, &scope, params)
+}
+
+pub(super) async fn read_thread_history(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadHistoryReadParams,
+) -> psychevo_runtime::Result<wire::ThreadHistoryReadResult> {
+    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    read_history(state, auth, &scope, params).await
+}
+
+pub(super) async fn read_thread_history_draft(
+    state: &WebState,
+    auth: &AuthContext,
+    params: wire::ThreadHistoryDraftReadParams,
+) -> psychevo_runtime::Result<wire::ThreadHistoryDraftReadResult> {
+    let scope = resolve_required_scope(state, auth, params.scope.clone())?;
+    read_history_draft(state, auth, &scope, params).await
+}
+
 pub(super) async fn open_thread_draft(
     state: &WebState,
     auth: &AuthContext,
@@ -203,7 +278,7 @@ pub(super) async fn start_thread_turn(
     };
     let existing_binding = requested_thread_id
         .as_deref()
-        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten();
     let validated_target = params
@@ -319,7 +394,6 @@ pub(super) async fn start_thread_turn(
             state
                 .inner
                 .state
-                .store()
                 .session_summary(thread_id)?
                 .map(|summary| side_conversation_session_source(&summary.source))
                 .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))
@@ -379,15 +453,11 @@ pub(super) async fn start_thread_turn(
             ..GatewayProfileFields::default()
         },
     );
-    state
-        .inner
-        .state
-        .store()
-        .record_gateway_turn_start_receipt(
-            &response_thread_id,
-            &params.client_turn_id,
-            &requested_turn_id,
-        )?;
+    state.inner.state.record_gateway_turn_start_receipt(
+        &response_thread_id,
+        &params.client_turn_id,
+        &requested_turn_id,
+    )?;
     let turn_state = state.clone();
     let turn_scope = scope.clone();
     tokio::spawn(async move {
@@ -611,15 +681,11 @@ pub(super) fn action_descriptors(
     };
     let activity = snapshot_activity(state, &scope.source, Some(thread_id))?;
     let active = activity.running || activity.queued_turns > 0;
-    let binding = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(thread_id)?;
+    let binding = state.inner.state.gateway_runtime_binding(thread_id)?;
     let acp = binding
         .as_ref()
         .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"));
-    let revert = state.inner.state.store().session_revert_state(thread_id)?;
+    let revert = state.inner.state.session_revert_state(thread_id)?;
     let native_history_reason = native_history_action_unavailable_reason(state, scope, thread_id)?;
     let stability = stability.unwrap_or(wire::RuntimeStabilityView::Stable);
     let descriptor =
@@ -1032,7 +1098,6 @@ pub(super) async fn run_routed_action(
             let native = state
                 .inner
                 .state
-                .store()
                 .gateway_runtime_binding(&params.thread_id)?
                 .is_some_and(|binding| binding.backend_kind.as_deref() == Some("native"));
             if native {

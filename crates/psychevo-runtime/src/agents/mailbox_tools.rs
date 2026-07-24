@@ -1,6 +1,6 @@
 use super::{
     AbortSignal, AgentEdgeStatus, AgentMailboxEventInput, AgentMailboxEventRecord, AssistantBlock,
-    BTreeMap, BoxFuture, Duration, Message, Outcome, Path, PathBuf, Result, SqliteStore,
+    BTreeMap, BoxFuture, Duration, Message, Outcome, Path, PathBuf, Result, StateRuntime,
     ToolBinding, ToolExecutionMode, ToolOutput, Value, json, resolve_skills_home,
     user_text_message,
 };
@@ -17,7 +17,7 @@ use super::{
 };
 
 pub(crate) fn append_parent_agent_start_notification(
-    store: &SqliteStore,
+    store: &StateRuntime,
     parent_session_id: &str,
     record: &AgentRunRecord,
 ) -> Result<()> {
@@ -47,7 +47,7 @@ pub(crate) fn append_parent_agent_start_notification(
 }
 
 pub(crate) fn append_parent_agent_mailbox_event(
-    store: &SqliteStore,
+    store: &StateRuntime,
     parent_session_id: &str,
     record: &AgentRunRecord,
     outcome: &str,
@@ -220,7 +220,7 @@ impl ToolBinding for ListAgentsTool {
         _args: Value,
         _abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let store = self.context.state.store().clone();
+        let store = self.context.state.clone();
         let parent = self.context.parent_session_id.clone();
         Box::pin(async move {
             let system_value = agent_status_value(Some(&store), Some(&parent), false);
@@ -273,7 +273,7 @@ impl ToolBinding for WaitAgentTool {
         args: Value,
         _abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let store = self.context.state.store().clone();
+        let store = self.context.state.clone();
         let parent_session_id = self.context.parent_session_id.clone();
         let control_handle = self.context.control_handle.clone();
         Box::pin(async move {
@@ -370,7 +370,7 @@ impl ToolBinding for SendMessageTool {
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
         let context = self.context.clone();
-        let store = context.state.store().clone();
+        let store = context.state.clone();
         Box::pin(async move {
             let target = args
                 .get("target")
@@ -440,7 +440,7 @@ impl ToolBinding for CloseAgentTool {
         args: Value,
         _abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let store = self.context.state.store().clone();
+        let store = self.context.state.clone();
         Box::pin(async move {
             let target = args
                 .get("target")
@@ -507,7 +507,7 @@ impl ToolBinding for ResumeAgentTool {
         args: Value,
         _abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let store = self.context.state.store().clone();
+        let store = self.context.state.clone();
         Box::pin(async move {
             let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
             match resume_agent_id(id, Some(&store)) {

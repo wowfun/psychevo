@@ -250,7 +250,7 @@ impl ContextSnapshot {
 }
 
 pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let selector = options.session.trim();
     if selector.is_empty() {
         return Err(Error::Message(
@@ -466,7 +466,7 @@ struct PersistedProviderRequestCount {
 }
 
 fn persisted_provider_request_count(
-    store: &crate::store::SqliteStore,
+    store: &crate::store::StateRuntime,
     summary: &crate::types::SessionSummary,
 ) -> Result<Option<PersistedProviderRequestCount>> {
     let messages = crate::session_export::load_unfiltered_export_messages(store, &summary.id)?;

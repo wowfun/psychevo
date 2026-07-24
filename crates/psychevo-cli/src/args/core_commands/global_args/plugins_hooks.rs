@@ -54,8 +54,6 @@ pub(crate) enum PluginCommand {
     Enable(PluginNameScopeArgs),
     #[command(about = "Disable a plugin in the selected scope")]
     Disable(PluginNameScopeArgs),
-    #[command(about = "Trust the current package fingerprint for a plugin")]
-    Trust(PluginNameScopeArgs),
     #[command(about = "Manage local plugin catalog source entries")]
     Catalog(PluginMarketplaceArgs),
     #[command(about = "Manage local plugin marketplace source catalogs")]
@@ -103,12 +101,6 @@ pub(crate) struct PluginInspectArgs {
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,
-    #[arg(
-        long = "adapter-mode",
-        value_name = "adapter_host|manifest_only|disabled",
-        help = "Foreign adapter inspection mode"
-    )]
-    pub(crate) adapter_mode: Option<String>,
     #[arg(long, help = "Emit structured JSON instead of human text")]
     pub(crate) json: bool,
 }
@@ -129,12 +121,6 @@ pub(crate) struct PluginInstallArgs {
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,
-    #[arg(
-        long = "adapter-mode",
-        value_name = "adapter_host|manifest_only|disabled",
-        help = "Foreign adapter inspection mode"
-    )]
-    pub(crate) adapter_mode: Option<String>,
     #[arg(
         short = 'g',
         long = "global",
@@ -226,12 +212,6 @@ pub(crate) struct PluginMarketplaceAddArgs {
     pub(crate) npm_version: Option<String>,
     #[arg(long = "npm-registry", value_name = "URL", help = "Npm registry URL")]
     pub(crate) npm_registry: Option<String>,
-    #[arg(
-        long = "adapter-mode",
-        value_name = "adapter_host|manifest_only|disabled",
-        help = "Foreign adapter inspection mode"
-    )]
-    pub(crate) adapter_mode: Option<String>,
     #[arg(short = 'g', long = "global", conflicts_with = "local")]
     pub(crate) global: bool,
     #[arg(long = "local", conflicts_with = "global")]

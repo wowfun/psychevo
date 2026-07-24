@@ -23,14 +23,14 @@ fn context_read_result(
     let acp = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(&thread_id)?
         .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"));
     if acp {
         let usage = state
             .inner
             .state
-            .store()
+
             .session_metadata(&thread_id)?
             .as_ref()
             .and_then(acp_peer_usage_update)
@@ -53,7 +53,7 @@ fn context_read_result(
 }
 
 fn context_read_result_from_snapshot(
-    snapshot: &psychevo_runtime::ContextSnapshot,
+    snapshot: &psychevo_runtime::context_usage::ContextSnapshot,
 ) -> wire::ContextReadResult {
     let status = match snapshot.status.as_str() {
         "reported" | "derived" | "partial" | "unavailable" => snapshot.status.as_str(),
@@ -108,7 +108,7 @@ fn observability_read_value(
         None => state.inner.gateway.resolve_source_thread(&scope.source)?,
     };
     let metadata = match resolved_thread_id.as_deref() {
-        Some(session_id) => state.inner.state.store().session_metadata(session_id)?,
+        Some(session_id) => state.inner.state.session_metadata(session_id)?,
         None => None,
     };
     let peer_usage = metadata.as_ref().and_then(acp_peer_usage_update);

@@ -46,10 +46,10 @@ fn render_media_artifact(
     state: &WebState,
     artifact_id: &str,
 ) -> psychevo_runtime::Result<Response<Body>> {
-    psychevo_runtime::validate_media_artifact_id(artifact_id)?;
-    let path = psychevo_runtime::media_artifact_path(&state.inner.home, artifact_id)?;
+    psychevo_runtime::media::validate_media_artifact_id(artifact_id)?;
+    let path = psychevo_runtime::media::media_artifact_path(&state.inner.home, artifact_id)?;
     let bytes = std::fs::read(&path)?;
-    let media = psychevo_runtime::read_media_artifact(&state.inner.home, artifact_id)?;
+    let media = psychevo_runtime::media::read_media_artifact(&state.inner.home, artifact_id)?;
     let mut response = Response::new(Body::from(bytes));
     response.headers_mut().insert(
         CONTENT_TYPE,
@@ -109,7 +109,7 @@ fn render_download(
         None => SessionExportIncludeSet::default_for(artifact_kind),
     };
     let artifact = render_session_export(
-        state.inner.state.store(),
+        &state.inner.state,
         session_id,
         SessionExportOptions {
             format,

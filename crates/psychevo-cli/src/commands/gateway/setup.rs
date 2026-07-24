@@ -9,8 +9,9 @@ use psychevo_gateway::im::adapters::{
     fetch_wechat_qr_code, poll_wechat_qr_code,
 };
 use psychevo_runtime::{
-    ChannelSetupInput, channel_doctor_value, channel_list_value, channel_summary_value,
-    set_channel_enabled, setup_channel_connection, upsert_channel_connection,
+    config::ChannelSetupInput, config::channel_doctor_value, config::channel_list_value,
+    config::channel_summary_value, config::set_channel_enabled, config::setup_channel_connection,
+    config::upsert_channel_connection,
 };
 use serde_json::{Value, json};
 

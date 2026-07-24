@@ -298,6 +298,7 @@ async fn wechat_ilink_health_treats_local_longpoll_timeout_as_empty_poll() {
 }
 
 #[test]
+#[cfg(feature = "native-channels")]
 fn feishu_event_maps_text_payload() {
     let event: feishu_sdk::event::Event = serde_json::from_value(json!({
         "schema": "2.0",

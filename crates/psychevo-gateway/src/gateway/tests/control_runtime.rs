@@ -92,7 +92,7 @@
             assert!(run.runtime_options.is_empty());
             let binding = harness
                 .state
-                .store()
+
                 .gateway_runtime_binding(&result.thread.id)
                 .expect("binding read")
                 .expect("binding");
@@ -134,7 +134,7 @@
             let first = harness.gateway.send_turn(first).await.expect("first turn");
             let binding = harness
                 .state
-                .store()
+
                 .gateway_runtime_binding(&first.thread.id)
                 .expect("binding read")
                 .expect("binding");
@@ -158,7 +158,7 @@
                 .expect("captured Agent Definition remains authoritative");
             let binding = harness
                 .state
-                .store()
+
                 .gateway_runtime_binding(&second.thread.id)
                 .expect("binding read")
                 .expect("binding");
@@ -173,13 +173,13 @@
         let harness = harness(Arc::new(FakeBackend::default()));
         let thread_id = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "test", "model", "provider", None)
             .expect("session");
         let cwd = harness.cwd.to_string_lossy().to_string();
         harness
             .state
-            .store()
+
             .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
                 thread_id: &thread_id,
                 agent_ref: Some("opencode"),

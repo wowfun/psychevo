@@ -6,13 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use psychevo_ai::Outcome;
-use psychevo_runtime::{
-    AgentBackendConfig, AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, RunMode, RunOptions,
-    SessionSummary, SqliteStore, StateRuntime, TuiMessageSummary, agent_status_value,
-    close_agent_id, discover_agents, list_agents_value, load_agent_backend_configs,
-    effective_usage_total, resolve_agent_definition, resume_agent_id, send_agent_message, set_config_value,
-    valid_agent_name, view_agent_value_with_catalog, wait_agent_mailbox,
-};
+use psychevo_runtime::state::{AgentEdgeRecord, StateRuntime};
+use psychevo_runtime::{agents::AgentBackendConfig, agents::AgentCatalog, agents::AgentDiscoveryOptions, types::RunMode, types::RunOptions, types::SessionSummary, types::TuiMessageSummary, agents::agent_status_value, agents::close_agent_id, agents::discover_agents, agents::list_agents_value, config::load_agent_backend_configs, accounting::effective_usage_total, agents::resolve_agent_definition, agents::resume_agent_id, agents::send_agent_message, config::set_config_value, agents::valid_agent_name, agents::view_agent_value_with_catalog, agents::wait_agent_mailbox};
 use serde_json::{Value, json};
 
 use crate::args::{
@@ -285,7 +280,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         return Err(anyhow!("You must provide a message"));
     }
 
-    let result = psychevo_runtime::run_live(RunOptions {
+    let result = psychevo_runtime::run::run_live(RunOptions {
         state: StateRuntime::open(&db_path)?,
         cwd,
         snapshot_root: Some(home.join("snapshots")),
@@ -350,7 +345,7 @@ pub(crate) fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = SqliteStore::open(&db_path)?;
+    let store = StateRuntime::open(&db_path)?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
     let parent = if args.all {
         None
@@ -420,7 +415,7 @@ pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = SqliteStore::open(&db_path)?;
+    let store = StateRuntime::open(&db_path)?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
     let session_id = store
         .latest_run_session_for_cwd(&cwd)?
@@ -482,7 +477,7 @@ pub(crate) async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = SqliteStore::open(&db_path)?;
+    let store = StateRuntime::open(&db_path)?;
     let edge = store
         .find_agent_edge(&args.id)?
         .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
@@ -534,7 +529,7 @@ pub(crate) fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
 }
 
 pub(crate) fn agent_status_record_value(
-    store: &SqliteStore,
+    store: &StateRuntime,
     target: &str,
     edge: &AgentEdgeRecord,
 ) -> Result<Value> {

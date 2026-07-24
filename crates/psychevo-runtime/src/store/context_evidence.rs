@@ -3,9 +3,9 @@ use rusqlite::{Connection, params};
 use crate::error::Result;
 
 use super::store_message_fields::{optional_json_string, parse_optional_json};
-use super::{ContextEvidenceInput, ContextEvidenceRecord, SqliteStore};
+use super::{ContextEvidenceInput, ContextEvidenceRecord, StateRuntime};
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn load_context_evidence(
         &self,
         session_id: &str,

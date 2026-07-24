@@ -337,7 +337,7 @@ pub(crate) fn generation_metadata_from_session_metadata(
 }
 
 pub(crate) fn reconstructed_tool_declarations(
-    store: &SqliteStore,
+    store: &StateRuntime,
     summary: &SessionSummary,
     metadata: &Value,
     cwd: &Path,
@@ -412,7 +412,7 @@ pub(crate) fn reconstructed_tool_declarations(
             permission_mode: Default::default(),
             approval_mode: Default::default(),
             approval_handler: None,
-            state: StateRuntime::from_store(PathBuf::new(), store.clone()),
+            state: store.clone(),
             config_path: None,
             protected_config_paths: Vec::new(),
             parent_session_id: summary.id.clone(),

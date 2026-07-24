@@ -1,5 +1,5 @@
 pub(crate) fn first_use_empty_visible_session(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
 ) -> Result<bool> {
     let Some(summary) = store.session_summary(session_id)? else {
@@ -12,7 +12,7 @@ pub(crate) fn first_use_empty_visible_session(
 }
 
 pub(crate) fn materialize_first_use_empty_session(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     provider: &str,
     model: &str,

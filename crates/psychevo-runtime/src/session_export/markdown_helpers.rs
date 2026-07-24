@@ -109,7 +109,7 @@ pub(crate) mod tests {
     fn export_last_provider_response_uses_persisted_assistant_projection() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = SqliteStore::open(&db).expect("store");
+        let store = StateRuntime::open(&db).expect("store");
         let session = store
             .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
             .expect("session");
@@ -185,7 +185,7 @@ pub(crate) mod tests {
     fn export_last_provider_response_respects_reasoning_include_policy() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = SqliteStore::open(&db).expect("store");
+        let store = StateRuntime::open(&db).expect("store");
         let session = store
             .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
             .expect("session");
@@ -263,7 +263,7 @@ pub(crate) mod tests {
     fn export_last_provider_request_omits_tools_for_empty_effective_policy() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = SqliteStore::open(&db).expect("store");
+        let store = StateRuntime::open(&db).expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -390,7 +390,7 @@ pub(crate) mod tests {
     fn export_last_provider_request_uses_message_prompt_prefix_version() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = SqliteStore::open(&db).expect("store");
+        let store = StateRuntime::open(&db).expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -527,7 +527,7 @@ pub(crate) mod tests {
     fn export_last_provider_request_reconstructs_clarify_declaration() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = SqliteStore::open(&db).expect("store");
+        let store = StateRuntime::open(&db).expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -672,7 +672,7 @@ pub(crate) mod tests {
     fn export_last_provider_request_includes_mailbox_result_once_after_wait() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = SqliteStore::open(&db).expect("store");
+        let store = StateRuntime::open(&db).expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),

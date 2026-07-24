@@ -8,10 +8,10 @@ use crate::error::{Error, Result};
 
 use super::{
     GatewaySourceBindingInput, GatewaySourceBindingRecord, GatewaySourceLaneInput,
-    GatewaySourceLaneRecord, SqliteStore,
+    GatewaySourceLaneRecord, StateRuntime,
 };
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn upsert_gateway_source_binding(
         &self,
         input: GatewaySourceBindingInput<'_>,

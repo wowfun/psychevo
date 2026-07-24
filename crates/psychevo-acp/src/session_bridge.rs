@@ -67,13 +67,11 @@ mod mission_tests {
             .expect("runtime session");
         let team = agent
             .state
-            .store()
             .find_active_agent_team_run(&runtime_session_id)
             .expect("team lookup")
             .expect("team run");
         let mission = agent
             .state
-            .store()
             .find_active_agent_mission_run(&runtime_session_id)
             .expect("mission lookup")
             .expect("mission run");

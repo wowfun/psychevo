@@ -21,7 +21,7 @@ struct ResolvedScope {
 
 impl ResolvedScope {
     fn to_wire_scope(&self) -> wire::GatewayRequestScope {
-        let cwd = psychevo_runtime::normalized_native_path(&self.cwd);
+        let cwd = psychevo_runtime::host_paths::normalized_native_path(&self.cwd);
         wire::GatewayRequestScope {
             cwd: cwd.display().to_string(),
             source: wire::GatewaySourceInput {
@@ -39,7 +39,7 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
     if !matches!(auth, AuthContext::Browser { .. }) {
         return scope.clone();
     }
-    let cwd = psychevo_runtime::normalized_native_path(&scope.cwd);
+    let cwd = psychevo_runtime::host_paths::normalized_native_path(&scope.cwd);
     let mut source = scope.source.clone();
     let canonical_raw_id = source
         .raw_identity
@@ -123,7 +123,7 @@ fn ensure_turn_start_thread(
         return Ok(Some(thread_id));
     }
 
-    let thread_id = state.inner.state.store().create_session_with_metadata(
+    let thread_id = state.inner.state.create_session_with_metadata(
         &scope.cwd,
         "web",
         "pending",
@@ -157,7 +157,7 @@ fn gateway_backend_info_for_thread(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<GatewayBackendInfo> {
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     if let Some(binding) = store.gateway_runtime_binding(thread_id)? {
         if binding.status != GatewayRuntimeBindingStatus::Resolved {
             let message = binding.unresolved_reason.unwrap_or_else(|| {
@@ -368,7 +368,7 @@ fn resolved_scope_for_thread(
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     let cwd = PathBuf::from(summary.cwd);
@@ -434,7 +434,7 @@ fn update_browser_session_for_draft_scope(
     let adopts_stored_session = !state
         .inner
         .state
-        .store()
+
         .list_sessions_for_cwd_with_sources(&scope.cwd, &[])?
         .is_empty();
     if already_granted || adopts_stored_session {

@@ -665,7 +665,7 @@ pub(crate) fn agent_tools(context: AgentToolContext) -> Vec<Arc<dyn ToolBinding>
 }
 
 pub fn agent_status_value(
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
@@ -681,7 +681,7 @@ pub fn agent_status_value(
 }
 
 pub(crate) fn agent_status_model_value(
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
@@ -699,7 +699,7 @@ pub(crate) fn agent_status_model_value(
 }
 
 pub fn agent_status_records(
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Vec<AgentRunRecord> {
@@ -759,7 +759,7 @@ pub async fn wait_agent_id(id: &str, timeout: Duration) -> Result<Option<AgentRu
 pub async fn wait_agent_mailbox(
     parent_session_id: &str,
     timeout: Duration,
-    store: &SqliteStore,
+    store: &StateRuntime,
 ) -> Result<Value> {
     let started = Instant::now();
     loop {
@@ -779,7 +779,7 @@ pub async fn wait_agent_mailbox(
     }
 }
 
-pub fn close_agent_id(id: &str, store: Option<&SqliteStore>) -> Result<Option<AgentRunRecord>> {
+pub fn close_agent_id(id: &str, store: Option<&StateRuntime>) -> Result<Option<AgentRunRecord>> {
     let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
     let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? else {
         drop(runs);
@@ -817,7 +817,7 @@ pub fn close_agent_id(id: &str, store: Option<&SqliteStore>) -> Result<Option<Ag
 
 pub fn stop_agent_id_with_grace(
     id: &str,
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
     grace: Duration,
 ) -> Result<Option<AgentRunRecord>> {
     let requested = request_agent_stop_id(id)?;

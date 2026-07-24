@@ -22,19 +22,19 @@
 
     fn runtime_assistant_message(text: &str, timestamp_ms: i64) -> RuntimeMessage {
         RuntimeMessage::Assistant {
-            content: vec![psychevo_runtime::AssistantBlock::Text {
+            content: vec![psychevo_agent_core::AssistantBlock::Text {
                 text: text.to_string(),
             }],
             timestamp_ms,
             finish_reason: Some("stop".to_string()),
-            outcome: psychevo_runtime::Outcome::Normal,
+            outcome: psychevo_ai::Outcome::Normal,
             model: Some("fake-model".to_string()),
             provider: Some("fake-provider".to_string()),
         }
     }
 
     fn track_snapshot(root: &Path, cwd: &Path) -> String {
-        let workspace_id = psychevo_runtime::workspace_snapshot_id(cwd).expect("workspace id");
+        let workspace_id = psychevo_runtime::paths::workspace_snapshot_id(cwd).expect("workspace id");
         let git_dir = root.join("workspaces").join(workspace_id);
         std::fs::create_dir_all(&git_dir).expect("snapshot git dir");
         if !git_dir.join("HEAD").exists() {

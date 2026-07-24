@@ -89,8 +89,8 @@ mod tests {
     pub(crate) fn test_agent_tool_context(
         tmp: &TempDir,
         provider: Arc<dyn GenerationProvider>,
-        store: SqliteStore,
-        db_path: PathBuf,
+        store: StateRuntime,
+        _db_path: PathBuf,
         parent: String,
         catalog: AgentCatalog,
     ) -> AgentToolContext {
@@ -112,7 +112,7 @@ mod tests {
             permission_mode: PermissionMode::Default,
             approval_mode: ApprovalMode::Manual,
             approval_handler: None,
-            state: StateRuntime::from_store(db_path, store),
+            state: store,
             config_path: None,
             protected_config_paths: Vec::new(),
             parent_session_id: parent,

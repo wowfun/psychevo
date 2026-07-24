@@ -47,7 +47,7 @@ fn session_lifecycle_value(projection: &SessionListProjection) -> Value {
         let side = projection
             .metadata
             .as_ref()
-            .and_then(|metadata| metadata.get(psychevo_runtime::SIDE_CONVERSATION_METADATA_KEY))
+            .and_then(|metadata| metadata.get(psychevo_runtime::thread_lineage::SIDE_CONVERSATION_METADATA_KEY))
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let eligible = projection.summary.parent_session_id.is_none()

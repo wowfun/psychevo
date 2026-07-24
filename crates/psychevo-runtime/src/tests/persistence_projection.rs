@@ -49,7 +49,7 @@ pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_mess
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -136,7 +136,7 @@ pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_messag
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -198,7 +198,7 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &cwd,
@@ -284,7 +284,7 @@ pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadat
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -358,7 +358,7 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -459,7 +459,7 @@ pub(crate) async fn messages_preserve_assistant_content_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -512,7 +512,7 @@ pub(crate) async fn messages_preserve_assistant_content_order() {
         panic!("unexpected messages: {messages:?}");
     };
     assert_eq!(finish_reason.as_deref(), Some("tool_calls"));
-    assert_eq!(outcome, &Outcome::Normal);
+    assert_eq!(*outcome, Outcome::Normal);
     assert_eq!(model.as_deref(), Some("model"));
     assert_eq!(provider.as_deref(), Some("provider"));
     let [
@@ -537,7 +537,7 @@ pub(crate) async fn messages_preserve_tool_call_and_tool_result_facts() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -616,7 +616,7 @@ pub(crate) async fn messages_preserve_selected_skill_prompt_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -654,7 +654,7 @@ pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -864,7 +864,7 @@ pub(crate) fn json_projection_hides_reasoning_unless_included() {
     }
 }
 
-fn test_persistence_sink(store: SqliteStore, session_id: String) -> PersistenceSink {
+fn test_persistence_sink(store: StateRuntime, session_id: String) -> PersistenceSink {
     PersistenceSink {
         store,
         session_id,

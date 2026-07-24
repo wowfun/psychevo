@@ -206,7 +206,7 @@ async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
     let thread_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -858,7 +858,7 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
     state.inner.review.observe_mutation(
         "turn-1",
         &state.inner.cwd,
-        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo_runtime::types::WorkspaceMutation::ExactUtf8 {
             path: "notes.txt".to_string(),
             before: Some("user dirty\n".to_string()),
             after: Some("agent changed\n".to_string()),
@@ -935,35 +935,35 @@ fn workspace_review_records_patch_paths_and_opaque_invalidations() {
         .review
         .begin_turn("turn-patch", Some("thread-patch".to_string()), cwd);
     for mutation in [
-        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo_runtime::types::WorkspaceMutation::ExactUtf8 {
             path: "add.txt".to_string(),
             before: None,
             after: Some("added\n".to_string()),
         },
-        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo_runtime::types::WorkspaceMutation::ExactUtf8 {
             path: "update.txt".to_string(),
             before: Some("before update\n".to_string()),
             after: Some("after update\n".to_string()),
         },
-        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo_runtime::types::WorkspaceMutation::ExactUtf8 {
             path: "delete.txt".to_string(),
             before: Some("before delete\n".to_string()),
             after: None,
         },
-        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo_runtime::types::WorkspaceMutation::ExactUtf8 {
             path: "move-from.txt".to_string(),
             before: Some("before move\n".to_string()),
             after: None,
         },
-        psychevo_runtime::WorkspaceMutation::ExactUtf8 {
+        psychevo_runtime::types::WorkspaceMutation::ExactUtf8 {
             path: "move-to.txt".to_string(),
             before: None,
             after: Some("before move\n".to_string()),
         },
-        psychevo_runtime::WorkspaceMutation::Opaque {
+        psychevo_runtime::types::WorkspaceMutation::Opaque {
             source: "exec_command".to_string(),
         },
-        psychevo_runtime::WorkspaceMutation::Opaque {
+        psychevo_runtime::types::WorkspaceMutation::Opaque {
             source: "acp.edit".to_string(),
         },
     ] {
@@ -1164,7 +1164,7 @@ async fn command_execute_compact_returns_native_compaction_action() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
         .expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -1202,7 +1202,7 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
         .expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
@@ -1218,8 +1218,8 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
     state
         .inner
         .state
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: &session_id,
             agent_ref: None,
             agent_fingerprint: &agent_fingerprint,
@@ -1297,15 +1297,15 @@ async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_bi
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
         .expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+
+        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
             source_key: "legacy:test-lane",
             source_kind: "legacy",
             raw_identity: json!({"lane": "test-lane"}),
@@ -1320,7 +1320,7 @@ async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_bi
         state
             .inner
             .state
-            .store()
+
             .gateway_runtime_binding(&session_id)
             .expect("runtime binding lookup")
             .is_none(),
@@ -1362,10 +1362,10 @@ async fn thread_transcript_projects_compaction_checkpoint_divider() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
         .expect("session");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     store
         .append_message(&session_id, &runtime_user_message("first task", 1))
         .expect("user message");
@@ -1373,7 +1373,7 @@ async fn thread_transcript_projects_compaction_checkpoint_divider() {
         .append_message(&session_id, &runtime_assistant_message("done", 2))
         .expect("assistant message");
     let record = store
-        .append_session_compaction(psychevo_runtime::SessionCompactionInput {
+        .append_session_compaction(psychevo_runtime::state::SessionCompactionInput {
             session_id: session_id.clone(),
             reason: "manual".to_string(),
             summary_text: "Keep the decision trail.".to_string(),
@@ -1484,14 +1484,14 @@ async fn command_execute_mission_records_team_metadata_and_returns_thread() {
     let team = state
         .inner
         .state
-        .store()
+
         .find_active_agent_team_run(&thread_id)
         .expect("team")
         .expect("active team");
     let mission = state
         .inner
         .state
-        .store()
+
         .find_active_agent_mission_run(&thread_id)
         .expect("mission")
         .expect("active mission");
@@ -1509,13 +1509,13 @@ async fn command_execute_btw_creates_side_chat_session() {
     let parent_session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
     state
         .inner
         .state
-        .store()
+
         .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
         .expect("parent message");
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -1601,7 +1601,7 @@ async fn command_execute_btw_creates_side_chat_session() {
     let side_summary = state
         .inner
         .state
-        .store()
+
         .session_summary(side_thread_id)
         .expect("summary")
         .expect("side chat");
@@ -1615,7 +1615,7 @@ async fn command_execute_btw_creates_side_chat_session() {
     let side_metadata = state
         .inner
         .state
-        .store()
+
         .session_metadata(side_thread_id)
         .expect("metadata")
         .expect("metadata value");
@@ -1630,7 +1630,7 @@ async fn command_execute_btw_creates_side_chat_session() {
     let side_binding = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(side_thread_id)
         .expect("side binding")
         .expect("resolved side binding");
@@ -1652,7 +1652,7 @@ async fn command_execute_btw_snapshots_live_effective_acp_controls() {
     let parent_session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -1718,7 +1718,7 @@ async fn command_execute_btw_snapshots_live_effective_acp_controls() {
     let side_binding = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(side_thread_id)
         .expect("side binding")
         .expect("resolved side binding");
@@ -1737,13 +1737,13 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     let parent_session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
     state
         .inner
         .state
-        .store()
+
         .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
         .expect("parent message");
     bind_source_to_thread(&state, &resolved_scope, &parent_session).expect("bind parent source");
@@ -1755,7 +1755,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     state
         .inner
         .state
-        .store()
+
         .compare_and_set_gateway_runtime_control_state(
             &parent_session,
             parent_binding.binding_revision,
@@ -1813,7 +1813,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     let side_binding = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(&side_thread_id)
         .expect("side binding")
         .expect("resolved side binding");
@@ -1888,7 +1888,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         state
             .inner
             .state
-            .store()
+
             .session_summary(&side_thread_id)
             .expect("side summary")
             .is_none()
@@ -1908,8 +1908,8 @@ fn bind_native_runtime_to_thread(state: &WebState, thread_id: &str) -> GatewayRu
     state
         .inner
         .state
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id,
             agent_ref: None,
             agent_fingerprint: &agent_fingerprint,
@@ -1980,8 +1980,8 @@ default_mode = "default"
     let binding = state
         .inner
         .state
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id,
             agent_ref: Some("ephemeral"),
             agent_fingerprint: &agent_fingerprint,
@@ -2073,7 +2073,7 @@ default_mode = "default"
     state
         .inner
         .state
-        .store()
+
         .set_session_metadata_field(
             thread_id,
             ACP_PEER_METADATA_KEY,
@@ -2098,7 +2098,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     let snapshot_root = state.inner.home.join("snapshots");
@@ -2106,7 +2106,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
     state
         .inner
         .state
-        .store()
+
         .append_message_with_undo_snapshot(
             &session_id,
             &runtime_user_message("first prompt", 1),
@@ -2117,14 +2117,14 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
     state
         .inner
         .state
-        .store()
+
         .append_message(&session_id, &runtime_assistant_message("first answer", 2))
         .expect("first assistant");
     let before_second = track_snapshot(&snapshot_root, &state.inner.cwd);
     state
         .inner
         .state
-        .store()
+
         .append_message_with_undo_snapshot(
             &session_id,
             &runtime_user_message("second prompt", 3),
@@ -2135,7 +2135,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
     state
         .inner
         .state
-        .store()
+
         .append_message(&session_id, &runtime_assistant_message("second answer", 4))
         .expect("second assistant");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -2175,7 +2175,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
         state
             .inner
             .state
-            .store()
+
             .load_tui_message_summaries(&session_id)
             .expect("visible")
             .len(),
@@ -2214,7 +2214,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
         state
             .inner
             .state
-            .store()
+
             .load_tui_message_summaries(&session_id)
             .expect("visible")
             .len(),
@@ -2257,7 +2257,7 @@ async fn command_execute_undo_redo_bounded_without_matching_session() {
     let other_session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
         .expect("other session");
     let cross_cwd = handle_rpc(

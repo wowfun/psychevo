@@ -9,7 +9,7 @@ fn resolve_model_state_request_scope(
         let summary = state
             .inner
             .state
-            .store()
+
             .session_summary(&thread_id)?
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
         return Ok((PathBuf::from(summary.cwd), Some(thread_id)));

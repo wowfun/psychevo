@@ -12,10 +12,16 @@ cleanup_probes = []
 session_config = {"model": "test/default", "mode": "build"}
 
 
+def config_option_id(category):
+    if MODE == "custom-control-ids":
+        return "preferred-" + category
+    return category
+
+
 def config_options():
     return [
         {
-            "id": "model",
+            "id": config_option_id("model"),
             "name": "Model",
             "category": "model",
             "type": "select",
@@ -26,7 +32,7 @@ def config_options():
             ],
         },
         {
-            "id": "mode",
+            "id": config_option_id("mode"),
             "name": "Session Mode",
             "category": "mode",
             "type": "select",
@@ -187,8 +193,11 @@ for raw_line in sys.stdin:
             }],
         })
     elif method == "session/set_config_option":
-        if params.get("configId") in session_config:
-            session_config[params["configId"]] = params.get("value")
+        config_id = params.get("configId")
+        for category in session_config:
+            if config_id == config_option_id(category):
+                session_config[category] = params.get("value")
+                break
         respond(message_id, {"configOptions": config_options()})
         session_update(params["sessionId"], {
             "sessionUpdate": "session_info_update",

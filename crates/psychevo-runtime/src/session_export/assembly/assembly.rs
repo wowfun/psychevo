@@ -184,7 +184,7 @@ pub fn default_session_export_filename(
 }
 
 pub fn render_session_export(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     options: SessionExportOptions,
 ) -> Result<SessionExportArtifact> {
@@ -260,7 +260,7 @@ pub fn render_session_export(
 }
 
 pub fn write_session_export(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     output_path: &Path,
     options: SessionExportOptions,
@@ -281,7 +281,7 @@ pub fn write_session_export(
 }
 
 pub(crate) fn load_export_messages(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     include_reasoning: bool,
 ) -> Result<Vec<ExportMessageRecord>> {
@@ -305,7 +305,7 @@ pub(crate) fn load_export_messages(
 }
 
 pub(crate) fn load_unfiltered_export_messages(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
 ) -> Result<Vec<ExportMessageRecord>> {
     store
@@ -383,7 +383,7 @@ pub(crate) fn export_prompt_prefix_value(record: PromptPrefixRecord) -> ExportPr
 }
 
 pub(crate) fn load_provider_input_evidence(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
 ) -> Result<Vec<ExportPromptEvidence>> {
     let mut prompts = Vec::new();
@@ -440,7 +440,7 @@ pub(crate) fn export_mailbox_event_value(
 }
 
 pub(crate) fn reconstruct_last_provider_request(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     summary: &SessionSummary,
     messages: &[ExportMessageRecord],
@@ -536,7 +536,7 @@ pub(crate) fn reconstruct_last_provider_request(
 }
 
 pub(crate) struct ProviderMessageReconstruction<'a> {
-    pub(crate) store: &'a SqliteStore,
+    pub(crate) store: &'a StateRuntime,
     pub(crate) session_id: &'a str,
     pub(crate) messages: &'a [ExportMessageRecord],
     pub(crate) mode: RunMode,
@@ -681,7 +681,7 @@ pub(crate) fn reconstructed_provider_messages_from_prefix(
 }
 
 pub(crate) fn matching_prompt_prefix(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     prompt_metadata: &Option<Value>,
     assistant_metadata: &Option<Value>,

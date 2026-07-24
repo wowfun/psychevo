@@ -2,8 +2,8 @@ use std::path::Path;
 
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::{
-    AgentEntrypoint, ListSkillsOptions, agent_source_display_label, list_skills_value_with_options,
-    skill_source_display_label,
+    agents::AgentEntrypoint, agents::agent_source_display_label, skills::ListSkillsOptions,
+    skills::list_skills_value_with_options, skills::skill_source_display_label,
 };
 use serde_json::Value;
 

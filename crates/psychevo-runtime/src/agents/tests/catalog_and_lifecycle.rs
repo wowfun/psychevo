@@ -39,7 +39,7 @@ Coordinate.
     assert_eq!(visible, vec!["worker", "researcher"]);
 
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
         .expect("parent");
@@ -63,7 +63,7 @@ Coordinate.
             permission_mode: PermissionMode::Default,
             approval_mode: ApprovalMode::Manual,
             approval_handler: None,
-            state: StateRuntime::from_store(db_path, store),
+            state: store,
             config_path: None,
             protected_config_paths: Vec::new(),
             parent_session_id: parent,
@@ -771,7 +771,7 @@ pub(crate) fn spawn_agent_task_name_validation_is_strict() {
 pub(crate) fn agent_tool_schema_omits_name_argument() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
         .expect("parent");
@@ -856,7 +856,7 @@ pub(crate) fn pause_new_spawns_state_is_explicit() {
 #[test]
 pub(crate) fn child_session_summary_uses_latest_assistant_usage_tokens() {
     let tmp = TempDir::new().expect("tmp");
-    let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
     let session = store
         .create_session_with_metadata(tmp.path(), "agent", "mock-model", "mock", None)
         .expect("session");

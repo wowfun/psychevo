@@ -4,7 +4,7 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state
@@ -63,13 +63,13 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
 #[tokio::test]
 async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
     let (_temp, state) = web_state();
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     let owner_id = "gateway:foreign";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "activity-1",
             thread_id: Some(&session_id),
             source_key: None,
@@ -159,7 +159,7 @@ async fn turn_completed_event_removes_pending_permission_panel() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state.record_event_with_context(
@@ -250,8 +250,8 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
     let activity = state
         .inner
         .state
-        .store()
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "activity-draft-permission",
             thread_id: None,
             source_key: Some(&draft_source_key),
@@ -339,8 +339,8 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
     let activity = state
         .inner
         .state
-        .store()
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "activity-draft-clarify",
             thread_id: None,
             source_key: Some(&draft_source_key),
@@ -422,7 +422,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
     let thread_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
         .expect("thread");
     let source_key = state.inner.source.source_key().0;
@@ -430,8 +430,8 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
     let activity = state
         .inner
         .state
-        .store()
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "activity-draft-route",
             thread_id: Some(&thread_id),
             source_key: Some(&source_key),
@@ -550,7 +550,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
     let commands = state
         .inner
         .state
-        .store()
+
         .pending_gateway_control_commands(owner_id, 10)
         .expect("pending control commands");
     assert_eq!(commands.len(), 2);

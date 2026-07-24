@@ -2,9 +2,9 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::error::Result;
 
-use super::{PromptPrefixRecord, SqliteStore};
+use super::{PromptPrefixRecord, StateRuntime};
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn load_session_prompt_prefix(
         &self,
         session_id: &str,

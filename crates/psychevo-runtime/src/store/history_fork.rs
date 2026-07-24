@@ -6,9 +6,9 @@ use uuid::Uuid;
 use crate::error::{Error, Result};
 
 use super::store_undo_helpers::session_tool_call_count;
-use super::{NativeSessionForkInput, SqliteStore};
+use super::{NativeSessionForkInput, StateRuntime};
 
-impl SqliteStore {
+impl StateRuntime {
     /// Copies the durable conversation prefix into a new root Native session.
     ///
     /// The transaction deliberately omits source bindings, activities, live

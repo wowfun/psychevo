@@ -107,7 +107,7 @@ fn automation_tool_create_defaults_to_current_thread() {
     let thread_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
         .expect("session");
     let value = automations::automation_tool_execute_for_test(
@@ -304,7 +304,7 @@ async fn draft_open_remains_empty_without_creating_session() {
         state
             .inner
             .state
-            .store()
+
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("sessions")
             .len(),

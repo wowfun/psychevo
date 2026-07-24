@@ -1,7 +1,7 @@
 fn discover_gateway_agents(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<psychevo_runtime::AgentCatalog> {
+) -> psychevo_runtime::Result<psychevo_runtime::agents::AgentCatalog> {
     materialize_local_acp_backends(state, scope)?;
     discover_agents(&AgentDiscoveryOptions {
         home: state.inner.home.clone(),
@@ -15,7 +15,7 @@ fn discover_gateway_agents(
 fn discover_gateway_skills(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<psychevo_runtime::SkillCatalog> {
+) -> psychevo_runtime::Result<psychevo_runtime::skills::SkillCatalog> {
     discover_skills(&SkillDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: scope.cwd.clone(),

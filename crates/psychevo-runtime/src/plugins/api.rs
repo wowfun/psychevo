@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use chrono::Utc;
 use serde_json::{Map, Value, json};
 
 use super::inspect::{PluginMaterializedSource, inspect_materialized_source, inspection_value};
@@ -11,11 +10,7 @@ use super::records::{
     select_record,
 };
 use super::store::PluginStore;
-use super::types::{
-    LoadedPluginManifest, PluginAdapterMode, PluginInstallRecord, PluginManifestKind, PluginScope,
-    PluginTrustRecord,
-};
-use super::util::directory_fingerprint;
+use super::types::{LoadedPluginManifest, PluginInstallRecord, PluginScope};
 use super::worker::worker_tools;
 use crate::config::{
     BuiltinPluginPolicyConfig, CONFIG_FILE_NAME, PluginPolicyConfig, PluginPolicyEntry,
@@ -41,16 +36,11 @@ pub fn plugin_list_value(options: &RunOptions) -> Result<Value> {
         &loaded.config.builtin_plugins,
         builtin_scope,
     )];
-    plugins.extend(records.iter().map(|record| {
-        record_value(
-            &home,
-            &cwd,
-            &records,
-            record,
-            &loaded.config.plugins,
-            &project_policy,
-        )
-    }));
+    plugins.extend(
+        records
+            .iter()
+            .map(|record| record_value(&records, record, &loaded.config.plugins, &project_policy)),
+    );
     Ok(json!({
         "plugins": plugins,
         "count": plugins.len(),
@@ -63,8 +53,6 @@ pub fn plugin_view_value(options: &RunOptions, selector: &str) -> Result<Value> 
     let home = resolve_psychevo_home(&loaded.env)?;
     if is_builtin_browser_selector(selector) {
         let builtin_scope = builtin_browser_policy_scope(options, &cwd)?;
-        let enabled = builtin_browser_enabled(&loaded.config.builtin_plugins);
-        let status = builtin_browser_status(enabled);
         let plugin =
             builtin_browser_plugin_value(&cwd, &loaded.config.builtin_plugins, builtin_scope);
         return Ok(json!({
@@ -73,11 +61,9 @@ pub fn plugin_view_value(options: &RunOptions, selector: &str) -> Result<Value> 
             "inspection": {
                 "name": "Browser",
                 "framework": "psychevo",
-                "status": status,
+                "support": "built_in",
                 "source_kind": "built_in",
-                "adapter_mode": "built_in",
-                "target_lanes": ["browser", "plugins"],
-                "projected_contributions": ["right_workspace_browser", "desktop_browser_host", "annotation_context"],
+                "declared_lanes": ["browser", "plugins"],
                 "unsupported_lanes": [],
                 "stages": [],
             },
@@ -89,14 +75,7 @@ pub fn plugin_view_value(options: &RunOptions, selector: &str) -> Result<Value> 
     let inspection = inspect_record(record)?;
     let manifest = load_plugin_manifest(&record.package_root, true).ok();
     Ok(json!({
-        "plugin": record_value(
-            &home,
-            &cwd,
-            &records,
-            record,
-            &loaded.config.plugins,
-            &project_policy,
-        ),
+        "plugin": record_value(&records, record, &loaded.config.plugins, &project_policy),
         "manifest": manifest.as_ref().map(manifest_value).unwrap_or_else(|| inspection_value(&inspection)),
         "inspection": inspection,
     }))
@@ -144,14 +123,7 @@ pub fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Resu
             };
         }
         plugins.push(json!({
-            "plugin": record_value(
-                &home,
-                &cwd,
-                &records,
-                record,
-                &loaded.config.plugins,
-                &project_policy,
-            ),
+            "plugin": record_value(&records, record, &loaded.config.plugins, &project_policy),
             "manifest": manifest.as_ref().map(manifest_value).unwrap_or_else(|| inspection_value(&inspection)),
             "inspection": inspection,
             "worker": worker,
@@ -501,18 +473,10 @@ fn builtin_browser_plugin_value(
         "data_root": data_root,
         "manifest_path": null,
         "manifest_kind": "built_in",
-        "package_fingerprint": "builtin-browser",
-        "adapter_mode": "built_in",
         "manifest_resources": ["browser"],
         "psychevo_extensions": ["browser"],
         "enabled": enabled,
-        "readiness": builtin_browser_status(enabled),
         "status": builtin_browser_status(enabled),
-        "trust": {
-            "required": false,
-            "status": "not_required",
-            "fingerprint": "builtin-browser",
-        },
         "contributions": {
             "right_workspace": ["browser", "preview"],
             "desktop": ["managed_browser_host"],
@@ -545,18 +509,15 @@ fn builtin_browser_doctor_value(
     policy: &BuiltinPluginPolicyConfig,
     policy_scope: PluginScope,
 ) -> Value {
-    let status = builtin_browser_status(builtin_browser_enabled(policy));
     json!({
         "plugin": builtin_browser_plugin_value(cwd, policy, policy_scope),
         "manifest": builtin_browser_manifest_value(),
         "inspection": {
             "name": "Browser",
             "framework": "psychevo",
-            "status": status,
+            "support": "built_in",
             "source_kind": "built_in",
-            "adapter_mode": "built_in",
-            "target_lanes": ["browser", "plugins"],
-            "projected_contributions": ["right_workspace_browser", "desktop_browser_host", "annotation_context"],
+            "declared_lanes": ["browser", "plugins"],
             "unsupported_lanes": [],
             "stages": [],
         },
@@ -570,46 +531,6 @@ fn builtin_browser_doctor_value(
             "message": "Browser is built in; Desktop Browser host automation is not exposed as a plugin worker.",
         }
     })
-}
-
-pub fn plugin_set_trust_value(
-    home: &Path,
-    cwd: &Path,
-    scope: PluginScope,
-    selector: &str,
-    trusted: bool,
-) -> Result<Value> {
-    let records = all_records(home, cwd)?;
-    let record = select_record(&records, selector)?.clone();
-    ensure_record_scope(selector, &record, scope)?;
-    let store = PluginStore::new(home, cwd, record.scope)?;
-    let key = trust_key(&record);
-    let fingerprint =
-        current_fingerprint(&record).unwrap_or_else(|| record.package_fingerprint.clone());
-    if fingerprint.is_empty() {
-        return Err(Error::Config(format!(
-            "plugin `{}` has no package fingerprint to trust",
-            record.name
-        )));
-    }
-    let mut trust = store.trust_records()?;
-    trust.retain(|entry| entry.key != key);
-    if trusted {
-        trust.push(PluginTrustRecord {
-            key: key.clone(),
-            fingerprint: fingerprint.clone(),
-            trusted_at_ms: Utc::now().timestamp_millis(),
-        });
-    }
-    store.write_trust_records(&trust)?;
-    Ok(json!({
-        "success": true,
-        "scope": record.scope.as_str(),
-        "plugin": record.name,
-        "source": record.source_slug,
-        "trusted": trusted,
-        "trust": trust_value(home, cwd, &record),
-    }))
 }
 
 fn ensure_record_scope(
@@ -647,8 +568,6 @@ fn set_plugin_policy_document_value(
 }
 
 fn record_value(
-    home: &Path,
-    cwd: &Path,
     records: &[PluginInstallRecord],
     record: &PluginInstallRecord,
     policy: &PluginPolicyConfig,
@@ -664,8 +583,7 @@ fn record_value(
         PluginScope::Global
     };
     let enabled = policy.is_some_and(PluginPolicyEntry::plugin_enabled);
-    let trust = trust_value(home, cwd, record);
-    let readiness = readiness_status(record, enabled, &trust);
+    let readiness = readiness_status(record, enabled);
     json!({
         "name": record.name,
         "authority": {
@@ -691,14 +609,11 @@ fn record_value(
         "manifest_kind": record.manifest_kind.as_str(),
         "compatibility_profile": record.compatibility_profile,
         "component_statuses": record.component_statuses,
-        "package_fingerprint": current_fingerprint(record).unwrap_or_else(|| record.package_fingerprint.clone()),
-        "adapter_mode": record.adapter_mode.as_str(),
         "manifest_resources": record.manifest_resources,
         "psychevo_extensions": record.psychevo_extensions,
         "enabled": enabled,
         "readiness": readiness,
         "status": readiness,
-        "trust": trust,
         "diagnostics": record.diagnostics,
     })
 }
@@ -736,52 +651,10 @@ fn inspect_record(record: &PluginInstallRecord) -> Result<super::types::PluginIn
         npm_registry: record.npm_registry.clone(),
         temp_dir: None,
     };
-    inspect_materialized_source(&materialized, record.adapter_mode, "Installed")
+    inspect_materialized_source(&materialized)
 }
 
-fn current_fingerprint(record: &PluginInstallRecord) -> Option<String> {
-    directory_fingerprint(&record.package_root).ok()
-}
-
-fn trust_key(record: &PluginInstallRecord) -> String {
-    format!("{}@{}", record.name, record.source_slug)
-}
-
-fn trust_value(home: &Path, cwd: &Path, record: &PluginInstallRecord) -> Value {
-    let key = trust_key(record);
-    let current = current_fingerprint(record).unwrap_or_else(|| record.package_fingerprint.clone());
-    let trust = PluginStore::new(home, cwd, record.scope)
-        .and_then(|store| store.trust_records())
-        .ok()
-        .and_then(|entries| entries.into_iter().find(|entry| entry.key == key));
-    let required = trust_required(record);
-    let status = if !required {
-        "not_required"
-    } else {
-        match trust.as_ref() {
-            Some(entry) if !current.is_empty() && entry.fingerprint == current => "trusted",
-            Some(_) => "modified",
-            None => "untrusted",
-        }
-    };
-    json!({
-        "required": required,
-        "key": key,
-        "status": status,
-        "fingerprint": current,
-        "trusted_fingerprint": trust.as_ref().map(|entry| entry.fingerprint.clone()),
-        "trusted_at_ms": trust.as_ref().map(|entry| entry.trusted_at_ms),
-    })
-}
-
-fn trust_required(record: &PluginInstallRecord) -> bool {
-    matches!(
-        record.manifest_kind,
-        PluginManifestKind::Hermes | PluginManifestKind::OpenCode
-    ) && record.adapter_mode == PluginAdapterMode::AdapterHost
-}
-
-fn readiness_status(record: &PluginInstallRecord, enabled: bool, trust: &Value) -> &'static str {
+fn readiness_status(record: &PluginInstallRecord, enabled: bool) -> &'static str {
     if !enabled {
         return "Disabled";
     }
@@ -791,22 +664,6 @@ fn readiness_status(record: &PluginInstallRecord, enabled: bool, trust: &Value) 
         .any(|diagnostic| diagnostic.kind == "invalid")
     {
         return "Failed";
-    }
-    if matches!(
-        record.manifest_kind,
-        PluginManifestKind::Hermes | PluginManifestKind::OpenCode
-    ) {
-        if record.adapter_mode == PluginAdapterMode::Disabled {
-            return "Unsupported target";
-        }
-        if trust
-            .get("required")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-            && trust.get("status").and_then(Value::as_str) != Some("trusted")
-        {
-            return "Needs trust";
-        }
     }
     if record.manifest_resources.iter().any(|lane| lane == "apps") {
         return "Needs setup";

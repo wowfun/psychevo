@@ -5,7 +5,7 @@ pub(crate) use super::*;
 pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
@@ -30,7 +30,7 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -123,7 +123,7 @@ pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -204,7 +204,7 @@ pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned
 pub(crate) async fn background_session_completion_does_not_steal_current_session() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
@@ -215,7 +215,7 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
 
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: first.clone(),
         ..finished_run_result(&app)
     };
@@ -265,7 +265,7 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
     let other_cwd = temp.path().join("other-work");
     fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = other_cwd.canonicalize().expect("other canonical");
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&other_cwd, "web", "mock-model", "mock", None)
         .expect("session");
@@ -316,7 +316,7 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
 pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
@@ -363,7 +363,7 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
 pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
@@ -372,7 +372,7 @@ pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -414,7 +414,7 @@ pub(crate) async fn new_session_does_not_receive_previous_running_output() {
 pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
@@ -426,7 +426,8 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>>()
+            .await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -502,7 +503,7 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
 pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let older = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("older");
@@ -593,7 +594,7 @@ pub(crate) fn session_panel_ids(panel: &BottomSelectionPanel) -> Vec<String> {
 pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("first");
@@ -633,7 +634,7 @@ pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
 pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_from_archived_view() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("session");
@@ -711,7 +712,7 @@ pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel(
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     app.current_session = None;
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("session");
@@ -808,7 +809,7 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
 {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
         .expect("session");
@@ -816,7 +817,7 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -884,7 +885,7 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
 pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");

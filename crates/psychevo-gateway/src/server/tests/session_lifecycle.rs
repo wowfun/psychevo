@@ -198,7 +198,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         state
             .inner
             .state
-            .store()
+
             .gateway_runtime_binding(&imported_thread_id)
             .expect("binding")
             .expect("imported binding")
@@ -261,7 +261,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
         state
             .inner
             .state
-            .store()
+
             .session_summary(&imported_thread_id)
             .expect("deleted lookup")
             .is_none()
@@ -678,7 +678,7 @@ async fn agent_session_import_rejects_resume_only_history_without_publishing_a_t
         state
             .inner
             .state
-            .store()
+
             .gateway_runtime_binding_by_native_session("resume-only-fixture", "listed-native")
             .expect("binding lookup")
             .is_none()
@@ -859,7 +859,7 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
             state
                 .inner
                 .state
-                .store()
+
                 .session_summary(&thread_id)
                 .expect("local Thread lookup")
                 .is_some(),

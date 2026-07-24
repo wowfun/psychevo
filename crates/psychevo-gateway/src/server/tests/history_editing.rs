@@ -4,7 +4,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
         .expect("session");
     let profile = generated_runtime_profiles()
@@ -19,8 +19,8 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
     state
         .inner
         .state
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: &session_id,
             agent_ref: None,
             agent_fingerprint: &agent_fingerprint,
@@ -47,7 +47,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
         timestamp_ms: 1,
     };
     let metadata = json!({
-        psychevo_runtime::EDITABLE_INPUT_METADATA_KEY: {
+        psychevo_runtime::types::EDITABLE_INPUT_METADATA_KEY: {
             "version": 1,
             "parts": [
                 {"type": "text", "text": "visible"},
@@ -58,7 +58,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
     let message_seq = state
         .inner
         .state
-        .store()
+
         .append_message_with_undo_snapshot_metadata_and_context_evidence(
             &session_id,
             &message,
@@ -128,7 +128,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
     state
         .inner
         .state
-        .store()
+
         .append_message(
             &session_id,
             &RuntimeMessage::User {
@@ -165,7 +165,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
     state
         .inner
         .state
-        .store()
+
         .append_message_with_undo_snapshot_metadata_and_context_evidence(
             &session_id,
             &RuntimeMessage::User {
@@ -173,7 +173,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
                 timestamp_ms: 3,
             },
             Some(json!({
-                psychevo_runtime::EDITABLE_INPUT_METADATA_KEY: {
+                psychevo_runtime::types::EDITABLE_INPUT_METADATA_KEY: {
                     "version": 1,
                     "parts": []
                 }
@@ -226,7 +226,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
         state
             .inner
             .state
-            .store()
+
             .session_revert_state(&session_id)
             .expect("revert state")
             .is_none()

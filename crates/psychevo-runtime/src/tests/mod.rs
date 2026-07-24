@@ -1,4 +1,16 @@
-pub(crate) use super::*;
+#[allow(unused_imports)]
+pub(crate) use crate::{
+    accounting::*, agents::*, automations::*, compaction::*, config::*, context::*,
+    context_usage::*, events::*, extensions::*, hooks::*, host_paths::*, host_process::*, mcp::*,
+    media::*, model_state::*, paths::*, plugins::*, process_env::*, prompt_image::*,
+    prompt_templates::*, run::*, sandbox::*, session_export::*, session_lookup::*,
+    session_trace::*, skills::*, stats::*, thread_lineage::*, tool_argument_display::*,
+    tool_result_display::*, tools::*, types::*, undo::*, user_shell::*, workspace_diff::*,
+};
+#[allow(unused_imports)]
+pub(crate) use psychevo_agent_core::*;
+#[allow(unused_imports)]
+pub(crate) use psychevo_ai::*;
 pub(crate) use std::collections::BTreeMap;
 pub(crate) use std::fs;
 pub(crate) use std::io::{Read, Write};
@@ -25,6 +37,7 @@ pub(crate) use crate::run::{
     visible_session_source_allows_auto_title,
 };
 pub(crate) use crate::snapshot::SnapshotStore;
+pub(crate) use crate::state::*;
 pub(crate) use crate::types::{
     MessageAccounting, ModelCatalogEntry, ModelCost, ModelCostTier, ModelMetadata,
     ProjectContextInstructionMode, SelectedAgent,

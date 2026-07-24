@@ -4,11 +4,10 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use super::inspect::{
-    PluginMaterializedSource, SourceRequest, inspect_materialized_source,
-    materialize_source_for_install,
+    PluginMaterializedSource, SourceRequest, inspect_materialized_source, materialize_source_in_dir,
 };
 use super::store::PluginStore;
-use super::types::{PluginAdapterMode, PluginInstallOptions, PluginInstallRecord};
+use super::types::{PluginInstallOptions, PluginInstallRecord, PluginManifestKind};
 use super::util::{sanitize_path_segment, source_slug};
 use crate::error::{Error, Result};
 
@@ -29,18 +28,36 @@ pub fn install_plugin(
     cwd: &Path,
     options: PluginInstallOptions,
 ) -> Result<PluginInstallRecord> {
-    let store = PluginStore::new(home, cwd, options.scope)?;
-    store.ensure()?;
-    let materialized =
-        materialize_source_for_install(&store, home, cwd, &SourceRequest::from_install(&options))?;
-    let adapter_mode = options.adapter_mode.unwrap_or_default();
-    let inspection = inspect_materialized_source(&materialized, adapter_mode, "Installed")?;
+    let staging = tempfile::TempDir::new()?;
+    let staging_root = staging.path().to_path_buf();
+    let materialized = materialize_source_in_dir(
+        home,
+        cwd,
+        &staging_root,
+        &SourceRequest::from_install(&options),
+        Some(staging),
+    )?;
+    let inspection = inspect_materialized_source(&materialized)?;
+    if matches!(
+        inspection.framework,
+        PluginManifestKind::Hermes | PluginManifestKind::OpenCode
+    ) {
+        return Err(Error::Config(format!(
+            "{} plugins are inspection-only; configure the {} ACP Agent runtime profile to execute this source",
+            inspection.framework.as_str(),
+            inspection.framework.as_str()
+        )));
+    }
     let invalid = inspection
         .diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.kind == "invalid")
         .map(|diagnostic| diagnostic.message.clone())
-        .chain((inspection.status == "Failed").then_some(inspection.readiness.clone()))
+        .chain(
+            inspection
+                .invalid
+                .then_some("inspection failed".to_string()),
+        )
         .collect::<Vec<_>>();
     if !invalid.is_empty() {
         return Err(Error::Config(format!(
@@ -54,6 +71,8 @@ pub fn install_plugin(
         .unwrap_or_else(|| "local".to_string());
     let description = inspection.description.clone().unwrap_or_default();
     let source_slug = source_slug(&materialized.source_id);
+    let store = PluginStore::new(home, cwd, options.scope)?;
+    store.ensure()?;
     let package_root = store
         .cache
         .join(package_dir_name(&inspection.name, &version, &source_slug));
@@ -78,17 +97,14 @@ pub fn install_plugin(
         npm_registry: materialized.npm_registry.clone(),
         temp_dir: None,
     };
-    let installed_inspection = inspect_materialized_source(&installed, adapter_mode, "Installed")?;
+    let installed_inspection = inspect_materialized_source(&installed)?;
     let installed_manifest = super::manifest::load_plugin_manifest(&package_root, true).ok();
     let (manifest_resources, psychevo_extensions) = match installed_manifest.as_ref() {
         Some(manifest) => (
             manifest.manifest_resources.iter().cloned().collect(),
             manifest.psychevo_extensions.iter().cloned().collect(),
         ),
-        None => (
-            installed_inspection.target_lanes.clone(),
-            installed_inspection.projected_contributions.clone(),
-        ),
+        None => (installed_inspection.declared_lanes.clone(), Vec::new()),
     };
     let data_root = store.data.join(format!(
         "{}-{}",
@@ -117,10 +133,6 @@ pub fn install_plugin(
             .as_ref()
             .map(|manifest| manifest.component_statuses.clone())
             .unwrap_or_default(),
-        package_fingerprint: installed_inspection.package_fingerprint,
-        adapter_mode: options
-            .adapter_mode
-            .unwrap_or(PluginAdapterMode::ManifestOnly),
         manifest_resources,
         psychevo_extensions,
         diagnostics: installed_inspection.diagnostics,

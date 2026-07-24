@@ -4,7 +4,7 @@ pub(super) async fn run_due_automations_once(state: WebState) -> psychevo_runtim
     let due = state
         .inner
         .state
-        .store()
+
         .due_automation_tasks(now, AUTOMATION_DUE_LIMIT)?;
     let mut accepted = 0;
     for task in due {
@@ -24,7 +24,7 @@ fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<u
     let candidates = state
         .inner
         .state
-        .store()
+
         .stale_automation_runs_for_recovery(
             now,
             AUTOMATION_STALE_RUN_RECOVERY_MS,
@@ -50,7 +50,7 @@ fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<u
         if state
             .inner
             .state
-            .store()
+
             .finish_automation_run(AutomationRunFinishInput {
                 run_id: &candidate.run.id,
                 status: "failed",
@@ -77,7 +77,7 @@ fn start_automation_run(
     let Some(run) = state
         .inner
         .state
-        .store()
+
         .claim_automation_run(&task.id, trigger)?
     else {
         return Ok(None);
@@ -113,7 +113,7 @@ async fn execute_automation_run(
             let _ = state
                 .inner
                 .state
-                .store()
+
                 .finish_automation_run(AutomationRunFinishInput {
                     run_id: &run.id,
                     status: "completed",
@@ -130,7 +130,7 @@ async fn execute_automation_run(
             let _ = state
                 .inner
                 .state
-                .store()
+
                 .finish_automation_run(AutomationRunFinishInput {
                     run_id: &run.id,
                     status: "failed",

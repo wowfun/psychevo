@@ -255,7 +255,7 @@ pub(crate) fn clarify_resolved_restores_previous_bottom_panel() {
     ui.apply_stream_event(
         RunStreamEvent::ClarifyResolved(ClarifyResolvedEvent {
             call_id: "call_clarify".to_string(),
-            reason: psychevo_runtime::ClarifyResolvedReason::TimedOut,
+            reason: psychevo_runtime::types::ClarifyResolvedReason::TimedOut,
         }),
         true,
         false,
@@ -568,8 +568,8 @@ pub(crate) async fn filesystem_approval_expands_before_selecting_a_canonical_sco
                 matched_rule: None,
                 suggested_rule: Some("filesystem:linked/result.txt".to_string()),
                 allow_always: false,
-                filesystem: Some(psychevo_runtime::FilesystemApprovalRequest {
-                    targets: vec![psychevo_runtime::FilesystemApprovalTarget {
+                filesystem: Some(psychevo_runtime::types::FilesystemApprovalRequest {
+                    targets: vec![psychevo_runtime::types::FilesystemApprovalTarget {
                         requested_path: "linked/result.txt".to_string(),
                         resolved_path: "/tmp/shared/result.txt".to_string(),
                     }],
@@ -652,8 +652,8 @@ pub(crate) fn filesystem_scope_keyboard_navigation_keeps_selection_visible() {
             matched_rule: None,
             suggested_rule: None,
             allow_always: false,
-            filesystem: Some(psychevo_runtime::FilesystemApprovalRequest {
-                targets: vec![psychevo_runtime::FilesystemApprovalTarget {
+            filesystem: Some(psychevo_runtime::types::FilesystemApprovalRequest {
+                targets: vec![psychevo_runtime::types::FilesystemApprovalTarget {
                     requested_path: "linked/result.txt".to_string(),
                     resolved_path: "/tmp/a/b/c/d/e/f/result.txt".to_string(),
                 }],
@@ -786,11 +786,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "Which mode should we use?".to_string(),
             options: vec![
-                psychevo_runtime::ClarifyQuestionOption {
+                psychevo_runtime::types::ClarifyQuestionOption {
                     label: "Fast (Recommended)".to_string(),
                     description: "Prioritize speed".to_string(),
                 },
-                psychevo_runtime::ClarifyQuestionOption {
+                psychevo_runtime::types::ClarifyQuestionOption {
                     label: "Careful".to_string(),
                     description: "Prioritize review".to_string(),
                 },
@@ -803,11 +803,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "How much detail should the answer include?".to_string(),
             options: vec![
-                psychevo_runtime::ClarifyQuestionOption {
+                psychevo_runtime::types::ClarifyQuestionOption {
                     label: "Brief".to_string(),
                     description: "Keep it concise".to_string(),
                 },
-                psychevo_runtime::ClarifyQuestionOption {
+                psychevo_runtime::types::ClarifyQuestionOption {
                     label: "Deep".to_string(),
                     description: "Cover tradeoffs".to_string(),
                 },
@@ -820,11 +820,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "Which output format should be used?".to_string(),
             options: vec![
-                psychevo_runtime::ClarifyQuestionOption {
+                psychevo_runtime::types::ClarifyQuestionOption {
                     label: "Markdown".to_string(),
                     description: "Use prose and bullets".to_string(),
                 },
-                psychevo_runtime::ClarifyQuestionOption {
+                psychevo_runtime::types::ClarifyQuestionOption {
                     label: "JSON".to_string(),
                     description: "Use structured data".to_string(),
                 },

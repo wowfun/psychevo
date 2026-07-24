@@ -3,7 +3,7 @@ fn thread_snapshot(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let thread = thread_id
         .map(|thread_id| {
             let forked_from_thread_id = store
@@ -66,7 +66,7 @@ fn thread_snapshot(
 }
 
 fn thread_history_editing_value(
-    store: &psychevo_runtime::SqliteStore,
+    store: &psychevo_runtime::state::StateRuntime,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Option<Value>> {
     let Some(revert) = store.session_revert_state(thread_id)? else {
@@ -132,17 +132,17 @@ fn snapshot_activity(
     if state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(thread_id)?
         .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"))
     {
         return Ok(activity);
     }
 
-    let Some(edge) = state.inner.state.store().find_agent_edge(thread_id)? else {
+    let Some(edge) = state.inner.state.find_agent_edge(thread_id)? else {
         return Ok(activity);
     };
-    if edge.child_session_id != thread_id || edge.status != psychevo_runtime::AgentEdgeStatus::Open
+    if edge.child_session_id != thread_id || edge.status != psychevo_runtime::state::AgentEdgeStatus::Open
     {
         return Ok(activity);
     }
@@ -150,7 +150,7 @@ fn snapshot_activity(
     let Some(parent_record) = state
         .inner
         .state
-        .store()
+
         .active_gateway_activity_for_thread(&edge.parent_session_id)?
     else {
         return Ok(activity);
@@ -181,7 +181,7 @@ fn replay_running_live_transcript_overlay(
     let snapshots = state
         .inner
         .state
-        .store()
+
         .list_gateway_live_snapshots_for_thread(thread_id, Some(active_turn_id), 1000)?;
     for snapshot in snapshots {
         let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event) else {
@@ -206,7 +206,7 @@ fn active_turn_projection_window(
     let Some(record) = state
         .inner
         .state
-        .store()
+
         .active_gateway_activity_for_thread(thread_id)?
     else {
         return Ok(None);
@@ -221,7 +221,7 @@ fn active_turn_projection_window(
 }
 
 fn first_committed_seq_from_activity_intent(
-    record: &psychevo_runtime::GatewayActivityRecord,
+    record: &psychevo_runtime::state::GatewayActivityRecord,
 ) -> Option<i64> {
     record
         .intent

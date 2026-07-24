@@ -6,7 +6,8 @@ use std::process::Command;
 use chardetng::EncodingDetector;
 use encoding_rs::{Encoding, GBK, IBM866, WINDOWS_1251, WINDOWS_1252};
 
-use crate::{Error, HostPlatform, Result};
+use crate::host_paths::HostPlatform;
+use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostProcessLaunch {

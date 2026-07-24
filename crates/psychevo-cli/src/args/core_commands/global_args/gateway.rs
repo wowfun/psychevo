@@ -19,6 +19,7 @@ pub(crate) enum GatewayCommand {
     Open(GatewayOpenArgs),
     #[command(about = "Start the managed Gateway server without opening a browser")]
     Start(GatewayStartArgs),
+    #[cfg(feature = "native-channels")]
     #[command(about = "Configure Gateway messaging channels")]
     Setup(GatewaySetupArgs),
     #[command(about = "Print managed Gateway server status")]
@@ -39,6 +40,7 @@ pub(crate) enum WebCommand {
     Restart(GatewayStartArgs),
 }
 
+#[cfg(feature = "native-channels")]
 #[derive(Debug, Parser, Clone)]
 pub(crate) struct GatewaySetupArgs {
     #[arg(

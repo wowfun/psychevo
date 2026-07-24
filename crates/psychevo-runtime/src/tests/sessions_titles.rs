@@ -6,7 +6,7 @@ pub(crate) fn latest_run_session_filters_source_and_cwd() {
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let other_cwd = canonical_cwd(&temp.path().join("other")).expect("other");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let smoke = store.create_session(&cwd).expect("smoke");
     let other = store
         .create_session_with_metadata(&other_cwd, "run", "model", "provider", None)
@@ -21,7 +21,7 @@ pub(crate) fn latest_run_session_filters_source_and_cwd() {
         .append_message(&first, &user_message("real activity", 1))
         .expect("activity");
 
-    let state = StateRuntime::from_store(db, store.clone());
+    let state = store.clone();
     let latest = latest_run_session_for_cwd(&state, &cwd)
         .expect("latest")
         .expect("session");
@@ -36,7 +36,7 @@ pub(crate) fn session_title_setter_normalizes_and_bounds_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -59,7 +59,7 @@ pub(crate) async fn new_visible_session_title_uses_model_generated_title_without
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -95,7 +95,7 @@ pub(crate) async fn new_visible_session_title_falls_back_when_model_title_fails(
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -129,7 +129,7 @@ pub(crate) async fn new_visible_session_title_fallback_uses_selected_skill_for_m
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -173,7 +173,7 @@ pub(crate) async fn new_visible_session_title_fallback_covers_visible_sources() 
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let resolved = resolved_title_provider();
 
     for source in ["web", "run", "automation", "channel/wechat"] {
@@ -205,12 +205,12 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let resolved = resolved_title_provider();
     let internal = store
         .create_session_with_metadata(
             &cwd,
-            crate::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+            crate::thread_lineage::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
             "model",
             "provider",
             None,
@@ -251,7 +251,7 @@ pub(crate) async fn new_visible_session_title_preserves_existing_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
         .expect("session");
@@ -351,7 +351,6 @@ model = "main"
         Ok(joined) => {
             let result = joined.expect("run task").expect("streaming run");
             state
-                .store()
                 .set_session_title(&result.session_id, "Manual title")
                 .expect("manual title");
             release_title_tx.send(()).expect("release title");
@@ -377,7 +376,6 @@ model = "main"
     assert_eq!(event["title"], "Manual title");
     assert_eq!(
         state
-            .store()
             .session_summary(&result.session_id)
             .expect("summary")
             .and_then(|summary| summary.title)
@@ -414,8 +412,8 @@ pub(crate) fn visible_session_source_title_rules_match_history_sources() {
     }
     for source in [
         "automation-draft",
-        crate::TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-        crate::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+        crate::thread_lineage::TUI_SIDE_CONVERSATION_SESSION_SOURCE,
+        crate::thread_lineage::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
     ] {
         assert!(
             !visible_session_source_allows_auto_title(source),
@@ -429,7 +427,7 @@ pub(crate) fn first_use_empty_visible_session_materializes_model_and_metadata() 
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
         .expect("session");
@@ -465,7 +463,7 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let non_empty = store
         .create_session_with_metadata(
             &cwd,
@@ -481,7 +479,7 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
     let internal = store
         .create_session_with_metadata(
             &cwd,
-            crate::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+            crate::thread_lineage::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
             "internal-model",
             "internal-provider",
             None,

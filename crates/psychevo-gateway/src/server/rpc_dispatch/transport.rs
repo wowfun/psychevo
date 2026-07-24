@@ -361,7 +361,7 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
     let mut last_seq = state
         .inner
         .state
-        .store()
+
         .latest_gateway_live_event_seq()
         .unwrap_or_default();
     let weak_state = Arc::downgrade(&state.inner);
@@ -378,7 +378,7 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
             let events = match state
                 .inner
                 .state
-                .store()
+
                 .list_gateway_live_events_after(last_seq, 100)
             {
                 Ok(events) => events,
@@ -396,7 +396,7 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                 state.publish_gateway_event_with_context(event, context, None);
             }
             let now = gateway_now_ms();
-            let snapshots = match state.inner.state.store().list_gateway_live_snapshots(1000) {
+            let snapshots = match state.inner.state.list_gateway_live_snapshots(1000) {
                 Ok(snapshots) => snapshots,
                 Err(_) => continue,
             };
@@ -412,7 +412,7 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                 }
                 if let Some(activity_id) = snapshot.activity_id.as_deref() {
                     let Ok(Some(activity)) =
-                        state.inner.state.store().gateway_activity(activity_id)
+                        state.inner.state.gateway_activity(activity_id)
                     else {
                         continue;
                     };
@@ -437,12 +437,12 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                 let _ = state
                     .inner
                     .state
-                    .store()
+
                     .cleanup_gateway_live_events_before(now - 10 * 60_000);
                 let _ = state
                     .inner
                     .state
-                    .store()
+
                     .cleanup_gateway_live_snapshots_before(now - 10 * 60_000);
                 last_cleanup_ms = now;
             }

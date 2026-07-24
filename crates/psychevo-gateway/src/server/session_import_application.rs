@@ -5,20 +5,21 @@ use crate::{
     runtime_profile_config_revision,
 };
 use futures::{StreamExt, stream};
-use psychevo_runtime::AgentEntrypoint;
+use psychevo_runtime::agents::AgentEntrypoint;
 
 const IMPORT_DISCOVERY_CONCURRENCY: usize = 4;
 const IMPORT_STATE_METADATA_KEY: &str = "agentSessionImportState";
 const LIFECYCLE_METADATA_KEY: &str = "agentSessionLifecycle";
 const DELETE_INTENT_METADATA_KEY: &str = "agentSessionDeleteIntent";
 
-pub(super) async fn list_importable_agent_sessions(
+pub(super) async fn list(
     state: &WebState,
-    scope: &ResolvedScope,
+    auth: &AuthContext,
     params: wire::ThreadImportListParams,
 ) -> psychevo_runtime::Result<wire::ThreadImportListResult> {
+    let scope = resolve_optional_scope(state, auth, Some(params.scope.clone()))?;
     let requested_cursors = params.cursors;
-    let jobs = runtime_profiles::importable_acp_profiles(state, scope)?;
+    let jobs = runtime_profiles::importable_acp_profiles(state, &scope)?;
     let mut profiles = stream::iter(jobs)
         .map(|profile| {
             let state = state.clone();
@@ -83,14 +84,10 @@ async fn discover_profile_sessions(
             let mut sessions = Vec::new();
             let mut already_imported_count = 0;
             for session in page.sessions {
-                match state
-                    .inner
-                    .state
-                    .store()
-                    .gateway_runtime_binding_by_native_session(
-                        &runtime_profile_ref,
-                        &session.native_session_id,
-                    ) {
+                match state.inner.state.gateway_runtime_binding_by_native_session(
+                    &runtime_profile_ref,
+                    &session.native_session_id,
+                ) {
                     Ok(Some(_)) => {
                         already_imported_count += 1;
                         continue;
@@ -202,11 +199,12 @@ fn resolve_import_cursor(
     Ok(Some(cursor.cursor.clone()))
 }
 
-pub(super) async fn import_agent_session(
+pub(super) async fn import(
     state: &WebState,
-    scope: &ResolvedScope,
+    auth: &AuthContext,
     params: wire::ThreadImportParams,
 ) -> psychevo_runtime::Result<wire::ThreadImportResult> {
+    let scope = resolve_optional_scope(state, auth, Some(params.scope.clone()))?;
     let import_archived = params.archived;
     let candidate = take_import_candidate(state, &params.candidate_id)?;
     if candidate.cwd != scope.cwd {
@@ -219,7 +217,7 @@ pub(super) async fn import_agent_session(
             None,
         ));
     }
-    let target = runtime_profiles::runnable_target_by_id(state, scope, &params.target_id)?;
+    let target = runtime_profiles::runnable_target_by_id(state, &scope, &params.target_id)?;
     if target.runtime_profile_ref != candidate.runtime_profile_ref {
         return Err(agent_session_error(
             "agent_session_candidate_target_mismatch",
@@ -233,7 +231,6 @@ pub(super) async fn import_agent_session(
     if let Some(existing) = state
         .inner
         .state
-        .store()
         .gateway_runtime_binding_by_native_session(
             &candidate.runtime_profile_ref,
             &candidate.native_session_id,
@@ -244,15 +241,15 @@ pub(super) async fn import_agent_session(
         } else {
             restore_thread(state, &existing.thread_id).await?;
         }
-        bind_source_to_thread(state, scope, &existing.thread_id)?;
+        bind_source_to_thread(state, &scope, &existing.thread_id)?;
         return Ok(wire::ThreadImportResult {
             snapshot: Box::new(typed_thread_snapshot(
-                thread_snapshot_live(state, scope, Some(&existing.thread_id)).await?,
+                thread_snapshot_live(state, &scope, Some(&existing.thread_id)).await?,
             )?),
         });
     }
 
-    let profile = runtime_profiles::importable_acp_profiles(state, scope)?
+    let profile = runtime_profiles::importable_acp_profiles(state, &scope)?
         .into_iter()
         .find(|profile| profile.config.id == candidate.runtime_profile_ref)
         .map(|profile| profile.config)
@@ -261,12 +258,12 @@ pub(super) async fn import_agent_session(
         })?;
     let peer = runtime_profiles::resolve_runtime_target_peer_turn(
         state,
-        scope,
+        &scope,
         &candidate.runtime_profile_ref,
         target.agent_ref.as_deref(),
     )?
     .ok_or_else(|| agent_session_configuration_error("The selected ACP Agent is unavailable."))?;
-    let thread_id = state.inner.state.store().create_session_with_metadata(
+    let thread_id = state.inner.state.create_session_with_metadata(
         &candidate.cwd,
         "web",
         "pending",
@@ -276,7 +273,7 @@ pub(super) async fn import_agent_session(
     let imported_native_session_id = candidate.native_session_id.clone();
     let result = async {
         let imported = import_agent_session_into_thread(
-            state, scope, &target, profile, peer, candidate, &thread_id,
+            state, &scope, &target, profile, peer, candidate, &thread_id,
         )
         .await?;
         if !import_archived {
@@ -285,7 +282,7 @@ pub(super) async fn import_agent_session(
         archive_thread(state, &thread_id).await?;
         Ok(wire::ThreadImportResult {
             snapshot: Box::new(typed_thread_snapshot(
-                thread_snapshot_live(state, scope, Some(&thread_id)).await?,
+                thread_snapshot_live(state, &scope, Some(&thread_id)).await?,
             )?),
         })
     }
@@ -353,16 +350,12 @@ async fn import_agent_session_into_thread(
         revision,
         &fingerprint,
     )?;
-    state
-        .inner
-        .state
-        .store()
-        .attach_gateway_runtime_native_session(
-            thread_id,
-            binding.binding_revision,
-            &candidate.native_session_id,
-        )?;
-    state.inner.state.store().set_session_metadata_field(
+    state.inner.state.attach_gateway_runtime_native_session(
+        thread_id,
+        binding.binding_revision,
+        &candidate.native_session_id,
+    )?;
+    state.inner.state.set_session_metadata_field(
         thread_id,
         ACP_PEER_METADATA_KEY,
         Some(crate::acp_peer::peer_session_metadata(
@@ -379,17 +372,12 @@ async fn import_agent_session_into_thread(
         .as_deref()
         .filter(|title| !title.trim().is_empty())
     {
-        state
-            .inner
-            .state
-            .store()
-            .set_session_title(thread_id, title)?;
+        state.inner.state.set_session_title(thread_id, title)?;
     }
-    state.inner.state.store().set_session_metadata_field(
-        thread_id,
-        IMPORT_STATE_METADATA_KEY,
-        None,
-    )?;
+    state
+        .inner
+        .state
+        .set_session_metadata_field(thread_id, IMPORT_STATE_METADATA_KEY, None)?;
     bind_source_to_thread(state, scope, thread_id)?;
     Ok(wire::ThreadImportResult {
         snapshot: Box::new(typed_thread_snapshot(
@@ -431,7 +419,7 @@ fn persist_lifecycle_projection(
     target: &wire::RunnableTargetView,
     snapshot: &crate::acp_peer::AcpSessionSnapshot,
 ) -> psychevo_runtime::Result<()> {
-    state.inner.state.store().set_session_metadata_field(
+    state.inner.state.set_session_metadata_field(
         thread_id,
         LIFECYCLE_METADATA_KEY,
         Some(json!({
@@ -466,7 +454,7 @@ pub(super) async fn fork_acp_thread(
         .peer
         .clone()
         .ok_or_else(|| agent_session_configuration_error("The source ACP Agent is unavailable."))?;
-    let thread_id = state.inner.state.store().create_session_with_metadata(
+    let thread_id = state.inner.state.create_session_with_metadata(
         &scope.cwd,
         "web",
         "pending",
@@ -526,17 +514,13 @@ pub(super) async fn fork_acp_thread(
             bound.revision,
             &bound.fingerprint,
         )?;
-        state
-            .inner
-            .state
-            .store()
-            .attach_gateway_runtime_native_session(
-                &thread_id,
-                fork_binding.binding_revision,
-                &snapshot.native_session_id,
-            )?;
+        state.inner.state.attach_gateway_runtime_native_session(
+            &thread_id,
+            fork_binding.binding_revision,
+            &snapshot.native_session_id,
+        )?;
         persist_lifecycle_projection(state, &thread_id, &target, &snapshot)?;
-        state.inner.state.store().set_session_metadata_field(
+        state.inner.state.set_session_metadata_field(
             &thread_id,
             IMPORT_STATE_METADATA_KEY,
             None,
@@ -618,11 +602,7 @@ pub(super) async fn archive_thread(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Value> {
-    if let Some(binding) = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(thread_id)?
+    if let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id)?
         && binding.backend_kind.as_deref() == Some("acp")
         && let Some(native_session_id) = binding.native_session_id.clone()
         && state
@@ -658,7 +638,7 @@ pub(super) async fn archive_thread(
                 .await?;
         }
     }
-    state.inner.state.store().archive_session(thread_id)?;
+    state.inner.state.archive_session(thread_id)?;
     state
         .inner
         .codex_capability_broker
@@ -671,11 +651,7 @@ pub(super) async fn restore_thread(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Value> {
-    if let Some(binding) = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(thread_id)?
+    if let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id)?
         && binding.backend_kind.as_deref() == Some("acp")
     {
         let scope = resolved_scope_for_thread(state, thread_id)?;
@@ -718,7 +694,7 @@ pub(super) async fn restore_thread(
         };
         persist_lifecycle_projection(state, thread_id, &target, &snapshot)?;
     }
-    state.inner.state.store().restore_session(thread_id)?;
+    state.inner.state.restore_session(thread_id)?;
     session_summary_by_id(state, thread_id)
 }
 
@@ -726,12 +702,7 @@ pub(super) async fn delete_thread(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<()> {
-    let Some(binding) = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(thread_id)?
-    else {
+    let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id)? else {
         state.inner.state.delete_session(thread_id)?;
         state
             .inner
@@ -789,7 +760,7 @@ pub(super) async fn delete_thread(
             Some(format!("thread:{thread_id}")),
         ));
     }
-    state.inner.state.store().set_session_metadata_field(
+    state.inner.state.set_session_metadata_field(
         thread_id,
         DELETE_INTENT_METADATA_KEY,
         Some(json!({"state": "prepared", "createdAtMs": gateway_now_ms()})),
@@ -799,7 +770,7 @@ pub(super) async fn delete_thread(
         .gateway
         .delete_bound_agent_session(binding, bound.profile, peer, options)
         .await?;
-    state.inner.state.store().set_session_metadata_field(
+    state.inner.state.set_session_metadata_field(
         thread_id,
         DELETE_INTENT_METADATA_KEY,
         Some(json!({"state": "remoteAcknowledged", "updatedAtMs": gateway_now_ms()})),
@@ -820,7 +791,6 @@ fn require_acp_binding(
     let binding = state
         .inner
         .state
-        .store()
         .gateway_runtime_binding(thread_id)?
         .ok_or_else(|| agent_session_configuration_error("The Thread has no Agent binding."))?;
     if binding.backend_kind.as_deref() != Some("acp") {
@@ -837,11 +807,11 @@ fn require_acp_binding(
 }
 
 pub(super) fn reconcile_acknowledged_session_deletes(state: &WebState) {
-    let Ok(sessions) = state.inner.state.store().list_sessions_with_sources(&[]) else {
+    let Ok(sessions) = state.inner.state.list_sessions_with_sources(&[]) else {
         return;
     };
     for session in sessions {
-        let Ok(Some(metadata)) = state.inner.state.store().session_metadata(&session.id) else {
+        let Ok(Some(metadata)) = state.inner.state.session_metadata(&session.id) else {
             continue;
         };
         if metadata

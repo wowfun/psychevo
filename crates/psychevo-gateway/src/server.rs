@@ -19,6 +19,7 @@ use axum::routing::{get, post};
 #[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use futures::{SinkExt, StreamExt};
+use psychevo_agent_core::{Message as RuntimeMessage, UserContentBlock};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::command_registry::{
     AvailableSlashCommand, CommandArgumentKind, CommandCapability, CommandPresentation,
@@ -31,53 +32,75 @@ use psychevo_runtime::command_registry::{
     split_slash_command_token, validate_configured_alias, validate_configured_slash_target,
     validate_shared_slash_config,
 };
-use psychevo_runtime::{
-    AgentBackendConfig, AgentCatalog, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions,
-    AgentEntrypoint, AgentMissionRunInput, AgentRunRecord, AgentSource, AgentTeamCatalog,
-    AgentTeamDefinition, AgentTeamMember, AgentTeamRunInput, AgentTeamSource,
-    AutomationRunFinishInput, AutomationRunRecord, AutomationSchedule, AutomationTaskInput,
-    AutomationTaskRecord, ChildSessionSnapshotInput, ClarifyAnswer, ClarifyResponse, ClarifyResult,
-    ConfigScope, ContextOptions, ConversationDraftPart, Error, ExecutableResolveOptions,
+use psychevo_runtime::state::{
+    AgentMissionRunInput, AgentTeamRunInput, AutomationRunFinishInput, AutomationRunRecord,
+    AutomationTaskInput, AutomationTaskRecord, ChildSessionSnapshotInput, ConversationDraftPart,
     GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
-    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, HostPlatform, InstallOptions,
-    ListSkillsOptions, LoadedMainAgent, MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP,
-    McpServerConfigInput, McpToolPolicyInput, Message as RuntimeMessage, ModelCatalogEntry,
-    ModelCatalogProvider, ModelState, PermissionApprovalDecision, PermissionMode,
-    PluginAdapterMode, PluginInspectOptions, PluginInstallOptions, PluginMarketplaceEntry,
-    PluginScope, PluginSourceKind, REASONING_EFFORT_VALUES, RunMode, RunOptions,
-    RunSandboxOverride, RuntimeProfileConfig, RuntimeProfileKind,
-    SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
-    SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY, SessionArtifactKind,
-    SessionExportFormat, SessionExportIncludeSet, SessionExportOptions, SessionListProjection,
-    SessionRevertKind, SessionTraceReadOptions, SessionUndoOptions, SessionUsageOptions,
-    SkillDiscoveryOptions, SkillTarget, StateRuntime, UsageReadOptions, UserContentBlock,
-    UserShellContextOptions, WEB_SIDE_CONVERSATION_SESSION_SOURCE, WorkspaceMutationSink,
-    agent_spawn_paused, agent_status_records, auth_status_value, canonicalize_cwd,
-    clear_mcp_oauth_access_token, codex_plugin_set_enabled_value, config_show_value,
-    configured_models, context_snapshot, create_local_toolset, discover_agent_teams_with_catalog,
-    discover_agents, discover_skills, fetch_and_cache_model_catalog, format_context_total_value,
-    format_context_total_value_parts, image_generation_config_value, install_skill,
-    latest_due_at_ms, list_skill_bundles, list_skills_value_with_options,
-    load_agent_backend_configs, load_runtime_profile_configs, main_agent_default_metadata,
-    main_agent_from_session_metadata, main_agent_metadata, mcp_server_value, mcp_servers_value,
-    mcp_test_server_value, model_catalog_entry_is_free, model_catalog_provider,
-    model_catalog_providers, next_run_at_ms, normalize_provider_id, normalize_reasoning_effort,
-    normalized_native_path, parse_agent_definition_text, parse_agent_team_definition_text,
-    plugin_doctor_value, plugin_import_inspect_value, plugin_install_value, plugin_list_value,
-    plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
-    plugin_reset_enabled_value, plugin_set_enabled_value, plugin_set_trust_value,
-    plugin_uninstall_value, plugin_view_value, read_cached_model_catalog, redo_session,
-    remove_config_value, remove_installed_skill, remove_local_toolset, remove_mcp_server,
-    render_session_export, resolve_agent_definition, resolve_agent_team_definition,
-    resolve_executable_path, resolve_voice_asr_config, resolve_voice_realtime_config,
-    resolve_voice_tts_config, resume_agent_id, save_mcp_oauth_access_token,
-    selected_configured_model, send_agent_message, session_usage_summary, set_agent_spawn_paused,
-    set_auxiliary_model_with_reasoning, set_channel_enabled, set_config_value,
-    set_default_model_with_reasoning, set_local_toolset_enabled, set_mcp_server_enabled,
-    set_mcp_server_tool_policy, set_provider_api_key, set_provider_model_config, set_skill_enabled,
-    side_conversation_boundary_prompt, side_conversation_session_source, stop_agent_id_with_grace,
-    toolsets_value, undo_session, upsert_mcp_server, usage_read, valid_agent_name,
-    view_skill_value_selected, voice_config_value, write_installed_skill,
+    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, SessionListProjection,
+    SessionRevertKind, StateRuntime,
+};
+use psychevo_runtime::{
+    Error, agents::AgentBackendConfig, agents::AgentCatalog, agents::AgentDefinition,
+    agents::AgentDiagnostic, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
+    agents::AgentRunRecord, agents::AgentSource, agents::AgentTeamCatalog,
+    agents::AgentTeamDefinition, agents::AgentTeamMember, agents::AgentTeamSource,
+    agents::LoadedMainAgent, agents::MAX_AGENT_SPAWN_DEPTH_CAP,
+    agents::MAX_TEAM_PARALLEL_AGENTS_CAP, agents::SESSION_MAIN_AGENT_METADATA_KEY,
+    agents::agent_spawn_paused, agents::agent_status_records,
+    agents::discover_agent_teams_with_catalog, agents::discover_agents,
+    agents::main_agent_default_metadata, agents::main_agent_from_session_metadata,
+    agents::main_agent_metadata, agents::parse_agent_definition_text,
+    agents::parse_agent_team_definition_text, agents::resolve_agent_definition,
+    agents::resolve_agent_team_definition, agents::resume_agent_id, agents::send_agent_message,
+    agents::set_agent_spawn_paused, agents::stop_agent_id_with_grace, agents::valid_agent_name,
+    automations::AutomationSchedule, automations::latest_due_at_ms, automations::next_run_at_ms,
+    config::McpServerConfigInput, config::McpToolPolicyInput, config::REASONING_EFFORT_VALUES,
+    config::RuntimeProfileConfig, config::RuntimeProfileKind, config::auth_status_value,
+    config::clear_mcp_oauth_access_token, config::config_show_value, config::configured_models,
+    config::create_local_toolset, config::fetch_and_cache_model_catalog,
+    config::generated_runtime_profile_id_for_backend, config::image_generation_config_value,
+    config::load_agent_backend_configs, config::load_runtime_profile_configs,
+    config::mcp_server_value, config::mcp_servers_value, config::model_catalog_entry_is_free,
+    config::model_catalog_provider, config::model_catalog_providers, config::normalize_provider_id,
+    config::read_cached_model_catalog, config::remove_config_value, config::remove_local_toolset,
+    config::remove_mcp_server, config::resolve_voice_asr_config,
+    config::resolve_voice_realtime_config, config::resolve_voice_tts_config,
+    config::save_mcp_oauth_access_token, config::selected_configured_model,
+    config::set_auxiliary_model_with_reasoning, config::set_channel_enabled,
+    config::set_config_value, config::set_default_model_with_reasoning,
+    config::set_local_toolset_enabled, config::set_mcp_server_enabled,
+    config::set_mcp_server_tool_policy, config::set_provider_api_key,
+    config::set_provider_model_config, config::toolsets_value, config::upsert_mcp_server,
+    config::voice_config_value, context_usage::ContextOptions, context_usage::context_snapshot,
+    context_usage::format_context_total_value, context_usage::format_context_total_value_parts,
+    host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
+    host_paths::normalized_native_path, host_paths::resolve_executable_path,
+    mcp::mcp_test_server_value, model_state::ModelState,
+    model_state::SESSION_COMPOSER_MODEL_METADATA_KEY, model_state::normalize_reasoning_effort,
+    paths::canonicalize_cwd, plugins::PluginInspectOptions, plugins::PluginInstallOptions,
+    plugins::PluginMarketplaceEntry, plugins::PluginScope, plugins::PluginSourceKind,
+    plugins::codex_plugin_set_enabled_value, plugins::plugin_doctor_value,
+    plugins::plugin_import_inspect_value, plugins::plugin_install_value,
+    plugins::plugin_list_value, plugins::plugin_marketplace_add_value,
+    plugins::plugin_marketplace_list_value, plugins::plugin_marketplace_remove_value,
+    plugins::plugin_reset_enabled_value, plugins::plugin_set_enabled_value,
+    plugins::plugin_uninstall_value, plugins::plugin_view_value,
+    prompt_templates::side_conversation_boundary_prompt, session_export::SessionArtifactKind,
+    session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
+    session_export::SessionExportOptions, session_export::render_session_export,
+    session_trace::SessionTraceReadOptions, skills::InstallOptions, skills::ListSkillsOptions,
+    skills::SkillDiscoveryOptions, skills::SkillTarget, skills::discover_skills,
+    skills::install_skill, skills::list_skill_bundles, skills::list_skills_value_with_options,
+    skills::remove_installed_skill, skills::set_skill_enabled, skills::view_skill_value_selected,
+    skills::write_installed_skill, stats::session_usage_summary, stats::usage_read,
+    thread_lineage::SIDE_CONVERSATION_METADATA_KEY, thread_lineage::SIDE_INHERITED_METADATA_KEY,
+    thread_lineage::WEB_SIDE_CONVERSATION_SESSION_SOURCE,
+    thread_lineage::side_conversation_session_source, types::ClarifyAnswer, types::ClarifyResponse,
+    types::ClarifyResult, types::ConfigScope, types::ModelCatalogEntry,
+    types::ModelCatalogProvider, types::PermissionApprovalDecision, types::PermissionMode,
+    types::RunMode, types::RunOptions, types::RunSandboxOverride, types::SessionUndoOptions,
+    types::SessionUsageOptions, types::UsageReadOptions, types::UserShellContextOptions,
+    types::WorkspaceMutationSink, undo::redo_session, undo::undo_session,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -107,7 +130,8 @@ mod commands;
 mod completion;
 mod event_delivery;
 mod runtime_profiles;
-mod session_lifecycle;
+mod session_application;
+mod session_import_application;
 mod terminal;
 mod thread_application;
 mod voice;
@@ -159,29 +183,23 @@ use runtime_profiles::{
 use runtime_profiles::{
     acp_session_mode_control_descriptor, combined_thread_revision, generated_runtime_profiles,
 };
-use session_lifecycle::{
-    archive_thread, delete_thread, fork_acp_thread, fork_native_thread, import_agent_session,
-    list_importable_agent_sessions, reconcile_acknowledged_session_deletes, restore_thread,
+use session_import_application::{
+    fork_acp_thread, fork_native_thread, reconcile_acknowledged_session_deletes,
     typed_thread_snapshot,
 };
 use terminal::TerminalManager;
 use thread_application::{
     RoutedThreadTurn, action_descriptors as thread_action_descriptors,
-    authoritative_history_projection, authoritative_history_view, open_thread_draft,
+    authoritative_history_projection, authoritative_history_view,
     pending_interactions as thread_pending_interactions, prewarm_codex_runtime_inventory,
-    read_history as thread_history_read_result,
-    read_history_draft as thread_history_draft_read_result,
-    respond_to_interaction as thread_interaction_respond_result,
     respond_to_routed_interaction_for_selector as thread_routed_interaction_respond_for_selector,
-    run_action as thread_action_run_result, run_routed_action as run_routed_thread_action,
-    run_routed_turn as run_routed_thread_turn, source_draft_control_values, start_thread_turn,
+    run_routed_action as run_routed_thread_action, run_routed_turn as run_routed_thread_turn,
+    source_draft_control_values,
 };
 use voice::{
     RealtimeSessionState, update_voice_policy_for_source, voice_asr_transcribe_value,
     voice_policy_for_source, voice_policy_read_value, voice_policy_update_value,
-    voice_realtime_append_audio_value, voice_realtime_append_speech_value,
-    voice_realtime_append_text_value, voice_realtime_list_voices_value, voice_realtime_start_value,
-    voice_realtime_stop_value, voice_tts_synthesize_value,
+    voice_tts_synthesize_value,
 };
 #[cfg(test)]
 use workspace::workspace_dir_name;

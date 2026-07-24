@@ -28,7 +28,7 @@ fn authorize_thread(
     if state
         .inner
         .state
-        .store()
+
         .session_summary(thread_id)?
         .is_none()
     {

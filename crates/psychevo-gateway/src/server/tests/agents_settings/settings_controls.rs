@@ -227,7 +227,7 @@ async fn settings_read_exposes_session_agent() {
     let session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -237,7 +237,7 @@ async fn settings_read_exposes_session_agent() {
                 "main_agent": main_agent_metadata(
                     "translate",
                     "translate",
-                    psychevo_runtime::AgentSource::Project,
+                    psychevo_runtime::agents::AgentSource::Project,
                     None,
                 )
             })),
@@ -273,7 +273,7 @@ async fn settings_update_persists_session_agent_and_default() {
     let session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
         .expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -303,7 +303,7 @@ async fn settings_update_persists_session_agent_and_default() {
     let metadata = state
         .inner
         .state
-        .store()
+
         .session_metadata(&session)
         .expect("metadata")
         .expect("metadata value");
@@ -337,7 +337,7 @@ async fn settings_update_persists_session_agent_and_default() {
     let metadata = state
         .inner
         .state
-        .store()
+
         .session_metadata(&session)
         .expect("metadata")
         .expect("metadata value");
@@ -354,7 +354,7 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
     let session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
         .expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)

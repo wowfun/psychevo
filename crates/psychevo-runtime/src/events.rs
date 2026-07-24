@@ -12,14 +12,14 @@ use crate::messages::{
     add_assistant_metadata, add_elapsed_ms_metadata, sanitize_message_for_output,
 };
 use crate::session_trace::SessionTraceSink;
-use crate::store::{ContextEvidenceInput, SqliteStore};
+use crate::store::{ContextEvidenceInput, StateRuntime};
 use crate::types::{
     EDITABLE_INPUT_METADATA_KEY, MessageAccounting, ModelMetadata, PromptDisplayMetadata,
     RunStreamEvent, RunStreamSink, SelectedAgent, SmokeControl, TUI_DISPLAY_METADATA_KEY,
 };
 
 pub(crate) struct PersistenceSink {
-    pub(crate) store: SqliteStore,
+    pub(crate) store: StateRuntime,
     pub(crate) session_id: String,
     pub(crate) prompt_snapshot: Option<String>,
     pub(crate) prompt_snapshot_written: Arc<Mutex<bool>>,

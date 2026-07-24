@@ -51,7 +51,7 @@ async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
     let runs = state
         .inner
         .state
-        .store()
+
         .automation_runs_for_task(&automation_id, 10)
         .expect("automation runs");
     assert_eq!(runs.len(), 1);
@@ -72,7 +72,7 @@ async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
     assert!(sandbox.enabled);
     assert_eq!(
         sandbox.mode,
-        psychevo_runtime::RunSandboxMode::WorkspaceWrite
+        psychevo_runtime::types::RunSandboxMode::WorkspaceWrite
     );
 
     let mut saw_terminal = false;
@@ -90,7 +90,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
     let historical_thread = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "automation",
@@ -104,7 +104,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
     state
         .inner
         .state
-        .store()
+
         .upsert_automation_task(AutomationTaskInput {
             id: Some(automation_id.to_string()),
             cwd,
@@ -124,7 +124,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
     let stale_run = state
         .inner
         .state
-        .store()
+
         .claim_automation_run(automation_id, "scheduler")
         .expect("claim")
         .expect("running claim");
@@ -143,7 +143,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
     let recovered = state
         .inner
         .state
-        .store()
+
         .automation_task(automation_id)
         .expect("automation task")
         .expect("task");

@@ -217,7 +217,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
     let parent_session = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -726,7 +726,7 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
         state
             .inner
             .state
-            .store()
+
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("sessions")
             .len(),
@@ -1005,13 +1005,13 @@ async fn download_session_honors_export_query_options() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state
         .inner
         .state
-        .store()
+
         .append_message(&session_id, &runtime_user_message("hello export", 1))
         .expect("message");
     let mut headers = HeaderMap::new();
@@ -1058,13 +1058,13 @@ async fn download_session_defaults_to_markdown_artifact() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state
         .inner
         .state
-        .store()
+
         .append_message(&session_id, &runtime_user_message("hello markdown", 1))
         .expect("message");
     let mut headers = HeaderMap::new();
@@ -1110,7 +1110,7 @@ async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
         .decode(psychevo_ai::DEFAULT_FAKE_IMAGE_BASE64)
         .expect("png fixture");
     let artifact =
-        psychevo_runtime::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
+        psychevo_runtime::media::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
             .expect("artifact");
 
     let unauthorized = read_media_artifact(

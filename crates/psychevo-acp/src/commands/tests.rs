@@ -6,9 +6,7 @@ mod tests {
         SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
         available_slash_commands_for_surface, parse_slash_command_line, slash_invocation_effect,
     };
-    use psychevo_runtime::{
-        SessionExportInclude, WorkspaceDiffFileStatus, WorkspaceDiffTruncation,
-    };
+    use psychevo_runtime::{session_export::SessionExportInclude, workspace_diff::WorkspaceDiffFileStatus, workspace_diff::WorkspaceDiffTruncation};
 
     #[test]
     fn acp_advertises_diff_and_allows_it_during_active_turns() {

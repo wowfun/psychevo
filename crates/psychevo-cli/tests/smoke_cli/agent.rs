@@ -23,7 +23,7 @@ pub(crate) fn cli_agent_inspect_unknown_id_reports_not_found() {
 pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let store = psychevo_runtime::SqliteStore::open(&db).expect("store");
+    let store = psychevo_runtime::state::StateRuntime::open(&db).expect("store");
     let cwd = temp.path().join("repo");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let parent = store
@@ -36,7 +36,7 @@ pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",

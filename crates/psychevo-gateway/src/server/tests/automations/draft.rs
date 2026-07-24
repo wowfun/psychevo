@@ -61,5 +61,5 @@ async fn automation_draft_returns_model_draft_without_persisting_task() {
         .as_ref()
         .expect("draft sandbox override");
     assert!(sandbox.enabled);
-    assert_eq!(sandbox.mode, psychevo_runtime::RunSandboxMode::ReadOnly);
+    assert_eq!(sandbox.mode, psychevo_runtime::types::RunSandboxMode::ReadOnly);
 }

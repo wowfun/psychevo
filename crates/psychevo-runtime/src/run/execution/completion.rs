@@ -50,7 +50,7 @@ pub(crate) fn prompt_prefix_invalidation_reason(
 }
 
 pub(crate) fn take_prompt_prefix_notice(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
 ) -> Result<Option<String>> {
     let notice = store
@@ -210,7 +210,7 @@ pub(crate) async fn smart_review_permission(
 }
 
 pub(crate) fn record_missed_required_agents(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     messages: &[Message],
     required: &[String],

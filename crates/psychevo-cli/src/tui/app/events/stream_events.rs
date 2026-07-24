@@ -170,7 +170,7 @@ impl TuiApp {
         loop {
             let records = self
                 .state_runtime
-                .store()
+
                 .list_gateway_live_events_after(after_seq, 500)?;
             if records.is_empty() {
                 break;
@@ -196,7 +196,7 @@ impl TuiApp {
     ) -> Result<bool> {
         let records = self
             .state_runtime
-            .store()
+
             .list_gateway_live_events_after(self.last_gateway_live_event_seq, 100)?;
         let mut changed = false;
         for record in records {
@@ -214,7 +214,7 @@ impl TuiApp {
     ) -> Result<bool> {
         let snapshots = self
             .state_runtime
-            .store()
+
             .list_gateway_live_snapshots_for_thread(session_id, None, 1000)?;
         let mut changed = false;
         for snapshot in snapshots {
@@ -233,7 +233,7 @@ impl TuiApp {
     ) -> Result<bool> {
         let snapshots = self
             .state_runtime
-            .store()
+
             .list_gateway_live_snapshots(1000)?;
         let mut changed = false;
         for snapshot in snapshots {
@@ -259,7 +259,7 @@ impl TuiApp {
             return Ok(false);
         }
         if let Some(activity_id) = snapshot.activity_id.as_deref() {
-            let Some(activity) = self.state_runtime.store().gateway_activity(activity_id)? else {
+            let Some(activity) = self.state_runtime.gateway_activity(activity_id)? else {
                 return Ok(false);
             };
             if !matches!(activity.status.as_str(), "running" | "queued")
@@ -332,7 +332,7 @@ impl TuiApp {
         };
         Ok(self
             .state_runtime
-            .store()
+
             .gateway_activity(activity_id)?
             .and_then(|activity| activity.thread_id))
     }
@@ -353,7 +353,7 @@ impl TuiApp {
         };
         Ok(self
             .state_runtime
-            .store()
+
             .gateway_activity(activity_id)?
             .and_then(|activity| activity.thread_id))
     }

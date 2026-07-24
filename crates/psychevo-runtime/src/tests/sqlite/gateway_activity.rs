@@ -25,7 +25,7 @@ fn gateway_activity_claim<'a>(
 #[test]
 fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let source_key = "source:test";
     let first = store
         .claim_gateway_activity(gateway_activity_claim(
@@ -81,7 +81,7 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
 #[test]
 fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let thread_id = store.create_session(temp.path()).expect("thread");
 
     for index in 0..34 {
@@ -119,7 +119,7 @@ fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
 #[test]
 fn gateway_activity_release_is_generation_guarded() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let record = store
         .claim_gateway_activity(gateway_activity_claim(
             "activity-1",
@@ -170,7 +170,7 @@ fn gateway_activity_release_is_generation_guarded() {
 #[test]
 fn gateway_live_events_are_ordered_and_control_commands_track_status() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let first_seq = store
         .append_gateway_live_event(
             Some("activity-1"),
@@ -226,7 +226,7 @@ fn gateway_live_events_are_ordered_and_control_commands_track_status() {
 #[test]
 fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let session_id = store.create_session(temp.path()).expect("session");
 
     let first_revision = store
@@ -278,7 +278,7 @@ fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
 #[test]
 fn gateway_turn_terminals_round_trip_and_order_by_thread() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let thread_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)

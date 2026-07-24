@@ -1,5 +1,5 @@
 fn configured_model_option_view(
-    model: &psychevo_runtime::ConfiguredModel,
+    model: &psychevo_runtime::types::ConfiguredModel,
 ) -> wire::ModelOptionView {
     let reasoning_supported = model.metadata.capabilities.reasoning;
     wire::ModelOptionView {
@@ -21,7 +21,7 @@ fn configured_model_option_view(
 fn model_options_with_cached_catalog(
     state: &WebState,
     options: &RunOptions,
-    configured: &[psychevo_runtime::ConfiguredModel],
+    configured: &[psychevo_runtime::types::ConfiguredModel],
 ) -> Vec<wire::ModelOptionView> {
     let mut seen = std::collections::BTreeSet::new();
     let mut views = Vec::new();
@@ -309,7 +309,7 @@ fn model_state_set_value(
     model_state.set_model(&cwd_key, model_spec.clone(), reasoning_effort.clone());
     model_state.save(&path)?;
     if let Some(thread_id) = thread_id {
-        let store = state.inner.state.store();
+        let store = &state.inner.state;
         store.set_session_model(thread_id, &provider, &model_id)?;
         let mut metadata = serde_json::Map::new();
         metadata.insert("model".to_string(), Value::String(model_spec));
@@ -613,7 +613,7 @@ fn advanced_model_metadata_object(
         .ok_or_else(|| Error::Config("advanced metadata must be an object".to_string()))
 }
 
-fn configured_model_is_free(model: &psychevo_runtime::ConfiguredModel) -> bool {
+fn configured_model_is_free(model: &psychevo_runtime::types::ConfiguredModel) -> bool {
     let Some(cost) = &model.metadata.cost else {
         return false;
     };

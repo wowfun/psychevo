@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::{
-    Error, WorkspaceDiffFileStatus, WorkspaceMutation, canonicalize_cwd, collect_workspace_diff,
-    normalized_native_path, resolve_workspace_root,
+    Error, config::resolve_workspace_root, host_paths::normalized_native_path,
+    paths::canonicalize_cwd, types::WorkspaceMutation, workspace_diff::WorkspaceDiffFileStatus,
+    workspace_diff::collect_workspace_diff,
 };
 use serde_json::Value;
 

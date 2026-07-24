@@ -239,7 +239,7 @@ impl PsychevoAcpAgent {
         request: ResumeSessionRequest,
     ) -> Result<ResumeSessionResponse, Error> {
         let runtime_session_id = request.session_id.to_string();
-        let store = self.state.store().clone();
+        let store = self.state.clone();
         store
             .resume_session(&runtime_session_id)
             .map_err(|_| Error::resource_not_found(Some(runtime_session_id.clone())))?;
@@ -263,7 +263,7 @@ impl PsychevoAcpAgent {
         let cwd = request
             .cwd
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let store = self.state.store().clone();
+        let store = self.state.clone();
         let sessions = store
             .list_sessions_for_cwd_with_sources(&cwd, &[])
             .map_err(acp_internal_error)?

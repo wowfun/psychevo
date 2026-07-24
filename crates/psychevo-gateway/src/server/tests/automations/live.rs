@@ -59,7 +59,7 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
     let runs = state
         .inner
         .state
-        .store()
+
         .automation_runs_for_task(&automation_id, 5)
         .expect("automation runs");
     assert_eq!(runs[0].status, "completed");
@@ -67,7 +67,7 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(runs[0].thread_id.as_deref().expect("thread id"))
         .expect("session summary")
         .expect("session");

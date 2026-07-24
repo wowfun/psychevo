@@ -1,6 +1,6 @@
 use super::{
     AgentMissionRunRecord, AgentTeamRunRecord, BTreeMap, BTreeSet, Deserialize, Error, Path,
-    PathBuf, Result, Serialize, SqliteStore, Value, fs,
+    PathBuf, Result, Serialize, StateRuntime, Value, fs,
 };
 use super::{
     catalog_surface::{AgentCatalog, AgentDiagnostic, AgentDiscoveryOptions, discover_agents},
@@ -106,7 +106,7 @@ impl ActiveAgentTeamContext {
 }
 
 pub fn active_agent_team_context_for_session(
-    store: &SqliteStore,
+    store: &StateRuntime,
     parent_session_id: &str,
 ) -> Result<Option<ActiveAgentTeamContext>> {
     let Some(team) = store.find_active_agent_team_run(parent_session_id)? else {

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::fs;
+#[cfg(feature = "native-channels")]
 use std::future::Future;
 use std::path::PathBuf;
+#[cfg(feature = "native-channels")]
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -12,15 +14,19 @@ use psychevo_runtime::{Error, Result};
 use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
+#[cfg(feature = "native-channels")]
+use tokio::sync::mpsc;
 
 use super::{ImAdapter, ImAttachment, ImIdentity, ImInboundMessage, ImOutboundMessage};
 
+#[cfg(feature = "native-channels")]
 mod feishu_lark;
 mod telegram;
 mod util;
 mod wechat;
 
+#[cfg(feature = "native-channels")]
 pub use feishu_lark::{
     FeishuLarkDomain, FeishuLarkLongConnectionAdapter, FeishuLarkLongConnectionConfig,
 };
@@ -32,7 +38,7 @@ pub use wechat::{
     wechat_ilink_error_code_from_message,
 };
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native-channels"))]
 use feishu_lark::feishu_event_to_inbound;
 #[cfg(test)]
 use telegram::telegram_update_to_message;

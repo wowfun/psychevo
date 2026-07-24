@@ -20,7 +20,7 @@ pub fn usage_stats(options: StatsOptions) -> Result<Value> {
         cutoff_ms,
         limit: options.limit.max(1),
     };
-    options.state.store().with_conn(|conn| {
+    options.state.with_conn(|conn| {
         let totals = totals(conn, &scope)?;
         let provider_models = provider_models(conn, &scope)?;
         let top_tools = top_tools(conn, &scope)?;
@@ -40,7 +40,7 @@ pub fn usage_stats(options: StatsOptions) -> Result<Value> {
 }
 
 pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsageSummary> {
-    let store = options.state.store();
+    let store = options.state;
     let summary = store.session_summary(&options.session_id)?.ok_or_else(|| {
         crate::Error::Message(format!("session not found: {}", options.session_id))
     })?;
@@ -198,7 +198,7 @@ pub fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {
             Some(generated_at_ms.saturating_sub(7 * 86_400_000)),
         ),
     ];
-    options.state.store().with_conn(|conn| {
+    options.state.with_conn(|conn| {
         let mut windows = Vec::new();
         for (id, label, since_ms) in window_specs {
             windows.push(usage_window_summary(conn, id, label, since_ms)?);

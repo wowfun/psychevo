@@ -27,7 +27,7 @@ impl TuiApp {
         };
 
         let (provider, model) = self.side_conversation_provider_model()?;
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let side_thread_id =
             store.create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
                 parent_session_id: &parent_session,

@@ -24,7 +24,6 @@ impl TuiApp {
                 .as_ref()
                 .map(|path| path.display().to_string());
             self.state_runtime
-                .store()
                 .create_agent_team_run(AgentTeamRunInput {
                     id: &team_id,
                     parent_session_id: &parent_session_id,
@@ -39,7 +38,6 @@ impl TuiApp {
                     metadata: metadata.clone(),
                 })?;
             self.state_runtime
-                .store()
                 .create_agent_mission_run(AgentMissionRunInput {
                     id: &mission_id,
                     parent_session_id: &parent_session_id,
@@ -53,7 +51,6 @@ impl TuiApp {
         } else {
             let lead_agent_name = self.current_agent.as_deref().unwrap_or("general");
             self.state_runtime
-                .store()
                 .create_agent_mission_run(AgentMissionRunInput {
                     id: &mission_id,
                     parent_session_id: &parent_session_id,
@@ -70,17 +67,12 @@ impl TuiApp {
 
     fn ensure_mission_parent_session(&mut self) -> Result<String> {
         if let Some(session_id) = self.current_session.clone()
-            && self
-                .state_runtime
-                .store()
-                .session_summary(&session_id)?
-                .is_some()
+            && self.state_runtime.session_summary(&session_id)?.is_some()
         {
             return Ok(session_id);
         }
         let session_id = self
             .state_runtime
-            .store()
             .create_session_with_metadata(&self.cwd, "tui", "pending", "pending", None)?;
         self.current_session = Some(session_id.clone());
         self.current_session_title = None;
@@ -482,7 +474,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push("--format json".to_string());
             }
             if options.include
-                != psychevo_runtime::SessionExportIncludeSet::default_for(
+                != psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Export,
                 )
             {
@@ -496,7 +488,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push(path.clone());
             }
             if options.include
-                != psychevo_runtime::SessionExportIncludeSet::default_for(
+                != psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Share,
                 )
             {

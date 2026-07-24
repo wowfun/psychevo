@@ -304,7 +304,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn skill_catalog(
         &self,
         session: &AcpSession,
-    ) -> Result<psychevo_runtime::SkillCatalog, Error> {
+    ) -> Result<psychevo_runtime::skills::SkillCatalog, Error> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.options.home.clone(),
             cwd: session.cwd.clone(),
@@ -386,8 +386,8 @@ impl PsychevoAcpAgent {
         } else {
             session.cwd.join(path)
         };
-        let store = self.state.store().clone();
-        let result = psychevo_runtime::write_session_export(
+        let store = self.state.clone();
+        let result = psychevo_runtime::session_export::write_session_export(
             &store,
             runtime_session_id,
             &path,

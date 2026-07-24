@@ -2,7 +2,7 @@
 pub(crate) fn load_history_omits_bottom_context_usage_without_context_limit() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -91,7 +91,7 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
 pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -192,7 +192,7 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
 pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_owner() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -236,7 +236,7 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -271,7 +271,7 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
 pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gateway_activity() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -310,7 +310,7 @@ pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gatewa
 pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -345,7 +345,7 @@ pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
 pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -380,7 +380,7 @@ pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command(
 pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_row() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -490,7 +490,7 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
 pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_tool() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -551,7 +551,7 @@ pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_too
 pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -619,7 +619,7 @@ pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
 pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -664,7 +664,7 @@ pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
 pub(crate) fn message_history_orders_assistant_preamble_before_tool_after_reload() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -798,14 +798,14 @@ fn insert_unfinished_write_call(conn: &rusqlite::Connection, session_id: &str) {
 }
 
 fn claim_foreign_gateway_activity(
-    store: &SqliteStore,
+    store: &StateRuntime,
     conn: &rusqlite::Connection,
     session_id: &str,
     lease_expires_at_ms: i64,
     started_elapsed_ms: i64,
 ) {
     store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "activity-web",
             thread_id: Some(session_id),
             source_key: Some("source:web:test"),
@@ -829,7 +829,7 @@ fn claim_foreign_gateway_activity(
     .expect("set activity start");
 }
 
-fn append_foreign_gateway_event(store: &SqliteStore, session_id: &str, event: GatewayEvent) {
+fn append_foreign_gateway_event(store: &StateRuntime, session_id: &str, event: GatewayEvent) {
     match &event {
         GatewayEvent::EntryStarted { turn_id, entry }
         | GatewayEvent::EntryUpdated { turn_id, entry }
@@ -841,7 +841,7 @@ fn append_foreign_gateway_event(store: &SqliteStore, session_id: &str, event: Ga
                 _ => unreachable!(),
             };
             store
-                .upsert_gateway_live_snapshot(psychevo_runtime::GatewayLiveSnapshotInput {
+                .upsert_gateway_live_snapshot(psychevo_runtime::state::GatewayLiveSnapshotInput {
                     snapshot_key: &format!("activity-web:{turn_id}:{}", entry.id),
                     activity_id: Some("activity-web"),
                     owner_id: Some("gateway:web:test"),

@@ -249,7 +249,7 @@ impl CostStatus {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "estimated" => Some(Self::Estimated),
             "free" => Some(Self::Free),

@@ -1,4 +1,5 @@
 use std::env;
+#[cfg(feature = "native-channels")]
 use std::fs;
 use std::path::PathBuf;
 
@@ -41,6 +42,7 @@ impl GatewayContext {
         })
     }
 
+    #[cfg(feature = "native-channels")]
     pub(super) fn load_for_setup() -> Result<Self> {
         let env_map = inherited_env();
         let cwd = env::current_dir()?;
@@ -74,9 +76,9 @@ impl GatewayContext {
         })
     }
 
-    pub(super) fn run_options(&self, cwd: PathBuf) -> Result<psychevo_runtime::RunOptions> {
-        Ok(psychevo_runtime::RunOptions {
-            state: psychevo_runtime::StateRuntime::open(self.home.join("state.db"))?,
+    pub(super) fn run_options(&self, cwd: PathBuf) -> Result<psychevo_runtime::types::RunOptions> {
+        Ok(psychevo_runtime::types::RunOptions {
+            state: psychevo_runtime::state::StateRuntime::open(self.home.join("state.db"))?,
             cwd,
             snapshot_root: Some(self.home.join("snapshots")),
             session: None,
@@ -96,7 +98,7 @@ impl GatewayContext {
             runtime_options: std::collections::BTreeMap::new(),
             external_agent_delegate: None,
             include_reasoning: false,
-            mode: psychevo_runtime::RunMode::Default,
+            mode: psychevo_runtime::types::RunMode::Default,
             permission_mode: None,
             approval_mode: None,
             approval_handler: None,

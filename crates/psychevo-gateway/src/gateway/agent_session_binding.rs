@@ -1,11 +1,14 @@
 use std::path::Path;
 
+use psychevo_runtime::state::{
+    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
+    GatewayRuntimeBindingStatus, StateRuntime,
+};
 use psychevo_runtime::{
-    AgentDefinition, AgentDiscoveryOptions, AgentEntrypoint, Error, GatewayRuntimeBindingInput,
-    GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
-    RunOptions, RuntimeProfileConfig, RuntimeProfileKind, StateRuntime, discover_agents,
-    load_agent_backend_configs, load_runtime_profile_configs, resolve_agent_definition,
-    resolve_skills_home,
+    Error, agents::AgentDefinition, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
+    agents::discover_agents, agents::resolve_agent_definition, config::RuntimeProfileConfig,
+    config::RuntimeProfileKind, config::load_agent_backend_configs,
+    config::load_runtime_profile_configs, skills::resolve_skills_home, types::RunOptions,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -160,7 +163,7 @@ pub(crate) fn resolve_bound_gateway_agent_target(
     let Some(thread_id) = options.session.as_deref() else {
         return Ok(None);
     };
-    let Some(binding) = options.state.store().gateway_runtime_binding(thread_id)? else {
+    let Some(binding) = options.state.gateway_runtime_binding(thread_id)? else {
         return Ok(None);
     };
     let bound =
@@ -401,7 +404,7 @@ pub(super) fn resolve_bound_gateway_runtime_profile(
     thread_id: &str,
     requested_runtime_ref: Option<&str>,
 ) -> psychevo_runtime::Result<Option<BoundGatewayRuntimeProfile>> {
-    let Some(binding) = state.store().gateway_runtime_binding(thread_id)? else {
+    let Some(binding) = state.gateway_runtime_binding(thread_id)? else {
         return Ok(None);
     };
     if binding.status != GatewayRuntimeBindingStatus::Resolved {
@@ -526,7 +529,7 @@ pub(super) fn ensure_gateway_runtime_binding(
     revision: u64,
     fingerprint: &str,
 ) -> psychevo_runtime::Result<GatewayRuntimeBindingRecord> {
-    if let Some(existing) = state.store().gateway_runtime_binding(thread_id)? {
+    if let Some(existing) = state.gateway_runtime_binding(thread_id)? {
         if existing.status != GatewayRuntimeBindingStatus::Resolved {
             return Err(agent_session_configuration_error(
                 existing.unresolved_reason.unwrap_or_else(|| {
@@ -562,7 +565,6 @@ pub(super) fn ensure_gateway_runtime_binding(
         return Ok(existing);
     }
     let summary = state
-        .store()
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     let backend_kind = match profile.runtime {
@@ -571,26 +573,24 @@ pub(super) fn ensure_gateway_runtime_binding(
     };
     let native_session_id = (profile.runtime == RuntimeProfileKind::Native).then_some(thread_id);
     let profile_config_json = serde_json::to_string(profile)?;
-    state
-        .store()
-        .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
-            thread_id,
-            agent_ref: agent.agent_ref.as_deref(),
-            agent_fingerprint: &agent.fingerprint,
-            agent_definition_json: &agent.definition_json,
-            runtime_ref: &profile.id,
-            backend_kind,
-            native_kind: profile.runtime.as_str(),
-            native_session_id,
-            cwd: &summary.cwd,
-            profile_fingerprint: fingerprint,
-            profile_revision: &revision.to_string(),
-            profile_config_json: &profile_config_json,
-            adapter_kind: profile.runtime.as_str(),
-            adapter_revision: env!("CARGO_PKG_VERSION"),
-            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: summary.parent_session_id.as_deref(),
-        })
+    state.create_gateway_runtime_binding(GatewayRuntimeBindingInput {
+        thread_id,
+        agent_ref: agent.agent_ref.as_deref(),
+        agent_fingerprint: &agent.fingerprint,
+        agent_definition_json: &agent.definition_json,
+        runtime_ref: &profile.id,
+        backend_kind,
+        native_kind: profile.runtime.as_str(),
+        native_session_id,
+        cwd: &summary.cwd,
+        profile_fingerprint: fingerprint,
+        profile_revision: &revision.to_string(),
+        profile_config_json: &profile_config_json,
+        adapter_kind: profile.runtime.as_str(),
+        adapter_revision: env!("CARGO_PKG_VERSION"),
+        ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+        parent_thread_id: summary.parent_session_id.as_deref(),
+    })
 }
 
 pub(crate) fn runtime_session_handle(
@@ -602,7 +602,7 @@ pub(crate) fn runtime_session_handle(
     let digest = Sha256::digest(
         format!(
             "agent-session-v1\0{runtime_ref}\0{}\0{native_session_id}",
-            psychevo_runtime::normalized_native_path(&canonical).display()
+            psychevo_runtime::host_paths::normalized_native_path(&canonical).display()
         )
         .as_bytes(),
     );

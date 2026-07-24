@@ -5,9 +5,9 @@ use crate::error::Result;
 
 use super::store_message_fields::optional_json_string;
 use super::store_metadata::json_to_sql;
-use super::{AgentMailboxEventInput, AgentMailboxEventRecord, SqliteStore};
+use super::{AgentMailboxEventInput, AgentMailboxEventRecord, StateRuntime};
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn append_agent_mailbox_event(&self, input: AgentMailboxEventInput) -> Result<i64> {
         let now = now_ms();
         let payload_json = serde_json::to_string(&input.payload)?;

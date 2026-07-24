@@ -507,11 +507,12 @@ fn structured_agent_markdown(
     }
     let mut optional_contributions = BTreeSet::new();
     for name in &params.optional_contributions {
-        let contribution = psychevo_runtime::AgentContribution::parse(name).ok_or_else(|| {
-            Error::Message(format!(
-                "optional contribution `{name}` must be instructions, tools, mcp, or skills"
-            ))
-        })?;
+        let contribution =
+            psychevo_runtime::agents::AgentContribution::parse(name).ok_or_else(|| {
+                Error::Message(format!(
+                    "optional contribution `{name}` must be instructions, tools, mcp, or skills"
+                ))
+            })?;
         optional_contributions.insert(contribution.as_str());
     }
     if optional_contributions.is_empty() {
@@ -818,7 +819,10 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
         enabled: agent.enabled,
         source: agent.source.as_str().to_string(),
         source_label: agent.source.display_label().to_string(),
-        generated: matches!(agent.source, psychevo_runtime::AgentSource::Generated),
+        generated: matches!(
+            agent.source,
+            psychevo_runtime::agents::AgentSource::Generated
+        ),
         target,
         mutable: target.is_some(),
         path: agent
@@ -915,7 +919,7 @@ fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticV
 }
 
 pub(super) fn agent_status_result(
-    store: Option<&psychevo_runtime::SqliteStore>,
+    store: Option<&psychevo_runtime::state::StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> wire::AgentStatusResult {
@@ -929,7 +933,7 @@ pub(super) fn agent_status_result(
 }
 
 pub(super) fn team_status_result(
-    store: &psychevo_runtime::SqliteStore,
+    store: &psychevo_runtime::state::StateRuntime,
     parent_session_id: Option<&str>,
 ) -> psychevo_runtime::Result<wire::TeamStatusResult> {
     let team = parent_session_id
@@ -968,7 +972,7 @@ pub(super) fn team_status_result(
 }
 
 pub(super) fn agent_control_result(
-    store: &psychevo_runtime::SqliteStore,
+    store: &psychevo_runtime::state::StateRuntime,
     params: wire::AgentControlParams,
 ) -> psychevo_runtime::Result<wire::AgentControlResult> {
     let action = params.action.trim();
@@ -1055,7 +1059,7 @@ fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
     }
 }
 
-fn team_run_view(record: &psychevo_runtime::AgentTeamRunRecord) -> wire::TeamRunView {
+fn team_run_view(record: &psychevo_runtime::state::AgentTeamRunRecord) -> wire::TeamRunView {
     wire::TeamRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),
@@ -1077,7 +1081,9 @@ fn team_run_view(record: &psychevo_runtime::AgentTeamRunRecord) -> wire::TeamRun
     }
 }
 
-fn mission_run_view(record: &psychevo_runtime::AgentMissionRunRecord) -> wire::MissionRunView {
+fn mission_run_view(
+    record: &psychevo_runtime::state::AgentMissionRunRecord,
+) -> wire::MissionRunView {
     wire::MissionRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),

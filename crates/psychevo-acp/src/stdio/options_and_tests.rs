@@ -233,7 +233,7 @@ pub(crate) struct AcpSession {
     pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) control: Option<RunControlHandle>,
     pub(crate) queued_prompts: VecDeque<String>,
-    pub(crate) pending_steers: Vec<psychevo_runtime::PendingInputId>,
+    pub(crate) pending_steers: Vec<psychevo_agent_core::PendingInputId>,
     pub(crate) last_session_list: Vec<SessionSummary>,
 }
 

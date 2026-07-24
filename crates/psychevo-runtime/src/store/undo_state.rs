@@ -10,10 +10,10 @@ use super::store_metadata::{
 };
 use super::store_undo_helpers::session_tool_call_count;
 use super::{
-    SESSION_REVERT_METADATA_KEY, SessionRevertKind, SessionRevertState, SqliteStore, UndoTarget,
+    SESSION_REVERT_METADATA_KEY, SessionRevertKind, SessionRevertState, StateRuntime, UndoTarget,
 };
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn session_revert_state(&self, session_id: &str) -> Result<Option<SessionRevertState>> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let metadata_json = conn

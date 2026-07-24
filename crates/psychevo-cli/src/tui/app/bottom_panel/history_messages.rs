@@ -38,7 +38,6 @@ impl TuiApp {
         }
         if self
             .state_runtime
-            .store()
             .session_revert_state(&thread_id)?
             .is_some()
         {
@@ -143,10 +142,9 @@ impl TuiApp {
         };
         if matches!(
             self.state_runtime
-                .store()
                 .session_revert_state(&edit.thread_id)?
                 .map(|revert| revert.kind),
-            Some(psychevo_runtime::SessionRevertKind::ConversationEdit { .. })
+            Some(psychevo_runtime::state::SessionRevertKind::ConversationEdit { .. })
         ) {
             let draft = psychevo_gateway::history_editing::restore_native_conversation_edit(
                 &self.state_runtime,
@@ -171,20 +169,14 @@ impl TuiApp {
         let Some(thread_id) = self.current_session.clone() else {
             return Ok(false);
         };
-        if self
-            .state_runtime
-            .store()
-            .session_summary(&thread_id)?
-            .is_none()
-        {
+        if self.state_runtime.session_summary(&thread_id)?.is_none() {
             return Ok(false);
         }
         if !matches!(
             self.state_runtime
-                .store()
                 .session_revert_state(&thread_id)?
                 .map(|revert| revert.kind),
-            Some(psychevo_runtime::SessionRevertKind::ConversationEdit { .. })
+            Some(psychevo_runtime::state::SessionRevertKind::ConversationEdit { .. })
         ) {
             return Ok(false);
         }
@@ -205,16 +197,15 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         thread_id: &str,
     ) -> Result<()> {
-        let Some(revert) = self.state_runtime.store().session_revert_state(thread_id)? else {
+        let Some(revert) = self.state_runtime.session_revert_state(thread_id)? else {
             return Ok(());
         };
         if matches!(
             revert.kind,
-            psychevo_runtime::SessionRevertKind::ConversationEdit { .. }
+            psychevo_runtime::state::SessionRevertKind::ConversationEdit { .. }
         ) {
             let hidden = self
                 .state_runtime
-                .store()
                 .messages_from_count(thread_id, revert.start_seq)?;
             ui.push_status(format!(
                 "history edit staged · {hidden} entries hidden · Esc restore history"
@@ -278,7 +269,6 @@ impl TuiApp {
             HistoryMessageAction::Fork => {
                 if self
                     .state_runtime
-                    .store()
                     .session_revert_state(&edit.thread_id)?
                     .is_some()
                 {
@@ -324,7 +314,6 @@ impl TuiApp {
         }
         if self
             .state_runtime
-            .store()
             .session_revert_state(&session_id)?
             .is_some()
         {

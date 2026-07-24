@@ -1,6 +1,6 @@
 use super::{
     AbortSignal, AgentEdgeRecord, AgentEdgeStatus, BTreeMap, BTreeSet, ControlHandle, Error,
-    HashMap, Map, Message, Path, PathBuf, Result, SessionSummary, SqliteStore, Value, fs, json,
+    HashMap, Map, Message, Path, PathBuf, Result, SessionSummary, StateRuntime, Value, fs, json,
     user_text_message,
 };
 use super::{
@@ -16,7 +16,7 @@ use super::{
 
 pub(crate) fn force_stop_agent_id(
     id: &str,
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
     let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? else {
@@ -58,7 +58,7 @@ pub(crate) fn force_stop_agent_id(
 }
 
 pub(crate) fn collect_agent_edge_tree(
-    store: &SqliteStore,
+    store: &StateRuntime,
     parent_session_id: &str,
 ) -> Result<Vec<AgentEdgeRecord>> {
     let mut records = Vec::new();
@@ -154,7 +154,7 @@ pub(crate) fn interrupt_live_descendants_locked(
 pub fn send_agent_message(
     id: &str,
     message: &str,
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
     if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? {
@@ -210,10 +210,10 @@ pub(crate) async fn send_agent_message_with_context(
         }
     }
 
-    let Some(edge) = find_agent_edge_for_target(context.state.store(), target)? else {
+    let Some(edge) = find_agent_edge_for_target(&context.state, target)? else {
         return Ok(None);
     };
-    let base = agent_record_from_edge(context.state.store(), edge.clone());
+    let base = agent_record_from_edge(&context.state, edge.clone());
     let agent_name = edge_agent_name(&edge).unwrap_or(base.agent_name.as_str());
     let agent = context
         .catalog
@@ -229,7 +229,6 @@ pub(crate) async fn send_agent_message_with_context(
         .unwrap_or_else(|| default_task_name(&agent.name, &id));
     let model_override = context
         .state
-        .store()
         .session_summary(&edge.child_session_id)?
         .map(|summary| summary.model);
     let spawn_depth_remaining = edge_spawn_depth_remaining(&edge);
@@ -269,7 +268,6 @@ pub(crate) async fn send_agent_message_with_context(
     }
     context
         .state
-        .store()
         .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
     let mut child_context = context;
     child_context.parent_session_id = edge.parent_session_id.clone();
@@ -299,7 +297,7 @@ pub(crate) async fn send_agent_message_with_context(
     Ok(Some(record))
 }
 
-pub fn resume_agent_id(id: &str, store: Option<&SqliteStore>) -> Result<Option<AgentRunRecord>> {
+pub fn resume_agent_id(id: &str, store: Option<&StateRuntime>) -> Result<Option<AgentRunRecord>> {
     if let Some(record) = {
         let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
         resolve_live_record_locked(&runs, id)?
@@ -402,7 +400,7 @@ pub(crate) fn generated_task_name_matches(record: &AgentRunRecord, target: &str)
 }
 
 pub(crate) fn find_agent_edge_for_target(
-    store: &SqliteStore,
+    store: &StateRuntime,
     target: &str,
 ) -> Result<Option<AgentEdgeRecord>> {
     let target = target.trim();
@@ -498,7 +496,10 @@ pub(crate) fn ambiguous_agent_task_error(target: &str) -> Error {
     ))
 }
 
-pub(crate) fn agent_record_from_edge(store: &SqliteStore, edge: AgentEdgeRecord) -> AgentRunRecord {
+pub(crate) fn agent_record_from_edge(
+    store: &StateRuntime,
+    edge: AgentEdgeRecord,
+) -> AgentRunRecord {
     if let Some(record) = {
         let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
         find_live_record_locked(&runs, &edge.child_session_id)
@@ -580,7 +581,7 @@ pub(crate) fn agent_record_from_edge(store: &SqliteStore, edge: AgentEdgeRecord)
 }
 
 pub(crate) fn agent_child_session_summary_value(
-    store: &SqliteStore,
+    store: &StateRuntime,
     summary: &SessionSummary,
 ) -> Value {
     let latest_usage = latest_session_assistant_usage(store, &summary.id);
@@ -602,7 +603,7 @@ pub(crate) fn agent_child_session_summary_value(
 }
 
 pub(crate) fn subagent_summary_value(
-    store: Option<&SqliteStore>,
+    store: Option<&StateRuntime>,
     record: &AgentRunRecord,
     include_agent_id: bool,
 ) -> Value {
@@ -715,7 +716,7 @@ pub(crate) fn record_duration_ms(record: &AgentRunRecord) -> Option<u64> {
     Some(ended_at_ms.saturating_sub(record.started_at_ms).max(0) as u64)
 }
 
-pub(crate) fn child_session_tokens_value(store: &SqliteStore, session_id: &str) -> Option<Value> {
+pub(crate) fn child_session_tokens_value(store: &StateRuntime, session_id: &str) -> Option<Value> {
     let messages = store.load_tui_message_summaries(session_id).ok()?;
     let mut input = 0u64;
     let mut output = 0u64;
@@ -785,7 +786,7 @@ pub(crate) fn usage_counter(usage: &Value, keys: &[&str]) -> Option<u64> {
 }
 
 pub(crate) fn latest_session_assistant_usage(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
 ) -> Option<Value> {
     store

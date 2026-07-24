@@ -4,11 +4,12 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::CommandFactory;
 use psychevo_runtime::{
-    PluginAdapterMode, PluginInspectOptions, PluginInstallOptions, PluginMarketplaceEntry,
-    PluginScope, PluginSourceKind, plugin_doctor_value, plugin_import_inspect_value,
-    plugin_install_value, plugin_list_value, plugin_marketplace_add_value,
-    plugin_marketplace_list_value, plugin_marketplace_remove_value, plugin_set_enabled_value,
-    plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
+    plugins::PluginInspectOptions, plugins::PluginInstallOptions, plugins::PluginMarketplaceEntry,
+    plugins::PluginScope, plugins::PluginSourceKind, plugins::plugin_doctor_value,
+    plugins::plugin_import_inspect_value, plugins::plugin_install_value,
+    plugins::plugin_list_value, plugins::plugin_marketplace_add_value,
+    plugins::plugin_marketplace_list_value, plugins::plugin_marketplace_remove_value,
+    plugins::plugin_set_enabled_value, plugins::plugin_uninstall_value, plugins::plugin_view_value,
 };
 use serde_json::Value;
 
@@ -67,16 +68,6 @@ pub(crate) fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
             )?;
             print_plugin_value(&value, args.json)?;
         }
-        PluginCommand::Trust(args) => {
-            let value = plugin_set_trust_value(
-                &home,
-                &cwd,
-                write_scope(args.global, args.local),
-                &args.selector,
-                true,
-            )?;
-            print_plugin_value(&value, args.json)?;
-        }
         PluginCommand::Catalog(args) => marketplace_command(args, &home, &cwd)?,
         PluginCommand::Marketplace(args) => marketplace_command(args, &home, &cwd)?,
     }
@@ -131,7 +122,6 @@ fn inspect_plugin(
             git_ref: args.git_ref,
             npm_version: args.npm_version,
             npm_registry: args.npm_registry,
-            adapter_mode: parse_adapter_mode(args.adapter_mode.as_deref())?,
         },
     )?;
     print_plugin_value(&value, args.json)
@@ -152,7 +142,6 @@ fn install_plugin(
             git_ref: args.git_ref,
             npm_version: args.npm_version,
             npm_registry: args.npm_registry,
-            adapter_mode: parse_adapter_mode(args.adapter_mode.as_deref())?,
             force: args.force,
         },
     )?;
@@ -182,7 +171,6 @@ fn marketplace_command(
                     git_ref: args.git_ref,
                     npm_version: args.npm_version,
                     npm_registry: args.npm_registry,
-                    adapter_mode: parse_adapter_mode(args.adapter_mode.as_deref())?,
                 },
             )?;
             print_plugin_value(&value, args.json)?;
@@ -213,18 +201,6 @@ fn parse_source_kind(value: Option<&str>) -> Result<Option<PluginSourceKind>> {
         .map(|value| {
             PluginSourceKind::parse(value).ok_or_else(|| {
                 anyhow::anyhow!("unknown plugin source kind `{value}`; expected local, git, or npm")
-            })
-        })
-        .transpose()
-}
-
-fn parse_adapter_mode(value: Option<&str>) -> Result<Option<PluginAdapterMode>> {
-    value
-        .map(|value| {
-            PluginAdapterMode::parse(value).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unknown plugin adapter mode `{value}`; expected adapter_host, manifest_only, or disabled"
-                )
             })
         })
         .transpose()

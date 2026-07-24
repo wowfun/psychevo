@@ -222,7 +222,7 @@ async fn command_result_from_effect(
         }
         SlashCommandEffect::SandboxShow => {
             let options = state.run_options(scope.cwd.clone(), thread_id.clone());
-            let status = psychevo_runtime::sandbox_status_text(&options, RunMode::Default)?;
+            let status = psychevo_runtime::sandbox::sandbox_status_text(&options, RunMode::Default)?;
             Ok(command_accepted_message(raw, action, Some(status)))
         }
         SlashCommandEffect::Voice(mode) => Ok(command_voice_result(
@@ -312,7 +312,7 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
         state
             .inner
             .state
-            .store()
+
             .create_agent_team_run(AgentTeamRunInput {
                 id: &team_id,
                 parent_session_id: parent_thread_id,
@@ -329,7 +329,7 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
         state
             .inner
             .state
-            .store()
+
             .create_agent_mission_run(AgentMissionRunInput {
                 id: &mission_id,
                 parent_session_id: parent_thread_id,
@@ -346,7 +346,7 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
         state
             .inner
             .state
-            .store()
+
             .create_agent_mission_run(AgentMissionRunInput {
                 id: &mission_id,
                 parent_session_id: parent_thread_id,
@@ -577,7 +577,7 @@ fn command_session_undo_options(
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(&thread_id)
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("session not found: {thread_id}"))?;
@@ -718,7 +718,7 @@ async fn command_side_conversation_start(
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(&parent_thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {parent_thread_id}")))?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
@@ -734,7 +734,7 @@ async fn command_side_conversation_start(
     let parent_binding = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(&parent_thread_id)?;
     if !parent_binding.is_some_and(|binding| {
         binding.status == GatewayRuntimeBindingStatus::Resolved
@@ -770,7 +770,7 @@ async fn command_side_conversation_start(
     let side_thread_id = state
         .inner
         .state
-        .store()
+
         .create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
             parent_session_id: &parent_thread_id,
             cwd: &scope.cwd,
@@ -796,7 +796,7 @@ async fn command_side_conversation_start(
     state
         .inner
         .state
-        .store()
+
         .create_gateway_runtime_binding_from_parent_snapshot(
             &parent_thread_id,
             &side_thread_id,

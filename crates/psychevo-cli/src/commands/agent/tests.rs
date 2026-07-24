@@ -108,12 +108,12 @@ pub(crate) fn catalog_for(
     .map_err(Into::into)
 }
 
-pub(crate) fn command_store() -> Result<SqliteStore> {
+pub(crate) fn command_store() -> Result<StateRuntime> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    Ok(SqliteStore::open(&db_path)?)
+    Ok(StateRuntime::open(&db_path)?)
 }
 
 pub(crate) fn print_agent_status(value: &Value) {
@@ -145,7 +145,7 @@ pub(crate) fn print_wait_report(value: &Value) {
     }
 }
 
-pub(crate) fn print_agent_record(record: &psychevo_runtime::AgentRunRecord) {
+pub(crate) fn print_agent_record(record: &psychevo_runtime::agents::AgentRunRecord) {
     println!(
         "{}\t{}\t{:?}\t{}",
         record.id, record.agent_name, record.status, record.task

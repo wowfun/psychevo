@@ -1,3 +1,4 @@
+#[cfg(feature = "native-channels")]
 use super::paths::wechat_context_store_path;
 use super::*;
 
@@ -5,6 +6,14 @@ pub(super) async fn build_channel_gateway(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
 ) -> psychevo_runtime::Result<ChannelGateway> {
+    #[cfg(not(feature = "native-channels"))]
+    {
+        let _ = (state, connection);
+        return Err(Error::Message(
+            "native channel adapters are not compiled into this build".to_string(),
+        ));
+    }
+    #[cfg(feature = "native-channels")]
     let adapter: Arc<dyn crate::im::ImAdapter> = match connection.channel.as_str() {
         "wechat" => Arc::new(WechatIlinkAdapter::new(WechatIlinkConfig {
             connection_id: Some(connection.id.clone()),
@@ -51,6 +60,7 @@ pub(super) async fn build_channel_gateway(
             )));
         }
     };
+    #[cfg(feature = "native-channels")]
     Ok(ChannelGateway::new(vec![ChannelAdapterBinding::new(
         connection.id.clone(),
         adapter,

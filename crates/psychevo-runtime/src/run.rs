@@ -57,7 +57,7 @@ pub(crate) use crate::skills::{
     skills_visible_for_prompt_with_tools_and_toolsets,
 };
 pub(crate) use crate::snapshot::SnapshotStore;
-pub(crate) use crate::store::{PromptPrefixRecord, SqliteStore};
+pub(crate) use crate::store::{PromptPrefixRecord, StateRuntime};
 pub(crate) use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };

@@ -426,7 +426,7 @@ async fn channel_command_action_from_effect(
             let options = context
                 .state
                 .run_options(context.scope.cwd.clone(), thread_id);
-            ChannelCommandAction::Reply(psychevo_runtime::sandbox_status_text(
+            ChannelCommandAction::Reply(psychevo_runtime::sandbox::sandbox_status_text(
                 &options,
                 RunMode::Default,
             )?)
@@ -721,12 +721,13 @@ fn ensure_channel_mission_thread(
     {
         return Ok(thread_id);
     }
-    let thread_id = context
-        .state
-        .inner
-        .state
-        .store()
-        .create_session_with_metadata(&context.scope.cwd, "channel", "pending", "pending", None)?;
+    let thread_id = context.state.inner.state.create_session_with_metadata(
+        &context.scope.cwd,
+        "channel",
+        "pending",
+        "pending",
+        None,
+    )?;
     bind_source_to_thread(context.state, context.scope, &thread_id)?;
     Ok(thread_id)
 }
@@ -1225,7 +1226,6 @@ pub(super) fn channel_resolved_scope(
         Some(thread_id) => state
             .inner
             .state
-            .store()
             .session_summary(&thread_id)?
             .map(|summary| PathBuf::from(summary.cwd))
             .unwrap_or_else(|| channel_cwd(&state.inner.cwd, connection)),

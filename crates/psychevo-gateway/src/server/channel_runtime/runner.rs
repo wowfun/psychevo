@@ -126,7 +126,6 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
     let records = state
         .inner
         .state
-        .store()
         .retryable_gateway_channel_outbox(&connection.id)?;
     let mut delivered = 0;
     let mut first_error = None;
@@ -135,11 +134,7 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
         match deliver_channel_outbox_record(state, runtime, channel_gateway, record).await {
             Ok(()) => delivered += 1,
             Err(err) => {
-                let _ = state
-                    .inner
-                    .state
-                    .store()
-                    .fail_gateway_channel_outbox(&delivery_id);
+                let _ = state.inner.state.fail_gateway_channel_outbox(&delivery_id);
                 first_error.get_or_insert(err);
             }
         }
@@ -155,7 +150,7 @@ async fn deliver_channel_outbox_record(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     channel_gateway: &ChannelGateway,
-    record: psychevo_runtime::GatewayChannelOutboxRecord,
+    record: psychevo_runtime::state::GatewayChannelOutboxRecord,
 ) -> psychevo_runtime::Result<()> {
     let payload = record.payload_text.ok_or_else(|| {
         psychevo_runtime::Error::Message(format!(
@@ -173,7 +168,6 @@ async fn deliver_channel_outbox_record(
     let lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&record.source_key)?
         .ok_or_else(|| {
             psychevo_runtime::Error::Message(format!(
@@ -192,7 +186,6 @@ async fn deliver_channel_outbox_record(
     state
         .inner
         .state
-        .store()
         .acknowledge_gateway_channel_outbox(&record.delivery_id)?;
     runtime.mark_outbound(&record.connection_id);
     Ok(())
@@ -489,8 +482,8 @@ async fn run_channel_inbound_turn(
     );
     let delivery_id = format!("out_{digest:x}");
     let payload_hash = format!("{:x}", Sha256::digest(answer.as_bytes()));
-    let record = state.inner.state.store().upsert_gateway_channel_outbox(
-        psychevo_runtime::GatewayChannelOutboxInput {
+    let record = state.inner.state.upsert_gateway_channel_outbox(
+        psychevo_runtime::state::GatewayChannelOutboxInput {
             delivery_id: &delivery_id,
             thread_id: &result.thread.id,
             turn_id: &result.turn.id,
@@ -515,15 +508,10 @@ async fn run_channel_inbound_turn(
             state
                 .inner
                 .state
-                .store()
                 .acknowledge_gateway_channel_outbox(&delivery_id)?;
         }
         Err(err) => {
-            let _ = state
-                .inner
-                .state
-                .store()
-                .fail_gateway_channel_outbox(&delivery_id);
+            let _ = state.inner.state.fail_gateway_channel_outbox(&delivery_id);
             return Err(err);
         }
     }

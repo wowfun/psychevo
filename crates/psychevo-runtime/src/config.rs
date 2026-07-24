@@ -69,7 +69,8 @@ pub(crate) use config_types::{
 pub use config_types::{
     CodexPluginsConfig, DEFAULT_WORKSPACE_NAME, DEFAULT_WORKSPACE_ROOT, REASONING_EFFORT_VALUES,
     ResolvedImageGenerationConfig, ResolvedVoiceAsrConfig, ResolvedVoiceRealtimeConfig,
-    ResolvedVoiceTtsConfig, RuntimeProfileConfig, RuntimeProfileKind, load_agent_backend_configs,
+    ResolvedVoiceTtsConfig, RuntimeProfileConfig, RuntimeProfileKind,
+    generated_runtime_profile_id_for_backend, load_agent_backend_configs,
     load_codex_plugins_profile_config, load_runtime_profile_configs, resolve_default_workspace_cwd,
     resolve_workspace_root, validate_runtime_profile_backend_ref,
     write_codex_plugins_profile_config,

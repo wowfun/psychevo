@@ -299,7 +299,7 @@ impl Gateway {
         let (profile, _, _) = resolve_gateway_runtime_profile(&options)?;
         let binding = self
             .state
-            .store()
+
             .gateway_runtime_binding(&local_session_id)?
             .ok_or_else(|| {
                 agent_session_configuration_error(format!(
@@ -392,13 +392,13 @@ impl Gateway {
         &self,
         thread_id: &str,
     ) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
-        let summaries = self.state.store().load_tui_message_summaries(thread_id)?;
+        let summaries = self.state.load_tui_message_summaries(thread_id)?;
         let mut entries = transcript::project_transcript_entries(thread_id, &summaries);
-        let agent_edges = self.state.store().list_agent_edges_for_parent(thread_id)?;
+        let agent_edges = self.state.list_agent_edges_for_parent(thread_id)?;
         transcript::enrich_agent_blocks_from_edges(&mut entries, &agent_edges);
         let compactions = self
             .state
-            .store()
+
             .list_valid_session_compactions(thread_id)?;
         let mut synthetic_entries = compactions
             .iter()
@@ -410,7 +410,7 @@ impl Gateway {
             .collect::<Vec<_>>();
         let terminals = self
             .state
-            .store()
+
             .list_gateway_turn_terminals_for_thread(thread_id)?;
         transcript::reconcile_terminal_bounded_running_blocks(&mut entries, &terminals);
         synthetic_entries.extend(terminals.iter().filter_map(|terminal| {
@@ -476,7 +476,7 @@ impl Gateway {
         }
         drop(aliases);
         drop(active);
-        for record in self.state.store().active_gateway_activities()? {
+        for record in self.state.active_gateway_activities()? {
             let Some(thread_id) = record.thread_id.clone() else {
                 continue;
             };
@@ -492,13 +492,13 @@ impl Gateway {
         if let Some(thread_id) = key.strip_prefix("thread:") {
             return self
                 .state
-                .store()
+
                 .active_gateway_activity_for_thread(thread_id);
         }
         if let Some(source_key) = key.strip_prefix("source:") {
             return self
                 .state
-                .store()
+
                 .active_gateway_activity_for_source(source_key);
         }
         Ok(None)
@@ -634,7 +634,7 @@ impl Gateway {
             if let Some(active_activity_id) = active_activity_id {
                 let _ = self
                     .state
-                    .store()
+
                     .set_gateway_activity_queued_turns(&active_activity_id, queue_position);
             }
             if let Some(event_sink) = event_sink {
@@ -689,7 +689,7 @@ impl Gateway {
                     if let Some(active_activity_id) = active_activity_id {
                         let _ = self
                             .state
-                            .store()
+
                             .set_gateway_activity_queued_turns(&active_activity_id, queue_position);
                     }
                     ShellStartState::Queued(receiver)
@@ -730,7 +730,7 @@ impl Gateway {
         &self,
         request: SendCompactRequest,
     ) -> psychevo_runtime::Result<
-        BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::CompactionResult>>,
+        BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult>>,
     > {
         let queue_key = self.queue_key_for_compact_request(&request)?;
         let compact_id = Uuid::now_v7().to_string();
@@ -775,7 +775,7 @@ impl Gateway {
     pub async fn compact_session(
         &self,
         request: SendCompactRequest,
-    ) -> psychevo_runtime::Result<psychevo_runtime::CompactionResult> {
+    ) -> psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult> {
         self.enqueue_compact_session(request)?.await
     }
 
@@ -783,8 +783,8 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        message: psychevo_runtime::Message,
-    ) -> Option<psychevo_runtime::PendingInputId> {
+        message: psychevo_agent_core::Message,
+    ) -> Option<psychevo_agent_core::PendingInputId> {
         if self.expected_turn_is_terminal(expected_turn_id) {
             return None;
         }
@@ -799,7 +799,7 @@ impl Gateway {
         let thread_id = match selector {
             GatewayThreadSelector::ThreadId { thread_id } => Some(thread_id.clone()),
             GatewayThreadSelector::Source { source_key } => {
-                match self.state.store().gateway_source_lane(&source_key.0) {
+                match self.state.gateway_source_lane(&source_key.0) {
                     Ok(lane) => lane.and_then(|lane| lane.thread_id),
                     Err(_) => return false,
                 }
@@ -808,7 +808,7 @@ impl Gateway {
         let Some(thread_id) = thread_id else {
             return true;
         };
-        match self.state.store().gateway_runtime_binding(&thread_id) {
+        match self.state.gateway_runtime_binding(&thread_id) {
             Ok(Some(binding)) => binding.backend_kind.as_deref() == Some("native"),
             Ok(None) => true,
             Err(_) => false,
@@ -819,7 +819,7 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        message: psychevo_runtime::Message,
+        message: psychevo_agent_core::Message,
     ) -> bool {
         if self.expected_turn_is_terminal(expected_turn_id) {
             return false;
@@ -843,7 +843,7 @@ impl Gateway {
     fn expected_turn_is_terminal(&self, expected_turn_id: Option<&str>) -> bool {
         expected_turn_id.is_some_and(|turn_id| {
             self.state
-                .store()
+
                 .gateway_turn_terminal(turn_id)
                 .map(|terminal| terminal.is_some())
                 .unwrap_or(true)
@@ -854,7 +854,7 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        input_id: psychevo_runtime::PendingInputId,
+        input_id: psychevo_agent_core::PendingInputId,
     ) -> bool {
         self.control_for_selector(&selector, expected_turn_id)
             .is_some_and(|control| control.cancel_pending_user_message(input_id))
@@ -864,8 +864,8 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        input_id: psychevo_runtime::PendingInputId,
-        message: psychevo_runtime::Message,
+        input_id: psychevo_agent_core::PendingInputId,
+        message: psychevo_agent_core::Message,
     ) -> bool {
         self.control_for_selector(&selector, expected_turn_id)
             .is_some_and(|control| control.update_pending_user_message(input_id, message))

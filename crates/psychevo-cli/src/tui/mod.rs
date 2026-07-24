@@ -21,6 +21,9 @@ pub(crate) use crossterm::execute;
 pub(crate) use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+pub(crate) use psychevo_agent_core::{
+    PendingInputId, TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec,
+};
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayActionKind, GatewayActionOutcome, GatewayActivity, GatewayEvent,
@@ -29,48 +32,66 @@ pub(crate) use psychevo_gateway::{
     ThreadTurnRequest, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
     TranscriptEntry, TranscriptEntryRole,
 };
+pub(crate) use psychevo_runtime::state::*;
 pub(crate) use psychevo_runtime::{
-    AgentCatalog, AgentDiscoveryOptions, AgentEdgeRecord, AgentEntrypoint, AgentMissionRunInput,
-    AgentSource, AgentSpawnOptions, AgentTeamRunInput, AutoCompactionCheckOptions,
-    ChildSessionSnapshotInput, ClarifyAnswer, ClarifyQuestion, ClarifyRequestEvent,
-    ClarifyResolvedEvent, ClarifyResolvedReason, ClarifyResponse, ClarifyResult,
-    CompactSessionOptions, CompactionReason, CompactionResult, ConfigScope, ConfiguredModel,
-    ContextFormatOptions, ContextOptions, ContextSnapshot, GatewayLiveEventRecord,
-    GatewayLiveSnapshotRecord, ImageInput, InstallOptions, LoadedMainAgent,
-    MAX_AGENT_SPAWN_DEPTH_CAP, MAX_TEAM_PARALLEL_AGENTS_CAP, ModelCatalogEntry,
-    ModelCatalogProvider, ModelMetadataCacheTarget, ModelState, PendingInputId,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
-    PermissionMode, PromptAttachmentDisplay, PromptDisplayMetadata, ReloadContextOptions,
-    RunControlHandle, RunMode, RunOptions, RunStreamEvent, RunStreamSink,
-    SESSION_COMPOSER_MODEL_METADATA_KEY, SESSION_MAIN_AGENT_METADATA_KEY,
-    SIDE_CONVERSATION_METADATA_KEY, SIDE_INHERITED_METADATA_KEY, ScopedCustomProviderInput,
-    SessionArtifactKind, SessionExportFormat, SessionExportOptions, SessionExportWriteResult,
-    SessionSummary, SessionUndoOptions, SessionUsageOptions, SessionUsageSummary, SkillBundle,
-    SkillCatalog, SkillDiscoveryOptions, SkillTarget, SqliteStore, StateRuntime, StatsOptions,
-    TUI_DISPLAY_METADATA_KEY, TUI_SIDE_CONVERSATION_SESSION_SOURCE, TerminalReason,
-    ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, TuiMessageSummary,
-    USER_SHELL_METADATA_KEY, UserShellContextOptions, UserShellOptions, WorkspaceDiff,
-    WriteArgumentPreview, WriteArgumentPreviewTracker, agent_spawn_paused, agent_status_value,
-    auto_compaction_due_for_snapshot, canonicalize_cwd, collect_workspace_diff, compact_session,
-    config_show_value, configured_models, context_snapshot, create_scoped_custom_provider,
-    custom_provider_api_key_env, decode_persisted_tool_result_for_display,
-    default_session_export_filename, discover_agent_teams_with_catalog, discover_agents,
-    discover_skills, effective_usage_total, fetch_and_cache_model_catalog,
-    format_context_snapshot_text_with_options, format_context_total_value,
-    format_context_total_value_parts, install_skill, list_skill_bundles,
-    main_agent_default_metadata, main_agent_from_session_metadata, main_agent_metadata,
-    model_catalog_providers, model_metadata_explicitly_disallows_image_input,
-    normalize_context_bar_width, normalize_reasoning_effort, permission_rules_value,
-    prompt_message_from_inputs_with_options, prompt_starts_with_supported_image_path,
-    read_cached_model_catalog, redo_session, refresh_model_metadata_cache, reload_session_context,
-    remove_installed_skill, resolve_agent_definition, resolve_agent_team_definition,
-    resolve_image_source, run_control, run_user_shell_command_streaming_controlled,
-    scan_skill_path, selected_configured_model, session_base_agent_name_from_metadata,
-    session_usage_summary, set_agent_spawn_paused, set_default_model_with_reasoning,
-    set_local_toolset_enabled, set_provider_api_key, set_skill_config_value, set_skill_enabled,
-    side_conversation_boundary_prompt, side_inherited_metadata_hidden, spawn_agent_background,
-    stop_agent_id_with_grace, toolsets_value, undo_session, usage_stats, view_skill_value,
-    write_argument_preview_from_args, write_session_export,
+    accounting::effective_usage_total, agents::AgentCatalog, agents::AgentDiscoveryOptions,
+    agents::AgentEntrypoint, agents::AgentSource, agents::LoadedMainAgent,
+    agents::MAX_AGENT_SPAWN_DEPTH_CAP, agents::MAX_TEAM_PARALLEL_AGENTS_CAP,
+    agents::SESSION_MAIN_AGENT_METADATA_KEY, agents::agent_spawn_paused,
+    agents::agent_status_value, agents::discover_agent_teams_with_catalog, agents::discover_agents,
+    agents::main_agent_default_metadata, agents::main_agent_from_session_metadata,
+    agents::main_agent_metadata, agents::resolve_agent_definition,
+    agents::resolve_agent_team_definition, agents::session_base_agent_name_from_metadata,
+    agents::set_agent_spawn_paused, agents::stop_agent_id_with_grace,
+    compaction::AutoCompactionCheckOptions, compaction::CompactSessionOptions,
+    compaction::CompactionReason, compaction::CompactionResult,
+    compaction::auto_compaction_due_for_snapshot, compaction::compact_session,
+    config::config_show_value, config::configured_models, config::create_scoped_custom_provider,
+    config::custom_provider_api_key_env, config::fetch_and_cache_model_catalog,
+    config::model_catalog_providers, config::permission_rules_value,
+    config::read_cached_model_catalog, config::refresh_model_metadata_cache,
+    config::selected_configured_model, config::set_default_model_with_reasoning,
+    config::set_local_toolset_enabled, config::set_provider_api_key, config::toolsets_value,
+    context_usage::ContextFormatOptions, context_usage::ContextOptions,
+    context_usage::ContextSnapshot, context_usage::context_snapshot,
+    context_usage::format_context_snapshot_text_with_options,
+    context_usage::format_context_total_value, context_usage::format_context_total_value_parts,
+    context_usage::normalize_context_bar_width, model_state::ModelState,
+    model_state::SESSION_COMPOSER_MODEL_METADATA_KEY, model_state::normalize_reasoning_effort,
+    paths::canonicalize_cwd, prompt_image::model_metadata_explicitly_disallows_image_input,
+    prompt_image::prompt_message_from_inputs_with_options,
+    prompt_image::prompt_starts_with_supported_image_path, prompt_image::resolve_image_source,
+    prompt_templates::side_conversation_boundary_prompt, run::reload_session_context,
+    run::spawn_agent_background, session_export::SessionArtifactKind,
+    session_export::SessionExportFormat, session_export::SessionExportOptions,
+    session_export::SessionExportWriteResult, session_export::default_session_export_filename,
+    session_export::write_session_export, skills::InstallOptions, skills::SkillBundle,
+    skills::SkillCatalog, skills::SkillDiscoveryOptions, skills::SkillTarget,
+    skills::discover_skills, skills::install_skill, skills::list_skill_bundles,
+    skills::remove_installed_skill, skills::scan_skill_path, skills::set_skill_config_value,
+    skills::set_skill_enabled, skills::view_skill_value, stats::session_usage_summary,
+    stats::usage_stats, thread_lineage::SIDE_CONVERSATION_METADATA_KEY,
+    thread_lineage::SIDE_INHERITED_METADATA_KEY,
+    thread_lineage::TUI_SIDE_CONVERSATION_SESSION_SOURCE,
+    thread_lineage::side_inherited_metadata_hidden, tool_argument_display::WriteArgumentPreview,
+    tool_argument_display::WriteArgumentPreviewTracker,
+    tool_argument_display::write_argument_preview_from_args,
+    tool_result_display::decode_persisted_tool_result_for_display, types::AgentSpawnOptions,
+    types::ClarifyAnswer, types::ClarifyQuestion, types::ClarifyRequestEvent,
+    types::ClarifyResolvedEvent, types::ClarifyResolvedReason, types::ClarifyResponse,
+    types::ClarifyResult, types::ConfigScope, types::ConfiguredModel, types::ImageInput,
+    types::ModelCatalogEntry, types::ModelCatalogProvider, types::ModelMetadataCacheTarget,
+    types::PermissionApprovalDecision, types::PermissionApprovalOutcome,
+    types::PermissionApprovalRequest, types::PermissionMode, types::PromptAttachmentDisplay,
+    types::PromptDisplayMetadata, types::ReloadContextOptions, types::RunControlHandle,
+    types::RunMode, types::RunOptions, types::RunStreamEvent, types::RunStreamSink,
+    types::ScopedCustomProviderInput, types::SessionSummary, types::SessionUndoOptions,
+    types::SessionUsageOptions, types::SessionUsageSummary, types::StatsOptions,
+    types::TUI_DISPLAY_METADATA_KEY, types::TuiMessageSummary, types::USER_SHELL_METADATA_KEY,
+    types::UserShellContextOptions, types::UserShellOptions, types::run_control,
+    undo::redo_session, undo::undo_session,
+    user_shell::run_user_shell_command_streaming_controlled, workspace_diff::WorkspaceDiff,
+    workspace_diff::collect_workspace_diff,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -179,14 +200,13 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     } else if args.new_session {
         None
     } else {
-        latest_human_visible_session_id(state_runtime.store())?
+        latest_human_visible_session_id(&state_runtime)?
     };
 
     let color = io::stdout().is_terminal() && env_value("NO_COLOR", &env_map).is_none();
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let gateway = Gateway::new(state_runtime.clone());
     let last_gateway_live_event_seq = state_runtime
-        .store()
         .latest_gateway_live_event_seq()
         .unwrap_or_default();
     let mut app = TuiApp {

@@ -5,7 +5,7 @@ pub(crate) use super::*;
 
 #[tokio::test]
 pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowed_definitions() {
-    psychevo_runtime::set_agent_spawn_paused(false);
+    psychevo_runtime::agents::set_agent_spawn_paused(false);
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     write_tui_agent(
@@ -61,7 +61,7 @@ pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowe
     )
     .await
     .expect("resume spawning");
-    assert!(!psychevo_runtime::agent_spawn_paused());
+    assert!(!psychevo_runtime::agents::agent_spawn_paused());
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await
@@ -192,7 +192,7 @@ pub(crate) fn available_agent_use_as_main_is_session_scoped_and_clearable() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     write_tui_agent(&app, "translate", "Translate user messages");
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -313,7 +313,7 @@ pub(crate) fn child_session_identity_separator_uses_child_agent_default() {
     let mut app = test_app(&temp);
     write_tui_agent(&app, "translate", "Translate user messages");
     write_tui_agent(&app, "review", "Review code changes");
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
@@ -380,7 +380,7 @@ pub(crate) fn session_switch_restores_each_sessions_main_agent() {
     let mut app = test_app(&temp);
     app.startup_agent = Some("general".to_string());
     write_tui_agent(&app, "translate", "Translate user messages");
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("first");
@@ -428,7 +428,7 @@ pub(crate) async fn running_turn_blocks_main_agent_switching() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     write_tui_agent(&app, "translate", "Translate user messages");
-    let session = SqliteStore::open(&app.db_path)
+    let session = StateRuntime::open(&app.db_path)
         .expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -530,7 +530,7 @@ pub(crate) fn agent_editor_writes_max_spawn_depth_frontmatter() {
 pub(crate) fn child_status_line_keeps_compact_parent_hint() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
@@ -541,7 +541,7 @@ pub(crate) fn child_status_line_keeps_compact_parent_hint() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("edge");
@@ -630,10 +630,10 @@ pub(crate) fn history_agent_edge_reconcile_does_not_make_failed_rows_openable() 
     success_en.tool_name = Some("spawn_agent".to_string());
     ui.transcript = vec![failed_zh, failed_en, success_zh, success_en];
     let edges = vec![
-        psychevo_runtime::AgentEdgeRecord {
+        psychevo_runtime::state::AgentEdgeRecord {
             parent_session_id: "parent".to_string(),
             child_session_id: "child-zh".to_string(),
-            status: psychevo_runtime::AgentEdgeStatus::Closed,
+            status: psychevo_runtime::state::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(serde_json::json!({
@@ -644,10 +644,10 @@ pub(crate) fn history_agent_edge_reconcile_does_not_make_failed_rows_openable() 
                 }
             })),
         },
-        psychevo_runtime::AgentEdgeRecord {
+        psychevo_runtime::state::AgentEdgeRecord {
             parent_session_id: "parent".to_string(),
             child_session_id: "child-en".to_string(),
-            status: psychevo_runtime::AgentEdgeStatus::Closed,
+            status: psychevo_runtime::state::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(serde_json::json!({

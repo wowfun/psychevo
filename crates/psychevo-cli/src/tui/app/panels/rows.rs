@@ -111,7 +111,7 @@ pub(crate) fn json_array_strings(value: &Value) -> Vec<String> {
 }
 
 pub(crate) fn agent_definition_row(
-    agent: psychevo_runtime::AgentDefinition,
+    agent: psychevo_runtime::agents::AgentDefinition,
     shadowed: bool,
     current_agent: Option<&str>,
 ) -> BottomSelectionRow {
@@ -181,7 +181,7 @@ pub(crate) fn agent_definition_row(
 }
 
 pub(crate) fn agent_diagnostic_row(
-    diagnostic: psychevo_runtime::AgentDiagnostic,
+    diagnostic: psychevo_runtime::agents::AgentDiagnostic,
 ) -> BottomSelectionRow {
     let path = diagnostic
         .path

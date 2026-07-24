@@ -5,7 +5,8 @@ pub(crate) use anyhow::{Result, anyhow};
 pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub(crate) use psychevo_runtime::command_registry::parse_session_export_command_args;
 pub(crate) use psychevo_runtime::{
-    SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet, split_image_source_argument,
+    prompt_image::split_image_source_argument, session_export::SessionArtifactKind,
+    session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
 };
 pub(crate) use serde_json::Value;
 

@@ -4,7 +4,7 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let top_level = store
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
         .expect("top level");
@@ -87,7 +87,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
     let other_cwd = temp.path().join("large-other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     for index in 0..2_000 {
         let cwd = if index % 2 == 0 {
             &state.inner.cwd
@@ -172,7 +172,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
 async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() {
     let (_temp, state) = web_state();
     let cwd_string = state.inner.cwd.display().to_string();
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let mut ids = Vec::new();
     for index in 0..25 {
         let id = store
@@ -231,7 +231,12 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
         5
     );
     assert_eq!(second_workspace["hiddenCount"], 0);
-    assert!(second_workspace["nextCursor"].is_null());
+    assert_eq!(
+        second_workspace
+            .as_object()
+            .and_then(|workspace| workspace.get("nextCursor")),
+        Some(&Value::Null)
+    );
     let included_id = second_workspace["sessions"][0]["id"]
         .as_str()
         .expect("included candidate")
@@ -263,7 +268,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
 
     let running_id = ids[0].clone();
     store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "browser-running-activity",
             thread_id: Some(&running_id),
             source_key: None,

@@ -5,7 +5,7 @@ fn bind_source_to_thread_keeps_previous_history_active() {
     let first = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -17,7 +17,7 @@ fn bind_source_to_thread_keeps_previous_history_active() {
     let second = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -34,7 +34,7 @@ fn bind_source_to_thread_keeps_previous_history_active() {
         state
             .inner
             .state
-            .store()
+
             .session_summary(&first)
             .expect("first summary")
             .expect("first exists")

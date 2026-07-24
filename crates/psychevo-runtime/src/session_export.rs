@@ -16,10 +16,8 @@ pub(crate) use serde_json::{Map, Value};
 pub(crate) use crate::agents::{AgentCatalog, AgentToolContext, agent_mailbox_event_message};
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::skills::SkillDiscoveryOptions;
-pub(crate) use crate::state_runtime::StateRuntime;
-pub(crate) use crate::store::{
-    AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixRecord, SqliteStore,
-};
+pub(crate) use crate::state::StateRuntime;
+pub(crate) use crate::store::{AgentMailboxEventRecord, ContextEvidenceRecord, PromptPrefixRecord};
 pub(crate) use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface, tool_declarations,
 };

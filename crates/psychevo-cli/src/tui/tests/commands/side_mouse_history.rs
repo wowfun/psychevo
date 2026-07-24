@@ -5,7 +5,7 @@ pub(crate) use super::*;
 pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
@@ -78,7 +78,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     assert_eq!(app.current_session.as_deref(), Some(parent.as_str()));
     assert!(app.side_conversation.is_none());
     assert!(
-        SqliteStore::open(&app.db_path)
+        StateRuntime::open(&app.db_path)
             .expect("store")
             .session_summary(&side)
             .expect("summary")
@@ -95,7 +95,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
 pub(crate) async fn fullscreen_btw_detaches_running_parent() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
@@ -127,7 +127,7 @@ pub(crate) async fn fullscreen_btw_detaches_running_parent() {
 pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent");
@@ -155,7 +155,7 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     }
 
     assert!(
-        SqliteStore::open(&app.db_path)
+        StateRuntime::open(&app.db_path)
             .expect("store")
             .session_summary(&side)
             .expect("summary")

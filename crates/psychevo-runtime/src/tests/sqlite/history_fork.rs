@@ -33,7 +33,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let source = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
         .expect("source");
@@ -291,7 +291,7 @@ fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let root = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
         .expect("root");

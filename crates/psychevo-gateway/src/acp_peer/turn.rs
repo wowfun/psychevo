@@ -11,7 +11,7 @@ struct AcpClientContext {
     cwd: PathBuf,
     fs_read: bool,
     fs_write: bool,
-    approval_handler: Option<Arc<dyn psychevo_runtime::ApprovalHandler>>,
+    approval_handler: Option<Arc<dyn psychevo_runtime::types::ApprovalHandler>>,
     clarify_control: Option<RunControlHandle>,
     terminal: bool,
     terminal_env: BTreeMap<String, String>,
@@ -89,7 +89,7 @@ struct PreviousAcpPromptUsage {
 }
 
 fn acp_prompt_usage_delta(
-    store: &psychevo_runtime::SqliteStore,
+    store: &psychevo_runtime::state::StateRuntime,
     session_id: &str,
     native_session_id: &str,
     cumulative: &Value,
@@ -99,7 +99,7 @@ fn acp_prompt_usage_delta(
         .into_iter()
         .rev()
         .filter(|summary| {
-            matches!(summary.message, psychevo_runtime::Message::Assistant { .. })
+            matches!(summary.message, psychevo_agent_core::Message::Assistant { .. })
         })
         .find_map(|summary| {
             let metadata = summary.metadata?;
@@ -197,7 +197,7 @@ fn acp_history_message_metadata(
 }
 
 fn commit_acp_replay_and_current_input(
-    state: &psychevo_runtime::StateRuntime,
+    state: &psychevo_runtime::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     current_turn_id: &str,
@@ -211,7 +211,7 @@ fn commit_acp_replay_and_current_input(
         Some(current_turn_id),
         replay,
     )?;
-    state.store().append_message(
+    state.append_message(
         session_id,
         &Message::User {
             content: vec![UserContentBlock::text(current_user_text.to_string())],
@@ -221,7 +221,7 @@ fn commit_acp_replay_and_current_input(
 }
 
 pub(crate) fn commit_imported_acp_replay(
-    state: &psychevo_runtime::StateRuntime,
+    state: &psychevo_runtime::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     replay: &AcpHistoryReplayProjection,
@@ -230,13 +230,13 @@ pub(crate) fn commit_imported_acp_replay(
 }
 
 fn commit_acp_replay(
-    state: &psychevo_runtime::StateRuntime,
+    state: &psychevo_runtime::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     current_turn_id: Option<&str>,
     replay: &AcpHistoryReplayProjection,
 ) -> psychevo_runtime::Result<()> {
-    let store = state.store();
+    let store = state.clone();
     let unknown = match current_turn_id {
         Some(current_turn_id) => {
             store.unknown_gateway_turn_deliveries_for_thread(session_id, current_turn_id)?
@@ -377,7 +377,7 @@ fn commit_acp_replay(
 pub(crate) async fn run_acp_peer_turn(
     pool: &AcpProcessPool,
     peer: ResolvedPeerTurn,
-    profile: &psychevo_runtime::RuntimeProfileConfig,
+    profile: &psychevo_runtime::config::RuntimeProfileConfig,
     request: BackendTurnRequest,
     turn_id: String,
     session_ready: AcpSessionReadyCallback,
@@ -391,7 +391,7 @@ pub(crate) async fn run_acp_peer_turn(
     let input = request.input;
     let options = request.options;
     let state = options.state.clone();
-    let store = state.store();
+    let store = state.clone();
     let local_session = ensure_local_session(&peer, &options)?;
     let session_id = local_session.session_id;
     let auto_title_new_session = local_session.created;
@@ -532,17 +532,17 @@ pub(crate) async fn run_acp_peer_turn(
         )),
     )?;
     if let Some(title) = acp.session_title.as_deref() {
-        set_session_title_if_empty(store, &session_id, title);
+        set_session_title_if_empty(&store, &session_id, title);
     } else if auto_title_new_session {
         let title = fallback_visible_session_title(&prompt_for_history);
-        set_session_title_if_empty(store, &session_id, &title);
+        set_session_title_if_empty(&store, &session_id, &title);
     }
     let assistant_content = acp.persisted_assistant_content();
     let prompt_usage_cumulative = acp.prompt_usage.clone();
     let (prompt_usage, usage_counter_reset) = match prompt_usage_cumulative.as_ref() {
         Some(cumulative) => {
             let (delta, reset) = acp_prompt_usage_delta(
-                store,
+                &store,
                 &session_id,
                 &acp.native_session_id,
                 cumulative,
@@ -631,8 +631,8 @@ pub(crate) async fn run_acp_peer_turn(
 }
 
 fn acp_peer_turn_controls(
-    options: &psychevo_runtime::RunOptions,
-    profile: &psychevo_runtime::RuntimeProfileConfig,
+    options: &psychevo_runtime::types::RunOptions,
+    profile: &psychevo_runtime::config::RuntimeProfileConfig,
     is_new_native_session: bool,
 ) -> (Option<String>, Option<String>, BTreeMap<String, String>) {
     let mut runtime_options = options.runtime_options.clone();
@@ -654,7 +654,7 @@ fn acp_peer_turn_controls(
 }
 
 fn set_session_title_if_empty(
-    store: &psychevo_runtime::SqliteStore,
+    store: &psychevo_runtime::state::StateRuntime,
     session_id: &str,
     title: &str,
 ) {

@@ -7,7 +7,7 @@ async fn wait_for_automation_status(
         let task = state
             .inner
             .state
-            .store()
+
             .automation_task(automation_id)
             .expect("automation task")
             .expect("task");
@@ -30,7 +30,7 @@ async fn wait_for_automation_status_with_timeout(
         let task = state
             .inner
             .state
-            .store()
+
             .automation_task(automation_id)
             .expect("automation task")
             .expect("task");
@@ -210,7 +210,7 @@ impl crate::GatewayBackend for AutomationFakeBackend {
     fn run_turn(
         &self,
         request: crate::BackendTurnRequest,
-    ) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::RunResult>>
+    ) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::types::RunResult>>
     {
         self.dispatch_times
             .lock()
@@ -263,10 +263,10 @@ impl crate::GatewayBackend for AutomationFakeBackend {
         self.notify.notify_one();
         Box::pin(async move {
             let session_id = if let Some(session_id) = request.options.session.clone() {
-                request.options.state.store().resume_session(&session_id)?;
+                request.options.state.resume_session(&session_id)?;
                 session_id
             } else {
-                request.options.state.store().create_session_with_metadata(
+                request.options.state.create_session_with_metadata(
                     &request.options.cwd,
                     &request.runtime_source,
                     "fake-model",
@@ -288,9 +288,9 @@ impl crate::GatewayBackend for AutomationFakeBackend {
             } else {
                 "automation done".to_string()
             };
-            Ok(psychevo_runtime::RunResult {
+            Ok(psychevo_runtime::types::RunResult {
                 session_id,
-                outcome: psychevo_runtime::Outcome::Normal,
+                outcome: psychevo_ai::Outcome::Normal,
                 terminal_reason: None,
                 final_answer,
                 db_path: request.options.state.db_path().to_path_buf(),

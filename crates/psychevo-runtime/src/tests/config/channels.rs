@@ -138,7 +138,7 @@ allow_users = ["existing-user"]
     )
     .expect("env");
 
-    let duplicate = crate::setup_channel_connection(crate::ChannelSetupInput {
+    let duplicate = crate::config::setup_channel_connection(crate::config::ChannelSetupInput {
         config_dir: config_dir.clone(),
         id: "wechat".to_string(),
         channel: "wechat".to_string(),
@@ -155,7 +155,7 @@ allow_users = ["existing-user"]
     .expect_err("duplicate setup still fails");
     assert!(duplicate.to_string().contains("already exists"));
 
-    crate::upsert_channel_connection(crate::ChannelSetupInput {
+    crate::config::upsert_channel_connection(crate::config::ChannelSetupInput {
         config_dir: config_dir.clone(),
         id: "wechat".to_string(),
         channel: "wechat".to_string(),
@@ -214,7 +214,7 @@ allow_groups = ["old-group"]
     )
     .expect("env");
 
-    crate::update_channel_connection(crate::ChannelUpdateInput {
+    crate::config::update_channel_connection(crate::config::ChannelUpdateInput {
         config_dir: config_dir.clone(),
         id: "wechat".to_string(),
         label: Some(" Ops WeChat ".to_string()),
@@ -289,7 +289,7 @@ allow_groups = ["old-group"]
     assert!(env.contains("CUSTOM_WECHAT_ACCOUNT=secret-account"));
     assert!(env.contains("WECHAT_ILINK_BASE_URL=http://old.example"));
 
-    let invalid_env = crate::update_channel_connection(crate::ChannelUpdateInput {
+    let invalid_env = crate::config::update_channel_connection(crate::config::ChannelUpdateInput {
         config_dir: config_dir.clone(),
         id: "wechat".to_string(),
         label: None,
@@ -314,7 +314,7 @@ allow_groups = ["old-group"]
         "{invalid_env:#}"
     );
 
-    let unknown = crate::update_channel_connection(crate::ChannelUpdateInput {
+    let unknown = crate::config::update_channel_connection(crate::config::ChannelUpdateInput {
         config_dir,
         id: "missing".to_string(),
         label: None,
@@ -363,7 +363,7 @@ allow_users = ["wx-user"]
     )
     .expect("env");
 
-    crate::delete_channel_connection(config_dir.clone(), "release").expect("delete");
+    crate::config::delete_channel_connection(config_dir.clone(), "release").expect("delete");
 
     let config = fs::read_to_string(config_dir.join("config.toml")).expect("config");
     assert!(!config.contains("id = \"release\""));
@@ -372,6 +372,6 @@ allow_users = ["wx-user"]
     assert!(env.contains("TELEGRAM_BOT_TOKEN=telegram-secret"));
     assert!(env.contains("WECHAT_BOT_TOKEN=wechat-secret"));
 
-    let err = crate::delete_channel_connection(config_dir, "release").expect_err("unknown");
+    let err = crate::config::delete_channel_connection(config_dir, "release").expect_err("unknown");
     assert!(err.to_string().contains("unknown channel connection"));
 }

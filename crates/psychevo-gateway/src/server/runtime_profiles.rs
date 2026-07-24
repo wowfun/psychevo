@@ -17,7 +17,7 @@ pub(super) struct ThreadDraftPrepareWork {
     pub(super) target_catalog: Arc<RunnableTargetCatalog>,
     pub(super) target: wire::RunnableTargetView,
     pub(super) context: wire::ThreadContextReadResult,
-    pub(super) configured: Vec<psychevo_runtime::ConfiguredModel>,
+    pub(super) configured: Vec<psychevo_runtime::types::ConfiguredModel>,
     pub(super) source_lane_prepared: bool,
 }
 
@@ -208,7 +208,6 @@ impl RunnableTargetCatalog {
         let source_lane = state
             .inner
             .state
-            .store()
             .gateway_source_lane(&scope.source.source_key().0)?;
         if let Some(lane) = source_lane.as_ref()
             && let Some(runtime_profile_ref) = lane.draft_profile_ref.as_deref()
@@ -359,12 +358,11 @@ fn resolve_runnable_target_for_source(
     let lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&source.source_key().0)?;
     let binding = lane
         .as_ref()
         .and_then(|lane| lane.thread_id.as_deref())
-        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten();
     let agent_ref = binding
@@ -422,7 +420,7 @@ pub(super) async fn thread_context_read_result_for_target_id(
 ) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
     let has_binding = thread_id
         .as_deref()
-        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten()
         .is_some();
@@ -482,7 +480,7 @@ fn thread_context_read_result_with_configured_models(
     params: wire::ThreadContextReadParams,
 ) -> psychevo_runtime::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo_runtime::ConfiguredModel>,
+    Vec<psychevo_runtime::types::ConfiguredModel>,
 )> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_context_read_result_with_catalog(state, scope, params, target_catalog)
@@ -495,7 +493,7 @@ fn thread_context_read_result_with_catalog(
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo_runtime::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo_runtime::ConfiguredModel>,
+    Vec<psychevo_runtime::types::ConfiguredModel>,
 )> {
     let requested_target = params.target.clone();
     let thread_id = match params.thread_id {
@@ -504,7 +502,7 @@ fn thread_context_read_result_with_catalog(
     };
     let binding = thread_id
         .as_deref()
-        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten();
     let run_options = state.run_options(scope.cwd.clone(), thread_id.clone());
@@ -536,7 +534,6 @@ fn thread_context_read_result_with_catalog(
     let source_lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&scope.source.source_key().0)?;
     let requested_target_view = requested_target
         .as_ref()
@@ -918,7 +915,7 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo_runtime::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo_runtime::ConfiguredModel>,
+    Vec<psychevo_runtime::types::ConfiguredModel>,
 )> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
@@ -939,12 +936,7 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
         }
         return Ok((context, configured));
     };
-    let Some(binding) = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(&thread_id)?
-    else {
+    let Some(binding) = state.inner.state.gateway_runtime_binding(&thread_id)? else {
         return Ok((context, configured));
     };
     if binding.status != GatewayRuntimeBindingStatus::Resolved
@@ -1027,7 +1019,7 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
 fn apply_prepared_acp_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
-    configured: &[psychevo_runtime::ConfiguredModel],
+    configured: &[psychevo_runtime::types::ConfiguredModel],
     context: &mut wire::ThreadContextReadResult,
     snapshot: &crate::acp_peer::AcpSessionSnapshot,
 ) -> psychevo_runtime::Result<()> {
@@ -1044,7 +1036,6 @@ fn apply_prepared_acp_snapshot(
     let source_lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&scope.source.source_key().0)?;
     apply_control_state_precedence(&mut surface.controls, None, source_lane.as_ref());
     context.controls = surface.controls;
@@ -1057,17 +1048,81 @@ fn apply_prepared_acp_snapshot(
     Ok(())
 }
 
+async fn apply_prepared_acp_profile_defaults(
+    state: &WebState,
+    scope: &ResolvedScope,
+    target: &wire::RunnableTargetView,
+    profile: &RuntimeProfileConfig,
+    draft_control_values: &BTreeMap<String, String>,
+    mut snapshot: crate::acp_peer::AcpSessionSnapshot,
+) -> psychevo_runtime::Result<crate::acp_peer::AcpSessionSnapshot> {
+    for (control_id, configured_default) in [
+        ("model", profile.default_model.as_deref()),
+        ("mode", profile.default_mode.as_deref()),
+    ] {
+        let Some(configured_default) = configured_default
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let projected_control_id = snapshot
+            .options
+            .iter()
+            .find(|option| {
+                option.id == control_id || option.category.as_deref() == Some(control_id)
+            })
+            .map(|option| option.id.as_str())
+            .unwrap_or(control_id);
+        if draft_control_values.contains_key(control_id)
+            || draft_control_values.contains_key(projected_control_id)
+        {
+            continue;
+        }
+        let observed_value = snapshot
+            .options
+            .iter()
+            .find(|option| option.id == projected_control_id)
+            .and_then(|option| option.current_value.as_deref())
+            .or_else(|| {
+                (control_id == "mode")
+                    .then_some(snapshot.current_mode_id.as_deref())
+                    .flatten()
+            });
+        if observed_value == Some(configured_default) {
+            continue;
+        }
+        snapshot = state
+            .inner
+            .gateway
+            .set_prepared_agent_session_control(
+                &scope.source.source_key().0,
+                &target.target_id,
+                projected_control_id.to_string(),
+                Value::String(configured_default.to_string()),
+            )
+            .await?
+            .ok_or_else(|| {
+                runtime_rpc_error(
+                    "prepared_session_missing",
+                    "binding",
+                    wire::RuntimeRetryClassView::SafeRetry,
+                    "The prepared ACP Agent session disappeared while applying Runtime Profile defaults."
+                        .to_string(),
+                    None,
+                )
+            })?;
+    }
+    Ok(snapshot)
+}
+
 pub(super) fn prepare_draft_source_lane(
     state: &WebState,
     scope: &ResolvedScope,
     target: &wire::RunnableTargetView,
 ) -> psychevo_runtime::Result<()> {
     let source_key = scope.source.source_key();
-    let existing_lane = state
-        .inner
-        .state
-        .store()
-        .gateway_source_lane(&source_key.0)?;
+    let existing_lane = state.inner.state.gateway_source_lane(&source_key.0)?;
     let same_target = existing_lane.as_ref().is_some_and(|lane| {
         lane.draft_agent_ref == target.agent_ref
             && lane.draft_profile_ref.as_deref() == Some(target.runtime_profile_ref.as_str())
@@ -1083,7 +1138,6 @@ pub(super) fn prepare_draft_source_lane(
     state
         .inner
         .state
-        .store()
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source_key.0,
             source_kind: &scope.source.kind,
@@ -1228,7 +1282,6 @@ pub(super) async fn thread_draft_prepare_result_with_work(
     let draft_control_values = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&source_key.0)?
         .map(|lane| lane.draft_control_values)
         .unwrap_or_default();
@@ -1246,6 +1299,7 @@ pub(super) async fn thread_draft_prepare_result_with_work(
             )
         })?;
     if record.config.runtime == RuntimeProfileKind::Acp {
+        let profile = record.config.clone();
         gateway_profile_mark(
             "thread_draft_acp_handshake_started",
             None,
@@ -1276,7 +1330,7 @@ pub(super) async fn thread_draft_prepare_result_with_work(
             let mut options = state.run_options(scope.cwd.clone(), None);
             options.runtime_ref = Some(target.runtime_profile_ref.clone());
             options.agent = target.agent_ref.clone();
-            state
+            let snapshot = state
                 .inner
                 .gateway
                 .prepare_agent_session(
@@ -1286,7 +1340,16 @@ pub(super) async fn thread_draft_prepare_result_with_work(
                     target.target_id.clone(),
                     target.agent_ref.clone(),
                 )
-                .await
+                .await?;
+            apply_prepared_acp_profile_defaults(
+                state,
+                scope,
+                &target,
+                &profile,
+                &draft_control_values,
+                snapshot,
+            )
+            .await
         }
         .await;
         gateway_profile_mark(
@@ -1343,7 +1406,7 @@ fn apply_draft_preparation_problem(
 const DRAFT_PREPARATION_PROBLEM_KEY: &str = "draftPreparationProblem";
 
 fn source_lane_preparation_problem(
-    lane: &psychevo_runtime::GatewaySourceLaneRecord,
+    lane: &psychevo_runtime::state::GatewaySourceLaneRecord,
     target: &wire::RunnableTargetView,
 ) -> Option<wire::RuntimeErrorView> {
     if lane.draft_agent_ref != target.agent_ref
@@ -1371,7 +1434,6 @@ fn persist_source_lane_preparation_problem(
     state
         .inner
         .state
-        .store()
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source_key.0,
             source_kind: &scope.source.kind,
@@ -1439,7 +1501,6 @@ fn persisted_acp_session_snapshot(
     let projection = state
         .inner
         .state
-        .store()
         .session_metadata(thread_id)?
         .and_then(|metadata| {
             metadata
@@ -1471,12 +1532,7 @@ pub(super) fn cached_thread_history_descriptor(
             "History becomes available after the public Thread is bound.",
         ));
     };
-    let Some(binding) = state
-        .inner
-        .state
-        .store()
-        .gateway_runtime_binding(thread_id)?
-    else {
+    let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id)? else {
         return Ok(unavailable_history(
             "History is unavailable until the Agent target is bound.",
         ));
@@ -1521,7 +1577,7 @@ pub(super) async fn thread_control_set_result(
     };
     let binding = thread_id
         .as_deref()
-        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten();
     if let Some(binding) = binding.as_ref()
@@ -1643,11 +1699,7 @@ pub(super) async fn thread_control_set_result(
                 params.value.clone(),
             )
             .await?;
-        let lane = state
-            .inner
-            .state
-            .store()
-            .gateway_source_lane(&source_key.0)?;
+        let lane = state.inner.state.gateway_source_lane(&source_key.0)?;
         let mut draft_control_values = lane
             .as_ref()
             .map(|lane| lane.draft_control_values.clone())
@@ -1659,7 +1711,6 @@ pub(super) async fn thread_control_set_result(
         state
             .inner
             .state
-            .store()
             .upsert_gateway_source_lane(GatewaySourceLaneInput {
                 source_key: &source_key.0,
                 source_kind: &effective_scope.source.kind,
@@ -1803,7 +1854,6 @@ pub(super) async fn thread_control_set_result(
     state
         .inner
         .state
-        .store()
         .compare_and_set_gateway_runtime_control_state(
             &binding.thread_id,
             binding.binding_revision,
@@ -2407,7 +2457,7 @@ fn runtime_profile_records(
         if !backend.enabled || referenced_backends.contains(&backend.id) {
             continue;
         }
-        let id = format!("acp:{}", backend.id);
+        let id = generated_runtime_profile_id_for_backend(&backend.id);
         records
             .entry(id.clone())
             .or_insert_with(|| RuntimeProfileRecord {
@@ -3791,7 +3841,7 @@ fn acp_session_agent_surface_descriptor(
 fn apply_control_state_precedence(
     controls: &mut [wire::ThreadControlDescriptorView],
     binding: Option<&GatewayRuntimeBindingRecord>,
-    source_lane: Option<&psychevo_runtime::GatewaySourceLaneRecord>,
+    source_lane: Option<&psychevo_runtime::state::GatewaySourceLaneRecord>,
 ) {
     for control in controls {
         if let Some(value) = binding
@@ -3827,7 +3877,7 @@ fn apply_control_state_precedence(
 
 fn populate_native_control_catalog(
     options: &RunOptions,
-    configured: &[psychevo_runtime::ConfiguredModel],
+    configured: &[psychevo_runtime::types::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
     if let Some(model_control) = controls.iter_mut().find(|control| control.id == "model") {
@@ -3867,7 +3917,7 @@ fn populate_native_control_catalog(
 }
 
 fn decorate_configured_model_control_labels(
-    configured: &[psychevo_runtime::ConfiguredModel],
+    configured: &[psychevo_runtime::types::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
     let Some(model_control) = controls
@@ -3891,7 +3941,7 @@ fn decorate_configured_model_control_labels(
 }
 
 fn source_draft_control_revision(
-    source_lane: Option<&psychevo_runtime::GatewaySourceLaneRecord>,
+    source_lane: Option<&psychevo_runtime::state::GatewaySourceLaneRecord>,
     capability_revision: &str,
 ) -> String {
     let Some(source_lane) = source_lane else {
@@ -3915,11 +3965,7 @@ pub(super) fn apply_thread_control_precedence(
     options: &mut BTreeMap<String, String>,
 ) -> psychevo_runtime::Result<()> {
     if let Some(thread_id) = thread_id
-        && let Some(binding) = state
-            .inner
-            .state
-            .store()
-            .gateway_runtime_binding(thread_id)?
+        && let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id)?
     {
         for (control_id, value) in binding.thread_preferences {
             options.insert(control_id, thread_control_override_string_value(&value)?);
@@ -3929,7 +3975,6 @@ pub(super) fn apply_thread_control_precedence(
     if let Some(lane) = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&scope.source.source_key().0)?
     {
         options.extend(lane.draft_control_values);
@@ -3969,7 +4014,11 @@ fn runtime_profile_config_json(
         "acp" => RuntimeProfileKind::Acp,
         _ => unreachable!("runtime kind was validated"),
     };
-    psychevo_runtime::validate_runtime_profile_backend_ref(&params.id, runtime_kind, backend_ref)?;
+    psychevo_runtime::config::validate_runtime_profile_backend_ref(
+        &params.id,
+        runtime_kind,
+        backend_ref,
+    )?;
     let mut object = serde_json::Map::new();
     object.insert("runtime".to_string(), json!(params.runtime.trim()));
     object.insert("enabled".to_string(), json!(params.enabled.unwrap_or(true)));
@@ -4269,10 +4318,10 @@ default_model = "test/default"
         )
         .expect("ACP fixture");
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo_runtime::resolve_executable_path(
+        let python = psychevo_runtime::host_paths::resolve_executable_path(
             "python3",
             &state.inner.cwd,
-            &psychevo_runtime::ExecutableResolveOptions {
+            &psychevo_runtime::host_paths::ExecutableResolveOptions {
                 platform: HostPlatform::current(),
                 env: &host_env,
             },
@@ -4323,15 +4372,13 @@ backend_ref = "ephemeral"
         let thread_id = state
             .inner
             .state
-            .store()
             .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
             .expect("thread");
         let cwd = state.inner.cwd.display().to_string();
         state
             .inner
             .state
-            .store()
-            .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+            .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
                 thread_id: &thread_id,
                 agent_ref: Some("ephemeral"),
                 agent_fingerprint: &agent_fingerprint,
@@ -4406,7 +4453,6 @@ backend_ref = "ephemeral"
         state
             .inner
             .state
-            .store()
             .set_session_metadata_field(
                 &thread_id,
                 ACP_PEER_METADATA_KEY,

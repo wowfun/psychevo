@@ -16,24 +16,31 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
-use psychevo_runtime::{
-    AbortSignal, AgentDiscoveryOptions, AgentEntrypoint, ApprovalHandler, ClarifyAnswer,
-    ClarifyResponse, ClarifyResult, Error, ExternalAgentDelegate, ExternalAgentDelegateRequest,
-    ExternalAgentDelegateResult, GatewayActivityClaimInput, GatewayActivityRecord,
-    GatewayControlCommandInput, GatewayLiveSnapshotInput, GatewayRuntimeBindingRecord,
-    GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, GatewaySourceLaneInput,
-    GatewayTurnDeliveryInput, GatewayTurnTerminalInput, ImageInput, Outcome,
-    PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
-    PermissionMode, PromptDisplayMetadata, RunControl, RunControlHandle, RunMode, RunOptions,
-    RunResult, RunStreamEvent, RunStreamSink, RuntimeProfileConfig, RuntimeProfileKind,
-    StateRuntime, StoredEditableInputEnvelope, StoredEditableInputPart, UserShellContextOptions,
-    UserShellOptions, UserShellResult, WorkspaceMutationSink, discover_agents,
-    load_agent_backend_configs, resolve_agent_definition, resolve_skills_home, run_control,
-    run_live, run_live_streaming, run_live_streaming_controlled,
-    run_user_shell_command_streaming_controlled,
+use psychevo_ai::{AbortSignal, Outcome};
+use psychevo_runtime::state::{
+    GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
+    GatewayLiveSnapshotInput, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
+    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, GatewayTurnDeliveryInput,
+    GatewayTurnTerminalInput, StateRuntime,
 };
 #[cfg(test)]
-use psychevo_runtime::{GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership};
+use psychevo_runtime::state::{GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership};
+use psychevo_runtime::{
+    Error, agents::AgentDiscoveryOptions, agents::AgentEntrypoint, agents::discover_agents,
+    agents::resolve_agent_definition, config::RuntimeProfileConfig, config::RuntimeProfileKind,
+    config::load_agent_backend_configs, run::run_live, run::run_live_streaming,
+    run::run_live_streaming_controlled, skills::resolve_skills_home, types::ApprovalHandler,
+    types::ClarifyAnswer, types::ClarifyResponse, types::ClarifyResult,
+    types::ExternalAgentDelegate, types::ExternalAgentDelegateRequest,
+    types::ExternalAgentDelegateResult, types::ImageInput, types::PermissionApprovalDecision,
+    types::PermissionApprovalOutcome, types::PermissionApprovalRequest, types::PermissionMode,
+    types::PromptDisplayMetadata, types::RunControl, types::RunControlHandle, types::RunMode,
+    types::RunOptions, types::RunResult, types::RunStreamEvent, types::RunStreamSink,
+    types::StoredEditableInputEnvelope, types::StoredEditableInputPart,
+    types::UserShellContextOptions, types::UserShellOptions, types::UserShellResult,
+    types::WorkspaceMutationSink, types::run_control,
+    user_shell::run_user_shell_command_streaming_controlled,
+};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
 use tokio::time::timeout;

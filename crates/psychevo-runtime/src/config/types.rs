@@ -128,6 +128,13 @@ impl RuntimeProfileKind {
     }
 }
 
+pub fn generated_runtime_profile_id_for_backend(backend_id: &str) -> String {
+    match backend_id {
+        "codex" | "opencode" => backend_id.to_string(),
+        _ => format!("acp:{backend_id}"),
+    }
+}
+
 pub fn validate_runtime_profile_backend_ref(
     profile_id: &str,
     runtime: RuntimeProfileKind,

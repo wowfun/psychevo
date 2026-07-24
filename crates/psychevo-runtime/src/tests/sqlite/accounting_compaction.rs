@@ -6,7 +6,7 @@ pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metric
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");
@@ -96,7 +96,7 @@ pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metric
 #[test]
 pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
     let temp = tempdir().expect("temp");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let session = store
         .create_session_with_metadata(temp.path(), "run", "model", "provider", None)
         .expect("session");
@@ -150,7 +150,7 @@ pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
 #[test]
 pub(crate) fn projection_only_compaction_is_visible_but_never_drives_context() {
     let temp = tempdir().expect("temp");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let session = store
         .create_session_with_metadata(temp.path(), "run", "model", "provider", None)
         .expect("session");
@@ -210,7 +210,7 @@ pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "mimo-v2.5-pro", "xiaomi", None)
         .expect("session");
@@ -269,7 +269,7 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "mimo-v2.5-pro", "xiaomi", None)
         .expect("session");
@@ -414,7 +414,7 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model-a", "provider-a", None)
         .expect("first");
@@ -487,7 +487,7 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
         .expect("session");

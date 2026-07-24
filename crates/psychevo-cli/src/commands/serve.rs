@@ -5,7 +5,8 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow};
 use psychevo_gateway::{Gateway, GatewayWebServerConfig, bind_gateway_web_server};
-use psychevo_runtime::{StateRuntime, canonicalize_cwd};
+use psychevo_runtime::paths::canonicalize_cwd;
+use psychevo_runtime::state::StateRuntime;
 use serde_json::json;
 
 use crate::args::ServeArgs;

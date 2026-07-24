@@ -15,7 +15,7 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
     let first_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -41,7 +41,7 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
         state
             .inner
             .state
-            .store()
+
             .session_summary(&first_id)
             .expect("first summary")
             .expect("first exists")
@@ -52,7 +52,7 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
         state
             .inner
             .state
-            .store()
+
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("active sessions")
             .len(),
@@ -67,7 +67,7 @@ fn bind_source_to_thread_rebinds_existing_session() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -97,7 +97,7 @@ async fn deleting_the_idle_current_thread_clears_its_source_binding() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(
             &state.inner.cwd,
             "web",
@@ -128,7 +128,7 @@ async fn deleting_the_idle_current_thread_clears_its_source_binding() {
         state
             .inner
             .state
-            .store()
+
             .session_summary(&session_id)
             .expect("session lookup")
             .is_none()

@@ -11,7 +11,7 @@ impl TuiApp {
 
     pub(crate) fn refresh_current_session_title(&mut self) -> Result<()> {
         let summary = match self.current_session.as_deref() {
-            Some(session_id) => self.state_runtime.store().session_summary(session_id)?,
+            Some(session_id) => self.state_runtime.session_summary(session_id)?,
             None => None,
         };
         self.current_session_title = summary
@@ -27,7 +27,7 @@ impl TuiApp {
             }
             return Ok(());
         };
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let metadata = store.session_metadata(session_id)?;
         match main_agent_from_session_metadata(metadata.as_ref()) {
             LoadedMainAgent::Default => {
@@ -81,7 +81,7 @@ impl TuiApp {
     }
 
     pub(crate) fn persist_main_agent_selection_for_session(&self, session_id: &str) -> Result<()> {
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         if self.current_agent_explicit_default {
             store.set_session_metadata_field(
                 session_id,
@@ -112,7 +112,6 @@ impl TuiApp {
             .unwrap_or_else(|| "New session".to_string());
         let forked_from = self.current_session.as_deref().and_then(|session_id| {
             self.state_runtime
-                .store()
                 .session_metadata(session_id)
                 .ok()
                 .flatten()
@@ -134,7 +133,7 @@ impl TuiApp {
         let id = self.resolve_session_ref(reference)?;
         let summary = self.session_summary_required(&id)?;
         self.adopt_session_cwd(&summary)?;
-        self.state_runtime.store().resume_session(&id)?;
+        self.state_runtime.resume_session(&id)?;
         self.current_session = Some(id.clone());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
@@ -157,7 +156,7 @@ impl TuiApp {
             return Ok(());
         }
         let child_session_id = {
-            let store = self.state_runtime.store();
+            let store = &self.state_runtime;
             let edge = store
                 .find_agent_edge(target)?
                 .ok_or_else(|| anyhow!("agent not found: {target}"))?;
@@ -196,11 +195,11 @@ impl TuiApp {
             return Ok(false);
         }
         self.last_live_agent_reload_check = Some(now);
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let Some(edge) = store.find_agent_edge(&session_id)? else {
             return Ok(false);
         };
-        if edge.status != psychevo_runtime::AgentEdgeStatus::Open {
+        if edge.status != psychevo_runtime::state::AgentEdgeStatus::Open {
             return Ok(false);
         }
         let message_count = store.load_tui_message_summaries(&session_id)?.len();
@@ -224,7 +223,7 @@ impl TuiApp {
         }
         interrupted |= ui.request_interrupt(current_session.as_deref());
         if let Some(session_id) = current_session.as_deref() {
-            let store = self.state_runtime.store();
+            let store = &self.state_runtime;
             let value = agent_status_value(Some(store), Some(session_id), false);
             let targets = value
                 .get("agents")
@@ -265,7 +264,7 @@ impl TuiApp {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let Some(edge) = store.find_agent_edge(&current)? else {
             ui.push_status("no parent agent session");
             return Ok(());
@@ -281,7 +280,7 @@ impl TuiApp {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let Some(edge) = store.find_agent_edge(&current)? else {
             ui.push_status("no sibling agent sessions");
             return Ok(());
@@ -307,7 +306,7 @@ impl TuiApp {
         let summary = self.session_summary_required(session_id)?;
         self.adopt_session_cwd(&summary)?;
         self.detach_running_for_session_switch(ui, None);
-        self.state_runtime.store().resume_session(session_id)?;
+        self.state_runtime.resume_session(session_id)?;
         self.current_session = Some(session_id.to_string());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
@@ -425,7 +424,7 @@ impl TuiApp {
 
     pub(crate) fn agent_breadcrumb_status(&self) -> Option<String> {
         let session_id = self.current_session.as_deref()?;
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         let edge = store.find_agent_edge(session_id).ok().flatten()?;
         let sibling_count = store
             .list_agent_edges_for_parent(&edge.parent_session_id)
@@ -528,7 +527,7 @@ impl TuiApp {
         let Some((provider, model_id)) = model.split_once('/') else {
             return Ok(());
         };
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         if store.session_summary(session_id)?.is_none() {
             return Ok(());
         }
@@ -583,10 +582,7 @@ impl TuiApp {
         let Some(session_id) = self.current_session.as_deref() else {
             return Err(anyhow!("no current session to rename"));
         };
-        let title = self
-            .state_runtime
-            .store()
-            .set_session_title(session_id, &title)?;
+        let title = self.state_runtime.set_session_title(session_id, &title)?;
         self.current_session_title = Some(title.clone());
         Ok(title)
     }
@@ -658,7 +654,6 @@ impl TuiApp {
     pub(crate) fn sessions(&self) -> Result<Vec<SessionSummary>> {
         Ok(self
             .state_runtime
-            .store()
             .list_sessions_with_sources(&[])?
             .into_iter()
             .filter(human_visible_tui_session_summary)
@@ -669,12 +664,11 @@ impl TuiApp {
         &self,
         view: SessionListView,
     ) -> Result<Vec<TuiSessionDisplaySummary>> {
-        tui_sessions_for_store(self.state_runtime.store(), view)
+        tui_sessions_for_store(&self.state_runtime, view)
     }
 
     pub(crate) fn session_summary_required(&self, session_id: &str) -> Result<SessionSummary> {
         self.state_runtime
-            .store()
             .session_summary(session_id)?
             .ok_or_else(|| anyhow!("session not found: {session_id}"))
     }
@@ -705,16 +699,13 @@ impl TuiApp {
             ui.refresh_sidebar(self);
             return Ok(());
         };
-        let metadata = self.state_runtime.store().session_metadata(&session_id)?;
+        let metadata = self.state_runtime.session_metadata(&session_id)?;
         ui.sidebar_context_limit = session_context_limit_with_parent_fallback(
-            self.state_runtime.store(),
+            &self.state_runtime,
             &session_id,
             metadata.as_ref(),
         )?;
-        let summaries = self
-            .state_runtime
-            .store()
-            .load_tui_message_summaries(&session_id)?;
+        let summaries = self.state_runtime.load_tui_message_summaries(&session_id)?;
         ui.session_usage_summary = Some(session_usage_summary(SessionUsageOptions {
             state: self.state_runtime.clone(),
             session_id: session_id.clone(),
@@ -755,7 +746,6 @@ impl TuiApp {
         let agent_catalog = self.current_agent_catalog();
         let agent_edges = self
             .state_runtime
-            .store()
             .list_agent_edges_for_parent(&session_id)?;
         ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
         ui.visible_turn_started = ui
@@ -793,7 +783,7 @@ impl TuiApp {
     }
 }
 
-pub(crate) fn latest_human_visible_session_id(store: &SqliteStore) -> Result<Option<String>> {
+pub(crate) fn latest_human_visible_session_id(store: &StateRuntime) -> Result<Option<String>> {
     Ok(tui_sessions_for_store(store, SessionListView::Active)?
         .into_iter()
         .next()
@@ -801,7 +791,7 @@ pub(crate) fn latest_human_visible_session_id(store: &SqliteStore) -> Result<Opt
 }
 
 pub(crate) fn tui_sessions_for_store(
-    store: &SqliteStore,
+    store: &StateRuntime,
     view: SessionListView,
 ) -> Result<Vec<TuiSessionDisplaySummary>> {
     let sessions = match view {
@@ -851,7 +841,7 @@ pub(crate) fn session_project_display_path(cwd: &str) -> String {
 }
 
 pub(crate) fn session_context_limit_with_parent_fallback(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     metadata: Option<&Value>,
 ) -> Result<Option<u64>> {

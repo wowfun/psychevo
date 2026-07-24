@@ -83,7 +83,7 @@ impl GatewayExternalAgentDelegate {
         options.external_agent_delegate = None;
         let child = options
             .state
-            .store()
+
             .session_summary(&child_session_id)?
             .ok_or_else(|| Error::Message(format!("session not found: {child_session_id}")))?;
         if child.parent_session_id.as_deref() != Some(request.parent_session_id.as_str()) {
@@ -172,7 +172,7 @@ impl GatewayExternalAgentDelegate {
                     options.agent = Some(request.agent_name.clone());
                     let existing_binding = options
                         .state
-                        .store()
+
                         .gateway_runtime_binding(&child_session_id)?;
                     let agent_binding = resolve_gateway_agent_binding_snapshot(
                         &options,
@@ -227,10 +227,10 @@ impl GatewayExternalAgentDelegate {
         let _ = child_heartbeat.send(());
         terminal_gateway
             .state
-            .store()
+
             .set_agent_edge_status(
                 &terminal_child_session_id,
-                psychevo_runtime::AgentEdgeStatus::Closed,
+                psychevo_runtime::state::AgentEdgeStatus::Closed,
             )?;
         match &result {
             Ok(result) => terminal_gateway.record_external_delegate_terminal(
@@ -260,7 +260,7 @@ impl Gateway {
         durable_activity: Option<&DurableGatewayActivity>,
         event_sink: Option<&GatewayEventSink>,
     ) -> psychevo_runtime::Result<()> {
-        if let Some(terminal) = self.state.store().gateway_turn_terminal(turn_id)? {
+        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id)? {
             self.mark_active_turn_terminal(turn_id);
             self.finish_durable_gateway_activity(durable_activity, &terminal.status);
             return Ok(());

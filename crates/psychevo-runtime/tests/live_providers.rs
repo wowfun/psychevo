@@ -2,9 +2,11 @@ use std::env;
 use std::path::PathBuf;
 
 use psychevo_ai::Outcome;
+use psychevo_runtime::state::StateRuntime;
 use psychevo_runtime::{
-    RunOptions, StateRuntime, fetch_and_cache_model_catalog, model_catalog_provider,
-    provider_models_cache_path_for_home, read_cached_model_catalog, run_live,
+    config::fetch_and_cache_model_catalog, config::model_catalog_provider,
+    config::provider_models_cache_path_for_home, config::read_cached_model_catalog, run::run_live,
+    types::RunOptions,
 };
 use rusqlite::Connection;
 use tempfile::tempdir;
@@ -61,7 +63,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         workspace_mutations: None,
         runtime_tools: Vec::new(),
         include_reasoning: true,
-        mode: psychevo_runtime::RunMode::Default,
+        mode: psychevo_runtime::types::RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
@@ -155,7 +157,7 @@ fn live_provider_options_with_temp_home(
             workspace_mutations: None,
             runtime_tools: Vec::new(),
             include_reasoning: false,
-            mode: psychevo_runtime::RunMode::Default,
+            mode: psychevo_runtime::types::RunMode::Default,
             permission_mode: None,
             approval_mode: None,
             approval_handler: None,

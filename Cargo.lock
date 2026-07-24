@@ -2726,6 +2726,7 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "futures",
+ "psychevo-agent-core",
  "psychevo-ai",
  "psychevo-gateway",
  "psychevo-runtime",
@@ -2779,6 +2780,7 @@ dependencies = [
  "libc",
  "pretty_assertions",
  "psychevo-acp",
+ "psychevo-agent-core",
  "psychevo-ai",
  "psychevo-gateway",
  "psychevo-runtime",
@@ -2896,6 +2898,7 @@ dependencies = [
  "psychevo-gateway-protocol",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

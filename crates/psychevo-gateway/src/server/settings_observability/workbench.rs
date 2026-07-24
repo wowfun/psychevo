@@ -3,7 +3,7 @@ fn settings_read_value(
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
-    let normalized_cwd = psychevo_runtime::normalized_native_path(cwd);
+    let normalized_cwd = psychevo_runtime::host_paths::normalized_native_path(cwd);
     let cwd = normalized_cwd.as_path();
     let controls = workbench_controls_value(state, cwd, thread_id)?;
     let project = workbench_project_value(cwd);
@@ -22,7 +22,7 @@ fn settings_read_value(
 
 fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo_runtime::Result<Value> {
     let options = state.run_options(cwd.to_path_buf(), None);
-    let value = psychevo_runtime::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
+    let value = psychevo_runtime::config::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
         json!({
             "execution": "local", "backend": "exa", "external_access": "live",
             "context_size": "medium", "return_token_budget": "default",
@@ -68,7 +68,7 @@ fn web_search_settings_update_value(
         "location": search.location,
         "image": search.image,
     });
-    psychevo_runtime::update_global_web_search_settings(
+    psychevo_runtime::config::update_global_web_search_settings(
         &state.inner.home,
         value,
         params.credential_values,
@@ -173,10 +173,10 @@ fn session_model_state_selection(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Option<ComposerModelSelection>> {
-    let Some(summary) = state.inner.state.store().session_summary(thread_id)? else {
+    let Some(summary) = state.inner.state.session_summary(thread_id)? else {
         return Ok(None);
     };
-    let metadata = state.inner.state.store().session_metadata(thread_id)?;
+    let metadata = state.inner.state.session_metadata(thread_id)?;
     let reasoning_effort = metadata
         .as_ref()
         .and_then(|metadata| metadata.get(SESSION_COMPOSER_MODEL_METADATA_KEY))
@@ -221,7 +221,7 @@ fn session_control_agent(
     let Some(thread_id) = thread_id else {
         return Ok(None);
     };
-    let metadata = state.inner.state.store().session_metadata(thread_id)?;
+    let metadata = state.inner.state.session_metadata(thread_id)?;
     Ok(match main_agent_from_session_metadata(metadata.as_ref()) {
         LoadedMainAgent::Agent(agent) => Some(agent),
         LoadedMainAgent::Default | LoadedMainAgent::Missing => None,
@@ -237,7 +237,7 @@ fn update_session_agent_setting(
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
@@ -247,7 +247,7 @@ fn update_session_agent_setting(
         )));
     }
     let Some(input) = input else {
-        state.inner.state.store().set_session_metadata_field(
+        state.inner.state.set_session_metadata_field(
             thread_id,
             SESSION_MAIN_AGENT_METADATA_KEY,
             Some(main_agent_default_metadata()),
@@ -273,7 +273,7 @@ fn update_session_agent_setting(
     }
     let agent =
         resolve_agent_definition(&catalog, input, &scope.cwd, &state.inner.inherited_env)?;
-    state.inner.state.store().set_session_metadata_field(
+    state.inner.state.set_session_metadata_field(
         thread_id,
         SESSION_MAIN_AGENT_METADATA_KEY,
         Some(main_agent_metadata(
@@ -287,7 +287,7 @@ fn update_session_agent_setting(
 }
 
 fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
-    let cwd = psychevo_runtime::normalized_native_path(cwd);
+    let cwd = psychevo_runtime::host_paths::normalized_native_path(cwd);
     wire::WorkbenchProjectView {
         path: cwd.display().to_string(),
         display_path: display_cwd(&cwd),
@@ -296,11 +296,11 @@ fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
 }
 
 fn display_cwd(cwd: &Path) -> String {
-    let cwd_display = psychevo_runtime::display_path_for_native_path(cwd);
+    let cwd_display = psychevo_runtime::host_paths::display_path_for_native_path(cwd);
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
         && let Some(display) = display_relative_to_home(
             &cwd_display,
-            &psychevo_runtime::display_path_for_native_path(&home),
+            &psychevo_runtime::host_paths::display_path_for_native_path(&home),
         )
     {
         return display;

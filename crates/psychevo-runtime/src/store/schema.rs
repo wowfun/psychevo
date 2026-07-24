@@ -10,11 +10,12 @@ use crate::error::{Error, Result};
 
 use super::store_schema_helpers::sqlite_table_exists;
 use super::{
-    MIN_SUPPORTED_SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION, SqliteStore, SqliteStoreInner,
+    MIN_SUPPORTED_SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION, StateRuntime, StateRuntimeInner,
 };
 
-impl SqliteStore {
-    pub fn open(path: &Path) -> Result<Self> {
+impl StateRuntime {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
         if path != Path::new(":memory:")
             && let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
@@ -447,9 +448,11 @@ impl SqliteStore {
         )?;
         conn.pragma_update(None, "user_version", SQLITE_SCHEMA_VERSION)?;
         Ok(Self {
-            inner: Arc::new(SqliteStoreInner {
+            inner: Arc::new(StateRuntimeInner {
+                db_path: path.to_path_buf(),
                 conn: Mutex::new(conn),
                 successful_writes: AtomicUsize::new(0),
+                filesystem_grants: Mutex::new(Default::default()),
             }),
         })
     }

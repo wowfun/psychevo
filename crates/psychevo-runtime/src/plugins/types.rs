@@ -35,7 +35,6 @@ pub struct PluginInstallOptions {
     pub git_ref: Option<String>,
     pub npm_version: Option<String>,
     pub npm_registry: Option<String>,
-    pub adapter_mode: Option<PluginAdapterMode>,
     pub force: bool,
 }
 
@@ -46,7 +45,6 @@ pub struct PluginInspectOptions {
     pub git_ref: Option<String>,
     pub npm_version: Option<String>,
     pub npm_registry: Option<String>,
-    pub adapter_mode: Option<PluginAdapterMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,34 +121,6 @@ impl PluginSourceKind {
             "local" => Some(Self::Local),
             "git" => Some(Self::Git),
             "npm" => Some(Self::Npm),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PluginAdapterMode {
-    AdapterHost,
-    #[default]
-    ManifestOnly,
-    Disabled,
-}
-
-impl PluginAdapterMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::AdapterHost => "adapter_host",
-            Self::ManifestOnly => "manifest_only",
-            Self::Disabled => "disabled",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim() {
-            "adapter_host" | "adapter-host" => Some(Self::AdapterHost),
-            "manifest_only" | "manifest-only" => Some(Self::ManifestOnly),
-            "disabled" => Some(Self::Disabled),
             _ => None,
         }
     }
@@ -246,10 +216,6 @@ pub struct PluginInstallRecord {
     pub compatibility_profile: String,
     #[serde(default)]
     pub component_statuses: Vec<PluginComponentStatus>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub package_fingerprint: String,
-    #[serde(default)]
-    pub adapter_mode: PluginAdapterMode,
     pub manifest_resources: Vec<String>,
     pub psychevo_extensions: Vec<String>,
     pub diagnostics: Vec<PluginDiagnostic>,
@@ -266,15 +232,6 @@ pub struct PluginMarketplaceEntry {
     pub npm_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub npm_registry: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adapter_mode: Option<PluginAdapterMode>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PluginTrustRecord {
-    pub key: String,
-    pub fingerprint: String,
-    pub trusted_at_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -317,12 +274,8 @@ pub struct PluginInspection {
     pub description: Option<String>,
     pub manifest_path: PathBuf,
     pub package_root: PathBuf,
-    pub package_fingerprint: String,
-    pub adapter_mode: PluginAdapterMode,
-    pub readiness: String,
-    pub status: String,
-    pub target_lanes: Vec<String>,
-    pub projected_contributions: Vec<String>,
+    pub support: String,
+    pub declared_lanes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub component_statuses: Vec<PluginComponentStatus>,
     pub unsupported_lanes: Vec<String>,
@@ -330,6 +283,8 @@ pub struct PluginInspection {
     pub stages: Vec<PluginStageDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<PluginInterfaceMetadata>,
+    #[serde(skip)]
+    pub(crate) invalid: bool,
 }
 
 #[derive(Debug, Clone)]

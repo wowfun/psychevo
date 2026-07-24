@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use psychevo_runtime::{
-    RunStreamEvent, RunWarning, WriteArgumentPreview, WriteArgumentPreviewTracker,
-    write_argument_preview_from_args,
+    tool_argument_display::WriteArgumentPreview,
+    tool_argument_display::WriteArgumentPreviewTracker,
+    tool_argument_display::write_argument_preview_from_args, types::RunStreamEvent,
+    types::RunWarning,
 };
 use serde_json::{Value, json};
 

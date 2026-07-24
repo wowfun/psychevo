@@ -7,7 +7,7 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     let browser_session_id = "browser-session".to_string();
@@ -124,7 +124,7 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
     state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
         .expect("existing project session");
     let browser_session_id = "browser-session".to_string();

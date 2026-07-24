@@ -37,7 +37,7 @@ pub async fn run_live_streaming_controlled(
 }
 
 pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadContextResult> {
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let summary = store
         .session_summary(&options.session)?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
@@ -220,7 +220,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             required_agent_names: Vec::new(),
             spawn_depth_remaining: None,
             active_team: crate::agents::active_agent_team_context_for_session(
-                options.state.store(),
+                &options.state,
                 &summary.id,
             )
             .ok()
@@ -480,7 +480,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     }
     let resolved = resolve_run_provider(&resolved_options, &loaded)?;
     let managed_tools = ensure_rg(&loaded.env).await?;
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let selected_parent_summary = selected_agent_for_result(selected_parent_agent.as_ref());
     let parent_session_id = if let Some(session_id) = options.parent_session.clone() {
         store.resume_session(&session_id)?;
@@ -576,7 +576,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         required_agent_names: Vec::new(),
         spawn_depth_remaining: None,
         active_team: crate::agents::active_agent_team_context_for_session(
-            options.state.store(),
+            &options.state,
             &parent_session_id,
         )
         .ok()

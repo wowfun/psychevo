@@ -156,7 +156,7 @@ pub(crate) async fn spawn_subagent(
     let response_agent_name = agent.name.clone();
     let response_agent_description = agent.description.clone();
     let response_task_name = task_name.clone();
-    let response_store = context.state.store().clone();
+    let response_store = context.state.clone();
     let response_child_session_id = precreated_child_session.clone();
     let response_tool_call_id = tool_call_id.clone();
     let child_team_member_id = team_member.as_ref().map(|member| member.id.clone());
@@ -290,7 +290,7 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
         context: Some(context),
         parent_tool_call_id: input.parent_tool_call_id,
     });
-    let child_session = context.state.store().create_child_session_with_metadata(
+    let child_session = context.state.create_child_session_with_metadata(
         &context.parent_session_id,
         &context.cwd,
         "agent",
@@ -299,7 +299,7 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
         Some(metadata.clone()),
     )?;
     attach_child_thread_metadata(&mut metadata, &child_session);
-    context.state.store().upsert_agent_edge(
+    context.state.upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
         AgentEdgeStatus::Open,
@@ -355,7 +355,9 @@ fn external_agent_runtime_ref(
     agent
         .backend
         .as_ref()
-        .map(|backend| format!("acp:{}", backend.name))
+        .map(|backend| {
+            crate::config::generated_runtime_profile_id_for_backend(backend.name.as_str())
+        })
 }
 
 async fn spawn_external_subagent(
@@ -429,20 +431,20 @@ async fn spawn_external_subagent(
         context: Some(&context),
         parent_tool_call_id: Some(&tool_call_id),
     });
-    let child_session = context.state.store().create_child_session_with_metadata(
+    let child_provider = backend_ref
+        .as_deref()
+        .map(|backend| format!("acp:{backend}"))
+        .unwrap_or_else(|| runtime_ref.clone());
+    let child_session = context.state.create_child_session_with_metadata(
         &context.parent_session_id,
         &context.cwd,
-        if runtime_ref.starts_with("acp:") {
-            "peer_agent"
-        } else {
-            "runtime"
-        },
+        "peer_agent",
         model.as_deref().unwrap_or(&agent.name),
-        &runtime_ref,
+        &child_provider,
         Some(metadata.clone()),
     )?;
     attach_child_thread_metadata(&mut metadata, &child_session);
-    context.state.store().upsert_agent_edge(
+    context.state.upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
         AgentEdgeStatus::Open,
@@ -529,7 +531,7 @@ async fn spawn_external_subagent(
             let record = update_run_completed(&id, result.outcome, result.final_answer.clone());
             let _ = context
                 .state
-                .store()
+
                 .set_agent_edge_status(&result.child_session_id, AgentEdgeStatus::Closed);
             record
         }
@@ -537,7 +539,7 @@ async fn spawn_external_subagent(
             update_run_failed(&id, &err.to_string());
             let _ = context
                 .state
-                .store()
+
                 .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
             let record = {
                 let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
@@ -576,23 +578,23 @@ async fn spawn_external_subagent(
                         agent_path: Some(agent_path(&task_name)),
                     })
             };
-            let model_value = subagent_summary_value(Some(context.state.store()), &record, false);
+            let model_value = subagent_summary_value(Some(&context.state), &record, false);
             return Ok(ToolOutput::error(model_content_string(&model_value)));
         }
     };
-    let model_value = subagent_summary_value(Some(context.state.store()), &record, false);
+    let model_value = subagent_summary_value(Some(&context.state), &record, false);
     let child_summary = record
         .child_session_id
         .as_deref()
         .and_then(|session_id| {
             context
                 .state
-                .store()
+
                 .session_summary(session_id)
                 .ok()
                 .flatten()
         })
-        .map(|summary| agent_child_session_summary_value(context.state.store(), &summary));
+        .map(|summary| agent_child_session_summary_value(&context.state, &summary));
     let response_child_session_id = record.child_session_id.clone();
     let system_value = json!({
         "id": record.id,
@@ -786,7 +788,7 @@ pub(crate) fn spawn_child_agent_background(
         context: Some(&context),
         parent_tool_call_id: None,
     });
-    let child_session = context.state.store().create_child_session_with_metadata(
+    let child_session = context.state.create_child_session_with_metadata(
         &context.parent_session_id,
         &context.cwd,
         "agent",
@@ -794,7 +796,7 @@ pub(crate) fn spawn_child_agent_background(
         &context.model_provider,
         Some(metadata.clone()),
     )?;
-    context.state.store().upsert_agent_edge(
+    context.state.upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
         AgentEdgeStatus::Open,
@@ -844,7 +846,7 @@ pub(crate) fn spawn_child_agent_background(
         );
     }
     append_parent_agent_start_notification(
-        context.state.store(),
+        &context.state,
         &context.parent_session_id,
         &record,
     )?;

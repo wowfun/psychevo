@@ -7,10 +7,10 @@ use crate::error::{Error, Result};
 
 use super::{
     AutomationRunFinishInput, AutomationRunRecord, AutomationRunRecoveryCandidate,
-    AutomationTaskInput, AutomationTaskRecord, SqliteStore,
+    AutomationTaskInput, AutomationTaskRecord, StateRuntime,
 };
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn upsert_automation_task(
         &self,
         input: AutomationTaskInput,

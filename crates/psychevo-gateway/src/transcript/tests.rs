@@ -1,4 +1,5 @@
-    use psychevo_runtime::{Outcome, UserContentBlock};
+    use psychevo_agent_core::{UserContentBlock};
+    use psychevo_ai::{Outcome};
 
     #[test]
     fn terminal_projection_keeps_failed_and_interrupted_turns_visible() {
@@ -189,7 +190,7 @@
     fn projector_preserves_hosted_web_lifecycle_and_clickable_sources() {
         let entries = project_transcript_entries("thread-1", &[summary(1, Message::Assistant {
             content: vec![
-                AssistantBlock::ProviderTool(psychevo_runtime::ProviderToolBlock {
+                AssistantBlock::ProviderTool(psychevo_agent_core::ProviderToolBlock {
                     id: "ws_1".into(), name: "web_search".into(),
                     action: Some(json!({"type":"search","query":"rust news"})), status: "completed".into(),
                 }),
@@ -1171,7 +1172,7 @@
         );
         let mut metadata = serde_json::Map::new();
         metadata.insert(
-            psychevo_runtime::SIDE_INHERITED_METADATA_KEY.to_string(),
+            psychevo_runtime::thread_lineage::SIDE_INHERITED_METADATA_KEY.to_string(),
             json!({
                 "hidden": true,
                 "parent_session_id": "parent-thread",
@@ -1222,7 +1223,7 @@
         AgentEdgeRecord {
             parent_session_id: parent.to_string(),
             child_session_id: child.to_string(),
-            status: psychevo_runtime::AgentEdgeStatus::Closed,
+            status: psychevo_runtime::state::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(metadata),

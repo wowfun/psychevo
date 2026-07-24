@@ -72,7 +72,7 @@ impl GenerationProvider for ChildRequestCaptureProvider {
 #[tokio::test]
 pub(crate) async fn background_completion_records_mailbox_event_without_parent_user_message() {
     let tmp = TempDir::new().expect("tmp");
-    let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -111,7 +111,7 @@ pub(crate) async fn background_completion_records_mailbox_event_without_parent_u
 #[tokio::test]
 pub(crate) async fn wait_agent_mailbox_returns_status_without_final_answer() {
     let tmp = TempDir::new().expect("tmp");
-    let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -139,7 +139,7 @@ pub(crate) async fn wait_agent_mailbox_returns_status_without_final_answer() {
 #[test]
 pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
     let tmp = TempDir::new().expect("tmp");
-    let store = SqliteStore::open(&tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "parent-model", "provider", None)
         .expect("parent");
@@ -229,7 +229,7 @@ pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
 pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -288,7 +288,7 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
 pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -405,7 +405,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
 pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -511,7 +511,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
 pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -568,7 +568,6 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -661,7 +660,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
 pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extension_tools() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -723,7 +722,7 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
 pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -797,7 +796,7 @@ pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt(
 pub(crate) async fn background_agent_tool_result_includes_child_session_identity() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -869,7 +868,7 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
 pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -924,7 +923,7 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
 pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -975,11 +974,27 @@ pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
 
+#[test]
+pub(crate) fn generated_backend_agents_share_the_config_owned_profile_mapping() {
+    assert_eq!(
+        crate::config::generated_runtime_profile_id_for_backend("opencode"),
+        "opencode"
+    );
+    assert_eq!(
+        crate::config::generated_runtime_profile_id_for_backend("codex"),
+        "codex"
+    );
+    assert_eq!(
+        crate::config::generated_runtime_profile_id_for_backend("hermes"),
+        "acp:hermes"
+    );
+}
+
 #[tokio::test]
 pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -1040,7 +1055,7 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
     let calls = delegate.calls.lock().expect("delegate calls");
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].runtime_ref, "acp:opencode");
+    assert_eq!(calls[0].runtime_ref, "opencode");
     assert_eq!(calls[0].expected_runtime_profile_revision, None);
     assert_eq!(calls[0].backend_ref.as_deref(), Some("opencode"));
     assert_eq!(calls[0].prompt, "List your tools.");
@@ -1051,7 +1066,7 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
 pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_provenance() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -1159,7 +1174,7 @@ pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_prov
 pub(crate) async fn external_pairing_rejects_uninjectable_definition_contributions() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -1211,7 +1226,7 @@ pub(crate) async fn external_pairing_rejects_uninjectable_definition_contributio
 pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");
@@ -1276,7 +1291,7 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
 pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailable_error() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");

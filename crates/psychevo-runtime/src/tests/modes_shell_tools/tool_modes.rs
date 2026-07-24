@@ -739,7 +739,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     assert!(context_text.contains("Truncated: false"));
     assert!(context_text.contains("Output:\ncontext-ok\n"));
 
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let messages = store.load_messages(session_id).expect("messages");
     assert_eq!(messages.len(), 1);
     match &messages[0] {

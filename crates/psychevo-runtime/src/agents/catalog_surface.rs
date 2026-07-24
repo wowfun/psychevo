@@ -21,8 +21,8 @@ use super::{
     ApprovalHandler, ApprovalMode, AtomicBool, BTreeMap, BTreeSet, ControlHandle,
     CustomToolsetConfig, Duration, Error, GenerationProvider, HashMap, Instant, LazyLock,
     LspConfig, Message, ModelMetadata, Mutex, Ordering, Path, PathBuf, PermissionConfig,
-    PermissionMode, ProjectContextInstructionMode, Result, RunMode, RunStreamSink, SqliteStore,
-    StateRuntime, ToolBinding, ToolSelectionConfig, Value, json, prompt_templates,
+    PermissionMode, ProjectContextInstructionMode, Result, RunMode, RunStreamSink, StateRuntime,
+    ToolBinding, ToolSelectionConfig, Value, json, prompt_templates,
 };
 
 include!("catalog_surface/views.rs");

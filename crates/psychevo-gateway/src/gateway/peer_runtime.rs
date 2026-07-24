@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedPeerTurn {
-    pub(crate) agent: psychevo_runtime::AgentDefinition,
-    pub(crate) backend: psychevo_runtime::AgentBackendConfig,
+    pub(crate) agent: psychevo_runtime::agents::AgentDefinition,
+    pub(crate) backend: psychevo_runtime::agents::AgentBackendConfig,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) process_scope_fingerprint: Option<String>,
 }
@@ -117,7 +117,7 @@ fn clear_acp_peer_usage_update(
     state: &StateRuntime,
     session_id: &str,
 ) -> psychevo_runtime::Result<()> {
-    let Some(metadata) = state.store().session_metadata(session_id)? else {
+    let Some(metadata) = state.session_metadata(session_id)? else {
         return Ok(());
     };
     let Some(peer) = metadata.get(ACP_PEER_METADATA_KEY) else {
@@ -131,6 +131,6 @@ fn clear_acp_peer_usage_update(
     }
     let value = (!peer.is_empty()).then_some(Value::Object(peer));
     state
-        .store()
+
         .set_session_metadata_field(session_id, ACP_PEER_METADATA_KEY, value)
 }

@@ -13,7 +13,7 @@ use super::store_context_evidence::{insert_context_evidence_rows, prepare_contex
 use super::store_message_fields::{message_fields, optional_json_string, parse_optional_json};
 use super::store_schema_helpers::next_session_seq;
 use super::{
-    ContextEvidenceInput, MESSAGE_PRE_SNAPSHOT_KEY, MESSAGE_UNDO_METADATA_KEY, SqliteStore,
+    ContextEvidenceInput, MESSAGE_PRE_SNAPSHOT_KEY, MESSAGE_UNDO_METADATA_KEY, StateRuntime,
 };
 
 pub(crate) struct AppendMessageParams<'a> {
@@ -26,7 +26,7 @@ pub(crate) struct AppendMessageParams<'a> {
     pub(crate) content_text_override: Option<String>,
 }
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn resume_session(&self, session_id: &str) -> Result<()> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let exists = conn
@@ -427,7 +427,7 @@ pub(crate) fn accounting_json_from_row(
         pricing_tier: row.get(offset + 9)?,
         cost_status: row
             .get::<_, Option<String>>(offset + 10)?
-            .and_then(|value| CostStatus::from_str(&value)),
+            .and_then(|value| CostStatus::parse(&value)),
         pricing_missing_reason: row.get(offset + 11)?,
         pricing_version: row.get(offset + 12)?,
     };

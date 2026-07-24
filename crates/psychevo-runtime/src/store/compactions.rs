@@ -6,9 +6,9 @@ use crate::error::{Error, Result};
 
 use super::store_message_fields::{optional_json_string, parse_optional_json};
 use super::store_undo_helpers::session_tool_call_count;
-use super::{SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore};
+use super::{SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, StateRuntime};
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn append_session_compaction(
         &self,
         input: SessionCompactionInput,

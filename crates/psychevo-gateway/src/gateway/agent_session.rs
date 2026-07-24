@@ -197,7 +197,7 @@ struct AgentSessionRef {
     cwd: PathBuf,
     local_session_id: String,
     native_session_id: String,
-    mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
 }
 
 enum AgentSessionCommand {
@@ -365,14 +365,14 @@ impl AgentDeliveryObserver {
 
     fn mark_unknown(&self) -> psychevo_runtime::Result<()> {
         self.state
-            .store()
+
             .mark_gateway_turn_delivery_unknown(&self.turn_id)
             .map(|_| ())
     }
 
     fn confirm(&self) -> psychevo_runtime::Result<()> {
         self.state
-            .store()
+
             .confirm_gateway_turn_delivery(&self.turn_id)
             .map(|_| ())
     }
@@ -398,7 +398,7 @@ struct PreparedAgentSession {
     cwd: PathBuf,
     local_session_id: String,
     native_session_id: String,
-    mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
     peer: ResolvedPeerTurn,
 }
 
@@ -427,7 +427,7 @@ impl AgentSessionHost {
         target_id: String,
         agent_ref: Option<String>,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo_runtime::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
     ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
         let attached = self.attach(captured)?;
         let (peer, profile) = match &attached.target {
@@ -1149,7 +1149,7 @@ fn acp_session_ready_for_binding(
 ) -> acp_peer::AcpSessionReadyCallback {
     Arc::new(move |native_session_id| {
         state
-            .store()
+
             .attach_gateway_runtime_native_session(
                 &binding.thread_id,
                 binding.binding_revision,

@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+use crate::session_export::{SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet};
 
 #[path = "command_registry/specs.rs"]
 mod specs;

@@ -19,7 +19,7 @@
         assert!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&source.source_key().0)
                 .expect("binding lookup")
                 .is_none()
@@ -67,7 +67,7 @@
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
                 .expect("sessions")
                 .len(),
@@ -106,7 +106,7 @@
         assert!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&source.source_key().0)
                 .expect("binding lookup")
                 .is_none()
@@ -121,7 +121,7 @@
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
                 .expect("initial sessions")
                 .len(),
@@ -152,7 +152,7 @@
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
                 .expect("sessions")
                 .len(),
@@ -160,14 +160,14 @@
         );
         let lane = harness
             .state
-            .store()
+
             .gateway_source_lane(&source.source_key().0)
             .expect("lane lookup")
             .expect("lane");
         assert_eq!(lane.thread_id.as_deref(), Some(first.result.session_id.as_str()));
         let legacy_projection = harness
             .state
-            .store()
+
             .gateway_source_binding(&source.source_key().0)
             .expect("legacy binding lookup")
             .expect("legacy binding projection");
@@ -252,7 +252,7 @@
         assert!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&source.source_key().0)
                 .expect("binding lookup")
                 .is_none()
@@ -260,7 +260,7 @@
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&other_source.source_key().0)
                 .expect("other binding lookup")
                 .expect("other binding")
@@ -269,7 +269,7 @@
         );
         let old_summary = harness
             .state
-            .store()
+
             .session_summary(&first.result.session_id)
             .expect("old summary")
             .expect("old session");
@@ -292,7 +292,7 @@
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&source.source_key().0)
                 .expect("new binding lookup")
                 .expect("new binding")
@@ -365,7 +365,7 @@
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&source.source_key().0)
                 .expect("new binding lookup")
                 .expect("new binding")
@@ -431,7 +431,7 @@ model = "lmstudio/test-model"
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&source.source_key().0)
                 .expect("binding lookup")
                 .expect("binding")
@@ -441,7 +441,7 @@ model = "lmstudio/test-model"
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["web"])
                 .expect("sessions")
                 .len(),
@@ -526,7 +526,7 @@ model = "lmstudio/test-model"
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&canonical.source_key().0)
                 .expect("binding lookup")
                 .expect("canonical binding after draft")
@@ -541,7 +541,7 @@ model = "lmstudio/test-model"
         assert_eq!(
             harness
                 .state
-                .store()
+
                 .gateway_source_binding(&canonical.source_key().0)
                 .expect("binding lookup")
                 .expect("canonical binding after stale completion")
@@ -558,12 +558,12 @@ model = "lmstudio/test-model"
         let source = GatewaySource::new("web", "cwd").persistent();
         let first = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("first session");
         let second = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("second session");
         harness
@@ -627,12 +627,12 @@ model = "lmstudio/test-model"
         let turn_id = "turn-parent";
         let parent_thread = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("parent session");
         let child_thread = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
             .expect("child session");
 
@@ -655,7 +655,7 @@ model = "lmstudio/test-model"
         assert!(
             harness
                 .state
-                .store()
+
                 .update_gateway_activity_thread(
                     &activity.activity_id,
                     &activity.owner_id,
@@ -668,7 +668,7 @@ model = "lmstudio/test-model"
         assert!(
             !harness
                 .state
-                .store()
+
                 .update_gateway_activity_thread(
                     &activity.activity_id,
                     &activity.owner_id,
@@ -681,7 +681,7 @@ model = "lmstudio/test-model"
 
         let record = harness
             .state
-            .store()
+
             .gateway_activity(turn_id)
             .expect("activity lookup")
             .expect("activity");
@@ -696,12 +696,12 @@ model = "lmstudio/test-model"
         let queue_key = "source:web:test";
         let parent_thread = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("parent session");
         let child_thread = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
             .expect("child session");
 
@@ -768,12 +768,12 @@ model = "lmstudio/test-model"
         let harness = harness(backend);
         let parent_thread = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
             .expect("parent session");
         let child_thread = harness
             .state
-            .store()
+
             .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
             .expect("child session");
         let parent_activity = harness

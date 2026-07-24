@@ -16,10 +16,10 @@ use super::store_metadata::{metadata_json_sql, metadata_object_sql};
 use super::store_schema_helpers::session_summary_from_row;
 use super::{
     ChildSessionSnapshotInput, SessionBrowserRequest, SessionBrowserWorkspaceProjection,
-    SessionListProjection, SqliteStore,
+    SessionListProjection, StateRuntime,
 };
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn create_session(&self, cwd: &Path) -> Result<String> {
         self.create_session_with_metadata(cwd, "smoke", "fake-coding-model", "fake", None)
     }
@@ -572,18 +572,25 @@ impl SqliteStore {
         if changed == 0 {
             return Err(Error::Message(format!("session not found: {session_id}")));
         }
+        self.clear_session_filesystem_grants(session_id);
+        self.remove_session_trace(session_id);
         Ok(())
     }
 
     pub fn delete_sessions_for_cwd_with_source(&self, cwd: &Path, source: &str) -> Result<usize> {
         let ids = self.session_ids_for_cwd_with_source(cwd, source)?;
-        self.write_retry(|conn| {
+        let count = self.write_retry(|conn| {
             for id in &ids {
                 conn.execute("DELETE FROM messages WHERE session_id = ?1", params![id])?;
                 conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
             }
             Ok(ids.len())
-        })
+        })?;
+        for id in ids {
+            self.clear_session_filesystem_grants(&id);
+            self.remove_session_trace(&id);
+        }
+        Ok(count)
     }
 
     pub fn session_ids_for_cwd_with_source(&self, cwd: &Path, source: &str) -> Result<Vec<String>> {

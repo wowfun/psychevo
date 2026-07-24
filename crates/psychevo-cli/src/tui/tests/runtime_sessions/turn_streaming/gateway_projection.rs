@@ -430,7 +430,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
     drop(tx);
 
     let task = tokio::spawn(async move {
-        Ok(psychevo_runtime::RunResult {
+        Ok(psychevo_runtime::types::RunResult {
             session_id: "typed-session".to_string(),
             outcome: Outcome::Normal,
             terminal_reason: None,
@@ -486,7 +486,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
 pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_without_thread_leaks() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -497,7 +497,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
@@ -551,7 +551,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     })
     .expect("send other answer");
 
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -917,7 +917,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
     })))
     .expect("send agent end");
 
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: "streamed-session".to_string(),
         outcome: Outcome::Normal,
         terminal_reason: None,
@@ -1111,7 +1111,7 @@ pub(crate) async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
 pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,

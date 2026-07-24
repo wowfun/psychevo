@@ -49,7 +49,7 @@ impl Gateway {
             )));
         }
         if result.is_err()
-            && let Err(delivery_error) = self.state.store().finish_gateway_turn_delivery(&turn_id)
+            && let Err(delivery_error) = self.state.finish_gateway_turn_delivery(&turn_id)
         {
             return Err(Error::Message(format!(
                 "{}; failed to finalize the accepted turn delivery ledger: {delivery_error}",
@@ -106,7 +106,7 @@ impl Gateway {
             .or(mapped_thread_id)
             .or_else(|| options.session.clone());
         if active_thread_id.is_none() {
-            options.cwd = psychevo_runtime::canonicalize_cwd(&options.cwd)?;
+            options.cwd = psychevo_runtime::paths::canonicalize_cwd(&options.cwd)?;
             if options.continue_latest {
                 let continue_source_refs = continue_sources
                     .iter()
@@ -114,12 +114,12 @@ impl Gateway {
                     .collect::<Vec<_>>();
                 active_thread_id = self
                     .state
-                    .store()
+
                     .latest_session_for_cwd_with_sources(&options.cwd, &continue_source_refs)?;
             }
         }
         if active_thread_id.is_none() {
-            active_thread_id = Some(self.state.store().create_session_with_metadata(
+            active_thread_id = Some(self.state.create_session_with_metadata(
                 &options.cwd,
                 &source_name,
                 "pending",
@@ -143,7 +143,7 @@ impl Gateway {
             if options.runtime_ref.is_none()
                 && let Some(binding) = self
                     .state
-                    .store()
+
                     .gateway_runtime_binding(options.session.as_deref().expect("active thread"))?
             {
                 options.runtime_ref = binding.runtime_ref;
@@ -154,7 +154,7 @@ impl Gateway {
             && source.lifetime == GatewaySourceLifetime::Persistent
             && let Some(lane) = self
                 .state
-                .store()
+
                 .gateway_source_lane(&source.source_key().0)?
         {
             options.runtime_ref = lane.draft_profile_ref;
@@ -175,7 +175,7 @@ impl Gateway {
             .as_deref()
             .and_then(|thread_id| {
                 self.state
-                    .store()
+
                     .load_tui_message_summaries(thread_id)
                     .ok()
             })
@@ -280,7 +280,7 @@ impl Gateway {
             options.runtime_ref = Some(profile_config.id.clone());
             let existing_binding = match bound_target.as_ref() {
                 Some(target) => Some(target.binding.clone()),
-                None => self.state.store().gateway_runtime_binding(
+                None => self.state.gateway_runtime_binding(
                     active_thread_id.as_deref().expect("gateway thread exists"),
                 )?,
             };
@@ -321,7 +321,7 @@ impl Gateway {
                     .collect::<BTreeMap<_, _>>();
                 binding = self
                     .state
-                    .store()
+
                     .compare_and_set_gateway_runtime_control_state(
                         &binding.thread_id,
                         binding.binding_revision,
@@ -346,7 +346,7 @@ impl Gateway {
                     )
                     .await?
             {
-                self.state.store().attach_gateway_runtime_native_session(
+                self.state.attach_gateway_runtime_native_session(
                     &binding.thread_id,
                     binding.binding_revision,
                     &native_session_id,
@@ -354,7 +354,7 @@ impl Gateway {
                 options.runtime_session_id = Some(native_session_id);
                 binding = self
                     .state
-                    .store()
+
                     .gateway_runtime_binding(&binding.thread_id)?
                     .ok_or_else(|| {
                         agent_session_configuration_error(
@@ -363,7 +363,7 @@ impl Gateway {
                     })?;
             }
             self.state
-                .store()
+
                 .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
                     turn_id: &turn_id,
                     thread_id: &binding.thread_id,
@@ -427,7 +427,7 @@ impl Gateway {
                 let thread_id = active_thread_id.clone().or_else(|| {
                     durable_activity.as_ref().and_then(|activity| {
                         self.state
-                            .store()
+
                             .gateway_activity(&activity.activity_id)
                             .ok()
                             .flatten()
@@ -440,7 +440,7 @@ impl Gateway {
                     .as_deref()
                     .and_then(|thread_id| {
                         self.state
-                            .store()
+
                             .load_tui_message_summaries(thread_id)
                             .ok()
                     })
@@ -514,7 +514,7 @@ impl Gateway {
         }
         let summaries = self
             .state
-            .store()
+
             .load_tui_message_summaries(&result.session_id)?;
         let turn_status = gateway_turn_status_for_outcome(result.outcome);
         let terminal_message = terminal_message_for_result(&result);
@@ -537,7 +537,7 @@ impl Gateway {
             last_committed_seq: Some(last_committed_seq),
             durable_activity: durable_activity.as_ref(),
         })?;
-        self.state.store().finish_gateway_turn_delivery(&turn_id)?;
+        self.state.finish_gateway_turn_delivery(&turn_id)?;
         let mut committed_entries = transcript::project_committed_turn_window_entries(
             &result.session_id,
             &summaries,
@@ -548,14 +548,14 @@ impl Gateway {
         );
         let agent_edges = self
             .state
-            .store()
+
             .list_agent_edges_for_parent(&result.session_id)?;
         transcript::enrich_agent_blocks_from_edges(&mut committed_entries, &agent_edges);
         if let Some(checkpoint_id) = auto_compaction
             .as_ref()
             .filter(|result| result.compacted)
             .and_then(|result| result.checkpoint_id)
-            && let Some(record) = self.state.store().session_compaction(checkpoint_id)?
+            && let Some(record) = self.state.session_compaction(checkpoint_id)?
             && record.session_id == result.session_id
         {
             committed_entries.extend(transcript::project_compaction_entries(
@@ -581,7 +581,7 @@ impl Gateway {
                 turn: turn.clone(),
                 committed_entries: committed_entries.clone(),
             });
-            if let Ok(Some(summary)) = self.state.store().session_summary(&result.session_id) {
+            if let Ok(Some(summary)) = self.state.session_summary(&result.session_id) {
                 event_sink(GatewayEvent::TitleChanged {
                     thread_id: result.session_id.clone(),
                     title: summary.title.clone(),
@@ -640,9 +640,9 @@ impl Gateway {
         event_sink: Option<&GatewayEventSink>,
         error: &Error,
     ) -> psychevo_runtime::Result<()> {
-        if let Some(terminal) = self.state.store().gateway_turn_terminal(turn_id)? {
+        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id)? {
             self.mark_active_turn_terminal(turn_id);
-            if let Some(activity) = self.state.store().gateway_activity(turn_id)? {
+            if let Some(activity) = self.state.gateway_activity(turn_id)? {
                 self.finish_durable_gateway_activity(
                     Some(&DurableGatewayActivity {
                         activity_id: activity.activity_id,
@@ -656,7 +656,7 @@ impl Gateway {
             }
             return Ok(());
         }
-        let activity_record = self.state.store().gateway_activity(turn_id)?;
+        let activity_record = self.state.gateway_activity(turn_id)?;
         let thread_id = thread_hint.map(str::to_string).or_else(|| {
             activity_record
                 .as_ref()
@@ -726,7 +726,7 @@ impl Gateway {
         };
         if let Some(thread_id) = input.thread_id {
             self.state
-                .store()
+
                 .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
                     turn_id: input.turn_id,
                     thread_id,
@@ -749,7 +749,7 @@ impl Gateway {
 
     fn project_terminal_entry_for_turn(&self, turn_id: &str) -> Vec<TranscriptEntry> {
         self.state
-            .store()
+
             .gateway_turn_terminal(turn_id)
             .ok()
             .flatten()
@@ -760,7 +760,7 @@ impl Gateway {
     async fn maybe_auto_compact_after_turn(
         &self,
         input: AutoCompactionAfterTurn<'_>,
-    ) -> psychevo_runtime::Result<Option<psychevo_runtime::CompactionResult>> {
+    ) -> psychevo_runtime::Result<Option<psychevo_runtime::compaction::CompactionResult>> {
         let AutoCompactionAfterTurn {
             result,
             config_path,
@@ -773,7 +773,7 @@ impl Gateway {
         let Some(snapshot) = result.context_snapshot.as_ref() else {
             return Ok(None);
         };
-        let check = psychevo_runtime::AutoCompactionCheckOptions {
+        let check = psychevo_runtime::compaction::AutoCompactionCheckOptions {
             state: self.state.clone(),
             cwd: result.cwd.clone(),
             session: result.session_id.clone(),
@@ -782,7 +782,7 @@ impl Gateway {
             reasoning_effort: reasoning_effort.clone(),
             inherited_env: inherited_env.clone(),
         };
-        if !psychevo_runtime::auto_compaction_due_for_snapshot(&check, snapshot)? {
+        if !psychevo_runtime::compaction::auto_compaction_due_for_snapshot(&check, snapshot)? {
             return Ok(None);
         }
         let started_at_ms = gateway_now_ms();
@@ -798,7 +798,7 @@ impl Gateway {
                 ),
             });
         }
-        let result = psychevo_runtime::compact_session(psychevo_runtime::CompactSessionOptions {
+        let result = psychevo_runtime::compaction::compact_session(psychevo_runtime::compaction::CompactSessionOptions {
             state: self.state.clone(),
             cwd: result.cwd.clone(),
             session: result.session_id.clone(),
@@ -806,7 +806,7 @@ impl Gateway {
             model,
             reasoning_effort,
             inherited_env,
-            reason: psychevo_runtime::CompactionReason::AutoThreshold,
+            reason: psychevo_runtime::compaction::CompactionReason::AutoThreshold,
             instructions: None,
             force: false,
         })
@@ -836,7 +836,7 @@ impl Gateway {
         queue_key: &str,
         request: SendCompactRequest,
         compact_id: String,
-    ) -> psychevo_runtime::Result<psychevo_runtime::CompactionResult> {
+    ) -> psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult> {
         let thread_id = match request.thread_id.clone() {
             Some(thread_id) => thread_id,
             None => {
@@ -926,7 +926,7 @@ impl Gateway {
                     .expect("checked legacy runtime identity"),
             )),
             _ => {
-                psychevo_runtime::compact_session(psychevo_runtime::CompactSessionOptions {
+                psychevo_runtime::compaction::compact_session(psychevo_runtime::compaction::CompactSessionOptions {
                     state: self.state.clone(),
                     cwd,
                     session: thread_id,
@@ -1032,7 +1032,7 @@ impl Gateway {
             .as_deref()
             .and_then(|thread_id| {
                 self.state
-                    .store()
+
                     .load_tui_message_summaries(thread_id)
                     .ok()
             })
@@ -1117,7 +1117,7 @@ impl Gateway {
         {
             self.bind_source_thread(source, &session_id, &backend, None)?;
         }
-        let summaries = self.state.store().load_tui_message_summaries(&session_id)?;
+        let summaries = self.state.load_tui_message_summaries(&session_id)?;
         let committed_entries = transcript::project_committed_turn_window_entries(
             &session_id,
             &summaries,
@@ -1150,7 +1150,7 @@ impl Gateway {
     fn thread_cwd(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
         let summary = self
             .state
-            .store()
+
             .session_summary(thread_id)?
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
         Ok(PathBuf::from(summary.cwd))
@@ -1185,7 +1185,7 @@ fn persisted_gateway_activity(
     activity: &DurableGatewayActivity,
 ) -> Option<GatewayActivityRecord> {
     state
-        .store()
+
         .gateway_activity(&activity.activity_id)
         .ok()
         .flatten()

@@ -215,9 +215,9 @@ impl TuiApp {
                         SkillSearchMatch {
                             name: skill.name,
                             description: skill.description,
-                            source_label: psychevo_runtime::skill_source_display_label(Some(
-                                skill.source.as_str(),
-                            ))
+                            source_label: psychevo_runtime::skills::skill_source_display_label(
+                                Some(skill.source.as_str()),
+                            )
                             .map(ToString::to_string),
                         },
                     )
@@ -251,9 +251,9 @@ impl TuiApp {
                         AgentSearchMatch {
                             name: agent.name,
                             description: agent.description,
-                            source_label: psychevo_runtime::agent_source_display_label(Some(
-                                agent.source.as_str(),
-                            ))
+                            source_label: psychevo_runtime::agents::agent_source_display_label(
+                                Some(agent.source.as_str()),
+                            )
                             .map(ToString::to_string),
                         },
                     )

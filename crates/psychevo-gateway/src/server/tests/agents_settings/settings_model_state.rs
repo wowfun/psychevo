@@ -154,7 +154,7 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "old-model", "old", None)
         .expect("session");
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -183,7 +183,7 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(&session_id)
         .expect("summary")
         .expect("session");
@@ -192,7 +192,7 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
     let metadata = state
         .inner
         .state
-        .store()
+
         .session_metadata(&session_id)
         .expect("metadata")
         .expect("metadata");

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{custom_provider_api_key_env, remove_config_value, set_config_value};
+use psychevo_runtime::{
+    config::custom_provider_api_key_env, config::remove_config_value, config::set_config_value,
+};
 use serde_json::json;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -33,8 +33,8 @@ pub(super) fn automation_runtime_tools(
     state: WebState,
     cwd: PathBuf,
     current_thread_id: Option<String>,
-) -> Vec<psychevo_runtime::RuntimeTool> {
-    vec![psychevo_runtime::RuntimeTool::new(Arc::new(
+) -> Vec<psychevo_runtime::types::RuntimeTool> {
+    vec![psychevo_runtime::types::RuntimeTool::new(Arc::new(
         AutomationTool {
             state,
             cwd,

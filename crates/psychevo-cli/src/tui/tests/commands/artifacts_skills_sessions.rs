@@ -249,7 +249,7 @@ pub(crate) async fn explicit_steer_errors_when_idle() {
 pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -313,7 +313,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/session.md".to_string()),
             format: SessionExportFormat::Markdown,
-            include: psychevo_runtime::SessionExportIncludeSet::default_for(
+            include: psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
                 SessionArtifactKind::Export,
             ),
         }),
@@ -337,7 +337,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/session.json".to_string()),
             format: SessionExportFormat::Json,
-            include: psychevo_runtime::SessionExportIncludeSet::parse(
+            include: psychevo_runtime::session_export::SessionExportIncludeSet::parse(
                 "last-provider-request",
                 SessionArtifactKind::Export,
             )
@@ -367,7 +367,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/response.json".to_string()),
             format: SessionExportFormat::Json,
-            include: psychevo_runtime::SessionExportIncludeSet::parse(
+            include: psychevo_runtime::session_export::SessionExportIncludeSet::parse(
                 "last-provider-response",
                 SessionArtifactKind::Export,
             )
@@ -402,7 +402,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         &mut ui,
         SlashCommand::Share(crate::tui::slash::TuiShareOptions {
             path: Some("share.md".to_string()),
-            include: psychevo_runtime::SessionExportIncludeSet::default_for(
+            include: psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
                 SessionArtifactKind::Share,
             ),
         }),
@@ -457,10 +457,10 @@ pub(crate) fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
         "---\nname: same\ndescription: Project same\n---\n\nbody\n",
     )
     .expect("project same");
-    psychevo_runtime::set_skill_enabled(
+    psychevo_runtime::skills::set_skill_enabled(
         &app.home,
         &app.cwd,
-        psychevo_runtime::SkillTarget::Global,
+        psychevo_runtime::skills::SkillTarget::Global,
         "disabled",
         false,
     )
@@ -764,7 +764,7 @@ pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript
     );
     let file = app.cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");

@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::error::Result;
 
-use super::SqliteStore;
+use super::StateRuntime;
 use super::store_message_fields::optional_json_string;
 use super::store_metadata::json_to_sql;
 
@@ -104,7 +104,7 @@ pub struct AgentMissionRunRecord {
     pub metadata: Option<Value>,
 }
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn upsert_agent_edge(
         &self,
         parent_session_id: &str,

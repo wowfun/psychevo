@@ -185,7 +185,7 @@ reserve_tokens = 5000
 
     #[test]
     fn compacted_context_projection_uses_checkpoint_without_deleting_transcript() {
-        let store = SqliteStore::open(std::path::Path::new(":memory:")).expect("store");
+        let store = StateRuntime::open(std::path::Path::new(":memory:")).expect("store");
         let session = store
             .create_session(std::path::Path::new("."))
             .expect("session");

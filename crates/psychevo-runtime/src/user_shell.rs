@@ -9,7 +9,7 @@ use crate::config::{load_run_config, resolve_run_provider};
 use crate::error::{Error, Result};
 use crate::paths::canonical_cwd;
 use crate::run::SESSION_TITLE_MAX_CHARS;
-use crate::store::SqliteStore;
+use crate::store::StateRuntime;
 use crate::tools::{default_exec_max_output_tokens, run_exec_command_for_user_shell};
 use crate::types::{
     RunControl, RunOptions, RunStreamEvent, RunStreamSink, USER_SHELL_METADATA_KEY,
@@ -17,7 +17,7 @@ use crate::types::{
 };
 
 pub(crate) struct PreparedUserShellContext {
-    pub(crate) store: SqliteStore,
+    pub(crate) store: StateRuntime,
     pub(crate) session_id: String,
     pub(crate) sandbox_policy: crate::sandbox::SandboxPolicy,
 }
@@ -182,7 +182,7 @@ pub(crate) fn prepare_user_shell_context(
         context.mode,
         &loaded.env,
     )?;
-    let store = context.state.store().clone();
+    let store = context.state.clone();
     let continue_sources = context
         .continue_sources
         .iter()

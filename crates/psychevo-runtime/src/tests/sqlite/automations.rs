@@ -43,7 +43,7 @@ fn automation_activity_claim<'a>(
 #[test]
 fn automation_task_upsert_lists_due_and_deletes() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
 
@@ -106,7 +106,7 @@ fn automation_task_upsert_lists_due_and_deletes() {
 #[test]
 fn automation_run_claim_is_single_running_and_finish_updates_task() {
     let temp = tempdir().expect("tempdir");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
     let thread_id = store
@@ -184,7 +184,7 @@ fn automation_run_claim_is_single_running_and_finish_updates_task() {
 fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("state.db");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
     let source_key = "automation:automation-1";
@@ -246,7 +246,7 @@ fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
 fn recovered_stale_automation_run_allows_new_claim() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("state.db");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
     store

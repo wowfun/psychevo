@@ -3,11 +3,13 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
+use psychevo_runtime::state::StateRuntime;
 use psychevo_runtime::{
-    ReloadContextOptions, SessionArtifactKind, SessionExportFormat, SessionExportIncludeSet,
-    SessionExportOptions, SessionExportWriteResult, SessionSummary, SqliteStore, StateRuntime,
-    canonicalize_cwd, default_session_export_filename, reload_session_context,
-    render_session_export, write_session_export,
+    paths::canonicalize_cwd, run::reload_session_context, session_export::SessionArtifactKind,
+    session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
+    session_export::SessionExportOptions, session_export::SessionExportWriteResult,
+    session_export::default_session_export_filename, session_export::render_session_export,
+    session_export::write_session_export, types::ReloadContextOptions, types::SessionSummary,
 };
 use serde_json::{Value, json};
 
@@ -38,7 +40,7 @@ pub(crate) fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> 
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let state = StateRuntime::open(&db_path)?;
-    let store = state.store().clone();
+    let store = state.clone();
     let cwd = canonicalize_cwd(&cwd)?;
 
     match &args.command {
@@ -72,7 +74,7 @@ pub(crate) fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> 
 
 pub(crate) fn list_sessions(
     args: &SessionListArgs,
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &std::path::Path,
 ) -> Result<()> {
     if args.limit == 0 {
@@ -112,7 +114,7 @@ pub(crate) fn list_sessions(
 
 pub(crate) fn rename_session(
     args: &SessionRenameArgs,
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &std::path::Path,
 ) -> Result<()> {
     let session_id = resolve_session_id(store, cwd, &args.session)?;
@@ -126,7 +128,7 @@ pub(crate) fn rename_session(
 
 pub(crate) fn reload_context(
     args: &SessionIdArgs,
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &Path,
     state: &StateRuntime,
     env_map: std::collections::BTreeMap<String, String>,
@@ -166,7 +168,7 @@ pub(crate) fn reload_context(
 
 pub(crate) fn export_session(
     args: &SessionExportArgs,
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &Path,
 ) -> Result<()> {
     let session_id = resolve_session_id(store, cwd, &args.session)?;
@@ -188,7 +190,7 @@ pub(crate) fn export_session(
 
 pub(crate) fn share_session(
     args: &SessionShareArgs,
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &Path,
 ) -> Result<()> {
     let session_id = resolve_session_id(store, cwd, &args.session)?;
@@ -221,9 +223,9 @@ pub(crate) fn parse_include(
 
 pub(crate) fn mutate_session(
     args: &SessionIdArgs,
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &std::path::Path,
-    mutate: impl Fn(&SqliteStore, &str) -> psychevo_runtime::Result<()>,
+    mutate: impl Fn(&StateRuntime, &str) -> psychevo_runtime::Result<()>,
 ) -> Result<SessionSummary> {
     let session_id = resolve_session_id(store, cwd, &args.session)?;
     mutate(store, &session_id)?;
@@ -233,7 +235,7 @@ pub(crate) fn mutate_session(
 }
 
 pub(crate) fn resolve_session_id(
-    store: &SqliteStore,
+    store: &StateRuntime,
     cwd: &std::path::Path,
     raw: &str,
 ) -> Result<String> {

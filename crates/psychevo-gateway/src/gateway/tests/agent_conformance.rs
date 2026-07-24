@@ -231,7 +231,7 @@ impl AgentConformanceHarness {
         let terminals = self
             .inner
             .state
-            .store()
+
             .list_gateway_turn_terminals_for_thread(thread_id)
             .expect("conformance terminals");
         let matching = terminals
@@ -252,7 +252,7 @@ impl AgentConformanceHarness {
         let delivery = self
             .inner
             .state
-            .store()
+
             .gateway_turn_delivery(turn_id)
             .expect("conformance delivery lookup")
             .expect("conformance delivery");
@@ -819,7 +819,7 @@ async fn conformance_shared_agent_session_transact_seam(runtime: AgentConformanc
     let binding = harness
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(&turn.thread.id)
         .expect("transact binding lookup")
         .expect("transact binding");
@@ -966,7 +966,7 @@ async fn agent_session_attach_is_idempotent_for_captured_binding_and_rejects_con
     let binding = harness
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(&turn.thread.id)
         .expect("binding lookup")
         .expect("captured binding");
@@ -1059,7 +1059,7 @@ async fn thread_application_run_turn_lowers_typed_caller_intent() {
         harness
             .gateway
             .state()
-            .store()
+
             .gateway_runtime_binding(runs[0].session.as_deref().expect("public Thread session"))
             .expect("binding lookup")
             .is_some()
@@ -1140,7 +1140,7 @@ async fn conformance_process_exit_preserves_unknown_delivery_without_retry(
     let delivery = harness
         .inner
         .state
-        .store()
+
         .gateway_turn_delivery(turn_id)
         .expect("unknown delivery lookup")
         .expect("unknown delivery record");

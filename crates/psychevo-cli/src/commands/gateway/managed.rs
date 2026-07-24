@@ -49,7 +49,7 @@ pub(super) struct ManagedServerState {
     pub(super) executable_path: Option<String>,
     pub(super) executable_modified_ms: Option<i64>,
     pub(super) executable_size: Option<u64>,
-    pub(super) executable_inode: Option<u64>,
+    pub(super) executable_inode: Option<String>,
     pub(super) static_dir: Option<String>,
 }
 
@@ -761,7 +761,10 @@ fn state_executable_fingerprint(state: &ManagedServerState) -> Option<Executable
         path: state.executable_path.clone()?,
         modified_ms: state.executable_modified_ms?,
         size: state.executable_size?,
-        inode: state.executable_inode,
+        inode: state
+            .executable_inode
+            .as_deref()
+            .and_then(|value| value.parse().ok()),
     })
 }
 

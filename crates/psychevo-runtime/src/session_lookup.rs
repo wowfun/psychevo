@@ -3,10 +3,10 @@ use std::path::Path;
 use rusqlite::{OptionalExtension, params};
 
 use crate::error::Result;
-use crate::state_runtime::StateRuntime;
+use crate::state::StateRuntime;
 
 pub fn session_exists(state: &StateRuntime, session_id: &str) -> Result<bool> {
-    state.store().with_conn(|conn| {
+    state.with_conn(|conn| {
         let found = conn
             .query_row(
                 "SELECT 1 FROM sessions WHERE id = ?1",
@@ -20,5 +20,5 @@ pub fn session_exists(state: &StateRuntime, session_id: &str) -> Result<bool> {
 }
 
 pub fn latest_run_session_for_cwd(state: &StateRuntime, cwd: &Path) -> Result<Option<String>> {
-    state.store().latest_run_session_for_cwd(cwd)
+    state.latest_run_session_for_cwd(cwd)
 }

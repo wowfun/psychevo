@@ -111,7 +111,7 @@ fn pending_interaction_context_state(
     let Some(activity_id) = request.activity_id else {
         return Ok(PendingInteractionState::Visible);
     };
-    let Some(activity) = state.inner.state.store().gateway_activity(activity_id)? else {
+    let Some(activity) = state.inner.state.gateway_activity(activity_id)? else {
         return Ok(PendingInteractionState::Stale);
     };
     if !matches!(activity.status.as_str(), "running" | "queued") {

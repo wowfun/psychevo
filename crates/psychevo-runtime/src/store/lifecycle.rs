@@ -6,9 +6,9 @@ use serde_json::{Map, Value};
 use crate::error::Result;
 
 use super::store_undo_helpers::undo_target_from_row;
-use super::{SqliteStore, UndoTarget};
+use super::{StateRuntime, UndoTarget};
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn finish_session(
         &self,
         session_id: &str,

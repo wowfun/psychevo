@@ -10,9 +10,10 @@ use psychevo_ai::Outcome;
 use psychevo_gateway::{
     Gateway, GatewayInputPart, GatewaySource, ThreadTurnRequest, TranscriptBlockKind,
 };
+use psychevo_runtime::state::StateRuntime;
 use psychevo_runtime::{
-    ApprovalHandler, PermissionApprovalDecision, PermissionApprovalRequest, PermissionMode,
-    ProjectContextInstructionMode, RunMode, RunWarning, StateRuntime,
+    types::ApprovalHandler, types::PermissionApprovalDecision, types::PermissionApprovalRequest,
+    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode, types::RunWarning,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};

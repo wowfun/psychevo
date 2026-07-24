@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow, bail};
-use psychevo_runtime::SqliteStore;
+use psychevo_runtime::state::StateRuntime;
 use serde_json::{Value, json};
 
 use crate::args::{
@@ -251,7 +251,7 @@ fn create_profile_home(home: &Path, description: Option<&str>) -> Result<()> {
     write_if_absent(&home.join("config.toml"), STARTER_CONFIG)?;
     write_if_absent(&home.join(".env"), STARTER_ENV)?;
     crate::profiles::protect_env_file(&home.join(".env"))?;
-    SqliteStore::open(&home.join("state.db"))?;
+    StateRuntime::open(home.join("state.db"))?;
     write_metadata(
         home,
         &ProfileMetadata {

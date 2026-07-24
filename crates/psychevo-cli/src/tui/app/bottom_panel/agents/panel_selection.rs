@@ -407,7 +407,7 @@ impl TuiApp {
                     .and_then(BottomPanel::session_view)
                     .is_some_and(|view| view == SessionListView::Archived);
                 if archived {
-                    self.state_runtime.store().restore_session(&session_id)?;
+                    self.state_runtime.restore_session(&session_id)?;
                 }
                 self.open_session_direct(ui, &session_id)?;
             }

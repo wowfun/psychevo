@@ -6,7 +6,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
-    let session_id = SqliteStore::open(&app.db_path)
+    let session_id = StateRuntime::open(&app.db_path)
         .expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -32,8 +32,8 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
-        SqliteStore::open(&db_path)?.set_session_title(&task_session_id, "X Daily")?;
-        Ok(psychevo_runtime::RunResult {
+        StateRuntime::open(&db_path)?.set_session_title(&task_session_id, "X Daily")?;
+        Ok(psychevo_runtime::types::RunResult {
             session_id: task_session_id,
             outcome: Outcome::Normal,
             terminal_reason: None,
@@ -93,7 +93,7 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: "aborted-session".to_string(),
         outcome: Outcome::Aborted,
         terminal_reason: None,
@@ -260,7 +260,7 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: "normal-with-tool-failure".to_string(),
         outcome: Outcome::Normal,
         terminal_reason: None,
@@ -309,10 +309,10 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
     let mut app = test_app(&temp);
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: "budget-exhausted".to_string(),
         outcome: Outcome::Failed,
-        terminal_reason: Some(psychevo_runtime::TerminalReason::MaxTurnsExceeded {
+        terminal_reason: Some(psychevo_agent_core::TerminalReason::MaxTurnsExceeded {
             max_turns: 128,
         }),
         final_answer: String::new(),
@@ -363,7 +363,7 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
 pub(crate) fn fullscreen_loads_current_session_history() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,

@@ -45,7 +45,7 @@ pub(crate) async fn run_live_internal(
             crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
         }
     });
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let resumed_session_id = if let Some(session_id) = &options.session {
         Some(session_id.clone())
     } else if options.continue_latest {
@@ -472,7 +472,7 @@ pub(crate) async fn run_live_internal(
             required_agent_names: required_agent_mentions.clone(),
             spawn_depth_remaining: None,
             active_team: crate::agents::active_agent_team_context_for_session(
-                options.state.store(),
+                &options.state,
                 &session_id,
             )
             .ok()

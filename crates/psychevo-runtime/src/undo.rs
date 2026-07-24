@@ -4,7 +4,7 @@ use crate::store::{SessionRevertKind, SessionRevertState};
 use crate::types::{SessionRedoResult, SessionUndoOptions, SessionUndoResult};
 
 pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let target = store
         .latest_undo_target(&options.session_id)?
         .ok_or_else(|| Error::Message("nothing to undo".to_string()))?;
@@ -44,7 +44,7 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
 }
 
 pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let revert = store
         .session_revert_state(&options.session_id)?
         .ok_or_else(|| Error::Message("nothing to redo".to_string()))?;

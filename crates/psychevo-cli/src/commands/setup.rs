@@ -8,8 +8,8 @@ use anyhow::{Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use psychevo_runtime::{
-    ModelCatalogEntry, fetch_model_catalog, model_catalog_providers, set_default_model,
-    set_provider_api_key,
+    config::fetch_model_catalog, config::model_catalog_providers, config::set_default_model,
+    config::set_provider_api_key, types::ModelCatalogEntry,
 };
 
 use crate::args::{DoctorArgs, InitArgs, SetupArgs};

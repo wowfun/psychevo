@@ -23,7 +23,7 @@ pub(super) fn requested_peer_mcp_server_names(
 
 pub(super) fn acp_mcp_server_declarations(
     peer: &ResolvedPeerTurn,
-    resolved_servers: &[psychevo_runtime::ResolvedMcpServerInput],
+    resolved_servers: &[psychevo_runtime::types::ResolvedMcpServerInput],
     capabilities: &AgentCapabilities,
 ) -> psychevo_runtime::Result<Vec<McpServer>> {
     resolved_servers
@@ -109,7 +109,7 @@ pub(super) fn acp_mcp_server_declarations(
 }
 
 fn validate_portable_acp_mcp_policy(
-    server: &psychevo_runtime::McpServerInput,
+    server: &psychevo_runtime::types::McpServerInput,
 ) -> psychevo_runtime::Result<()> {
     let policy = &server.policy;
     if policy.required

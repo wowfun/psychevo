@@ -6,8 +6,9 @@ use std::process::{Command, ExitCode};
 
 use anyhow::{Context, Result, anyhow};
 use psychevo_runtime::{
-    ExecutableResolveOptions, HostPlatform, canonicalize_cwd, resolve_executable_path,
-    tokio_host_process_command,
+    host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
+    host_paths::resolve_executable_path, paths::canonicalize_cwd,
+    process_env::tokio_host_process_command,
 };
 
 use crate::args::DesktopArgs;
@@ -102,7 +103,7 @@ fn desktop_command_for_platform(
 
 fn apply_pnpm_runtime_env(command: &mut Command, env_map: &BTreeMap<String, String>) {
     for (name, value) in PNPM_RUNTIME_ENV_DEFAULTS {
-        if psychevo_runtime::env_value_case_insensitive(env_map, name).is_none() {
+        if psychevo_runtime::process_env::env_value_case_insensitive(env_map, name).is_none() {
             command.env(name, value);
         }
     }
@@ -114,8 +115,11 @@ fn apply_cargo_runtime_env(
     platform: HostPlatform,
 ) {
     if platform == HostPlatform::Windows
-        && psychevo_runtime::env_value_case_insensitive(env_map, CARGO_HTTP_CHECK_REVOKE_ENV)
-            .is_none()
+        && psychevo_runtime::process_env::env_value_case_insensitive(
+            env_map,
+            CARGO_HTTP_CHECK_REVOKE_ENV,
+        )
+        .is_none()
     {
         command.env(CARGO_HTTP_CHECK_REVOKE_ENV, "false");
     }
@@ -285,7 +289,7 @@ mod tests {
             &desktop_cwd,
             Path::new("/tmp/pevo"),
             &env_map,
-            psychevo_runtime::HostPlatform::Posix,
+            psychevo_runtime::host_paths::HostPlatform::Posix,
         )
         .expect_err("missing pnpm");
 
@@ -320,7 +324,7 @@ mod tests {
             &desktop_cwd,
             Path::new(r"C:\Tools\pevo.exe"),
             &env_map,
-            psychevo_runtime::HostPlatform::Windows,
+            psychevo_runtime::host_paths::HostPlatform::Windows,
         )
         .expect("desktop command");
         let command = command.as_std();
@@ -368,7 +372,7 @@ mod tests {
             &desktop_cwd,
             Path::new(r"C:\Tools\pevo.exe"),
             &env_map,
-            psychevo_runtime::HostPlatform::Windows,
+            psychevo_runtime::host_paths::HostPlatform::Windows,
         )
         .expect("desktop command");
 
@@ -408,7 +412,7 @@ mod tests {
                 &desktop_cwd,
                 Path::new(r"C:\Tools\pevo.exe"),
                 &env_map,
-                psychevo_runtime::HostPlatform::Windows,
+                psychevo_runtime::host_paths::HostPlatform::Windows,
             )
             .expect("desktop command");
 
@@ -437,7 +441,7 @@ mod tests {
             &desktop_cwd,
             Path::new("/tmp/pevo"),
             &env_map,
-            psychevo_runtime::HostPlatform::Posix,
+            psychevo_runtime::host_paths::HostPlatform::Posix,
         )
         .expect("desktop command");
 
@@ -465,7 +469,7 @@ mod tests {
             &desktop_cwd,
             Path::new("/tmp/pevo"),
             &env_map,
-            psychevo_runtime::HostPlatform::Posix,
+            psychevo_runtime::host_paths::HostPlatform::Posix,
         )
         .expect("desktop command");
         let command = command.as_std();
@@ -496,7 +500,7 @@ mod tests {
             &desktop_cwd,
             Path::new("/tmp/pevo"),
             &env_map,
-            psychevo_runtime::HostPlatform::Posix,
+            psychevo_runtime::host_paths::HostPlatform::Posix,
         )
         .expect("desktop command");
         let command = command.as_std();
@@ -541,7 +545,7 @@ mod tests {
             &desktop_cwd,
             Path::new("/tmp/pevo"),
             &env_map,
-            psychevo_runtime::HostPlatform::Posix,
+            psychevo_runtime::host_paths::HostPlatform::Posix,
         )
         .expect("desktop command");
         let command = command.as_std();

@@ -11,9 +11,10 @@ pub(super) fn channel_cwd(default_cwd: &Path, connection: &ChannelRuntimeConnect
     } else {
         default_cwd.join(path)
     };
-    psychevo_runtime::canonicalize_cwd(&path).unwrap_or(path)
+    psychevo_runtime::paths::canonicalize_cwd(&path).unwrap_or(path)
 }
 
+#[cfg(feature = "native-channels")]
 pub(super) fn wechat_context_store_path(home: &Path, id: &str) -> PathBuf {
     home.join("gateway").join("channels").join(format!(
         "{}-wechat-context.json",
@@ -21,6 +22,7 @@ pub(super) fn wechat_context_store_path(home: &Path, id: &str) -> PathBuf {
     ))
 }
 
+#[cfg(feature = "native-channels")]
 fn safe_channel_file_stem(value: &str) -> String {
     let mut out = value
         .chars()

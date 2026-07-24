@@ -1,7 +1,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -36,6 +36,7 @@ impl SnapshotStore {
 
     fn track_locked(&self) -> Result<Option<String>> {
         self.ensure_initialized()?;
+        self.seed_tracked_paths_from_worktree_index()?;
         let add = self.git_snapshot(["add", "--all", "--", "."])?;
         if !add.status.success() {
             return Ok(None);
@@ -50,6 +51,57 @@ impl SnapshotStore {
         } else {
             Ok(Some(hash))
         }
+    }
+
+    fn seed_tracked_paths_from_worktree_index(&self) -> Result<()> {
+        let reset = self.git_snapshot(["read-tree", "--empty"])?;
+        if !reset.status.success() {
+            return Err(Error::Message(
+                "failed to reset Git snapshot index".to_string(),
+            ));
+        }
+        let tracked = Command::new("git")
+            .arg("-C")
+            .arg(&self.cwd)
+            .args(["ls-files", "--cached", "--full-name", "-z", "--", "."])
+            .output()?;
+        if !tracked.status.success() {
+            return Err(Error::Message(
+                "failed to read tracked workspace paths".to_string(),
+            ));
+        }
+        if tracked.stdout.is_empty() {
+            return Ok(());
+        }
+
+        let git_dir = self.git_dir()?;
+        let worktree_root = self.worktree_root()?.ok_or_else(|| {
+            Error::Message("Git snapshot is unavailable outside a Git worktree".to_string())
+        })?;
+        let mut child = Command::new("git")
+            .current_dir(&worktree_root)
+            .arg("--git-dir")
+            .arg(git_dir)
+            .arg("--work-tree")
+            .arg(&worktree_root)
+            .args(["update-index", "--add", "--remove", "-z", "--stdin"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| Error::Message("failed to open Git snapshot index input".to_string()))?
+            .write_all(&tracked.stdout)?;
+        let updated = child.wait_with_output()?;
+        if !updated.status.success() {
+            return Err(Error::Message(format!(
+                "failed to seed tracked workspace paths: {}",
+                String::from_utf8_lossy(&updated.stderr).trim()
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) fn restore(&self, target: &str) -> Result<()> {
@@ -70,6 +122,7 @@ impl SnapshotStore {
         };
         let diff = self.git_snapshot([
             "diff",
+            "--relative",
             "--name-status",
             "--no-renames",
             target,
@@ -131,26 +184,43 @@ impl SnapshotStore {
     }
 
     pub(crate) fn is_git_worktree(&self) -> bool {
+        self.worktree_root().ok().flatten().is_some()
+    }
+
+    fn worktree_root(&self) -> Result<Option<PathBuf>> {
         Command::new("git")
             .arg("-C")
             .arg(&self.cwd)
-            .args(["rev-parse", "--is-inside-work-tree"])
+            .args(["rev-parse", "--show-toplevel"])
             .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "true")
-            .unwrap_or(false)
+            .map_err(Error::from)
+            .map(|output| {
+                if !output.status.success() {
+                    return None;
+                }
+                let root = String::from_utf8_lossy(&output.stdout);
+                let root = root.trim();
+                if root.is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(root))
+                }
+            })
     }
 
     pub(crate) fn ensure_initialized(&self) -> Result<()> {
         let git_dir = self.git_dir()?;
+        let worktree_root = self.worktree_root()?.ok_or_else(|| {
+            Error::Message("Git snapshot is unavailable outside a Git worktree".to_string())
+        })?;
         fs::create_dir_all(&git_dir)?;
         if git_dir.join("HEAD").exists() {
             return Ok(());
         }
         let init = Command::new("git")
+            .current_dir(&self.cwd)
             .env("GIT_DIR", &git_dir)
-            .env("GIT_WORK_TREE", &self.cwd)
+            .env("GIT_WORK_TREE", worktree_root)
             .arg("init")
             .output()?;
         if !init.status.success() {
@@ -175,11 +245,15 @@ impl SnapshotStore {
 
     pub(crate) fn git_snapshot<const N: usize>(&self, args: [&str; N]) -> Result<Output> {
         let git_dir = self.git_dir()?;
+        let worktree_root = self.worktree_root()?.ok_or_else(|| {
+            Error::Message("Git snapshot is unavailable outside a Git worktree".to_string())
+        })?;
         Ok(Command::new("git")
+            .current_dir(&self.cwd)
             .arg("--git-dir")
             .arg(git_dir)
             .arg("--work-tree")
-            .arg(&self.cwd)
+            .arg(worktree_root)
             .args(args)
             .output()?)
     }
@@ -444,6 +518,80 @@ mod tests {
         snapshots.restore(&before).expect("restore");
 
         assert_eq!(fs::read_to_string(file).expect("file"), "base\n");
+    }
+
+    #[test]
+    fn subdirectory_snapshot_honors_enclosing_worktree_ignores() {
+        let temp = tempfile::tempdir().expect("temp");
+        let repository = temp.path().join("repository");
+        let cwd = repository.join("apps").join("desktop");
+        init_git_cwd(&repository);
+        fs::create_dir_all(cwd.join("target")).expect("target");
+        fs::write(repository.join(".gitignore"), "target/\n").expect("ignore");
+        fs::write(cwd.join("tracked.txt"), "base\n").expect("tracked");
+        fs::write(cwd.join("target").join("generated.bin"), "generated\n").expect("ignored");
+        let snapshots = SnapshotStore::new(temp.path().join("snapshots"), cwd.clone());
+
+        let hash = snapshots.track().expect("track").expect("snapshot");
+        let tree = snapshots
+            .git_snapshot(["ls-tree", "-r", "--name-only", &hash])
+            .expect("tree");
+        let paths = String::from_utf8_lossy(&tree.stdout);
+
+        assert!(tree.status.success());
+        assert!(
+            paths.lines().any(|path| path == "tracked.txt"),
+            "snapshot tree: {paths}"
+        );
+        assert!(!paths.contains("generated.bin"));
+
+        fs::write(cwd.join("tracked.txt"), "changed\n").expect("changed");
+        snapshots.restore(&hash).expect("restore");
+        assert_eq!(
+            fs::read_to_string(cwd.join("tracked.txt")).expect("restored"),
+            "base\n"
+        );
+    }
+
+    #[test]
+    fn subdirectory_snapshot_preserves_tracked_file_that_became_ignored() {
+        let temp = tempfile::tempdir().expect("temp");
+        let repository = temp.path().join("repository");
+        let cwd = repository.join("apps").join("desktop");
+        init_git_cwd(&repository);
+        fs::create_dir_all(&cwd).expect("cwd");
+        let tracked = cwd.join("tracked-then-ignored.txt");
+        fs::write(&tracked, "base\n").expect("tracked");
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repository)
+                .args(["add", "apps/desktop/tracked-then-ignored.txt"])
+                .output()
+                .expect("git add")
+                .status
+                .success()
+        );
+        fs::write(
+            repository.join(".gitignore"),
+            "apps/desktop/tracked-then-ignored.txt\n",
+        )
+        .expect("ignore");
+        let snapshots = SnapshotStore::new(temp.path().join("snapshots"), cwd);
+
+        let before = snapshots.track().expect("track").expect("snapshot");
+        let tree = snapshots
+            .git_snapshot(["ls-tree", "-r", "--name-only", &before])
+            .expect("tree");
+        let paths = String::from_utf8_lossy(&tree.stdout);
+        assert!(
+            paths.lines().any(|path| path == "tracked-then-ignored.txt"),
+            "snapshot tree: {paths}"
+        );
+
+        fs::write(&tracked, "changed\n").expect("changed");
+        snapshots.restore(&before).expect("restore");
+        assert_eq!(fs::read_to_string(tracked).expect("restored"), "base\n");
     }
 
     #[test]

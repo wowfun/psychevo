@@ -59,7 +59,7 @@ struct PendingQueuedShell {
 struct PendingQueuedCompact {
     compact_id: String,
     request: SendCompactRequest,
-    responder: oneshot::Sender<psychevo_runtime::Result<psychevo_runtime::CompactionResult>>,
+    responder: oneshot::Sender<psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult>>,
 }
 
 type PendingPermissionMap = Arc<Mutex<HashMap<String, PendingPermission>>>;
@@ -212,11 +212,11 @@ pub struct ThreadTurnPolicy {
     pub snapshot_root: Option<PathBuf>,
     pub continue_latest: bool,
     pub extract_prompt_image_sources: bool,
-    pub prompt_display: Option<psychevo_runtime::PromptDisplayMetadata>,
+    pub prompt_display: Option<psychevo_runtime::types::PromptDisplayMetadata>,
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
-    pub project_context_override: Option<psychevo_runtime::ProjectContextInstructionMode>,
-    pub sandbox_override: Option<psychevo_runtime::RunSandboxOverride>,
+    pub project_context_override: Option<psychevo_runtime::types::ProjectContextInstructionMode>,
+    pub sandbox_override: Option<psychevo_runtime::types::RunSandboxOverride>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub runtime_profile_ref: Option<String>,
@@ -225,16 +225,16 @@ pub struct ThreadTurnPolicy {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<psychevo_runtime::ApprovalMode>,
+    pub approval_mode: Option<psychevo_runtime::types::ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub agent_ref: Option<String>,
     pub no_agents: bool,
     pub no_skills: bool,
-    pub selected_capability_roots: Vec<psychevo_runtime::SelectedCapabilityRoot>,
+    pub selected_capability_roots: Vec<psychevo_runtime::extensions::SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
-    pub mcp_servers: Vec<psychevo_runtime::McpServerInput>,
+    pub mcp_servers: Vec<psychevo_runtime::types::McpServerInput>,
 }
 
 impl fmt::Debug for ThreadTurnPolicy {
@@ -321,7 +321,7 @@ pub struct ThreadTurnRequest {
     /// A transport may reserve the public turn id before dispatch so early
     /// events and the response correlate to one identity.
     pub turn_id: Option<String>,
-    runtime_tools: Vec<psychevo_runtime::RuntimeTool>,
+    runtime_tools: Vec<psychevo_runtime::types::RuntimeTool>,
 }
 
 impl ThreadTurnRequest {
@@ -346,13 +346,13 @@ impl ThreadTurnRequest {
         }
     }
 
-    pub(crate) fn set_runtime_tools(&mut self, tools: Vec<psychevo_runtime::RuntimeTool>) {
+    pub(crate) fn set_runtime_tools(&mut self, tools: Vec<psychevo_runtime::types::RuntimeTool>) {
         self.runtime_tools = tools;
     }
 
     pub(crate) fn extend_runtime_tools(
         &mut self,
-        tools: impl IntoIterator<Item = psychevo_runtime::RuntimeTool>,
+        tools: impl IntoIterator<Item = psychevo_runtime::types::RuntimeTool>,
     ) {
         self.runtime_tools.extend(tools);
     }
@@ -495,7 +495,7 @@ pub struct SendCompactRequest {
     pub reasoning_effort: Option<String>,
     pub instructions: Option<String>,
     pub force: bool,
-    pub reason: psychevo_runtime::CompactionReason,
+    pub reason: psychevo_runtime::compaction::CompactionReason,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub event_sink: Option<GatewayEventSink>,
 }

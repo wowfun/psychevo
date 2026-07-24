@@ -88,7 +88,7 @@ fn backend_backed_agent(name: &str, backend: &str) -> AgentDefinition {
 pub(crate) fn agent_control_declarations_hide_implementation_details() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let context = test_agent_tool_context(
         &tmp,
         Arc::new(FakeProvider::new(Vec::new())),

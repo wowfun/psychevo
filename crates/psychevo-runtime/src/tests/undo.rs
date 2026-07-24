@@ -19,7 +19,7 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let file = cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
 
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -132,7 +132,7 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
     );
     let file = cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -200,7 +200,7 @@ pub(crate) fn undo_redo_error_paths_do_not_mutate_revert_state() {
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
     fs::create_dir_all(&cwd).expect("cwd");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -238,7 +238,7 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
     fs::create_dir_all(&cwd).expect("cwd");
     let file = cwd.join("tracked.txt");
     fs::write(&file, "workspace stays current\n").expect("workspace");
-    let store = SqliteStore::open(&db).expect("store");
+    let store = StateRuntime::open(&db).expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .expect("session");
@@ -280,7 +280,7 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
         1
     );
     drop(store);
-    let restarted = SqliteStore::open(&db).expect("restart");
+    let restarted = StateRuntime::open(&db).expect("restart");
     assert_eq!(
         restarted.session_revert_state(&session_id).expect("revert"),
         Some(staged)
@@ -326,7 +326,7 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
 #[test]
 pub(crate) fn legacy_revert_metadata_parses_as_workspace_undo() {
     let temp = tempdir().expect("temp");
-    let store = SqliteStore::open(&temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
     let session_id = store
         .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
         .expect("session");

@@ -6,10 +6,10 @@ use crate::error::{Error, Result};
 
 use super::{
     GatewayChannelOutboxInput, GatewayChannelOutboxRecord, GatewayTurnDeliveryInput,
-    GatewayTurnDeliveryRecord, SqliteStore,
+    GatewayTurnDeliveryRecord, StateRuntime,
 };
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn insert_gateway_turn_delivery(
         &self,
         input: GatewayTurnDeliveryInput<'_>,

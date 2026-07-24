@@ -3,7 +3,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::Result;
 use crate::types::SessionSummary;
 
-use super::SqliteStore;
+use super::StateRuntime;
 
 pub(crate) fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
     conn.query_row(
@@ -15,7 +15,7 @@ pub(crate) fn sqlite_table_exists(conn: &Connection, table: &str) -> rusqlite::R
     .map(|value| value.is_some())
 }
 
-impl SqliteStore {
+impl StateRuntime {
     pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         f(&conn)

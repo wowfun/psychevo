@@ -367,7 +367,7 @@ entrypoints: [peer]
     assert!(methods.contains("session/cancel"), "{methods}");
     let binding = harness
         .state
-        .store()
+
         .gateway_runtime_binding(&result.result.session_id)
         .expect("runtime binding")
         .expect("binding after abort");
@@ -457,7 +457,7 @@ entrypoints: [peer]
     );
     let delivery = harness
         .state
-        .store()
+
         .gateway_turn_delivery(turn_id)
         .expect("delivery lookup")
         .expect("delivery record");
@@ -472,7 +472,7 @@ entrypoints: [peer]
     assert_eq!(delivery.terminal_at_ms, None);
     let activity = harness
         .state
-        .store()
+
         .gateway_activity(turn_id)
         .expect("activity lookup")
         .expect("activity");
@@ -564,7 +564,7 @@ entrypoints: [peer]
         .expect_err("first prompt response is lost after Agent acceptance");
     let first_delivery = harness
         .state
-        .store()
+
         .gateway_turn_delivery(first_turn_id)
         .expect("first delivery")
         .expect("first delivery record");
@@ -573,7 +573,7 @@ entrypoints: [peer]
     let thread_id = first_delivery.thread_id.clone();
     let first_terminal = harness
         .state
-        .store()
+
         .gateway_turn_terminal(first_turn_id)
         .expect("first terminal")
         .expect("first terminal record");
@@ -581,7 +581,7 @@ entrypoints: [peer]
     assert_eq!(
         harness
             .state
-            .store()
+
             .load_tui_message_summaries(&thread_id)
             .expect("messages after unknown delivery")
             .len(),
@@ -606,7 +606,7 @@ entrypoints: [peer]
 
     let reconciled_delivery = harness
         .state
-        .store()
+
         .gateway_turn_delivery(first_turn_id)
         .expect("reconciled delivery")
         .expect("reconciled delivery record");
@@ -616,7 +616,7 @@ entrypoints: [peer]
     assert!(reconciled_delivery.terminal_at_ms.is_some());
     let reconciled_terminal = harness
         .state
-        .store()
+
         .gateway_turn_terminal(first_turn_id)
         .expect("reconciled terminal")
         .expect("reconciled terminal record");
@@ -634,7 +634,7 @@ entrypoints: [peer]
 
     let messages = harness
         .state
-        .store()
+
         .load_tui_message_summaries(&thread_id)
         .expect("reconciled messages");
     assert_eq!(
@@ -687,7 +687,7 @@ entrypoints: [peer]
     assert_eq!(third.result.final_answer, "reconciled answer 3");
     let deduplicated = harness
         .state
-        .store()
+
         .load_tui_message_summaries(&thread_id)
         .expect("deduplicated messages");
     assert_eq!(deduplicated.len(), 8);

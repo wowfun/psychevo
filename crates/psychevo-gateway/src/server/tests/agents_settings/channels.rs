@@ -129,14 +129,14 @@ allow_users = ["12345"]
     let bound_thread = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
         .expect("bound thread");
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+
+        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
             source_key: "im.telegram:release-lane",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -197,7 +197,7 @@ allow_users = ["12345"]
         state
             .inner
             .state
-            .store()
+
             .gateway_source_binding("im.telegram:release-lane")
             .expect("rotated binding lookup")
             .is_none()
@@ -205,7 +205,7 @@ allow_users = ["12345"]
     let bound_summary = state
         .inner
         .state
-        .store()
+
         .session_summary(&bound_thread)
         .expect("bound summary")
         .expect("bound session");
@@ -218,14 +218,14 @@ allow_users = ["12345"]
     let same_cwd_thread = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
         .expect("same cwd thread");
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+
+        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
             source_key: "im.telegram:same-cwd-lane",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -260,7 +260,7 @@ allow_users = ["12345"]
         state
             .inner
             .state
-            .store()
+
             .gateway_source_binding("im.telegram:same-cwd-lane")
             .expect("same cwd binding lookup")
             .expect("same cwd binding")
@@ -291,14 +291,14 @@ allow_users = ["12345"]
     let source_list_thread = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
         .expect("source list thread");
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_source_binding(psychevo_runtime::GatewaySourceBindingInput {
+
+        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
             source_key: "im.telegram:source-hash",
             source_kind: "im.telegram",
             raw_identity: json!({

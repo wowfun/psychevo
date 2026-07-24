@@ -35,7 +35,7 @@ impl Gateway {
     ) -> psychevo_runtime::Result<DurableGatewayActivity> {
         let record = self
             .state
-            .store()
+
             .claim_gateway_activity(GatewayActivityClaimInput {
                 activity_id: claim.activity_id,
                 thread_id: claim.thread_id,
@@ -74,7 +74,7 @@ impl Gateway {
                         let now = gateway_now_ms();
                         if now.saturating_sub(last_heartbeat_ms) >= GATEWAY_ACTIVITY_HEARTBEAT_MS {
                             let lease_expires_at_ms = now + GATEWAY_ACTIVITY_LEASE_MS;
-                            let _ = gateway.state.store().heartbeat_gateway_activity(
+                            let _ = gateway.state.heartbeat_gateway_activity(
                                 &activity.activity_id,
                                 &activity.owner_id,
                                 activity.generation,
@@ -137,7 +137,7 @@ impl Gateway {
         };
         if root.is_some_and(|activity| {
             self.state
-                .store()
+
                 .gateway_activity(&activity.activity_id)
                 .ok()
                 .flatten()
@@ -149,7 +149,7 @@ impl Gateway {
         }
         let event_turn_id = gateway_event_turn_id(event);
         let matching_turn = event_turn_id
-            .and_then(|turn_id| self.state.store().gateway_activity(turn_id).ok().flatten())
+            .and_then(|turn_id| self.state.gateway_activity(turn_id).ok().flatten())
             .filter(|record| {
                 record.owner_id == self.owner_id()
                     && record.thread_id.as_deref() == Some(thread_id.as_str())
@@ -157,7 +157,7 @@ impl Gateway {
         matching_turn
             .or_else(|| {
                 self.state
-                    .store()
+
                     .active_gateway_activity_for_thread(&thread_id)
                     .ok()
                     .flatten()
@@ -191,7 +191,7 @@ impl Gateway {
         let activity_record = activity
             .and_then(|activity| {
                 self.state
-                    .store()
+
                     .gateway_activity(&activity.activity_id)
                     .ok()
             })
@@ -212,7 +212,7 @@ impl Gateway {
         }
         let binding = thread_id
             .as_deref()
-            .and_then(|thread_id| self.state.store().gateway_runtime_binding(thread_id).ok())
+            .and_then(|thread_id| self.state.gateway_runtime_binding(thread_id).ok())
             .flatten();
         let runtime_ref = binding
             .as_ref()
@@ -284,7 +284,7 @@ impl Gateway {
         } = event
             && self
                 .state
-                .store()
+
                 .update_gateway_activity_thread(
                     &activity.activity_id,
                     &activity.owner_id,
@@ -305,7 +305,7 @@ impl Gateway {
             return result;
         };
         if should_append_gateway_live_event(activity, event) {
-            let _ = self.state.store().append_gateway_live_event(
+            let _ = self.state.append_gateway_live_event(
                 Some(&activity.activity_id),
                 Some(&activity.owner_id),
                 gateway_event_thread_id(event).as_deref(),
@@ -412,7 +412,7 @@ impl Gateway {
     fn flush_gateway_live_snapshot(&self, snapshot: &PendingGatewayLiveSnapshot) {
         let _ = self
             .state
-            .store()
+
             .upsert_gateway_live_snapshot(GatewayLiveSnapshotInput {
                 snapshot_key: &snapshot.snapshot_key,
                 activity_id: snapshot.activity_id.as_deref(),
@@ -434,7 +434,7 @@ impl Gateway {
         }
         let _ = self
             .state
-            .store()
+
             .delete_gateway_live_snapshots_for_activity(activity_id);
     }
 
@@ -444,7 +444,7 @@ impl Gateway {
         status: &str,
     ) {
         if let Some(activity) = activity {
-            let _ = self.state.store().finish_gateway_activity(
+            let _ = self.state.finish_gateway_activity(
                 &activity.activity_id,
                 &activity.owner_id,
                 activity.generation,
@@ -471,7 +471,7 @@ impl Gateway {
             }
             if record.lease_expires_at_ms < now {
                 let superseded_by_activity_id = Uuid::now_v7().to_string();
-                let accepted = self.state.store().supersede_stale_gateway_activity(
+                let accepted = self.state.supersede_stale_gateway_activity(
                     &record.activity_id,
                     &superseded_by_activity_id,
                 )?;
@@ -514,7 +514,7 @@ impl Gateway {
             activity: gateway_activity_view(activity),
         };
         if let Ok(event_value) = serde_json::to_value(event) {
-            let _ = self.state.store().append_gateway_live_event(
+            let _ = self.state.append_gateway_live_event(
                 activity_id,
                 Some(self.owner_id()),
                 thread_id.as_deref(),
@@ -543,7 +543,7 @@ impl Gateway {
             }
             return self
                 .state
-                .store()
+
                 .enqueue_gateway_control_command(GatewayControlCommandInput {
                     activity_id: &record.activity_id,
                     owner_id: &record.owner_id,
@@ -558,7 +558,7 @@ impl Gateway {
     fn apply_pending_gateway_control_commands(&self) {
         let Ok(commands) = self
             .state
-            .store()
+
             .pending_gateway_control_commands(self.owner_id(), 50)
         else {
             return;
@@ -578,7 +578,7 @@ impl Gateway {
                 "clarify" => self.apply_clarify_control_command(&command.payload),
                 _ => false,
             };
-            let store = self.state.store();
+            let store = &self.state;
             let _ = if applied {
                 store.mark_gateway_control_command_applied(command.id)
             } else {
@@ -594,13 +594,13 @@ impl Gateway {
         }
         let released = self
             .state
-            .store()
+
             .gateway_activity(activity_id)
             .ok()
             .flatten()
             .and_then(|record| {
                 self.state
-                    .store()
+
                     .finish_gateway_activity(
                         activity_id,
                         self.owner_id(),
@@ -837,7 +837,7 @@ fn permission_decision_label(decision: &PermissionApprovalDecision) -> &'static 
 
 fn permission_decision_from_label(
     label: &str,
-    filesystem_scope: Option<psychevo_runtime::FilesystemApprovalScope>,
+    filesystem_scope: Option<psychevo_runtime::types::FilesystemApprovalScope>,
 ) -> Option<PermissionApprovalDecision> {
     match label {
         "allow_once" => Some(PermissionApprovalDecision::allow_once()),

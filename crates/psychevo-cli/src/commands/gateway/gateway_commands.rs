@@ -3,7 +3,8 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use psychevo_runtime::{
-    canonicalize_cwd, channel_list_value, channel_summary_value, resolve_default_workspace_cwd,
+    config::channel_list_value, config::channel_summary_value,
+    config::resolve_default_workspace_cwd, paths::canonicalize_cwd,
 };
 use serde_json::{Value, json};
 
@@ -20,12 +21,14 @@ use super::managed::{
     merge_channel_runtime_status, read_channel_runtime_status, stop_managed,
 };
 use super::output::{open_browser, print_json, print_json_code, workbench_dist_missing};
+#[cfg(feature = "native-channels")]
 use super::setup::gateway_setup;
 
 pub(crate) async fn run_gateway_command(args: GatewayArgs) -> Result<ExitCode> {
     match args.command {
         Some(GatewayCommand::Open(args)) => open(args).await,
         Some(GatewayCommand::Start(args)) => start(args).await,
+        #[cfg(feature = "native-channels")]
         Some(GatewayCommand::Setup(args)) => gateway_setup(args).await,
         Some(GatewayCommand::Status(_args)) => status().await,
         Some(GatewayCommand::Stop) => stop().await,

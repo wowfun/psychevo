@@ -38,7 +38,7 @@ pub(crate) fn run_hooks_command(args: HooksArgs) -> Result<ExitCode> {
 
 fn list_hooks(
     args: HooksListArgs,
-    options: &psychevo_runtime::RunOptions,
+    options: &psychevo_runtime::types::RunOptions,
     cwd: &std::path::Path,
 ) -> Result<()> {
     let value = psychevo_runtime::hooks::hook_metadata_value(options, cwd)?;
@@ -47,7 +47,7 @@ fn list_hooks(
 
 fn set_hook_enabled(
     args: HookKeyArgs,
-    options: &psychevo_runtime::RunOptions,
+    options: &psychevo_runtime::types::RunOptions,
     enabled: bool,
 ) -> Result<()> {
     let value = psychevo_runtime::hooks::set_hook_enabled_in_profile(options, &args.key, enabled)?;

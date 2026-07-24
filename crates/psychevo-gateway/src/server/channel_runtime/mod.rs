@@ -1,14 +1,20 @@
 use super::*;
+#[cfg(feature = "native-channels")]
 use crate::im::adapters::{
     FeishuLarkDomain, FeishuLarkLongConnectionAdapter, FeishuLarkLongConnectionConfig,
     TelegramPollingAdapter, TelegramPollingConfig, WECHAT_ILINK_BASE_URL, WechatIlinkAdapter,
-    WechatIlinkConfig, is_wechat_ilink_session_expired_error, wechat_ilink_error_code_from_message,
+    WechatIlinkConfig,
 };
+use crate::im::adapters::{
+    is_wechat_ilink_session_expired_error, wechat_ilink_error_code_from_message,
+};
+#[cfg(feature = "native-channels")]
+use crate::im::{ChannelAdapterBinding, ChannelAllowlist};
 use crate::im::{
-    ChannelAdapterBinding, ChannelAllowlist, ChannelGateway, ImIdentity, ImInboundMessage,
-    ImOutboundMessage, gateway_input_parts_for_im, gateway_source_for_im,
+    ChannelGateway, ImIdentity, ImInboundMessage, ImOutboundMessage, gateway_input_parts_for_im,
+    gateway_source_for_im,
 };
-use psychevo_runtime::{ChannelRuntimeConnection, channel_runtime_connections};
+use psychevo_runtime::{config::ChannelRuntimeConnection, config::channel_runtime_connections};
 use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
@@ -54,16 +60,11 @@ pub(super) fn channel_bind_target_draft(
     let agent_ref = target.agent_ref.as_deref();
     let profile_ref = target.runtime_profile_ref.as_str();
     let source_key = source.source_key();
-    let lane = state
-        .inner
-        .state
-        .store()
-        .gateway_source_lane(&source_key.0)?;
+    let lane = state.inner.state.gateway_source_lane(&source_key.0)?;
     let Some(current_thread_id) = lane.as_ref().and_then(|lane| lane.thread_id.as_deref()) else {
         state
             .inner
             .state
-            .store()
             .upsert_gateway_source_lane(GatewaySourceLaneInput {
                 source_key: &source_key.0,
                 source_kind: &source.kind,
@@ -82,10 +83,9 @@ pub(super) fn channel_bind_target_draft(
     let current = state
         .inner
         .state
-        .store()
         .session_summary(current_thread_id)?
         .ok_or_else(|| Error::Message(format!("session not found: {current_thread_id}")))?;
-    let new_thread_id = state.inner.state.store().create_session_with_metadata(
+    let new_thread_id = state.inner.state.create_session_with_metadata(
         Path::new(&current.cwd),
         &source.kind,
         "pending",
@@ -95,7 +95,6 @@ pub(super) fn channel_bind_target_draft(
     state
         .inner
         .state
-        .store()
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source_key.0,
             source_kind: &source.kind,
@@ -121,7 +120,6 @@ pub(super) fn channel_draft_agent_ref(
     Ok(state
         .inner
         .state
-        .store()
         .gateway_source_lane(&source.source_key().0)?
         .and_then(|lane| lane.draft_agent_ref))
 }
@@ -131,15 +129,11 @@ fn channel_bound_profile_ref(
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<Option<String>> {
     let source_key = source.source_key();
-    let lane = state
-        .inner
-        .state
-        .store()
-        .gateway_source_lane(&source_key.0)?;
+    let lane = state.inner.state.gateway_source_lane(&source_key.0)?;
     let bound = lane
         .as_ref()
         .and_then(|lane| lane.thread_id.as_deref())
-        .map(|thread_id| state.inner.state.store().gateway_runtime_binding(thread_id))
+        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
         .transpose()?
         .flatten()
         .and_then(|binding| binding.runtime_ref);

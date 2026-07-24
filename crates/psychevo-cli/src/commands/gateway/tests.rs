@@ -277,7 +277,7 @@ fn test_state(executable: ExecutableFingerprint, static_dir: &str) -> ManagedSer
         executable_path: Some(executable.path),
         executable_modified_ms: Some(executable.modified_ms),
         executable_size: Some(executable.size),
-        executable_inode: executable.inode,
+        executable_inode: executable.inode.map(|value| value.to_string()),
         static_dir: Some(static_dir.to_string()),
     }
 }

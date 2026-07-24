@@ -463,7 +463,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             .all(|profile| profile.id != "acp:opencode")
     );
 
-    let catalog = psychevo_runtime::discover_agents(&psychevo_runtime::AgentDiscoveryOptions {
+    let catalog = psychevo_runtime::agents::discover_agents(&psychevo_runtime::agents::AgentDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: state.inner.cwd.clone(),
         env: state.inner.inherited_env.clone(),
@@ -499,13 +499,13 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     let parent_thread_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
         .expect("parent Thread");
     let thread_id = state
         .inner
         .state
-        .store()
+
         .create_child_session_with_metadata(
             &parent_thread_id,
             &state.inner.cwd,
@@ -519,8 +519,8 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     state
         .inner
         .state
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("opencode"),
             agent_fingerprint: &agent_fingerprint,
@@ -1094,7 +1094,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
     let lane = state
         .inner
         .state
-        .store()
+
         .gateway_source_lane(&scope.source.source_key().0)
         .expect("source lane read")
         .expect("source lane persisted");
@@ -1200,7 +1200,7 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
     let binding = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(thread_id)
         .expect("binding read")
         .expect("binding");
@@ -1245,7 +1245,7 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
         state
             .inner
             .state
-            .store()
+
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("sessions")
             .is_empty(),
@@ -1333,7 +1333,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
         state
             .inner
             .state
-            .store()
+
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
             .expect("sessions")
             .is_empty(),
@@ -1357,15 +1357,15 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
     let thread_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
         .expect("thread");
     let cwd = state.inner.cwd.display().to_string();
     state
         .inner
         .state
-        .store()
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("native-peer"),
             agent_fingerprint: &agent_fingerprint,
@@ -1454,7 +1454,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
     let stored = state
         .inner
         .state
-        .store()
+
         .gateway_runtime_binding(&thread_id)
         .expect("binding read")
         .expect("binding");
@@ -1481,8 +1481,8 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
     state
         .inner
         .state
-        .store()
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "foreign-native-turn",
             thread_id: Some(&thread_id),
             source_key: Some(&state.inner.source.source_key().0),
@@ -2337,7 +2337,7 @@ fn backend_doctor_resolves_windows_pathext_command_shim() {
     std::fs::write(&shim, "@echo off\n").expect("shim");
     let backend = AgentBackendConfig {
         id: "opencode".to_string(),
-        kind: psychevo_runtime::AgentBackendKind::Acp,
+        kind: psychevo_runtime::agents::AgentBackendKind::Acp,
         enabled: true,
         label: "OpenCode".to_string(),
         description: None,
@@ -2625,7 +2625,7 @@ async fn backend_profile_write_uses_explicit_config_when_set() {
 }
 
 #[tokio::test]
-async fn thread_draft_prepare_projects_opencode_controls_before_first_prompt() {
+async fn thread_draft_prepare_preserves_explicit_values_for_opaque_acp_control_ids() {
     let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
     let host_cwd = std::env::current_dir().expect("host cwd");
     let python = ["python3", "python"]
@@ -2673,7 +2673,7 @@ name = "Configured default"
                 "args": [fixture],
                 "env": {
                     "ACP_LIFECYCLE_LOG": log,
-                    "ACP_LIFECYCLE_MODE": "all"
+                    "ACP_LIFECYCLE_MODE": "custom-control-ids"
                 },
                 "entrypoints": ["peer", "subagent"]
             })),
@@ -2681,6 +2681,31 @@ name = "Configured default"
     )
     .await
     .expect("backend/write");
+
+    handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("write-opencode-runtime-defaults")),
+            method: "runtime/profile/write".to_string(),
+            params: Some(json!({
+                "id": "opencode",
+                "target": "project",
+                "runtime": "acp",
+                "enabled": true,
+                "label": "OpenCode (ACP)",
+                "backendRef": "opencode",
+                "defaultModel": "test/second",
+                "defaultMode": "plan",
+                "workspaceRoots": [],
+                "scope": scope
+            })),
+        },
+    )
+    .await
+    .expect("runtime/profile/write");
 
     let before = handle_rpc(
         state.clone(),
@@ -2724,7 +2749,9 @@ name = "Configured default"
         .iter()
         .find(|control| control["surfaceRole"] == "model")
         .expect("model control");
-    assert_eq!(model["effectiveValue"], "test/default");
+    let model_control_id = model["id"].as_str().expect("model control id").to_string();
+    assert_eq!(model_control_id, "preferred-model");
+    assert_eq!(model["effectiveValue"], "test/second");
     assert_eq!(model["choices"].as_array().map(Vec::len), Some(2));
     assert_eq!(model["choices"][0]["label"], "Configured default");
     assert_eq!(model["choices"][1]["label"], "Second model");
@@ -2732,7 +2759,7 @@ name = "Configured default"
         .iter()
         .find(|control| control["surfaceRole"] == "mode")
         .expect("mode control");
-    assert_eq!(mode["effectiveValue"], "build");
+    assert_eq!(mode["effectiveValue"], "plan");
     assert_eq!(
         mode["choices"]
             .as_array()
@@ -2742,6 +2769,17 @@ name = "Configured default"
             .collect::<Vec<_>>(),
         vec!["build", "plan"]
     );
+    let prepared_log = std::fs::read_to_string(&log).expect("fixture log after prepare");
+    assert!(prepared_log.lines().any(|line| {
+        line.contains("\"method\":\"session/set_config_option\"")
+            && line.contains("\"configId\":\"preferred-model\"")
+            && line.contains("\"value\":\"test/second\"")
+    }));
+    assert!(prepared_log.lines().any(|line| {
+        line.contains("\"method\":\"session/set_config_option\"")
+            && line.contains("\"configId\":\"preferred-mode\"")
+            && line.contains("\"value\":\"plan\"")
+    }));
 
     let refreshed = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
@@ -2795,8 +2833,8 @@ name = "Configured default"
             params: Some(json!({
                 "threadId": null,
                 "targetId": target_id,
-                "controlId": "model",
-                "value": "test/second",
+                "controlId": model_control_id,
+                "value": "test/default",
                 "expectedCapabilityRevision": model["capabilityRevision"],
                 "expectedBindingRevision": 0,
                 "expectedContextRevision": prepared["context"]["contextRevision"],
@@ -2808,9 +2846,9 @@ name = "Configured default"
     .await
     .expect("thread/control/set prepared model");
     assert_eq!(changed["status"], "observed");
-    assert_eq!(changed["control"]["effectiveValue"], "test/second");
+    assert_eq!(changed["control"]["effectiveValue"], "test/default");
 
-    handle_rpc(
+    let prepared_again = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
         tx.clone(),
@@ -2823,12 +2861,32 @@ name = "Configured default"
     )
     .await
     .expect("idempotent thread/draft/prepare");
+    let prepared_again_model = prepared_again["context"]["controls"]
+        .as_array()
+        .expect("controls")
+        .iter()
+        .find(|control| control["surfaceRole"] == "model")
+        .expect("model control");
+    assert_eq!(prepared_again_model["effectiveValue"], "test/default");
     let session_new_count = std::fs::read_to_string(&log)
         .expect("fixture log")
         .lines()
         .filter(|line| line.contains("\"method\":\"session/new\""))
         .count();
     assert_eq!(session_new_count, 1);
+    let profile_default_set_count = std::fs::read_to_string(&log)
+        .expect("fixture log")
+        .lines()
+        .filter(|line| {
+            line.contains("\"method\":\"session/set_config_option\"")
+                && line.contains("\"configId\":\"preferred-model\"")
+                && line.contains("\"value\":\"test/second\"")
+        })
+        .count();
+    assert_eq!(
+        profile_default_set_count, 1,
+        "idempotent prepare must not reapply the profile default over an explicit draft value"
+    );
 
     let accepted = handle_rpc(
         state,

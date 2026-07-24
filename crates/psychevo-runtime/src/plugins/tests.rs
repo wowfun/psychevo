@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 
 use tempfile::tempdir;
 
-use crate::RunMode;
 use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolSelectionConfig};
 use crate::contribution_projection::ContributionStatus;
 use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
@@ -18,6 +17,7 @@ use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };
 use crate::types::McpTransportInput;
+use crate::types::RunMode;
 
 use super::*;
 
@@ -381,7 +381,7 @@ fn hermes_plugin_yaml_is_diagnostic_only() {
 }
 
 #[test]
-fn inspect_hermes_adapter_descriptor_does_not_execute_register_module() {
+fn inspect_hermes_metadata_does_not_execute_register_module() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -411,19 +411,18 @@ fn inspect_hermes_adapter_descriptor_does_not_execute_register_module() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: Some(PluginAdapterMode::AdapterHost),
         },
     )
     .expect("inspect");
 
     assert_eq!(value["inspection"]["framework"], "hermes");
-    assert_eq!(value["inspection"]["status"], "Needs trust");
-    assert_eq!(value["inspection"]["target_lanes"][0], "tools");
+    assert_eq!(value["inspection"]["support"], "inspection_only");
+    assert_eq!(value["inspection"]["declared_lanes"][0], "tools");
     assert!(!temp.path().join("executed").exists());
 }
 
 #[test]
-fn install_foreign_adapter_records_fingerprint_and_trust() {
+fn install_foreign_source_is_rejected_without_persistence() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -436,7 +435,7 @@ fn install_foreign_adapter_records_fingerprint_and_trust() {
     )
     .expect("plugin yaml");
 
-    let record = install_plugin(
+    let error = install_plugin(
         &home,
         &cwd,
         PluginInstallOptions {
@@ -446,21 +445,17 @@ fn install_foreign_adapter_records_fingerprint_and_trust() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: Some(PluginAdapterMode::AdapterHost),
             force: false,
         },
     )
-    .expect("install");
+    .expect_err("foreign install must be rejected");
 
-    assert_eq!(record.manifest_kind, PluginManifestKind::Hermes);
-    assert_eq!(record.adapter_mode, PluginAdapterMode::AdapterHost);
-    assert!(!record.package_fingerprint.is_empty());
-
-    let value = plugin_set_trust_value(&home, &cwd, PluginScope::Global, "hermes-cleanup", true)
-        .expect("trust");
-
-    assert_eq!(value["trust"]["status"], "trusted");
-    assert_eq!(value["trust"]["fingerprint"], record.package_fingerprint);
+    assert!(error.to_string().contains("inspection-only"));
+    assert!(error.to_string().contains("ACP Agent runtime profile"));
+    assert!(
+        !home.exists(),
+        "inspection-only install must not create state"
+    );
 }
 
 #[test]
@@ -490,7 +485,6 @@ fn inspect_opencode_rejects_entrypoint_outside_package_root() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
         },
     )
     .expect("inspect");
@@ -542,7 +536,6 @@ fn install_npm_source_uses_local_pack_fixture() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -799,7 +792,6 @@ fn install_record_preserves_scope_source_and_data_root() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -850,7 +842,6 @@ fn install_rejects_package_symlink_without_copying_escape_content() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -906,7 +897,6 @@ fn selector_conflict_requires_source_qualified_name() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -921,7 +911,6 @@ fn selector_conflict_requires_source_qualified_name() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -974,7 +963,6 @@ fn local_policy_can_target_profile_installed_plugin() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1019,7 +1007,6 @@ fn resetting_local_policy_restores_profile_inheritance() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1066,7 +1053,6 @@ fn scoped_selectors_and_policy_keys_distinguish_duplicate_installations() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1081,7 +1067,6 @@ fn scoped_selectors_and_policy_keys_distinguish_duplicate_installations() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1145,7 +1130,6 @@ fn enabled_plugin_contributions_materialize_mcp_servers_toolsets_and_projection(
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1216,7 +1200,6 @@ fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1302,7 +1285,6 @@ fn compatibility_manifest_install_allows_missing_description() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1332,7 +1314,6 @@ fn marketplace_rejects_unsupported_kind() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
         },
     )
     .expect_err("unsupported kind");
@@ -1370,7 +1351,6 @@ fn worker_tool_executes_through_binding() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1422,7 +1402,6 @@ fn worker_contribution_discovery_receives_effective_env() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1467,7 +1446,6 @@ fn worker_contribution_discovery_times_out() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1510,7 +1488,6 @@ async fn worker_tool_call_timeout_returns_tool_error() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -1610,7 +1587,6 @@ fn install_from_local_git_source_materializes_record() {
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )

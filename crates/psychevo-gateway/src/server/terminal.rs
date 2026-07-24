@@ -8,8 +8,9 @@ use std::time::Duration;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::{
-    Error, GitBashRuntime, ProcessEnvOptions, apply_pty_process_env, canonicalize_cwd,
-    resolve_input_path, terminate_pty_child_tree,
+    Error, host_paths::GitBashRuntime, host_paths::resolve_input_path, paths::canonicalize_cwd,
+    process_env::ProcessEnvOptions, process_env::apply_pty_process_env,
+    process_env::terminate_pty_child_tree,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -302,7 +303,7 @@ fn terminal_effective_env(
     inherited_env: &BTreeMap<String, String>,
     windows_utf8_defaults: bool,
 ) -> psychevo_runtime::Result<BTreeMap<String, String>> {
-    let mut env = psychevo_runtime::effective_process_env(
+    let mut env = psychevo_runtime::process_env::effective_process_env(
         inherited_env,
         ProcessEnvOptions::new(&[]).with_windows_utf8_defaults(windows_utf8_defaults),
     )?;

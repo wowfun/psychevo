@@ -17,7 +17,7 @@ use tokio::sync::oneshot;
 use crate::error::Result;
 use crate::extensions::SelectedCapabilityRoot;
 use crate::skills::SelectedSkill;
-use crate::state_runtime::StateRuntime;
+use crate::state::StateRuntime;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SmokeControl {

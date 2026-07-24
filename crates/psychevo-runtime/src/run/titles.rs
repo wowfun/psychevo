@@ -75,7 +75,7 @@ pub(crate) fn warning_event(warning: &RunWarning) -> serde_json::Value {
 }
 
 pub(crate) async fn ensure_new_visible_session_title(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     prompt: &str,
     selected_skills: &[SelectedSkill],

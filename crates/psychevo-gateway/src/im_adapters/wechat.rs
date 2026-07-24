@@ -224,6 +224,7 @@ pub async fn check_wechat_ilink_health(
     Ok(wechat_health_from_getupdates_body(&body))
 }
 
+#[cfg(feature = "native-channels")]
 pub fn render_wechat_qr_svg(value: &str) -> Result<String> {
     let code = qrcode::QrCode::new(value.as_bytes())
         .map_err(|err| Error::Message(format!("failed to render WeChat QR code: {err}")))?;
@@ -233,6 +234,13 @@ pub fn render_wechat_qr_svg(value: &str) -> Result<String> {
         .dark_color(qrcode::render::svg::Color("#111111"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
         .build())
+}
+
+#[cfg(not(feature = "native-channels"))]
+pub fn render_wechat_qr_svg(_value: &str) -> Result<String> {
+    Err(Error::Message(
+        "native channel QR rendering is not compiled into this build".to_string(),
+    ))
 }
 
 fn normalize_wechat_base_url(value: &str) -> String {

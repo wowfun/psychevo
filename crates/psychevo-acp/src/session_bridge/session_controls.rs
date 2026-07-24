@@ -4,7 +4,7 @@ impl PsychevoAcpAgent {
             return Ok("no runtime session yet".to_string());
         };
         let result =
-            psychevo_runtime::reload_session_context(psychevo_runtime::ReloadContextOptions {
+            psychevo_runtime::run::reload_session_context(psychevo_runtime::types::ReloadContextOptions {
                 state: self.state.clone(),
                 session: runtime_session_id,
                 config_path: self.options.config_path.clone(),
@@ -81,7 +81,7 @@ impl PsychevoAcpAgent {
             }
             return Ok(format!("No session matched `{reference}`."));
         };
-        let store = self.state.store().clone();
+        let store = self.state.clone();
         store
             .resume_session(&target.id)
             .map_err(|_| Error::resource_not_found(Some(target.id.clone())))?;
@@ -103,7 +103,7 @@ impl PsychevoAcpAgent {
         &self,
         session: &AcpSession,
     ) -> Result<Vec<SessionSummary>, Error> {
-        let store = self.state.store().clone();
+        let store = self.state.clone();
         store
             .list_sessions_for_cwd_with_sources(&session.cwd, &[])
             .map_err(acp_internal_error)

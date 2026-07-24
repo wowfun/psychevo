@@ -1,9 +1,7 @@
 
     use psychevo_ai::Outcome;
-    use psychevo_runtime::{
-        AssistantBlock, Message, PermissionMode, RunMode, UserContentBlock,
-        UserShellContextOptions,
-    };
+    use psychevo_runtime::{types::PermissionMode, types::RunMode, types::UserShellContextOptions};
+    use psychevo_agent_core::{AssistantBlock, Message, UserContentBlock};
     use tokio::sync::{Notify, mpsc};
 
     #[derive(Debug, Clone)]
@@ -34,7 +32,7 @@
         request_permission: AtomicBool,
         emit_stream_terminal: AtomicBool,
         persist_history: AtomicBool,
-        context_snapshot: Mutex<Option<psychevo_runtime::ContextSnapshot>>,
+        context_snapshot: Mutex<Option<psychevo_runtime::context_usage::ContextSnapshot>>,
     }
 
     #[derive(Clone, Default)]
@@ -120,7 +118,7 @@
                         request
                             .options
                             .state
-                            .store()
+
                             .gateway_runtime_binding(thread_id)
                             .ok()
                             .flatten()
@@ -163,7 +161,7 @@
                     if let Some(mut abort) = request
                         .control
                         .as_ref()
-                        .map(psychevo_runtime::RunControl::abort_signal)
+                        .map(psychevo_runtime::types::RunControl::abort_signal)
                     {
                         tokio::select! {
                             _ = wait.release.notified() => {}
@@ -194,10 +192,10 @@
                 }
 
                 let session_id = if let Some(session_id) = request.options.session.clone() {
-                    request.options.state.store().resume_session(&session_id)?;
+                    request.options.state.resume_session(&session_id)?;
                     session_id
                 } else {
-                    request.options.state.store().create_session_with_metadata(
+                    request.options.state.create_session_with_metadata(
                         &request.options.cwd,
                         &request.runtime_source,
                         "fake-model",
@@ -213,14 +211,14 @@
                 let final_answer = format!("answer {run_number}");
                 if outcome == Outcome::Normal && inner.persist_history.load(Ordering::SeqCst) {
                     let timestamp_ms = crate::gateway_now_ms();
-                    request.options.state.store().append_message(
+                    request.options.state.append_message(
                         &session_id,
                         &Message::User {
                             content: vec![UserContentBlock::text(request.options.prompt.clone())],
                             timestamp_ms,
                         },
                     )?;
-                    request.options.state.store().append_message(
+                    request.options.state.append_message(
                         &session_id,
                         &Message::Assistant {
                             content: vec![AssistantBlock::Text {
@@ -297,11 +295,11 @@
 
     fn test_python_command_toml(cwd: &std::path::Path) -> String {
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo_runtime::resolve_executable_path(
+        let python = psychevo_runtime::host_paths::resolve_executable_path(
             "python3",
             cwd,
-            &psychevo_runtime::ExecutableResolveOptions {
-                platform: psychevo_runtime::HostPlatform::current(),
+            &psychevo_runtime::host_paths::ExecutableResolveOptions {
+                platform: psychevo_runtime::host_paths::HostPlatform::current(),
                 env: &host_env,
             },
         )

@@ -14,7 +14,7 @@ mod worker;
 pub use api::{
     codex_plugin_policy_value, codex_plugin_set_enabled_value, plugin_doctor_value,
     plugin_list_value, plugin_reset_enabled_value, plugin_set_enabled_value,
-    plugin_set_trust_value, plugin_uninstall_value, plugin_view_value,
+    plugin_uninstall_value, plugin_view_value,
 };
 pub use compatibility::{
     CODEX_PLUGIN_COMPATIBILITY_PROFILE, PluginAuthority, PluginCompatibilityLevel,
@@ -30,9 +30,9 @@ pub use marketplace::{
     plugin_marketplace_add_value, plugin_marketplace_list_value, plugin_marketplace_remove_value,
 };
 pub use types::{
-    LoadedPluginManifest, PluginAdapterMode, PluginDiagnostic, PluginInspectOptions,
-    PluginInstallOptions, PluginInstallRecord, PluginInterfaceMetadata, PluginManifestKind,
-    PluginMarketplaceEntry, PluginScope, PluginSourceKind, PluginWorkerSpec,
+    LoadedPluginManifest, PluginDiagnostic, PluginInspectOptions, PluginInstallOptions,
+    PluginInstallRecord, PluginInterfaceMetadata, PluginManifestKind, PluginMarketplaceEntry,
+    PluginScope, PluginSourceKind, PluginWorkerSpec,
 };
 pub use util::external_plugin_fingerprint;
 

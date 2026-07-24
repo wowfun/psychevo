@@ -164,7 +164,7 @@ no_auth = true
     assert_eq!(result["models"][0]["value"], "localmodels/alpha-free");
     assert_eq!(result["models"][1]["value"], "localmodels/beta");
     assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 1);
-    let cache_path = psychevo_runtime::provider_models_cache_path_for_home(&state.inner.home);
+    let cache_path = psychevo_runtime::config::provider_models_cache_path_for_home(&state.inner.home);
     let cache = std::fs::read_to_string(cache_path).expect("provider cache");
     assert!(cache.contains("alpha-free"));
     assert!(!cache.contains("gateway-mock-key"));

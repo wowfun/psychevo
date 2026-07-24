@@ -12,7 +12,7 @@ impl Gateway {
                 ));
             }
             GatewaySourceLifetime::Process => {
-                self.state.store().resume_session(new_thread_id)?;
+                self.state.resume_session(new_thread_id)?;
                 let previous = self
                     .process_bindings
                     .lock()
@@ -20,22 +20,22 @@ impl Gateway {
                     .insert(source_key.0.clone(), new_thread_id.to_string());
                 if let Some(previous) = previous {
                     self.state
-                        .store()
+
                         .mark_session_ended_with_reason(&previous, "gateway_reset")?;
-                    self.state.store().archive_session(&previous)?;
+                    self.state.archive_session(&previous)?;
                 }
             }
             GatewaySourceLifetime::Persistent => {
-                if let Some(previous) = self.state.store().gateway_source_lane(&source_key.0)?
+                if let Some(previous) = self.state.gateway_source_lane(&source_key.0)?
                     && let Some(previous_thread_id) = previous.thread_id
                 {
                     self.state
-                        .store()
+
                         .mark_session_ended_with_reason(&previous_thread_id, "gateway_reset")?;
-                    self.state.store().archive_session(&previous_thread_id)?;
+                    self.state.archive_session(&previous_thread_id)?;
                 }
                 self.state
-                    .store()
+
                     .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
@@ -68,11 +68,11 @@ impl Gateway {
             GatewaySourceLifetime::Persistent => {
                 let previous = self
                     .state
-                    .store()
+
                     .gateway_source_lane(&source_key.0)?
                     .and_then(|lane| lane.thread_id);
                 self.state
-                    .store()
+
                     .delete_gateway_source_binding(&source_key.0)?;
                 previous
             }
@@ -88,9 +88,9 @@ impl Gateway {
         let previous = self.clear_source_binding(source)?;
         if let Some(previous) = previous.as_deref() {
             self.state
-                .store()
+
                 .mark_session_ended_with_reason(previous, "gateway_reset")?;
-            self.state.store().archive_session(previous)?;
+            self.state.archive_session(previous)?;
         }
         Ok(previous)
     }
@@ -101,14 +101,14 @@ impl Gateway {
     ) -> psychevo_runtime::Result<usize> {
         let bindings = self
             .state
-            .store()
+
             .gateway_source_bindings_for_connection_id(connection_id)?;
         let mut rotated = 0usize;
         let mut archived_threads = HashSet::new();
         for binding in bindings {
             if !self
                 .state
-                .store()
+
                 .delete_gateway_source_binding(&binding.source_key)?
             {
                 continue;
@@ -123,11 +123,11 @@ impl Gateway {
             );
 
             if archived_threads.insert(binding.thread_id.clone()) {
-                self.state.store().mark_session_ended_with_reason(
+                self.state.mark_session_ended_with_reason(
                     &binding.thread_id,
                     "channel_workspace_changed",
                 )?;
-                self.state.store().archive_session(&binding.thread_id)?;
+                self.state.archive_session(&binding.thread_id)?;
             }
         }
         Ok(rotated)
@@ -148,7 +148,7 @@ impl Gateway {
                 ));
             }
             GatewaySourceLifetime::Process => {
-                self.state.store().resume_session(thread_id)?;
+                self.state.resume_session(thread_id)?;
                 self.process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
@@ -156,7 +156,7 @@ impl Gateway {
             }
             GatewaySourceLifetime::Persistent => {
                 self.state
-                    .store()
+
                     .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,

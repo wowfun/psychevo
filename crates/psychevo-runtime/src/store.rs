@@ -1,5 +1,6 @@
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
@@ -8,6 +9,9 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::session_trace::{
+    SessionTraceReadOptions, SessionTraceReadResult, read_session_trace, remove_session_trace_dir,
+};
 use crate::types::SessionSummary;
 
 pub(crate) const SQLITE_SCHEMA_VERSION: i64 = 28;
@@ -656,13 +660,87 @@ pub struct SessionMessageRecord {
 }
 
 #[derive(Clone)]
-pub struct SqliteStore {
-    pub(crate) inner: Arc<SqliteStoreInner>,
+pub struct StateRuntime {
+    pub(crate) inner: Arc<StateRuntimeInner>,
 }
 
-pub(crate) struct SqliteStoreInner {
+pub(crate) struct StateRuntimeInner {
+    pub(crate) db_path: PathBuf,
     pub(crate) conn: Mutex<Connection>,
     pub(crate) successful_writes: AtomicUsize,
+    pub(crate) filesystem_grants: Mutex<HashMap<String, crate::sandbox::SandboxWriteGrants>>,
+}
+
+impl StateRuntime {
+    pub fn db_path(&self) -> &Path {
+        &self.inner.db_path
+    }
+
+    pub fn read_session_trace(
+        &self,
+        session_id: &str,
+        options: SessionTraceReadOptions,
+    ) -> SessionTraceReadResult {
+        read_session_trace(self.db_path(), session_id, options)
+    }
+
+    pub(crate) fn filesystem_grants(&self, session_id: &str) -> crate::sandbox::SandboxWriteGrants {
+        let mut grants = self
+            .inner
+            .filesystem_grants
+            .lock()
+            .expect("filesystem grant map poisoned");
+        grants.entry(session_id.to_string()).or_default().clone()
+    }
+
+    pub(crate) fn turn_filesystem_grant_guard(
+        &self,
+        session_id: impl Into<String>,
+    ) -> TurnFilesystemGrantGuard {
+        TurnFilesystemGrantGuard {
+            state: self.clone(),
+            session_id: session_id.into(),
+        }
+    }
+
+    fn clear_turn_filesystem_grants(&self, session_id: &str) {
+        if let Ok(grants) = self.inner.filesystem_grants.lock()
+            && let Some(grants) = grants.get(session_id)
+        {
+            grants.clear_turn_scopes();
+        }
+    }
+
+    pub(crate) fn clear_session_filesystem_grants(&self, session_id: &str) {
+        if let Ok(mut grants) = self.inner.filesystem_grants.lock()
+            && let Some(grants) = grants.remove(session_id)
+        {
+            grants.clear_session_scopes();
+        }
+    }
+
+    pub(crate) fn remove_session_trace(&self, session_id: &str) {
+        let _ = remove_session_trace_dir(self.db_path(), session_id);
+    }
+}
+
+pub(crate) struct TurnFilesystemGrantGuard {
+    state: StateRuntime,
+    session_id: String,
+}
+
+impl Drop for TurnFilesystemGrantGuard {
+    fn drop(&mut self) {
+        self.state.clear_turn_filesystem_grants(&self.session_id);
+    }
+}
+
+impl fmt::Debug for StateRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StateRuntime")
+            .field("db_path", &self.inner.db_path)
+            .finish_non_exhaustive()
+    }
 }
 
 // Store internals are split by schema, session, message, undo, and row-helper concerns.
@@ -712,3 +790,42 @@ pub(crate) mod store_schema_helpers;
 pub(crate) mod store_turn_delivery;
 #[path = "store/undo_helpers.rs"]
 pub(crate) mod store_undo_helpers;
+
+#[cfg(test)]
+mod state_runtime_tests {
+    use super::*;
+    use crate::types::{FilesystemApprovalLifetime, FilesystemApprovalScope};
+
+    #[test]
+    fn filesystem_grants_follow_turn_and_session_lifecycles() {
+        let temp = tempfile::tempdir().expect("temp");
+        let turn_root = temp.path().join("turn");
+        let session_root = temp.path().join("session");
+        std::fs::create_dir_all(&turn_root).expect("turn root");
+        std::fs::create_dir_all(&session_root).expect("session root");
+        let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let grants = state.filesystem_grants("session-1");
+        let turn_guard = state.turn_filesystem_grant_guard("session-1");
+        grants
+            .grant_scope(&FilesystemApprovalScope {
+                directory: turn_root.display().to_string(),
+                lifetime: FilesystemApprovalLifetime::Turn,
+            })
+            .expect("turn grant");
+        grants
+            .grant_scope(&FilesystemApprovalScope {
+                directory: session_root.display().to_string(),
+                lifetime: FilesystemApprovalLifetime::Session,
+            })
+            .expect("session grant");
+
+        drop(turn_guard);
+
+        assert_eq!(
+            grants.scoped_roots(),
+            vec![session_root.canonicalize().unwrap()]
+        );
+        state.clear_session_filesystem_grants("session-1");
+        assert!(grants.scoped_roots().is_empty());
+    }
+}

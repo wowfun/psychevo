@@ -135,7 +135,7 @@
         let thread_id = state
             .inner
             .state
-            .store()
+
             .create_session(&scope.cwd)
             .expect("session");
         let (out_tx, mut out_rx) = mpsc::unbounded_channel();

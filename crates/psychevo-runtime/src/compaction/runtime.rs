@@ -16,9 +16,9 @@ use crate::context_usage::ContextSnapshot;
 use crate::error::{Error, Result};
 use crate::paths::canonical_cwd;
 use crate::prompt_templates;
-use crate::state_runtime::StateRuntime;
+use crate::state::StateRuntime;
 use crate::store::{
-    SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord, SqliteStore,
+    SessionCompactionInput, SessionCompactionRecord, SessionMessageRecord,
 };
 use crate::thread_lineage::side_conversation_session_source;
 use crate::types::{ImageInput, RunMode, RunOptions};
@@ -87,7 +87,7 @@ pub struct CompactionResult {
 
 pub async fn compact_session(options: CompactSessionOptions) -> Result<CompactionResult> {
     let cwd = canonical_cwd(&options.cwd)?;
-    let store = options.state.store().clone();
+    let store = options.state.clone();
     let summary = store
         .session_summary(&options.session)?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
@@ -260,7 +260,7 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
 }
 
 pub(crate) fn load_projected_messages(
-    store: &SqliteStore,
+    store: &StateRuntime,
     session_id: &str,
     max_context_messages: Option<usize>,
 ) -> Result<Vec<Message>> {

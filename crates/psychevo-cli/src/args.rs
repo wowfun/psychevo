@@ -2,8 +2,8 @@ pub(crate) use std::path::PathBuf;
 
 pub(crate) use clap::{Parser, Subcommand};
 pub(crate) use psychevo_runtime::{
-    PermissionMode, ProjectContextInstructionMode, RunMode, SessionArtifactKind,
-    SessionExportIncludeSet,
+    session_export::SessionArtifactKind, session_export::SessionExportIncludeSet,
+    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
 };
 
 #[allow(unused_imports)]

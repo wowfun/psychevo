@@ -2,7 +2,7 @@
 pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = SqliteStore::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .expect("parent");

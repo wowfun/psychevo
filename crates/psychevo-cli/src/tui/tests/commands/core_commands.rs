@@ -437,7 +437,7 @@ pub(crate) async fn fullscreen_help_bottom_panel_switches_sections_and_closes() 
 pub(crate) async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usage() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    SqliteStore::open(&app.db_path).expect("store");
+    StateRuntime::open(&app.db_path).expect("store");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/help now");
 
@@ -472,7 +472,7 @@ pub(crate) async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usag
 pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    SqliteStore::open(&app.db_path).expect("store");
+    StateRuntime::open(&app.db_path).expect("store");
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Usage)
@@ -501,7 +501,7 @@ pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
 pub(crate) fn usage_panel_groups_persisted_stats_rows() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("session");
@@ -686,7 +686,7 @@ pub(crate) async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() 
 pub(crate) async fn fullscreen_compact_queues_behind_running_turn() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session = store
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
         .expect("session");

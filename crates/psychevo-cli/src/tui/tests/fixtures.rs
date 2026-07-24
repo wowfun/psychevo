@@ -772,7 +772,7 @@ pub(crate) fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
 pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -788,7 +788,7 @@ pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
 pub(crate) fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {

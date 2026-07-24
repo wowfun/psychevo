@@ -3,7 +3,8 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{RunMode, RunOptions, StateRuntime, canonicalize_cwd};
+use psychevo_runtime::state::StateRuntime;
+use psychevo_runtime::{paths::canonicalize_cwd, types::RunMode, types::RunOptions};
 use serde_json::json;
 
 use crate::env::{env_path, resolve_state_db};

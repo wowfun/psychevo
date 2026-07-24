@@ -64,7 +64,7 @@ impl TuiApp {
 
     pub(crate) fn sandbox_status_text(&self) -> Result<String> {
         let options = self.run_options(String::new());
-        Ok(psychevo_runtime::sandbox_status_text(
+        Ok(psychevo_runtime::sandbox::sandbox_status_text(
             &options,
             self.current_mode,
         )?)
@@ -89,7 +89,7 @@ impl TuiApp {
             ));
         }
         if let Some(parent) = self.current_session.as_deref() {
-            let store = self.state_runtime.store();
+            let store = &self.state_runtime;
             let value = agent_status_value(Some(store), Some(parent), false);
             let running = value
                 .get("agents")
@@ -200,7 +200,7 @@ impl TuiApp {
             SessionArtifactKind::Export,
             session_id,
         );
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         Ok(write_session_export(
             store,
             session_id,
@@ -227,7 +227,7 @@ impl TuiApp {
             SessionArtifactKind::Share,
             session_id,
         );
-        let store = self.state_runtime.store();
+        let store = &self.state_runtime;
         Ok(write_session_export(
             store,
             session_id,
@@ -287,7 +287,7 @@ impl TuiApp {
     pub(crate) fn reload_context_for_current_session(
         &self,
         ui: &FullscreenUi<'_>,
-    ) -> Result<psychevo_runtime::ReloadContextResult> {
+    ) -> Result<psychevo_runtime::types::ReloadContextResult> {
         if ui.running.is_some() {
             return Err(anyhow!("finish the current turn before reloading context"));
         }

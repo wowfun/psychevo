@@ -3,7 +3,7 @@ pub(super) fn automation_list_result(
     _auth: &AuthContext,
     params: wire::AutomationListParams,
 ) -> psychevo_runtime::Result<Value> {
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let records = match params.cwd {
         Some(cwd) => {
             let cwd = canonicalize_cwd(Path::new(&cwd))?;
@@ -109,7 +109,7 @@ pub(super) fn automation_write_result(
         .clone()
         .filter(|id| !id.trim().is_empty())
         .unwrap_or_else(|| Uuid::now_v7().to_string());
-    let existing = state.inner.state.store().automation_task(&automation_id)?;
+    let existing = state.inner.state.automation_task(&automation_id)?;
     let target = resolve_automation_target_scope(state, auth, params.scope, &params.target)?;
     let cwd = target.cwd.display().to_string();
     if let Some(existing) = existing.as_ref()
@@ -153,7 +153,7 @@ pub(super) fn automation_write_result(
     let record = state
         .inner
         .state
-        .store()
+
         .upsert_automation_task(AutomationTaskInput {
             id: Some(automation_id),
             cwd,
@@ -195,7 +195,7 @@ pub(super) fn automation_set_enabled_result(
     let record = state
         .inner
         .state
-        .store()
+
         .upsert_automation_task(AutomationTaskInput {
             id: Some(existing.id),
             cwd: existing.cwd,
@@ -225,7 +225,7 @@ pub(super) fn automation_delete_result(
     let deleted = state
         .inner
         .state
-        .store()
+
         .delete_automation_task(&params.automation_id)?;
     Ok(serde_json::to_value(wire::AutomationDeleteResult {
         deleted,
@@ -251,7 +251,7 @@ pub(super) fn automation_run_result(
     let automation = state
         .inner
         .state
-        .store()
+
         .automation_task(&task.id)?
         .unwrap_or(task);
     Ok(serde_json::to_value(wire::AutomationRunResult {

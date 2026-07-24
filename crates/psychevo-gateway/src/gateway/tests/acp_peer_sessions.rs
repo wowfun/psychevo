@@ -21,7 +21,7 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
         .expect("native turn");
     let delivery = harness
         .state
-        .store()
+
         .gateway_turn_delivery(&result.turn.id)
         .expect("delivery lookup")
         .expect("delivery record");
@@ -33,7 +33,7 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
     assert!(delivery.terminal_at_ms.is_some());
     let activity = harness
         .state
-        .store()
+
         .gateway_activity(&result.turn.id)
         .expect("activity lookup")
         .expect("activity");
@@ -61,7 +61,7 @@ async fn public_turn_terminal_observes_completed_thread_activity() {
     turn_request.event_sink = Some(Arc::new(move |event| {
         if let GatewayEvent::TurnCompleted { turn_id, .. } = event {
             let status = state_for_event
-                .store()
+
                 .gateway_activity(&turn_id)
                 .expect("activity read at terminal")
                 .expect("activity at terminal")
@@ -131,12 +131,12 @@ Use the captured child session.
 
     let parent_thread_id = harness
         .state
-        .store()
+
         .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
         .expect("parent Thread");
     let child_thread_id = harness
         .state
-        .store()
+
         .create_child_session_with_metadata(
             &parent_thread_id,
             &harness.cwd,
@@ -148,11 +148,11 @@ Use the captured child session.
         .expect("child Thread");
     harness
         .state
-        .store()
+
         .upsert_agent_edge(
             &parent_thread_id,
             &child_thread_id,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("open child edge");
@@ -195,7 +195,7 @@ Use the captured child session.
             let activity = gateway_for_sink
                 .activity_for_selector(GatewayThreadSelector::thread_id(&child_for_sink));
             let edge = state_for_sink
-                .store()
+
                 .find_agent_edge(&child_for_sink)
                 .expect("edge at terminal")
                 .expect("child edge at terminal");
@@ -289,7 +289,7 @@ Use the captured child session.
         .expect("terminal observed");
     assert!(!terminal_activity.running);
     assert_eq!(terminal_activity.active_turn_id, None);
-    assert_eq!(terminal_edge, psychevo_runtime::AgentEdgeStatus::Closed);
+    assert_eq!(terminal_edge, psychevo_runtime::state::AgentEdgeStatus::Closed);
     assert!(
         harness
             .gateway
@@ -393,7 +393,7 @@ Peer instructions.
 
     let binding = harness
         .state
-        .store()
+
         .gateway_source_binding(&source.source_key().0)
         .expect("binding lookup")
         .expect("binding");
@@ -401,7 +401,7 @@ Peer instructions.
     assert_eq!(binding.backend_native_id, None);
     let runtime_binding = harness
         .state
-        .store()
+
         .gateway_runtime_binding(&first.result.session_id)
         .expect("runtime binding lookup")
         .expect("runtime binding");
@@ -412,7 +412,7 @@ Peer instructions.
     );
     let delivery = harness
         .state
-        .store()
+
         .gateway_turn_delivery(&first.turn.id)
         .expect("ACP delivery lookup")
         .expect("ACP delivery record");
@@ -422,7 +422,7 @@ Peer instructions.
     assert!(delivery.delivery_confirmed_at_ms.is_some());
     let metadata = harness
         .state
-        .store()
+
         .session_metadata(&first.result.session_id)
         .expect("metadata")
         .expect("metadata value");
@@ -436,7 +436,7 @@ Peer instructions.
     assert_eq!(transcript[1].role, TranscriptEntryRole::Assistant);
     let summary = harness
         .state
-        .store()
+
         .session_summary(&first.result.session_id)
         .expect("session summary")
         .expect("summary");
@@ -475,7 +475,7 @@ Peer instructions.
 
     let child_session = harness
         .state
-        .store()
+
         .create_child_session_with_metadata(
             &first.result.session_id,
             &harness.cwd,
@@ -498,7 +498,7 @@ Peer instructions.
     assert_eq!(child.result.session_id, child_session);
     let child_summary = harness
         .state
-        .store()
+
         .session_summary(&child.result.session_id)
         .expect("child summary")
         .expect("child");
@@ -510,7 +510,7 @@ async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_se
     let harness = harness(backend.clone());
     let session_id = harness
         .state
-        .store()
+
         .create_session_with_metadata(
             &harness.cwd,
             "peer_agent",
@@ -547,7 +547,7 @@ async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_se
     );
     let metadata = harness
         .state
-        .store()
+
         .session_metadata(&session_id)
         .expect("metadata")
         .expect("metadata value");
@@ -747,7 +747,7 @@ tools: [read]
 
     let summary = harness
         .state
-        .store()
+
         .session_summary(&result.result.session_id)
         .expect("session summary")
         .expect("summary");
@@ -788,12 +788,12 @@ tools: [read]
 
     let summaries = harness
         .state
-        .store()
+
         .load_tui_message_summaries(&result.result.session_id)
         .expect("stored messages");
     let stored_assistant = summaries
         .iter()
-        .find(|summary| matches!(summary.message, psychevo_runtime::Message::Assistant { .. }))
+        .find(|summary| matches!(summary.message, psychevo_agent_core::Message::Assistant { .. }))
         .expect("stored assistant message");
     assert_eq!(
         stored_assistant.usage,
@@ -805,8 +805,8 @@ tools: [read]
             "reasoning_tokens": 4
         }))
     );
-    let usage_summary = psychevo_runtime::session_usage_summary(
-        psychevo_runtime::SessionUsageOptions {
+    let usage_summary = psychevo_runtime::stats::session_usage_summary(
+        psychevo_runtime::types::SessionUsageOptions {
             state: harness.state.clone(),
             session_id: result.result.session_id.clone(),
         },
@@ -814,7 +814,7 @@ tools: [read]
     .expect("session usage");
     assert_eq!(usage_summary.effective_total_tokens, Some(144));
     assert_eq!(usage_summary.total_status, "reported");
-    let psychevo_runtime::Message::Assistant { content, .. } = &stored_assistant.message else {
+    let psychevo_agent_core::Message::Assistant { content, .. } = &stored_assistant.message else {
         unreachable!("matched assistant message")
     };
     assert!(
@@ -859,7 +859,7 @@ tools: [read]
 
     let summaries = harness
         .state
-        .store()
+
         .load_tui_message_summaries(&result.result.session_id)
         .expect("stored messages after second turn");
     let stored_assistants = summaries
@@ -867,7 +867,7 @@ tools: [read]
         .filter(|summary| {
             matches!(
                 summary.message,
-                psychevo_runtime::Message::Assistant { .. }
+                psychevo_agent_core::Message::Assistant { .. }
             )
         })
         .collect::<Vec<_>>();
@@ -892,8 +892,8 @@ tools: [read]
             "reasoning_tokens": 8
         })
     );
-    let usage_summary = psychevo_runtime::session_usage_summary(
-        psychevo_runtime::SessionUsageOptions {
+    let usage_summary = psychevo_runtime::stats::session_usage_summary(
+        psychevo_runtime::types::SessionUsageOptions {
             state: harness.state.clone(),
             session_id: result.result.session_id.clone(),
         },

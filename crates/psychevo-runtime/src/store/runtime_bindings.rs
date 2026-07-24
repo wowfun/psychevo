@@ -8,10 +8,10 @@ use crate::error::{Error, Result};
 
 use super::{
     GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
-    GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, SqliteStore,
+    GatewayRuntimeBindingStatus, GatewayRuntimeControlStatePatch, StateRuntime,
 };
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn create_gateway_runtime_binding(
         &self,
         input: GatewayRuntimeBindingInput<'_>,
@@ -572,7 +572,7 @@ fn validate_runtime_binding_input(input: &GatewayRuntimeBindingInput<'_>) -> Res
 }
 
 fn validate_runtime_binding_threads(
-    store: &SqliteStore,
+    store: &StateRuntime,
     input: &GatewayRuntimeBindingInput<'_>,
 ) -> Result<()> {
     let thread = store

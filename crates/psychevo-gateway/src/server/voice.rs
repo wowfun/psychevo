@@ -175,12 +175,12 @@ pub(super) fn voice_policy_update_value(
     })?)
 }
 
-pub(super) async fn voice_realtime_start_value(
+pub(super) async fn start_realtime(
     state: &WebState,
     auth: &AuthContext,
     out_tx: ConnectionSender,
     params: wire::ThreadRealtimeStartParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::ThreadRealtimeStartResult> {
     authorize_thread(state, auth, &params.thread_id)?;
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     let mut options = state.run_options(scope.cwd, Some(params.thread_id.clone()));
@@ -256,42 +256,42 @@ pub(super) async fn voice_realtime_start_value(
             .expect("realtime sessions poisoned")
             .remove(&session_id);
     });
-    Ok(serde_json::to_value(wire::ThreadRealtimeStartResult {
+    Ok(wire::ThreadRealtimeStartResult {
         accepted: true,
         session_id: result.session_id,
         thread_id: result.thread_id,
-    })?)
+    })
 }
 
-pub(super) fn voice_realtime_append_audio_value(
+pub(super) fn append_realtime_audio(
     state: &WebState,
     params: wire::ThreadRealtimeAppendAudioParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
     ensure_realtime_session(state, &params.session_id)?;
     Ok(realtime_accepted())
 }
 
-pub(super) fn voice_realtime_append_text_value(
+pub(super) fn append_realtime_text(
     state: &WebState,
     params: wire::ThreadRealtimeAppendTextParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
     ensure_realtime_session(state, &params.session_id)?;
     Ok(realtime_accepted())
 }
 
-pub(super) fn voice_realtime_append_speech_value(
+pub(super) fn append_realtime_speech(
     state: &WebState,
     params: wire::ThreadRealtimeAppendSpeechParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
     ensure_realtime_session(state, &params.session_id)?;
     Ok(realtime_accepted())
 }
 
-pub(super) fn voice_realtime_stop_value(
+pub(super) fn stop_realtime(
     state: &WebState,
     out_tx: ConnectionSender,
     params: wire::ThreadRealtimeSessionParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
     let removed = state
         .inner
         .realtime_sessions
@@ -309,16 +309,16 @@ pub(super) fn voice_realtime_stop_value(
             }),
         ));
     }
-    Ok(serde_json::to_value(wire::ThreadRealtimeMutationResult {
+    Ok(wire::ThreadRealtimeMutationResult {
         accepted,
         message: (!accepted).then(|| "unknown realtime session".to_string()),
-    })?)
+    })
 }
 
-pub(super) fn voice_realtime_list_voices_value(
+pub(super) fn list_realtime_voices(
     state: &WebState,
     params: wire::ThreadRealtimeSessionParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo_runtime::Result<wire::ThreadRealtimeListVoicesResult> {
     let session = ensure_realtime_session(state, &params.session_id)?;
     let voices = if session.provider == "fake" {
         vec![wire::ThreadRealtimeVoiceView {
@@ -328,9 +328,7 @@ pub(super) fn voice_realtime_list_voices_value(
     } else {
         Vec::new()
     };
-    Ok(serde_json::to_value(
-        wire::ThreadRealtimeListVoicesResult { voices },
-    )?)
+    Ok(wire::ThreadRealtimeListVoicesResult { voices })
 }
 
 pub(super) fn voice_policy_for_source(
@@ -398,12 +396,11 @@ fn ensure_realtime_session(
         .ok_or_else(|| Error::Config(format!("unknown realtime session: {session_id}")))
 }
 
-fn realtime_accepted() -> Value {
-    serde_json::to_value(wire::ThreadRealtimeMutationResult {
+fn realtime_accepted() -> wire::ThreadRealtimeMutationResult {
+    wire::ThreadRealtimeMutationResult {
         accepted: true,
         message: None,
-    })
-    .expect("realtime mutation result serializes")
+    }
 }
 
 fn realtime_event_notification(event: VoiceRealtimeEvent) -> Option<String> {

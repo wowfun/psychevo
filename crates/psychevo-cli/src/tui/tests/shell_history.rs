@@ -72,7 +72,7 @@ pub(crate) async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -110,7 +110,7 @@ pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -161,7 +161,7 @@ pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
 pub(crate) fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let session = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("session");
@@ -196,7 +196,7 @@ pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -237,7 +237,7 @@ pub(crate) async fn esc_dismisses_slash_menu_before_interrupting_running_turn() 
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -461,14 +461,14 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
     let temp = tempdir().expect("temp");
     let mut app = test_app_with_models(&temp);
     app.current_session = None;
-    let session_id = SqliteStore::open(&app.db_path)
+    let session_id = StateRuntime::open(&app.db_path)
         .expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
         .expect("session");
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -532,7 +532,7 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
 pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let session_id = SqliteStore::open(&app.db_path)
+    let session_id = StateRuntime::open(&app.db_path)
         .expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
         .expect("session");
@@ -541,7 +541,7 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::RunResult>>().await
+        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {

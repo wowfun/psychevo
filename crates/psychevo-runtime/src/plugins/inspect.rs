@@ -7,13 +7,11 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::manifest::load_plugin_manifest;
-use super::store::PluginStore;
 use super::types::{
-    LoadedPluginManifest, PluginAdapterMode, PluginDiagnostic, PluginInspectOptions,
-    PluginInspection, PluginInstallOptions, PluginManifestKind, PluginSourceKind,
-    PluginStageDiagnostic,
+    LoadedPluginManifest, PluginDiagnostic, PluginInspectOptions, PluginInspection,
+    PluginInstallOptions, PluginManifestKind, PluginSourceKind, PluginStageDiagnostic,
 };
-use super::util::{directory_fingerprint, directory_size, source_slug};
+use super::util::{directory_size, source_slug};
 use crate::error::{Error, Result};
 
 const MAX_NPM_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
@@ -48,13 +46,9 @@ pub fn plugin_import_inspect_value(
         },
         Some(temp),
     )?;
-    let inspection = inspect_materialized_source(
-        &materialized,
-        options.adapter_mode.unwrap_or_default(),
-        "Available",
-    )?;
+    let inspection = inspect_materialized_source(&materialized)?;
     Ok(json!({
-        "success": inspection.status != "Failed",
+        "success": !inspection.invalid,
         "inspection": inspection,
     }))
 }
@@ -79,27 +73,7 @@ impl SourceRequest {
     }
 }
 
-pub(crate) fn materialize_source_for_install(
-    store: &PluginStore,
-    home: &Path,
-    cwd: &Path,
-    request: &SourceRequest,
-) -> Result<PluginMaterializedSource> {
-    let staging = store.cache.join(format!(
-        "incoming-{}",
-        source_slug(&format!(
-            "{}{:?}{:?}{:?}",
-            request.source, request.git_ref, request.npm_version, request.npm_registry
-        ))
-    ));
-    if staging.exists() {
-        fs::remove_dir_all(&staging)?;
-    }
-    fs::create_dir_all(&staging)?;
-    materialize_source_in_dir(home, cwd, &staging, request, None)
-}
-
-fn materialize_source_in_dir(
+pub(crate) fn materialize_source_in_dir(
     _home: &Path,
     cwd: &Path,
     staging_root: &Path,
@@ -119,10 +93,7 @@ fn materialize_source_in_dir(
 
 pub(crate) fn inspect_materialized_source(
     materialized: &PluginMaterializedSource,
-    adapter_mode: PluginAdapterMode,
-    status: &str,
 ) -> Result<PluginInspection> {
-    let fingerprint = directory_fingerprint(&materialized.root)?;
     let mut stages = vec![PluginStageDiagnostic::new(
         "resolve/fetch",
         "ok",
@@ -130,31 +101,12 @@ pub(crate) fn inspect_materialized_source(
         Some(materialized.root.clone()),
     )];
     match load_plugin_manifest(&materialized.root, false) {
-        Ok(manifest) => Ok(inspection_from_manifest(
-            materialized,
-            manifest,
-            fingerprint,
-            adapter_mode,
-            status,
-            stages,
-        )),
+        Ok(manifest) => Ok(inspection_from_manifest(materialized, manifest, stages)),
         Err(manifest_err) => {
-            if let Some(inspection) = inspect_hermes(
-                materialized,
-                &fingerprint,
-                adapter_mode,
-                status,
-                &mut stages,
-            )? {
+            if let Some(inspection) = inspect_hermes(materialized, &mut stages)? {
                 return Ok(inspection);
             }
-            if let Some(inspection) = inspect_opencode(
-                materialized,
-                &fingerprint,
-                adapter_mode,
-                status,
-                &mut stages,
-            )? {
+            if let Some(inspection) = inspect_opencode(materialized, &mut stages)? {
                 return Ok(inspection);
             }
             stages.push(PluginStageDiagnostic::new(
@@ -174,12 +126,8 @@ pub(crate) fn inspect_materialized_source(
                 description: None,
                 manifest_path: materialized.root.clone(),
                 package_root: materialized.root.clone(),
-                package_fingerprint: fingerprint,
-                adapter_mode,
-                readiness: "Failed".to_string(),
-                status: "Failed".to_string(),
-                target_lanes: Vec::new(),
-                projected_contributions: Vec::new(),
+                support: "unsupported".to_string(),
+                declared_lanes: Vec::new(),
                 component_statuses: Vec::new(),
                 unsupported_lanes: Vec::new(),
                 diagnostics: vec![PluginDiagnostic::invalid(
@@ -188,6 +136,7 @@ pub(crate) fn inspect_materialized_source(
                 )],
                 stages,
                 interface: None,
+                invalid: true,
             })
         }
     }
@@ -403,9 +352,6 @@ fn materialize_npm(
 fn inspection_from_manifest(
     materialized: &PluginMaterializedSource,
     manifest: LoadedPluginManifest,
-    fingerprint: String,
-    adapter_mode: PluginAdapterMode,
-    status: &str,
     mut stages: Vec<PluginStageDiagnostic>,
 ) -> PluginInspection {
     let invalid = manifest
@@ -432,49 +378,42 @@ fn inspection_from_manifest(
         Some(manifest.manifest_path.clone()),
     ));
 
-    let mut target_lanes = BTreeSet::new();
-    let mut projected = BTreeSet::new();
+    let mut declared_lanes = BTreeSet::new();
     for resource in &manifest.manifest_resources {
         match resource.as_str() {
             "skills" => {
-                target_lanes.insert("skills".to_string());
-                projected.insert("skill_roots".to_string());
+                declared_lanes.insert("skills".to_string());
             }
             "mcpServers" => {
-                target_lanes.insert("mcp".to_string());
-                projected.insert("mcp_servers".to_string());
+                declared_lanes.insert("mcp".to_string());
             }
             "hooks" => {
-                target_lanes.insert("hooks".to_string());
-                projected.insert("hook_sources".to_string());
+                declared_lanes.insert("hooks".to_string());
             }
             "interface" => {
-                target_lanes.insert("interface".to_string());
+                declared_lanes.insert("interface".to_string());
             }
             "apps" => {
-                target_lanes.insert("apps".to_string());
+                declared_lanes.insert("apps".to_string());
             }
             other => {
-                target_lanes.insert(other.to_string());
+                declared_lanes.insert(other.to_string());
             }
         }
     }
     for extension in &manifest.psychevo_extensions {
         match extension.as_str() {
             "runtime" => {
-                target_lanes.insert("tools".to_string());
-                projected.insert("worker_tools".to_string());
+                declared_lanes.insert("tools".to_string());
             }
             "agents" => {
-                target_lanes.insert("agents".to_string());
-                projected.insert("agent_roots".to_string());
+                declared_lanes.insert("agents".to_string());
             }
             "toolsets" => {
-                target_lanes.insert("toolsets".to_string());
-                projected.insert("toolsets".to_string());
+                declared_lanes.insert("toolsets".to_string());
             }
             other => {
-                target_lanes.insert(other.to_string());
+                declared_lanes.insert(other.to_string());
             }
         }
     }
@@ -482,44 +421,19 @@ fn inspection_from_manifest(
     stages.push(PluginStageDiagnostic::new(
         "target lanes",
         "ok",
-        if target_lanes.is_empty() {
+        if declared_lanes.is_empty() {
             "no runtime lanes declared".to_string()
         } else {
             format!(
                 "declared lanes: {}",
-                target_lanes.iter().cloned().collect::<Vec<_>>().join(", ")
+                declared_lanes
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         },
         Some(manifest.manifest_path.clone()),
-    ));
-    stages.push(PluginStageDiagnostic::new(
-        "policy",
-        "ok",
-        "native and Codex-compatible manifests use Psychevo-owned policy gates",
-        None,
-    ));
-    stages.push(PluginStageDiagnostic::new(
-        "trust",
-        "ok",
-        "package fingerprint trust is not required for manifest-only native loading",
-        None,
-    ));
-    let readiness = if invalid {
-        "Failed"
-    } else if manifest.manifest_resources.contains("apps") {
-        "Needs setup"
-    } else {
-        "Ready"
-    };
-    stages.push(PluginStageDiagnostic::new(
-        "readiness",
-        if readiness == "Failed" {
-            "failed"
-        } else {
-            "ok"
-        },
-        readiness,
-        None,
     ));
     PluginInspection {
         source_kind: materialized.source_kind,
@@ -532,29 +446,19 @@ fn inspection_from_manifest(
         description: manifest.description,
         manifest_path: manifest.manifest_path,
         package_root: materialized.root.clone(),
-        package_fingerprint: fingerprint,
-        adapter_mode,
-        readiness: readiness.to_string(),
-        status: if readiness == "Failed" {
-            "Failed".to_string()
-        } else {
-            status.to_string()
-        },
-        target_lanes: target_lanes.into_iter().collect(),
-        projected_contributions: projected.into_iter().collect(),
+        support: "installable".to_string(),
+        declared_lanes: declared_lanes.into_iter().collect(),
         component_statuses: manifest.component_statuses,
         unsupported_lanes: unsupported,
         diagnostics: manifest.diagnostics,
         stages,
         interface: manifest.interface,
+        invalid,
     }
 }
 
 fn inspect_hermes(
     materialized: &PluginMaterializedSource,
-    fingerprint: &str,
-    adapter_mode: PluginAdapterMode,
-    status: &str,
     stages: &mut Vec<PluginStageDiagnostic>,
 ) -> Result<Option<PluginInspection>> {
     let manifest_path = ["plugin.yaml", "plugin.yml", ".hermes-plugin/plugin.yaml"]
@@ -570,20 +474,16 @@ fn inspect_hermes(
     let name = yaml_string(&yaml, "name").unwrap_or_else(|| "hermes-plugin".to_string());
     let version = yaml_string(&yaml, "version");
     let description = yaml_string(&yaml, "description");
-    let mut target_lanes = Vec::new();
-    let mut projected = Vec::new();
+    let mut declared_lanes = Vec::new();
     let mut unsupported = Vec::new();
     if yaml_sequence_non_empty(&yaml, "provides_tools") {
-        target_lanes.push("tools".to_string());
-        projected.push("adapter_tools".to_string());
+        declared_lanes.push("tools".to_string());
     }
     if yaml_sequence_non_empty(&yaml, "provides_hooks") {
-        target_lanes.push("hooks".to_string());
-        projected.push("adapter_hooks".to_string());
+        declared_lanes.push("hooks".to_string());
     }
     if yaml.get("provides_skills").is_some() {
-        target_lanes.push("skills".to_string());
-        projected.push("adapter_skills".to_string());
+        declared_lanes.push("skills".to_string());
     }
     if yaml.get("requires_env").is_some() {
         unsupported.push("provider_credentials".to_string());
@@ -595,15 +495,10 @@ fn inspect_hermes(
     stages.push(PluginStageDiagnostic::new(
         "inspect manifest",
         "ok",
-        "loaded Hermes plugin.yaml as adapter descriptor",
+        "loaded Hermes plugin.yaml as inspection metadata",
         Some(manifest_path.clone()),
     ));
-    adapter_stages(
-        stages,
-        adapter_mode,
-        &manifest_path,
-        !target_lanes.is_empty(),
-    );
+    foreign_inspection_stages(stages, &manifest_path, !declared_lanes.is_empty());
     Ok(Some(PluginInspection {
         source_kind: materialized.source_kind,
         source_id: materialized.source_id.clone(),
@@ -615,28 +510,22 @@ fn inspect_hermes(
         description,
         manifest_path,
         package_root: materialized.root.clone(),
-        package_fingerprint: fingerprint.to_string(),
-        adapter_mode,
-        readiness: foreign_readiness(adapter_mode).to_string(),
-        status: foreign_status(status, adapter_mode),
-        target_lanes,
-        projected_contributions: projected,
+        support: "inspection_only".to_string(),
+        declared_lanes,
         component_statuses: Vec::new(),
         unsupported_lanes: unsupported,
         diagnostics: vec![PluginDiagnostic::warning(
-            "Hermes register(ctx) is not imported into the Rust process; adapter output is manifest-scoped",
+            "Hermes register(ctx) is not imported or executed; declared lanes are descriptive metadata only",
             None,
         )],
         stages: stages.clone(),
         interface: None,
+        invalid: false,
     }))
 }
 
 fn inspect_opencode(
     materialized: &PluginMaterializedSource,
-    fingerprint: &str,
-    adapter_mode: PluginAdapterMode,
-    status: &str,
     stages: &mut Vec<PluginStageDiagnostic>,
 ) -> Result<Option<PluginInspection>> {
     let package_path = materialized.root.join("package.json");
@@ -688,20 +577,18 @@ fn inspect_opencode(
     let failed = diagnostics
         .iter()
         .any(|diagnostic| diagnostic.kind == "invalid");
-    let mut target_lanes = Vec::new();
-    let mut projected = Vec::new();
+    let mut declared_lanes = Vec::new();
     let mut unsupported = Vec::new();
     if has_server {
-        target_lanes.push("tools".to_string());
-        target_lanes.push("hooks".to_string());
-        projected.push("adapter_server".to_string());
+        declared_lanes.push("tools".to_string());
+        declared_lanes.push("hooks".to_string());
     }
     if has_tui {
-        target_lanes.push("tui".to_string());
+        declared_lanes.push("tui".to_string());
         unsupported.push("tui".to_string());
     }
     if has_theme {
-        target_lanes.push("theme".to_string());
+        declared_lanes.push("theme".to_string());
         unsupported.push("theme".to_string());
     }
     stages.push(PluginStageDiagnostic::new(
@@ -710,12 +597,7 @@ fn inspect_opencode(
         "loaded OpenCode package descriptor",
         Some(package_path.clone()),
     ));
-    adapter_stages(
-        stages,
-        adapter_mode,
-        &package_path,
-        !target_lanes.is_empty(),
-    );
+    foreign_inspection_stages(stages, &package_path, !declared_lanes.is_empty());
     Ok(Some(PluginInspection {
         source_kind: materialized.source_kind,
         source_id: materialized.source_id.clone(),
@@ -727,92 +609,38 @@ fn inspect_opencode(
         description,
         manifest_path: package_path,
         package_root: materialized.root.clone(),
-        package_fingerprint: fingerprint.to_string(),
-        adapter_mode,
-        readiness: if failed {
-            "Failed".to_string()
-        } else {
-            foreign_readiness(adapter_mode).to_string()
-        },
-        status: if failed {
-            "Failed".to_string()
-        } else {
-            foreign_status(status, adapter_mode)
-        },
-        target_lanes,
-        projected_contributions: projected,
+        support: "inspection_only".to_string(),
+        declared_lanes,
         component_statuses: Vec::new(),
         unsupported_lanes: unsupported,
         diagnostics,
         stages: stages.clone(),
         interface: None,
+        invalid: failed,
     }))
 }
 
-fn adapter_stages(
+fn foreign_inspection_stages(
     stages: &mut Vec<PluginStageDiagnostic>,
-    adapter_mode: PluginAdapterMode,
     manifest_path: &Path,
     has_targets: bool,
 ) {
     stages.push(PluginStageDiagnostic::new(
         "compatibility",
         "ok",
-        "foreign package is compatible through adapter inspection only",
+        "foreign package support is inspection-only",
         Some(manifest_path.to_path_buf()),
     ));
     stages.push(PluginStageDiagnostic::new(
         "target lanes",
         if has_targets { "ok" } else { "warning" },
         if has_targets {
-            "adapter descriptor declares target lanes"
+            "foreign descriptor declares target lanes"
         } else {
-            "adapter descriptor declares no supported Psychevo target lanes"
+            "foreign descriptor declares no target lanes"
         },
         Some(manifest_path.to_path_buf()),
     ));
-    stages.push(PluginStageDiagnostic::new(
-        "policy",
-        "ok",
-        format!("adapter mode is {}", adapter_mode.as_str()),
-        None,
-    ));
-    stages.push(PluginStageDiagnostic::new(
-        "trust",
-        if adapter_mode == PluginAdapterMode::AdapterHost {
-            "blocked"
-        } else {
-            "ok"
-        },
-        if adapter_mode == PluginAdapterMode::AdapterHost {
-            "adapter host execution requires installed package fingerprint trust"
-        } else {
-            "manifest-only inspection does not execute foreign code"
-        },
-        None,
-    ));
-    stages.push(PluginStageDiagnostic::new(
-        "readiness",
-        "ok",
-        foreign_readiness(adapter_mode),
-        None,
-    ));
-}
-
-fn foreign_readiness(adapter_mode: PluginAdapterMode) -> &'static str {
-    match adapter_mode {
-        PluginAdapterMode::AdapterHost => "Needs trust",
-        PluginAdapterMode::ManifestOnly => "Ready",
-        PluginAdapterMode::Disabled => "Unsupported target",
-    }
-}
-
-fn foreign_status(status: &str, adapter_mode: PluginAdapterMode) -> String {
-    match adapter_mode {
-        PluginAdapterMode::AdapterHost => "Needs trust".to_string(),
-        PluginAdapterMode::Disabled => "Unsupported target".to_string(),
-        PluginAdapterMode::ManifestOnly => status.to_string(),
-    }
 }
 
 fn resolve_local_source(cwd: &Path, source: &str) -> Option<PathBuf> {

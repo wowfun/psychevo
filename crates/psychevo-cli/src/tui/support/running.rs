@@ -60,7 +60,7 @@ pub(crate) struct AuxiliaryShellTask {
     pub(crate) session_id: Option<String>,
     pub(crate) control: RunControlHandle,
     pub(crate) rx: mpsc::UnboundedReceiver<RunStreamEvent>,
-    pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>,
+    pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>>,
 }
 
 pub(crate) struct AuxiliaryAgentTask {
@@ -70,26 +70,26 @@ pub(crate) struct AuxiliaryAgentTask {
     pub(crate) pending_unowned_live_events: Vec<RunStreamEvent>,
     pub(crate) control: RunControlHandle,
     pub(crate) events: RunningTurnEvents,
-    pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>,
+    pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>,
 }
 
 pub(crate) enum RunningTask {
-    Agent(JoinHandle<psychevo_runtime::Result<psychevo_runtime::RunResult>>),
-    UserShell(JoinHandle<psychevo_runtime::Result<psychevo_runtime::UserShellResult>>),
+    Agent(JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>),
+    UserShell(JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>>),
 }
 
 pub(crate) enum RunningCompletion {
     Agent(
         Box<
             std::result::Result<
-                psychevo_runtime::Result<psychevo_runtime::RunResult>,
+                psychevo_runtime::Result<psychevo_runtime::types::RunResult>,
                 tokio::task::JoinError,
             >,
         >,
     ),
     UserShell(
         std::result::Result<
-            psychevo_runtime::Result<psychevo_runtime::UserShellResult>,
+            psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>,
             tokio::task::JoinError,
         >,
     ),
@@ -264,7 +264,7 @@ pub(crate) fn prompt_display_metadata(
 fn tui_editable_input_envelope(
     content_text: &str,
     attachments: &[PendingImageAttachment],
-) -> psychevo_runtime::StoredEditableInputEnvelope {
+) -> psychevo_runtime::types::StoredEditableInputEnvelope {
     let mut parts = Vec::new();
     let mut cursor = 0usize;
     for (image_block_index, attachment) in attachments.iter().enumerate() {
@@ -273,21 +273,21 @@ fn tui_editable_input_envelope(
         };
         let placeholder_start = cursor + relative;
         if placeholder_start > cursor {
-            parts.push(psychevo_runtime::StoredEditableInputPart::Text {
+            parts.push(psychevo_runtime::types::StoredEditableInputPart::Text {
                 text: content_text[cursor..placeholder_start].to_string(),
             });
         }
-        parts.push(psychevo_runtime::StoredEditableInputPart::Image { image_block_index });
+        parts.push(psychevo_runtime::types::StoredEditableInputPart::Image { image_block_index });
         cursor = placeholder_start + attachment.placeholder.len();
     }
     if cursor < content_text.len() {
-        parts.push(psychevo_runtime::StoredEditableInputPart::Text {
+        parts.push(psychevo_runtime::types::StoredEditableInputPart::Text {
             text: content_text[cursor..].to_string(),
         });
     } else if parts.is_empty() {
-        parts.push(psychevo_runtime::StoredEditableInputPart::Text {
+        parts.push(psychevo_runtime::types::StoredEditableInputPart::Text {
             text: content_text.to_string(),
         });
     }
-    psychevo_runtime::StoredEditableInputEnvelope { version: 1, parts }
+    psychevo_runtime::types::StoredEditableInputEnvelope { version: 1, parts }
 }

@@ -82,7 +82,7 @@ pub(super) fn channel_list_result_for_cwd(
     cwd: &Path,
 ) -> psychevo_runtime::Result<wire::ChannelListResult> {
     let options = state.run_options(cwd.to_path_buf(), None);
-    let value = psychevo_runtime::channel_list_value(&options)?;
+    let value = psychevo_runtime::config::channel_list_value(&options)?;
     channel_list_result_from_value(state, value)
 }
 
@@ -92,7 +92,7 @@ pub(super) fn channel_show_result(
     id: &str,
 ) -> psychevo_runtime::Result<wire::ChannelEnableResult> {
     let options = state.run_options(scope.cwd.clone(), None);
-    let value = psychevo_runtime::channel_show_value(&options, id)?;
+    let value = psychevo_runtime::config::channel_show_value(&options, id)?;
     let row = value
         .get("channel")
         .cloned()
@@ -135,23 +135,25 @@ pub(super) fn channel_update_result(
     } else {
         None
     };
-    psychevo_runtime::update_channel_connection(psychevo_runtime::ChannelUpdateInput {
-        config_dir,
-        id: params.id.clone(),
-        label: params.label,
-        enabled: params.enabled,
-        cwd: update_cwd,
-        runtime_ref: params.runtime_ref,
-        model: params.model,
-        permission_mode: params.permission_mode,
-        require_mention: params.require_mention,
-        credential_env: params.credential_env,
-        account_env: params.account_env,
-        base_url_env: params.base_url_env,
-        app_id_env: params.app_id_env,
-        allow_users: params.allow_users,
-        allow_groups: params.allow_groups,
-    })?;
+    psychevo_runtime::config::update_channel_connection(
+        psychevo_runtime::config::ChannelUpdateInput {
+            config_dir,
+            id: params.id.clone(),
+            label: params.label,
+            enabled: params.enabled,
+            cwd: update_cwd,
+            runtime_ref: params.runtime_ref,
+            model: params.model,
+            permission_mode: params.permission_mode,
+            require_mention: params.require_mention,
+            credential_env: params.credential_env,
+            account_env: params.account_env,
+            base_url_env: params.base_url_env,
+            app_id_env: params.app_id_env,
+            allow_users: params.allow_users,
+            allow_groups: params.allow_groups,
+        },
+    )?;
     if requested_cwd.is_some() && previous_cwd != normalized_cwd_value {
         state
             .inner
@@ -171,9 +173,9 @@ fn normalized_channel_update_cwd(
     if value.is_empty() {
         return Ok(None);
     }
-    let resolved = psychevo_runtime::resolve_input_path(value, cwd)?;
+    let resolved = psychevo_runtime::host_paths::resolve_input_path(value, cwd)?;
     Ok(Some(
-        psychevo_runtime::canonicalize_cwd(&resolved)?
+        psychevo_runtime::paths::canonicalize_cwd(&resolved)?
             .display()
             .to_string(),
     ))
@@ -185,7 +187,7 @@ pub(super) fn channel_delete_result(
     params: wire::ChannelIdParams,
 ) -> psychevo_runtime::Result<wire::ChannelListResult> {
     let config_dir = active_profile_config_dir(state, scope);
-    psychevo_runtime::delete_channel_connection(config_dir, &params.id)?;
+    psychevo_runtime::config::delete_channel_connection(config_dir, &params.id)?;
     channel_runtime::reconcile(state.clone());
     channel_list_result_for_scope(state, scope)
 }
@@ -198,7 +200,6 @@ pub(super) fn channel_source_list_result(
     let bindings = state
         .inner
         .state
-        .store()
         .gateway_source_bindings_for_connection_id(&params.id)?;
     let mut sources = Vec::new();
     for binding in bindings {
@@ -224,11 +225,7 @@ pub(super) fn channel_source_list_result(
             .get("userId")
             .and_then(Value::as_str)
             .map(redacted_remote_label);
-        let summary = state
-            .inner
-            .state
-            .store()
-            .session_summary(&binding.thread_id)?;
+        let summary = state.inner.state.session_summary(&binding.thread_id)?;
         let activity = state
             .inner
             .gateway
@@ -315,7 +312,8 @@ pub(super) async fn channel_doctor_result_live(
 ) -> psychevo_runtime::Result<wire::ChannelDoctorResult> {
     let options = state.run_options(scope.cwd.clone(), None);
     let live = params.live.unwrap_or(false);
-    let value = psychevo_runtime::channel_doctor_value(&options, params.id.as_deref(), live)?;
+    let value =
+        psychevo_runtime::config::channel_doctor_value(&options, params.id.as_deref(), live)?;
     let mut result = channel_doctor_result_from_value(state, value)?;
     if live {
         enrich_wechat_live_doctor(state, scope, params.id.as_deref(), &mut result).await?;
@@ -479,20 +477,22 @@ pub(super) async fn channel_wechat_qr_poll_result(
                 .remove(session_id);
             let config_dir = active_profile_config_dir(state, scope);
             let allow_users = user_id.into_iter().collect::<Vec<_>>();
-            psychevo_runtime::upsert_channel_connection(psychevo_runtime::ChannelSetupInput {
-                config_dir: config_dir.clone(),
-                id: session.id.clone(),
-                channel: "wechat".to_string(),
-                label: session.label.clone(),
-                credential_env: Some("WECHAT_BOT_TOKEN".to_string()),
-                credential: Some(token),
-                account_env: Some("WECHAT_ACCOUNT_ID".to_string()),
-                account_id: Some(account_id),
-                base_url_env: Some("WECHAT_ILINK_BASE_URL".to_string()),
-                base_url: Some(base_url.clone()),
-                allow_users,
-                allow_groups: Vec::new(),
-            })?;
+            psychevo_runtime::config::upsert_channel_connection(
+                psychevo_runtime::config::ChannelSetupInput {
+                    config_dir: config_dir.clone(),
+                    id: session.id.clone(),
+                    channel: "wechat".to_string(),
+                    label: session.label.clone(),
+                    credential_env: Some("WECHAT_BOT_TOKEN".to_string()),
+                    credential: Some(token),
+                    account_env: Some("WECHAT_ACCOUNT_ID".to_string()),
+                    account_id: Some(account_id),
+                    base_url_env: Some("WECHAT_ILINK_BASE_URL".to_string()),
+                    base_url: Some(base_url.clone()),
+                    allow_users,
+                    allow_groups: Vec::new(),
+                },
+            )?;
             protect_channel_env_file(&config_dir.join(".env"))?;
             if params.enable.unwrap_or(true) {
                 set_channel_enabled(config_dir, &session.id, true)?;
@@ -579,7 +579,7 @@ async fn enrich_wechat_live_doctor(
     result: &mut wire::ChannelDoctorResult,
 ) -> psychevo_runtime::Result<()> {
     let options = state.run_options(scope.cwd.clone(), None);
-    let connections = psychevo_runtime::channel_runtime_connections(&options, &scope.cwd)?;
+    let connections = psychevo_runtime::config::channel_runtime_connections(&options, &scope.cwd)?;
     let client = reqwest::Client::new();
     for connection in connections
         .into_iter()

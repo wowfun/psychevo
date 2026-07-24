@@ -47,7 +47,7 @@ fn automation_task_for_request(
     let record = state
         .inner
         .state
-        .store()
+
         .automation_task(automation_id)?
         .ok_or_else(|| Error::Message(format!("automation not found: {automation_id}")))?;
     Ok(record)
@@ -60,7 +60,7 @@ fn automation_task_view(
     let runs = state
         .inner
         .state
-        .store()
+
         .automation_runs_for_task(&record.id, AUTOMATION_RUN_HISTORY_LIMIT)?
         .into_iter()
         .map(automation_run_view)

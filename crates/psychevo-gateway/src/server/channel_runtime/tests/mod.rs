@@ -1,7 +1,9 @@
 use super::*;
 use crate::im::FakeImAdapter;
 use futures::future::BoxFuture;
-use psychevo_runtime::{Outcome, PermissionApprovalOutcome, RunResult, StateRuntime};
+use psychevo_ai::Outcome;
+use psychevo_runtime::state::StateRuntime;
+use psychevo_runtime::{types::PermissionApprovalOutcome, types::RunResult};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -100,7 +102,7 @@ impl crate::GatewayBackend for TestBackend {
                     return Err(Error::Message("approval handler missing".to_string()));
                 };
                 let decision = handler
-                    .request_permission(psychevo_runtime::PermissionApprovalRequest {
+                    .request_permission(psychevo_runtime::types::PermissionApprovalRequest {
                         tool_call_id: "permission-1".to_string(),
                         tool_name: "fake_tool".to_string(),
                         summary: "fake permission".to_string(),
@@ -123,7 +125,7 @@ impl crate::GatewayBackend for TestBackend {
             let session_id = if let Some(session_id) = request.options.session.clone() {
                 session_id
             } else {
-                request.options.state.store().create_session_with_metadata(
+                request.options.state.create_session_with_metadata(
                     &request.options.cwd,
                     &request.runtime_source,
                     "fake-model",
@@ -286,13 +288,11 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let thread_id = state
         .inner
         .state
-        .store()
         .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
         .expect("thread");
     state
         .inner
         .state
-        .store()
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
             source_key: &source.source_key().0,
             source_kind: &source.kind,
@@ -310,8 +310,7 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_channel_outbox(psychevo_runtime::GatewayChannelOutboxInput {
+        .upsert_gateway_channel_outbox(psychevo_runtime::state::GatewayChannelOutboxInput {
             delivery_id: "out-retry",
             thread_id: &thread_id,
             turn_id: "turn-already-completed",
@@ -327,7 +326,6 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let failed = state
         .inner
         .state
-        .store()
         .gateway_channel_outbox("out-retry")
         .expect("failed outbox read")
         .expect("failed outbox row");
@@ -353,7 +351,6 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     let acknowledged = state
         .inner
         .state
-        .store()
         .gateway_channel_outbox("out-retry")
         .expect("outbox read")
         .expect("outbox row");
@@ -433,14 +430,12 @@ async fn channel_mission_records_team_metadata_before_running_prompt() {
     let team = state
         .inner
         .state
-        .store()
         .find_active_agent_team_run(&sent[0].thread_id)
         .expect("team lookup")
         .expect("team run");
     let mission = state
         .inner
         .state
-        .store()
         .find_active_agent_mission_run(&sent[0].thread_id)
         .expect("mission lookup")
         .expect("mission run");
@@ -879,7 +874,6 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
     let original_thread_id = state
         .inner
         .state
-        .store()
         .gateway_source_binding(&source_key)
         .expect("original binding")
         .expect("original binding exists")
@@ -901,7 +895,6 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
     let binding = state
         .inner
         .state
-        .store()
         .gateway_source_binding(&source_key)
         .expect("binding")
         .expect("binding exists");
@@ -909,7 +902,6 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
     let runtime_binding = state
         .inner
         .state
-        .store()
         .gateway_runtime_binding(&binding.thread_id)
         .expect("runtime binding");
     assert!(
@@ -919,7 +911,6 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
     let lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&source_key)
         .expect("source lane")
         .expect("source lane exists");
@@ -928,7 +919,6 @@ async fn channel_profile_command_starts_new_unbound_target_draft() {
         state
             .inner
             .state
-            .store()
             .session_summary(&original_thread_id)
             .expect("original thread")
             .is_some()
@@ -992,7 +982,6 @@ async fn channel_profile_command_rejects_unknown_pre_thread_target() {
     let lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&source.source_key().0)
         .expect("lane");
     assert!(
@@ -1063,7 +1052,6 @@ async fn channel_agent_command_rotates_to_an_unbound_top_level_target() {
     let lane = state
         .inner
         .state
-        .store()
         .gateway_source_lane(&source.source_key().0)
         .expect("lane")
         .expect("lane exists");
@@ -1074,7 +1062,6 @@ async fn channel_agent_command_rotates_to_an_unbound_top_level_target() {
         state
             .inner
             .state
-            .store()
             .gateway_runtime_binding(lane.thread_id.as_deref().expect("draft thread"))
             .expect("runtime binding")
             .is_none(),
@@ -1146,11 +1133,9 @@ async fn channel_new_command_clears_binding_for_next_default_cwd() {
     assert_eq!(sent.len(), 3);
     assert_ne!(sent[0].thread_id, sent[2].thread_id);
     let active_sessions = store_state
-        .store()
         .list_sessions_with_sources(&["channel/wechat"])
         .expect("sessions");
     let archived_sessions = store_state
-        .store()
         .list_archived_sessions_with_sources(&["channel/wechat"])
         .expect("archived sessions");
     let cwds = active_sessions

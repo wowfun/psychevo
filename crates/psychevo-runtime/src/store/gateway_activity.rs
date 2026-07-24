@@ -10,13 +10,13 @@ use super::{
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayControlCommandRecord, GatewayLiveEventRecord, GatewayLiveSnapshotInput,
     GatewayLiveSnapshotRecord, GatewayTurnStartReceiptRecord, GatewayTurnTerminalInput,
-    GatewayTurnTerminalRecord, SqliteStore,
+    GatewayTurnTerminalRecord, StateRuntime,
 };
 
 const TURN_START_RECEIPTS_METADATA_KEY: &str = "gatewayTurnStartReceipts";
 const MAX_TURN_START_RECEIPTS: usize = 32;
 
-impl SqliteStore {
+impl StateRuntime {
     pub fn record_gateway_turn_start_receipt(
         &self,
         thread_id: &str,

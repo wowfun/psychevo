@@ -24,17 +24,16 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
         }"#,
     )
     .expect("manifest");
-    psychevo_runtime::install_plugin(
+    psychevo_runtime::plugins::install_plugin(
         &state.inner.home,
         &state.inner.cwd,
-        psychevo_runtime::PluginInstallOptions {
+        psychevo_runtime::plugins::PluginInstallOptions {
             source: source.display().to_string(),
             source_kind: None,
-            scope: psychevo_runtime::PluginScope::Global,
+            scope: psychevo_runtime::plugins::PluginScope::Global,
             git_ref: None,
             npm_version: None,
             npm_registry: None,
-            adapter_mode: None,
             force: false,
         },
     )
@@ -219,6 +218,46 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
     assert_eq!(installed["success"], true);
     assert_eq!(installed["authority"]["kind"], "codex");
     assert!(installed.get("result").is_none());
+    let untrusted = capability_rpc(
+        &state,
+        "plugin/authority/setTrust",
+        json!({
+            "scope": scope.clone(),
+            "selector": "codex:review@openai",
+            "trusted": false
+        }),
+    )
+    .await
+    .expect("remove Codex fingerprint trust");
+    assert_eq!(untrusted["trust"]["status"], "untrusted");
+    let trusted = capability_rpc(
+        &state,
+        "plugin/authority/setTrust",
+        json!({
+            "scope": scope.clone(),
+            "selector": "codex:review@openai",
+            "trusted": true
+        }),
+    )
+    .await
+    .expect("trust Codex fingerprint");
+    assert_eq!(trusted["trust"]["status"], "trusted");
+    let rejected = capability_rpc(
+        &state,
+        "plugin/authority/setTrust",
+        json!({
+            "scope": scope.clone(),
+            "selector": "profile:review@local",
+            "trusted": true
+        }),
+    )
+    .await
+    .expect_err("non-Codex trust rejected");
+    assert!(
+        rejected
+            .to_string()
+            .contains("accepts only Codex authority selectors")
+    );
     let doctor = capability_rpc(
         &state,
         "plugin/doctor",
@@ -647,7 +686,9 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     .expect("plugin/read");
     assert_eq!(read["manifest"]["interface"]["displayName"], "Browser");
     assert_eq!(read["plugin"]["status"], "Installed");
-    assert_eq!(read["inspection"]["status"], "Installed");
+    assert_eq!(read["inspection"]["framework"], "psychevo");
+    assert_eq!(read["inspection"]["support"], "built_in");
+    assert!(read["inspection"].get("status").is_none());
 
     let disabled = capability_rpc(
         &state,
@@ -686,7 +727,8 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     .await
     .expect("plugin/read disabled browser");
     assert_eq!(read["plugin"]["status"], "Disabled");
-    assert_eq!(read["inspection"]["status"], "Disabled");
+    assert_eq!(read["inspection"]["support"], "built_in");
+    assert!(read["inspection"].get("status").is_none());
 
     let doctor = capability_rpc(
         &state,
@@ -700,7 +742,12 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
     .expect("plugin/doctor");
     assert_eq!(doctor["plugins"][0]["plugin"]["name"], "Browser");
     assert_eq!(doctor["plugins"][0]["plugin"]["status"], "Disabled");
-    assert_eq!(doctor["plugins"][0]["inspection"]["status"], "Disabled");
+    assert_eq!(doctor["plugins"][0]["inspection"]["support"], "built_in");
+    assert!(
+        doctor["plugins"][0]["inspection"]
+            .get("status")
+            .is_none()
+    );
     assert_eq!(doctor["plugins"][0]["worker"]["status"], "not_applicable");
 
     let rejected = capability_rpc(
@@ -1120,24 +1167,6 @@ async fn capability_plugin_scoped_selectors_disambiguate_duplicate_installations
     assert_eq!(rows[0]["enablement_scope_name"], rows[0]["scope_name"]);
     assert_eq!(rows[1]["enablement_scope_name"], rows[1]["scope_name"]);
 
-    let trust_scope_mismatch = capability_rpc(
-        &state,
-        "plugin/setTrust",
-        json!({
-            "scope": scope.clone(),
-            "selector": profile_selector.clone(),
-            "scopeName": "project",
-            "trusted": true
-        }),
-    )
-    .await
-    .expect_err("package trust scope must match installation scope");
-    assert!(
-        trust_scope_mismatch
-            .to_string()
-            .contains("installed in profile scope, not project scope")
-    );
-
     let unscoped = profile_selector
         .strip_prefix("profile:")
         .expect("profile prefix");
@@ -1270,9 +1299,10 @@ async fn capability_plugin_scoped_selectors_disambiguate_duplicate_installations
 }
 
 #[tokio::test]
-async fn plugin_inspect_and_trust_rpcs_return_adapter_state() {
+async fn foreign_plugin_rpc_is_inspection_only_and_install_does_not_persist() {
     let (temp, state) = web_state();
     std::fs::create_dir_all(&state.inner.home).expect("home");
+    std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("hermes-plugin");
     std::fs::create_dir_all(&source).expect("source");
     std::fs::write(
@@ -1289,44 +1319,44 @@ async fn plugin_inspect_and_trust_rpcs_return_adapter_state() {
         "plugin/import/inspect",
         json!({
             "scope": scope.clone(),
-            "source": source,
-            "sourceKind": "local",
-            "adapterMode": "adapter_host"
+            "source": source.clone(),
+            "sourceKind": "local"
         }),
     )
     .await
     .expect("plugin/import/inspect");
     assert_eq!(inspected["inspection"]["framework"], "hermes");
-    assert_eq!(inspected["inspection"]["status"], "Needs trust");
+    assert_eq!(inspected["inspection"]["support"], "inspection_only");
+    assert_eq!(inspected["inspection"]["declared_lanes"][0], "tools");
 
-    let installed = capability_rpc(
+    let before = capability_rpc(
+        &state,
+        "plugin/list",
+        json!({ "scope": scope.clone() }),
+    )
+    .await
+    .expect("plugin/list before");
+    let error = capability_rpc(
         &state,
         "plugin/install",
         json!({
             "scope": scope.clone(),
             "source": source,
             "sourceKind": "local",
-            "adapterMode": "adapter_host",
             "scopeName": "profile"
         }),
     )
     .await
-    .expect("plugin/install");
-    assert_eq!(installed["plugin"]["manifest_kind"], "hermes");
-
-    let trusted = capability_rpc(
+    .expect_err("foreign install must be rejected");
+    assert!(error.to_string().contains("inspection-only"));
+    let after = capability_rpc(
         &state,
-        "plugin/setTrust",
-        json!({
-            "scope": scope,
-            "selector": "hermes-managed",
-            "trusted": true,
-            "scopeName": "profile"
-        }),
+        "plugin/list",
+        json!({ "scope": scope }),
     )
     .await
-    .expect("plugin/setTrust");
-    assert_eq!(trusted["trust"]["status"], "trusted");
+    .expect("plugin/list after");
+    assert_eq!(before, after);
 }
 
 #[tokio::test]

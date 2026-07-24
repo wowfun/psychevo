@@ -10,7 +10,7 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
         "general",
         "General-purpose subagent for focused coding tasks.",
     );
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -21,7 +21,7 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
@@ -105,7 +105,7 @@ pub(crate) fn agents_status_text_includes_team_mission_member_and_cap_labels() {
         "general",
         "General-purpose subagent for focused coding tasks.",
     );
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -116,7 +116,7 @@ pub(crate) fn agents_status_text_includes_team_mission_member_and_cap_labels() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "teamRunId": "team-run-1",
                 "missionRunId": "mission-run-1",
@@ -177,7 +177,7 @@ pub(crate) fn mission_metadata_creates_pending_tui_session_for_first_turn() {
         .expect("metadata");
 
     let parent = app.current_session.clone().expect("pending session");
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let team = store
         .find_active_agent_team_run(&parent)
         .expect("team lookup")
@@ -195,7 +195,7 @@ pub(crate) fn mission_metadata_creates_pending_tui_session_for_first_turn() {
 pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -206,7 +206,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
@@ -246,7 +246,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -292,7 +292,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
 pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -303,7 +303,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("agent edge");
@@ -322,7 +322,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -361,7 +361,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
 pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_return() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -372,7 +372,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("agent edge");
@@ -446,7 +446,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -547,7 +547,7 @@ pub(crate) fn compact_duration_seconds(token: &str) -> Option<u64> {
 pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -558,7 +558,7 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("agent edge");
@@ -617,7 +617,7 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
 pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -628,7 +628,7 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("agent edge");
@@ -666,7 +666,7 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
 pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -677,7 +677,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("agent edge");
@@ -696,7 +696,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     ui.ensure_selection();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -740,7 +740,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
 pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp);
-    let store = SqliteStore::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
         .expect("parent session");
@@ -751,7 +751,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("agent edge");
@@ -770,7 +770,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     ui.ensure_selection();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -834,7 +834,7 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     ui.transcript.push(row);
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::RunResult {
+    let result = psychevo_runtime::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };

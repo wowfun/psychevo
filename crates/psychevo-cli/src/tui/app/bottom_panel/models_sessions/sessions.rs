@@ -49,7 +49,7 @@ impl TuiApp {
             }
             return Ok(());
         }
-        self.state_runtime.store().archive_session(&session_id)?;
+        self.state_runtime.archive_session(&session_id)?;
         if self.current_session.as_deref() == Some(session_id.as_str()) {
             self.clear_current_session_after_management(ui);
         }
@@ -62,7 +62,7 @@ impl TuiApp {
         ui: &mut FullscreenUi<'_>,
         session_id: String,
     ) -> Result<()> {
-        self.state_runtime.store().restore_session(&session_id)?;
+        self.state_runtime.restore_session(&session_id)?;
         self.rebuild_session_panel(
             ui,
             SessionListView::Archived,

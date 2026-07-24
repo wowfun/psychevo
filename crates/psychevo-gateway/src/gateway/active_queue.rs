@@ -77,7 +77,7 @@ impl Gateway {
         request: &SendCompactRequest,
         thread_id: &str,
     ) -> psychevo_runtime::Result<Option<String>> {
-        if let Some(binding) = self.state.store().gateway_runtime_binding(thread_id)? {
+        if let Some(binding) = self.state.gateway_runtime_binding(thread_id)? {
             if binding.status == GatewayRuntimeBindingStatus::Resolved {
                 return Ok(binding
                     .runtime_ref
@@ -92,13 +92,13 @@ impl Gateway {
 
         let summary = self
             .state
-            .store()
+
             .session_summary(thread_id)?
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
         if summary.source == "peer_agent" {
             let runtime_ref = self
                 .state
-                .store()
+
                 .session_metadata(thread_id)?
                 .as_ref()
                 .and_then(|metadata| {
@@ -203,7 +203,7 @@ impl Gateway {
                 .cloned()),
             GatewaySourceLifetime::Persistent => Ok(self
                 .state
-                .store()
+
                 .gateway_source_lane(&source.source_key().0)?
                 .and_then(|lane| lane.thread_id)),
         }
@@ -252,7 +252,7 @@ impl Gateway {
             }
             GatewaySourceLifetime::Persistent => {
                 self.state
-                    .store()
+
                     .upsert_gateway_source_lane(GatewaySourceLaneInput {
                         source_key: &source_key.0,
                         source_kind: &source.kind,
@@ -382,7 +382,7 @@ impl Gateway {
                 {
                     keys.push(thread_key(&thread_id));
                 }
-                if let Ok(Some(lane)) = self.state.store().gateway_source_lane(&source_key.0)
+                if let Ok(Some(lane)) = self.state.gateway_source_lane(&source_key.0)
                     && let Some(thread_id) = lane.thread_id
                 {
                     keys.push(thread_key(&thread_id));
@@ -395,10 +395,10 @@ impl Gateway {
 
 fn unavailable_compaction_result(
     thread_id: &str,
-    reason: psychevo_runtime::CompactionReason,
+    reason: psychevo_runtime::compaction::CompactionReason,
     runtime_ref: &str,
-) -> psychevo_runtime::CompactionResult {
-    psychevo_runtime::CompactionResult {
+) -> psychevo_runtime::compaction::CompactionResult {
+    psychevo_runtime::compaction::CompactionResult {
         session_id: thread_id.to_string(),
         compacted: false,
         reason: reason.as_str().to_string(),

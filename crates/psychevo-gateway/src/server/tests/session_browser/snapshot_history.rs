@@ -5,13 +5,13 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     state
         .inner
         .state
-        .store()
+
         .append_message(
             &session_id,
             &RuntimeMessage::User {
@@ -23,16 +23,16 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
     state
         .inner
         .state
-        .store()
+
         .append_message(
             &session_id,
             &RuntimeMessage::Assistant {
-                content: vec![psychevo_runtime::AssistantBlock::Text {
+                content: vec![psychevo_agent_core::AssistantBlock::Text {
                     text: "hello from assistant".to_string(),
                 }],
                 timestamp_ms: 2,
                 finish_reason: Some("stop".to_string()),
-                outcome: psychevo_runtime::Outcome::Normal,
+                outcome: psychevo_ai::Outcome::Normal,
                 model: Some("fake-model".to_string()),
                 provider: Some("fake-provider".to_string()),
             },
@@ -41,7 +41,7 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
     let summary = state
         .inner
         .state
-        .store()
+
         .session_summary(&session_id)
         .expect("summary")
         .expect("session exists");
@@ -62,14 +62,14 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
     let session_id = state
         .inner
         .state
-        .store()
+
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
     for (timestamp_ms, text) in [(1, "first"), (2, "second")] {
         state
             .inner
             .state
-            .store()
+
             .append_message(
                 &session_id,
                 &RuntimeMessage::User {
@@ -150,7 +150,7 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
 fn thread_snapshot_replays_running_exec_live_overlay() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
@@ -158,8 +158,8 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
         .append_message(
             &session_id,
             &RuntimeMessage::Assistant {
-                content: vec![psychevo_runtime::AssistantBlock::ToolCall(
-                    psychevo_runtime::ToolCallBlock {
+                content: vec![psychevo_agent_core::AssistantBlock::ToolCall(
+                    psychevo_agent_core::ToolCallBlock {
                         id: "call_exec".to_string(),
                         name: "exec_command".to_string(),
                         arguments: json!({"cmd": "python fetch.py"}),
@@ -171,7 +171,7 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
                 )],
                 timestamp_ms: 10,
                 finish_reason: Some("tool_calls".to_string()),
-                outcome: psychevo_runtime::Outcome::Normal,
+                outcome: psychevo_ai::Outcome::Normal,
                 model: Some("fake-model".to_string()),
                 provider: Some("fake-provider".to_string()),
             },
@@ -193,7 +193,7 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
@@ -250,7 +250,7 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
 fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
@@ -259,8 +259,8 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
         .append_message(
             &session_id,
             &RuntimeMessage::Assistant {
-                content: vec![psychevo_runtime::AssistantBlock::ToolCall(
-                    psychevo_runtime::ToolCallBlock {
+                content: vec![psychevo_agent_core::AssistantBlock::ToolCall(
+                    psychevo_agent_core::ToolCallBlock {
                         id: "call_exec".to_string(),
                         name: "exec_command".to_string(),
                         arguments: json!({"cmd": command}),
@@ -272,7 +272,7 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
                 )],
                 timestamp_ms: 10,
                 finish_reason: Some("tool_calls".to_string()),
-                outcome: psychevo_runtime::Outcome::Normal,
+                outcome: psychevo_ai::Outcome::Normal,
                 model: Some("fake-model".to_string()),
                 provider: Some("fake-provider".to_string()),
             },
@@ -293,7 +293,7 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
@@ -338,7 +338,7 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
 fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("session");
@@ -346,12 +346,12 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
         .append_message(
             &session_id,
             &RuntimeMessage::Assistant {
-                content: vec![psychevo_runtime::AssistantBlock::Text {
+                content: vec![psychevo_agent_core::AssistantBlock::Text {
                     text: "Committed **answer**.".to_string(),
                 }],
                 timestamp_ms: 10,
                 finish_reason: Some("stop".to_string()),
-                outcome: psychevo_runtime::Outcome::Normal,
+                outcome: psychevo_ai::Outcome::Normal,
                 model: Some("fake-model".to_string()),
                 provider: Some("fake-provider".to_string()),
             },
@@ -360,7 +360,7 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
@@ -396,7 +396,7 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
 fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
@@ -413,12 +413,12 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
         .append_message(
             &parent_session_id,
             &RuntimeMessage::Assistant {
-                content: vec![psychevo_runtime::AssistantBlock::Text {
+                content: vec![psychevo_agent_core::AssistantBlock::Text {
                     text: "Committed **prefix**.".to_string(),
                 }],
                 timestamp_ms: 10,
                 finish_reason: Some("tool_calls".to_string()),
-                outcome: psychevo_runtime::Outcome::Normal,
+                outcome: psychevo_ai::Outcome::Normal,
                 model: Some("fake-model".to_string()),
                 provider: Some("fake-provider".to_string()),
             },
@@ -427,7 +427,7 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -473,7 +473,7 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
 fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
@@ -490,14 +490,14 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
         .upsert_agent_edge(
             &parent_session_id,
             &child_session_id,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("open child edge");
 
     let turn_id = "turn-parent-running";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -548,7 +548,7 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
     );
 
     store
-        .set_agent_edge_status(&child_session_id, psychevo_runtime::AgentEdgeStatus::Closed)
+        .set_agent_edge_status(&child_session_id, psychevo_runtime::state::AgentEdgeStatus::Closed)
         .expect("close child edge");
     let closed_child_snapshot =
         thread_snapshot(&state, &scope, Some(&child_session_id)).expect("closed child snapshot");
@@ -567,7 +567,7 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
 fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_activity() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
         .expect("parent session");
@@ -584,14 +584,14 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
         .upsert_agent_edge(
             &parent_session_id,
             &child_session_id,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("open child edge");
 
     let turn_id = "turn-parent-stale";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -650,7 +650,7 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
 fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activity() {
     let (_temp, state) = web_state();
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
-    let store = state.inner.state.store();
+    let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
         .expect("parent session");
@@ -668,7 +668,7 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
         .upsert_agent_edge(
             &parent_session_id,
             &child_session_id,
-            psychevo_runtime::AgentEdgeStatus::Open,
+            psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
         .expect("open child edge");
@@ -693,7 +693,7 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
     let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
     let cwd = state.inner.cwd.display().to_string();
     store
-        .create_gateway_runtime_binding(psychevo_runtime::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: &child_session_id,
             agent_ref: Some("opencode"),
             agent_fingerprint: &agent_fingerprint,
@@ -713,7 +713,7 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
         })
         .expect("ACP child binding");
     store
-        .claim_gateway_activity(psychevo_runtime::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "turn-parent-running",
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -803,8 +803,8 @@ fn append_exec_live_update(
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_live_snapshot(psychevo_runtime::GatewayLiveSnapshotInput {
+
+        .upsert_gateway_live_snapshot(psychevo_runtime::state::GatewayLiveSnapshotInput {
             snapshot_key: &format!("{activity_id}:{turn_id}:live-tool"),
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
@@ -865,8 +865,8 @@ fn append_stale_exec_live_snapshot(
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_live_snapshot(psychevo_runtime::GatewayLiveSnapshotInput {
+
+        .upsert_gateway_live_snapshot(psychevo_runtime::state::GatewayLiveSnapshotInput {
             snapshot_key: &format!("{activity_id}:{turn_id}:stale-live-tool"),
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
@@ -923,8 +923,8 @@ fn append_assistant_live_text_update(
     state
         .inner
         .state
-        .store()
-        .upsert_gateway_live_snapshot(psychevo_runtime::GatewayLiveSnapshotInput {
+
+        .upsert_gateway_live_snapshot(psychevo_runtime::state::GatewayLiveSnapshotInput {
             snapshot_key: &format!("{activity_id}:{turn_id}:live-text"),
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
