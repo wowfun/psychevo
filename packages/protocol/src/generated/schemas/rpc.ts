@@ -65,9 +65,9 @@ import { clientRequestPluginImportInspectSchema } from './rpc/client-request/plu
 import { clientRequestPluginInstallSchema } from './rpc/client-request/plugin-install';
 import { clientRequestPluginUninstallSchema } from './rpc/client-request/plugin-uninstall';
 import { clientRequestPluginSetEnabledSchema } from './rpc/client-request/plugin-set-enabled';
-import { clientRequestPluginSetTrustSchema } from './rpc/client-request/plugin-set-trust';
 import { clientRequestPluginAuthorityWriteSchema } from './rpc/client-request/plugin-authority-write';
 import { clientRequestPluginAuthorityRefreshSchema } from './rpc/client-request/plugin-authority-refresh';
+import { clientRequestPluginAuthoritySetTrustSchema } from './rpc/client-request/plugin-authority-set-trust';
 import { clientRequestPluginCatalogListSchema } from './rpc/client-request/plugin-catalog-list';
 import { clientRequestPluginCatalogAddSchema } from './rpc/client-request/plugin-catalog-add';
 import { clientRequestPluginCatalogRemoveSchema } from './rpc/client-request/plugin-catalog-remove';
@@ -163,6 +163,20 @@ import { serverNotificationThreadRealtimeErrorSchema } from './rpc/server-notifi
 import { serverNotificationThreadRealtimeClosedSchema } from './rpc/server-notification/thread-realtime-closed';
 
 export const rpcSchemas = {
+  JsonSafeI64: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maximum": 9007199254740991.0,
+  "minimum": -9007199254740991.0,
+  "title": "JsonSafeI64",
+  "type": "integer"
+},
+  JsonSafeU64: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maximum": 9007199254740991.0,
+  "minimum": 0.0,
+  "title": "JsonSafeU64",
+  "type": "integer"
+},
   JsonRpcId: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "anyOf": [
@@ -170,13 +184,19 @@ export const rpcSchemas = {
       "type": "string"
     },
     {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     {
       "type": "null"
     }
   ],
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "title": "JsonRpcId"
 },
   JsonRpcRequest: {
@@ -188,13 +208,17 @@ export const rpcSchemas = {
           "type": "string"
         },
         {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         {
           "type": "null"
         }
       ]
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -248,13 +272,17 @@ export const rpcSchemas = {
           "type": "string"
         },
         {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         {
           "type": "null"
         }
       ]
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -280,8 +308,7 @@ export const rpcSchemas = {
     "JsonRpcError": {
       "properties": {
         "code": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "data": {
           "default": null
@@ -302,13 +329,17 @@ export const rpcSchemas = {
           "type": "string"
         },
         {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         {
           "type": "null"
         }
       ]
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -332,10 +363,16 @@ export const rpcSchemas = {
 },
   JsonRpcError: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "code": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "data": {
       "default": null
@@ -550,13 +587,13 @@ export const rpcSchemas = {
       "$ref": "ClientRequest/plugin-set-enabled.json"
     },
     {
-      "$ref": "ClientRequest/plugin-set-trust.json"
-    },
-    {
       "$ref": "ClientRequest/plugin-authority-write.json"
     },
     {
       "$ref": "ClientRequest/plugin-authority-refresh.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-authority-set-trust.json"
     },
     {
       "$ref": "ClientRequest/plugin-catalog-list.json"
@@ -914,9 +951,9 @@ export const rpcSchemaRefs = [
   clientRequestPluginInstallSchema,
   clientRequestPluginUninstallSchema,
   clientRequestPluginSetEnabledSchema,
-  clientRequestPluginSetTrustSchema,
   clientRequestPluginAuthorityWriteSchema,
   clientRequestPluginAuthorityRefreshSchema,
+  clientRequestPluginAuthoritySetTrustSchema,
   clientRequestPluginCatalogListSchema,
   clientRequestPluginCatalogAddSchema,
   clientRequestPluginCatalogRemoveSchema,

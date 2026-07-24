@@ -1,5 +1,7 @@
 fn exported_types() -> Vec<ExportedType> {
     vec![
+        exported_type!(JsonSafeI64),
+        exported_type!(JsonSafeU64),
         exported_type!(SourceKey),
         exported_type!(GatewaySourceLifetime),
         exported_type!(GatewaySource),
@@ -147,9 +149,9 @@ fn exported_types() -> Vec<ExportedType> {
         exported_type!(PluginInstallParams),
         exported_type!(PluginUninstallParams),
         exported_type!(PluginSetEnabledParams),
-        exported_type!(PluginSetTrustParams),
         exported_type!(PluginAuthorityWriteParams),
         exported_type!(PluginAuthorityRefreshParams),
+        exported_type!(PluginAuthoritySetTrustParams),
         exported_type!(PluginCatalogListParams),
         exported_type!(PluginCatalogAddParams),
         exported_type!(PluginCatalogRemoveParams),

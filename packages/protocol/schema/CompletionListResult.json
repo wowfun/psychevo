@@ -77,14 +77,10 @@
     "CompletionReplacement": {
       "properties": {
         "end": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "start": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         }
       },
       "required": [
@@ -215,6 +211,11 @@
           "type": "object"
         }
       ]
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {

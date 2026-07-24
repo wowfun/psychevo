@@ -87,10 +87,13 @@
           ]
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -106,18 +109,19 @@
           ]
         },
         "queuedTurns": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "running": {
           "type": "boolean"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "takeoverState": {
@@ -127,10 +131,13 @@
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -158,10 +165,13 @@
     "GatewayTurn": {
       "properties": {
         "completedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "error": {
@@ -186,10 +196,13 @@
           ]
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "status": {
@@ -219,6 +232,16 @@
       ],
       "type": "string"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "PendingActionView": {
       "properties": {
         "actionId": {
@@ -234,10 +257,13 @@
           "$ref": "#/definitions/GatewayActionKind"
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -301,8 +327,7 @@
           ]
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "detail": {
           "type": [
@@ -318,8 +343,7 @@
         },
         "metadata": true,
         "order": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "phaseOrdinal": {
           "format": "uint32",
@@ -359,8 +383,7 @@
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -420,17 +443,19 @@
           "type": "array"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "id": {
           "type": "string"
         },
         "messageSeq": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "metadata": true,
@@ -453,8 +478,7 @@
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "usage": true
       },
@@ -484,8 +508,7 @@
           "type": "string"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "isError": {
           "type": "boolean"
@@ -494,15 +517,13 @@
           "default": null
         },
         "resultMessageSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -551,9 +572,7 @@
     {
       "properties": {
         "queuePosition": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "threadId": {
           "type": [

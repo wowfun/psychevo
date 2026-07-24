@@ -3,6 +3,18 @@
 export const threadSessionSchemas = {
   GatewayActivityView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "activeTurnId": {
       "default": null,
@@ -12,10 +24,13 @@ export const threadSessionSchemas = {
       ]
     },
     "leaseExpiresAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "ownerId": {
@@ -31,18 +46,19 @@ export const threadSessionSchemas = {
       ]
     },
     "queuedTurns": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "running": {
       "type": "boolean"
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "takeoverState": {
@@ -52,10 +68,13 @@ export const threadSessionSchemas = {
       ]
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
@@ -100,10 +119,13 @@ export const threadSessionSchemas = {
           ]
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -119,18 +141,19 @@ export const threadSessionSchemas = {
           ]
         },
         "queuedTurns": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "running": {
           "type": "boolean"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "takeoverState": {
@@ -140,10 +163,13 @@ export const threadSessionSchemas = {
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -152,6 +178,16 @@ export const threadSessionSchemas = {
         "running"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     },
     "SessionLifecycleActionKind": {
       "enum": [
@@ -235,12 +271,15 @@ export const threadSessionSchemas = {
       }
     },
     "archivedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "cwd": {
       "type": "string"
@@ -260,12 +299,15 @@ export const threadSessionSchemas = {
       ]
     },
     "endedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "forkedFromThreadId": {
       "type": [
@@ -287,9 +329,7 @@ export const threadSessionSchemas = {
       ]
     },
     "messageCount": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "model": {
       "default": null,
@@ -309,8 +349,7 @@ export const threadSessionSchemas = {
       ]
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "title": {
       "default": null,
@@ -320,17 +359,18 @@ export const threadSessionSchemas = {
       ]
     },
     "toolCallCount": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "updatedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [
@@ -440,29 +480,33 @@ export const threadSessionSchemas = {
 },
   SessionUsageSummaryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "accountedProviderCallCount": {
-      "format": "uint64",
-      "minimum": 0.0,
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
       "type": "integer"
     },
-    "assistantMessageCount": {
-      "format": "uint64",
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
       "minimum": 0.0,
       "type": "integer"
+    }
+  },
+  "properties": {
+    "accountedProviderCallCount": {
+      "$ref": "#/definitions/JsonSafeU64"
+    },
+    "assistantMessageCount": {
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "available": {
       "type": "boolean"
     },
     "billableInputTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "billableOutputTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "cacheReadPercent": {
       "default": null,
@@ -473,55 +517,42 @@ export const threadSessionSchemas = {
       ]
     },
     "cacheReadTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "cacheWriteTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "contextInputTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "costStatus": {
       "type": "string"
     },
     "effectiveTotalTokens": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "estimatedCostNanodollars": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "estimatedPricingCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "freePricingCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "includedPricingCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "messageCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "model": {
       "default": null,
@@ -538,14 +569,10 @@ export const threadSessionSchemas = {
       ]
     },
     "reasoningTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "reportedTotalTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "sessionId": {
       "default": null,
@@ -558,14 +585,10 @@ export const threadSessionSchemas = {
       "type": "string"
     },
     "unaccountedProviderCallCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "unknownPricingCount": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     }
   },
   "required": [

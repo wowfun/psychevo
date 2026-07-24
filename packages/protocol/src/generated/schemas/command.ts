@@ -309,6 +309,11 @@ export const commandSchemas = {
         "usage"
       ],
       "type": "object"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -319,10 +324,12 @@ export const commandSchemas = {
       "type": "array"
     },
     "hiddenDynamic": {
-      "default": 0,
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "allOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        }
+      ],
+      "default": 0
     }
   },
   "required": [

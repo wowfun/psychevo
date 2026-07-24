@@ -28,12 +28,15 @@ export const automationListResultSchemas = {
           "type": "string"
         },
         "completedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "error": {
           "default": null,
@@ -56,8 +59,7 @@ export const automationListResultSchemas = {
           ]
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "type": "string"
@@ -199,8 +201,7 @@ export const automationListResultSchemas = {
     "AutomationTaskView": {
       "properties": {
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "cwd": {
           "type": "string"
@@ -225,12 +226,15 @@ export const automationListResultSchemas = {
           ]
         },
         "lastRunAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "lastStatus": {
           "default": null,
@@ -247,12 +251,15 @@ export const automationListResultSchemas = {
           ]
         },
         "nextRunAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "prompt": {
           "type": "string"
@@ -292,8 +299,7 @@ export const automationListResultSchemas = {
           "type": "string"
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -309,6 +315,11 @@ export const automationListResultSchemas = {
         "updatedAtMs"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {

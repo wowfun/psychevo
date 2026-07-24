@@ -1,4 +1,5 @@
 {
+  "$id": "ClientRequest/plugin-authority-set-trust.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -63,42 +64,48 @@
       ],
       "type": "string"
     },
-    "JsonSafeU64": {
-      "maximum": 9007199254740991.0,
-      "minimum": 0.0,
-      "type": "integer"
+    "PluginAuthoritySetTrustParams": {
+      "properties": {
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewayRequestScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "selector": {
+          "type": "string"
+        },
+        "trusted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "selector",
+        "trusted"
+      ],
+      "type": "object"
     }
   },
   "properties": {
-    "cursor": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "limit": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/JsonSafeU64"
-        },
-        {
-          "type": "null"
-        }
+    "method": {
+      "enum": [
+        "plugin/authority/setTrust"
       ],
-      "default": null
-    },
-    "scope": {
-      "$ref": "#/definitions/GatewayRequestScope"
-    },
-    "threadId": {
       "type": "string"
+    },
+    "params": {
+      "$ref": "#/definitions/PluginAuthoritySetTrustParams"
     }
   },
   "required": [
-    "scope",
-    "threadId"
+    "method",
+    "params"
   ],
-  "title": "ThreadHistoryReadParams",
+  "title": "ClientRequest plugin/authority/setTrust",
   "type": "object"
 }

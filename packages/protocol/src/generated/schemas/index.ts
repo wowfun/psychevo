@@ -53,6 +53,8 @@ import { workspaceFileSchemas } from './workspace/files';
 import { workspaceReviewSchemas } from './workspace/review';
 
 export const gatewaySchemas = {
+  JsonSafeI64: rpcSchemas.JsonSafeI64,
+  JsonSafeU64: rpcSchemas.JsonSafeU64,
   SourceKey: sourceSchemas.SourceKey,
   GatewaySourceLifetime: sourceSchemas.GatewaySourceLifetime,
   GatewaySource: sourceSchemas.GatewaySource,
@@ -200,9 +202,9 @@ export const gatewaySchemas = {
   PluginInstallParams: gatewayPluginRequestSchemas.PluginInstallParams,
   PluginUninstallParams: gatewayPluginRequestSchemas.PluginUninstallParams,
   PluginSetEnabledParams: gatewayPluginRequestSchemas.PluginSetEnabledParams,
-  PluginSetTrustParams: gatewayPluginRequestSchemas.PluginSetTrustParams,
   PluginAuthorityWriteParams: gatewayPluginRequestSchemas.PluginAuthorityWriteParams,
   PluginAuthorityRefreshParams: gatewayPluginRequestSchemas.PluginAuthorityRefreshParams,
+  PluginAuthoritySetTrustParams: gatewayPluginRequestSchemas.PluginAuthoritySetTrustParams,
   PluginCatalogListParams: gatewayPluginRequestSchemas.PluginCatalogListParams,
   PluginCatalogAddParams: gatewayPluginRequestSchemas.PluginCatalogAddParams,
   PluginCatalogRemoveParams: gatewayPluginRequestSchemas.PluginCatalogRemoveParams,

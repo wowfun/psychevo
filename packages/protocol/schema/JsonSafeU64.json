@@ -1,0 +1,7 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "maximum": 9007199254740991.0,
+  "minimum": 0.0,
+  "title": "JsonSafeU64",
+  "type": "integer"
+}

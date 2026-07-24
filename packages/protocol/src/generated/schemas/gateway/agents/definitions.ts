@@ -303,6 +303,13 @@ export const gatewayAgentDefinitionSchemas = {
 },
   TeamMemberView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "agent": {
       "type": "string"
@@ -318,13 +325,15 @@ export const gatewayAgentDefinitionSchemas = {
       "type": "string"
     },
     "maxTurns": {
-      "default": null,
-      "format": "uint",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "role": {
       "default": null,
@@ -394,6 +403,11 @@ export const gatewayAgentDefinitionSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamMemberView": {
       "properties": {
         "agent": {
@@ -410,13 +424,15 @@ export const gatewayAgentDefinitionSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -471,9 +487,7 @@ export const gatewayAgentDefinitionSchemas = {
       "type": "string"
     },
     "maxParallelAgents": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "members": {
       "items": {

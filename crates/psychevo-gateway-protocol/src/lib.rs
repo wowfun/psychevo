@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
+include!("protocol/safe_integer.rs");
 include!("protocol/source.rs");
 include!("protocol/events_transcript.rs");
 include!("protocol/thread_command_turn.rs");

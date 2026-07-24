@@ -30,6 +30,11 @@
       ],
       "type": "object"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamMemberView": {
       "properties": {
         "agent": {
@@ -46,13 +51,15 @@
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -107,9 +114,7 @@
       "type": "string"
     },
     "maxParallelAgents": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "members": {
       "items": {

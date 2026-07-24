@@ -1,19 +1,26 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ThreadCompactionCheckpointView": {
       "properties": {
         "checkpointId": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "firstKeptSessionSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "reason": {
           "type": "string"
@@ -37,19 +44,23 @@
           ]
         },
         "tokensAfter": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "tokensBefore": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -112,19 +123,23 @@
       ]
     },
     "tokensAfter": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "tokensBefore": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "unavailable": {

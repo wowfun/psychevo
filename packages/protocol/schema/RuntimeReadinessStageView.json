@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeReadinessStatusView": {
       "enum": [
         "unchecked",
@@ -18,12 +23,15 @@
       "type": "string"
     },
     "observedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "status": {
       "$ref": "#/definitions/RuntimeReadinessStatusView"

@@ -79,6 +79,7 @@ import type {
   ObservabilityReadParams,
   ObservabilityReadResult,
   PluginAuthorityRefreshParams,
+  PluginAuthoritySetTrustParams,
   PluginAuthorityWriteParams,
   PluginCatalogAddParams,
   PluginCatalogListParams,
@@ -92,7 +93,6 @@ import type {
   PluginListParams,
   PluginReadParams,
   PluginSetEnabledParams,
-  PluginSetTrustParams,
   PluginUninstallParams,
   RuntimeProfileDeleteParams,
   RuntimeProfileDeleteResult,
@@ -294,9 +294,9 @@ export interface GatewayRequestParams {
   "plugin/install": PluginInstallParams;
   "plugin/uninstall": PluginUninstallParams;
   "plugin/setEnabled": PluginSetEnabledParams;
-  "plugin/setTrust": PluginSetTrustParams;
   "plugin/authority/write": PluginAuthorityWriteParams;
   "plugin/authority/refresh": PluginAuthorityRefreshParams;
+  "plugin/authority/setTrust": PluginAuthoritySetTrustParams;
   "plugin/catalog/list": PluginCatalogListParams;
   "plugin/catalog/add": PluginCatalogAddParams;
   "plugin/catalog/remove": PluginCatalogRemoveParams;
@@ -445,9 +445,9 @@ export interface GatewayRequestResults {
   "plugin/install": GatewayJsonResult;
   "plugin/uninstall": GatewayJsonResult;
   "plugin/setEnabled": GatewayJsonResult;
-  "plugin/setTrust": GatewayJsonResult;
   "plugin/authority/write": GatewayJsonResult;
   "plugin/authority/refresh": GatewayJsonResult;
+  "plugin/authority/setTrust": GatewayJsonResult;
   "plugin/catalog/list": GatewayJsonResult;
   "plugin/catalog/add": GatewayJsonResult;
   "plugin/catalog/remove": GatewayJsonResult;

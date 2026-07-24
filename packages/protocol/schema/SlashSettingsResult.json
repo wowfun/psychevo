@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ModelSettingsScope": {
       "enum": [
         "global"
@@ -79,9 +84,7 @@
       "type": "string"
     },
     "leaderTimeoutMs": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"

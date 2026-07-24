@@ -2,15 +2,23 @@
   "$id": "ClientRequest/thread-browser.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ThreadBrowserCursor": {
       "properties": {
         "cwd": {
           "type": "string"
         },
         "offset": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         }
       },
       "required": [
@@ -54,21 +62,26 @@
           "type": "array"
         },
         "limit": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "recentDays": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "type": "object"

@@ -14,10 +14,13 @@ export const threadResultSchemas = {
           ]
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -33,18 +36,19 @@ export const threadResultSchemas = {
           ]
         },
         "queuedTurns": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "running": {
           "type": "boolean"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "takeoverState": {
@@ -54,10 +58,13 @@ export const threadResultSchemas = {
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -66,6 +73,16 @@ export const threadResultSchemas = {
         "running"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     },
     "SessionLifecycleActionKind": {
       "enum": [
@@ -149,12 +166,15 @@ export const threadResultSchemas = {
           }
         },
         "archivedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "type": "string"
@@ -174,12 +194,15 @@ export const threadResultSchemas = {
           ]
         },
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "forkedFromThreadId": {
           "type": [
@@ -201,9 +224,7 @@ export const threadResultSchemas = {
           ]
         },
         "messageCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "model": {
           "default": null,
@@ -223,8 +244,7 @@ export const threadResultSchemas = {
           ]
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "title": {
           "default": null,
@@ -234,17 +254,18 @@ export const threadResultSchemas = {
           ]
         },
         "toolCallCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "updatedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -285,10 +306,13 @@ export const threadResultSchemas = {
           ]
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -304,18 +328,19 @@ export const threadResultSchemas = {
           ]
         },
         "queuedTurns": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "running": {
           "type": "boolean"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "takeoverState": {
@@ -325,10 +350,13 @@ export const threadResultSchemas = {
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -337,6 +365,16 @@ export const threadResultSchemas = {
         "running"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     },
     "SessionLifecycleActionKind": {
       "enum": [
@@ -420,12 +458,15 @@ export const threadResultSchemas = {
           }
         },
         "archivedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "cwd": {
           "type": "string"
@@ -445,12 +486,15 @@ export const threadResultSchemas = {
           ]
         },
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "forkedFromThreadId": {
           "type": [
@@ -472,9 +516,7 @@ export const threadResultSchemas = {
           ]
         },
         "messageCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "model": {
           "default": null,
@@ -494,8 +536,7 @@ export const threadResultSchemas = {
           ]
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "title": {
           "default": null,
@@ -505,17 +546,18 @@ export const threadResultSchemas = {
           ]
         },
         "toolCallCount": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "updatedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

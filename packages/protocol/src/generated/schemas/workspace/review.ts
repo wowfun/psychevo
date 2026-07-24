@@ -61,26 +61,25 @@ export const workspaceReviewSchemas = {
 },
   WorkspaceDiffTruncationView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "maxBytes": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "maxLines": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "omittedBytes": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "omittedLines": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "truncated": {
       "type": "boolean"
@@ -183,6 +182,11 @@ export const workspaceReviewSchemas = {
   WorkspaceDiffResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "WorkspaceDiffFileStatusView": {
       "enum": [
         "modified",
@@ -227,24 +231,16 @@ export const workspaceReviewSchemas = {
     "WorkspaceDiffTruncationView": {
       "properties": {
         "maxBytes": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "maxLines": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "omittedBytes": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "omittedLines": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "truncated": {
           "type": "boolean"
@@ -386,6 +382,11 @@ export const workspaceReviewSchemas = {
   WorkspaceChangeGroupView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "WorkspaceChangeFileView": {
       "properties": {
         "binary": {
@@ -462,12 +463,10 @@ export const workspaceReviewSchemas = {
   },
   "properties": {
     "completedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "createdAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "files": {
       "items": {
@@ -582,6 +581,11 @@ export const workspaceReviewSchemas = {
   WorkspaceChangesResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "WorkspaceChangeFileView": {
       "properties": {
         "binary": {
@@ -623,12 +627,10 @@ export const workspaceReviewSchemas = {
     "WorkspaceChangeGroupView": {
       "properties": {
         "completedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "files": {
           "items": {
@@ -800,6 +802,11 @@ export const workspaceReviewSchemas = {
   WorkspaceChangeMutationResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "WorkspaceChangeFileView": {
       "properties": {
         "binary": {
@@ -841,12 +848,10 @@ export const workspaceReviewSchemas = {
     "WorkspaceChangeGroupView": {
       "properties": {
         "completedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "files": {
           "items": {

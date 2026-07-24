@@ -4,25 +4,34 @@ export const clientRequestModelProviderSaveSchema = {
   "$id": "ClientRequest/model-provider-save.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ModelLimitView": {
       "properties": {
         "context": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "output": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "type": "object"

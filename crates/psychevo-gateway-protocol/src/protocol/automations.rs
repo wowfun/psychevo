@@ -27,6 +27,7 @@ pub enum AutomationScheduleInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum AutomationTaskKind {
     Project,
     ThreadHeartbeat,
@@ -48,6 +49,7 @@ pub enum AutomationTargetInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum AutomationExecutionPolicy {
     AutoSandbox,
     AskFirst,
@@ -55,6 +57,7 @@ pub enum AutomationExecutionPolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationExecutionInput {
     pub policy: AutomationExecutionPolicy,
 }
@@ -69,6 +72,7 @@ impl Default for AutomationExecutionInput {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationListParams {
     #[serde(default)]
     pub cwd: Option<String>,
@@ -76,6 +80,7 @@ pub struct AutomationListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationWriteParams {
     #[serde(default)]
     pub automation_id: Option<String>,
@@ -95,6 +100,7 @@ pub struct AutomationWriteParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationDraftParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -105,6 +111,7 @@ pub struct AutomationDraftParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationDraftView {
     pub target: AutomationTargetInput,
     pub title: String,
@@ -120,12 +127,14 @@ pub struct AutomationDraftView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationIdParams {
     pub automation_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationRunParams {
     pub automation_id: String,
     #[serde(default)]
@@ -134,6 +143,7 @@ pub struct AutomationRunParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationTaskView {
     pub id: String,
     pub cwd: String,
@@ -151,11 +161,23 @@ pub struct AutomationTaskView {
     pub reasoning_effort: Option<String>,
     #[serde(default)]
     pub source_key: Option<String>,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub created_at_ms: i64,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub last_run_at_ms: Option<i64>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub next_run_at_ms: Option<i64>,
     #[serde(default)]
     pub last_status: Option<String>,
@@ -167,13 +189,20 @@ pub struct AutomationTaskView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationRunView {
     pub id: String,
     pub automation_id: String,
     pub trigger: String,
     pub status: String,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub completed_at_ms: Option<i64>,
     #[serde(default)]
     pub thread_id: Option<String>,
@@ -188,24 +217,28 @@ pub struct AutomationRunView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationListResult {
     pub automations: Vec<AutomationTaskView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationMutationResult {
     pub automation: AutomationTaskView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationDraftResult {
     pub draft: AutomationDraftView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationDeleteResult {
     pub deleted: bool,
     pub automation_id: String,
@@ -213,6 +246,7 @@ pub struct AutomationDeleteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AutomationRunResult {
     pub accepted: bool,
     pub automation: AutomationTaskView,

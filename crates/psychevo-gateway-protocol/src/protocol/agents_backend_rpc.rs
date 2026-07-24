@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum AgentConfigTarget {
     Project,
     Profile,
@@ -7,6 +8,7 @@ pub enum AgentConfigTarget {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -14,6 +16,7 @@ pub struct AgentListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentReadParams {
     pub name: String,
     #[serde(default)]
@@ -24,6 +27,7 @@ pub struct AgentReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentBackendRefInput {
     #[serde(rename = "ref")]
     pub name: String,
@@ -31,6 +35,7 @@ pub struct AgentBackendRefInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentWriteParams {
     pub name: String,
     pub description: String,
@@ -58,6 +63,7 @@ pub struct AgentWriteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentDeleteParams {
     pub name: String,
     #[serde(default)]
@@ -68,6 +74,7 @@ pub struct AgentDeleteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentSetEnabledParams {
     pub name: String,
     pub enabled: bool,
@@ -79,6 +86,7 @@ pub struct AgentSetEnabledParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentStatusParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -90,6 +98,7 @@ pub struct AgentStatusParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -97,6 +106,7 @@ pub struct TeamListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamReadParams {
     pub name: String,
     #[serde(default)]
@@ -107,6 +117,7 @@ pub struct TeamReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamMemberInput {
     pub id: String,
     pub agent: String,
@@ -121,11 +132,15 @@ pub struct TeamMemberInput {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default, rename = "maxTurns")]
+    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub max_turns: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamWriteParams {
     pub name: String,
     pub description: String,
@@ -137,6 +152,9 @@ pub struct TeamWriteParams {
     #[serde(default)]
     pub members: Vec<TeamMemberInput>,
     #[serde(default, rename = "maxParallelAgents")]
+    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub max_parallel_agents: Option<u64>,
     #[serde(default)]
     pub instructions: String,
@@ -148,6 +166,7 @@ pub struct TeamWriteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamDeleteParams {
     pub name: String,
     #[serde(default)]
@@ -158,6 +177,7 @@ pub struct TeamDeleteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamSetEnabledParams {
     pub name: String,
     pub enabled: bool,
@@ -169,6 +189,7 @@ pub struct TeamSetEnabledParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamStatusParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -178,6 +199,7 @@ pub struct TeamStatusParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentControlParams {
     pub action: String,
     #[serde(default)]
@@ -190,6 +212,7 @@ pub struct AgentControlParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentListResult {
     pub agents: Vec<AgentDefinitionView>,
     pub shadowed_agents: Vec<AgentDefinitionView>,
@@ -199,6 +222,7 @@ pub struct AgentListResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentReadResult {
     pub agent: AgentDefinitionView,
     pub instructions: String,
@@ -207,6 +231,7 @@ pub struct AgentReadResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentWriteResult {
     pub written: bool,
     pub name: String,
@@ -217,6 +242,7 @@ pub struct AgentWriteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentDeleteResult {
     pub deleted: bool,
     pub name: String,
@@ -226,6 +252,7 @@ pub struct AgentDeleteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentSetEnabledResult {
     pub written: bool,
     pub name: String,
@@ -236,6 +263,7 @@ pub struct AgentSetEnabledResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentStatusResult {
     pub agents: Vec<AgentRunView>,
     pub control: AgentStatusControlView,
@@ -243,6 +271,7 @@ pub struct AgentStatusResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamListResult {
     pub teams: Vec<TeamDefinitionView>,
     pub shadowed_teams: Vec<TeamDefinitionView>,
@@ -252,6 +281,7 @@ pub struct TeamListResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamReadResult {
     pub team: TeamDefinitionView,
     pub instructions: String,
@@ -260,6 +290,7 @@ pub struct TeamReadResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamWriteResult {
     pub written: bool,
     pub name: String,
@@ -270,6 +301,7 @@ pub struct TeamWriteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamDeleteResult {
     pub deleted: bool,
     pub name: String,
@@ -279,6 +311,7 @@ pub struct TeamDeleteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamSetEnabledResult {
     pub written: bool,
     pub name: String,
@@ -289,6 +322,7 @@ pub struct TeamSetEnabledResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamStatusResult {
     #[serde(default)]
     pub team: Option<TeamRunView>,
@@ -300,6 +334,7 @@ pub struct TeamStatusResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentControlResult {
     pub accepted: bool,
     #[serde(default)]
@@ -309,6 +344,7 @@ pub struct AgentControlResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentBackendRefView {
     #[serde(rename = "ref")]
     pub name: String,
@@ -316,6 +352,7 @@ pub struct AgentBackendRefView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentDiagnosticView {
     pub kind: String,
     pub message: String,
@@ -325,6 +362,7 @@ pub struct AgentDiagnosticView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum AgentContributionView {
     Instructions,
     Tools,
@@ -334,6 +372,7 @@ pub enum AgentContributionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentDefinitionView {
     pub name: String,
     pub description: String,
@@ -361,6 +400,7 @@ pub struct AgentDefinitionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamMemberView {
     pub id: String,
     pub agent: String,
@@ -375,11 +415,15 @@ pub struct TeamMemberView {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default, rename = "maxTurns")]
+    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub max_turns: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamDefinitionView {
     pub name: String,
     pub description: String,
@@ -394,12 +438,16 @@ pub struct TeamDefinitionView {
     pub leader: String,
     pub members: Vec<TeamMemberView>,
     #[serde(rename = "maxParallelAgents")]
+    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub max_parallel_agents: u64,
     pub diagnostics: Vec<AgentDiagnosticView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentRunView {
     pub id: String,
     #[serde(default)]
@@ -414,8 +462,14 @@ pub struct AgentRunView {
     pub status: String,
     #[serde(default)]
     pub edge_status: Option<String>,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
     #[serde(default)]
     pub outcome: Option<String>,
@@ -439,15 +493,20 @@ pub struct AgentRunView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentStatusControlView {
     pub spawning_paused: bool,
     pub max_spawn_depth_cap: u8,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub concurrency_cap: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TeamRunView {
     pub id: String,
     pub parent_session_id: String,
@@ -461,10 +520,19 @@ pub struct TeamRunView {
     pub leader_agent_name: String,
     pub members: Vec<TeamMemberView>,
     #[serde(rename = "maxParallelAgents")]
+    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub max_parallel_agents: u64,
     pub status: String,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
     #[serde(default)]
     pub final_summary: Option<String>,
@@ -472,6 +540,7 @@ pub struct TeamRunView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct MissionRunView {
     pub id: String,
     pub parent_session_id: String,
@@ -482,8 +551,14 @@ pub struct MissionRunView {
     pub goal: String,
     pub lead_agent_name: String,
     pub status: String,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
     #[serde(default)]
     pub final_summary: Option<String>,
@@ -491,6 +566,7 @@ pub struct MissionRunView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum BackendConfigTarget {
     Project,
     Profile,
@@ -498,6 +574,7 @@ pub enum BackendConfigTarget {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -505,6 +582,7 @@ pub struct BackendListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendDoctorParams {
     pub id: String,
     #[serde(default)]
@@ -513,6 +591,7 @@ pub struct BackendDoctorParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendManageParams {
     pub id: String,
     #[serde(default)]
@@ -521,6 +600,7 @@ pub struct BackendManageParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendWriteParams {
     pub id: String,
     pub target: BackendConfigTarget,
@@ -550,6 +630,7 @@ pub struct BackendWriteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendDeleteParams {
     pub id: String,
     pub target: BackendConfigTarget,
@@ -559,6 +640,7 @@ pub struct BackendDeleteParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -566,6 +648,7 @@ pub struct RuntimeProfileListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileReadParams {
     pub id: String,
     #[serde(default)]
@@ -574,6 +657,7 @@ pub struct RuntimeProfileReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileSetEnabledParams {
     pub id: String,
     pub target: BackendConfigTarget,
@@ -584,6 +668,7 @@ pub struct RuntimeProfileSetEnabledParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileWriteParams {
     pub id: String,
     pub target: BackendConfigTarget,
@@ -615,6 +700,7 @@ pub struct RuntimeProfileWriteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileDeleteParams {
     pub id: String,
     pub target: BackendConfigTarget,
@@ -624,6 +710,7 @@ pub struct RuntimeProfileDeleteParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadContextReadParams {
     #[serde(default, rename = "threadId")]
     pub thread_id: Option<String>,
@@ -635,6 +722,7 @@ pub struct ThreadContextReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadDraftPrepareParams {
     #[serde(rename = "targetId")]
     pub target_id: String,
@@ -643,6 +731,7 @@ pub struct ThreadDraftPrepareParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadControlSetParams {
     #[serde(default, rename = "threadId")]
     pub thread_id: Option<String>,
@@ -655,6 +744,9 @@ pub struct ThreadControlSetParams {
     #[serde(rename = "expectedCapabilityRevision")]
     pub expected_capability_revision: String,
     #[serde(rename = "expectedBindingRevision")]
+    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub expected_binding_revision: u64,
     #[serde(rename = "expectedContextRevision")]
     pub expected_context_revision: String,
@@ -666,6 +758,7 @@ pub struct ThreadControlSetParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -673,6 +766,7 @@ pub struct PluginListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginReadParams {
     pub selector: String,
     #[serde(default)]
@@ -681,6 +775,7 @@ pub struct PluginReadParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginDoctorParams {
     #[serde(default)]
     pub selector: Option<String>,
@@ -690,6 +785,7 @@ pub struct PluginDoctorParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginInspectParams {
     pub source: String,
     #[serde(default)]
@@ -701,13 +797,12 @@ pub struct PluginInspectParams {
     #[serde(default)]
     pub npm_registry: Option<String>,
     #[serde(default)]
-    pub adapter_mode: Option<String>,
-    #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -715,6 +810,7 @@ pub struct SkillListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillReadParams {
     pub name: String,
     #[serde(default)]
@@ -725,6 +821,7 @@ pub struct SkillReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillInstallParams {
     pub source: String,
     #[serde(default)]
@@ -741,6 +838,7 @@ pub struct SkillInstallParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillUninstallParams {
     pub name: String,
     #[serde(default)]
@@ -753,6 +851,7 @@ pub struct SkillUninstallParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillSetEnabledParams {
     pub name: String,
     pub enabled: bool,
@@ -764,6 +863,7 @@ pub struct SkillSetEnabledParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillWriteParams {
     pub name: String,
     #[serde(default)]
@@ -777,6 +877,7 @@ pub struct SkillWriteParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SkillWriteResult {
     pub written: bool,
     pub name: String,
@@ -786,6 +887,7 @@ pub struct SkillWriteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginInstallParams {
     pub source: String,
     #[serde(default)]
@@ -797,8 +899,6 @@ pub struct PluginInstallParams {
     #[serde(default)]
     pub npm_registry: Option<String>,
     #[serde(default)]
-    pub adapter_mode: Option<String>,
-    #[serde(default)]
     pub scope_name: Option<String>,
     #[serde(default)]
     pub force: bool,
@@ -808,6 +908,7 @@ pub struct PluginInstallParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginUninstallParams {
     pub selector: String,
     #[serde(default)]
@@ -818,6 +919,7 @@ pub struct PluginUninstallParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginSetEnabledParams {
     pub selector: String,
     #[serde(default)]
@@ -830,6 +932,7 @@ pub struct PluginSetEnabledParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginAuthorityWriteParams {
     pub enabled: bool,
     #[serde(default)]
@@ -840,6 +943,7 @@ pub struct PluginAuthorityWriteParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginAuthorityRefreshParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -847,18 +951,17 @@ pub struct PluginAuthorityRefreshParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginSetTrustParams {
+#[ts(rename_all = "camelCase")]
+pub struct PluginAuthoritySetTrustParams {
     pub selector: String,
-    #[serde(default = "default_true")]
     pub trusted: bool,
-    #[serde(default)]
-    pub scope_name: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginCatalogListParams {
     #[serde(default)]
     pub authority: Option<String>,
@@ -870,6 +973,7 @@ pub struct PluginCatalogListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginCatalogAddParams {
     #[serde(default)]
     pub authority: Option<String>,
@@ -886,8 +990,6 @@ pub struct PluginCatalogAddParams {
     #[serde(default)]
     pub npm_registry: Option<String>,
     #[serde(default)]
-    pub adapter_mode: Option<String>,
-    #[serde(default)]
     pub scope_name: Option<String>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -895,6 +997,7 @@ pub struct PluginCatalogAddParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginCatalogRemoveParams {
     #[serde(default)]
     pub authority: Option<String>,
@@ -907,6 +1010,7 @@ pub struct PluginCatalogRemoveParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginCatalogUpgradeParams {
     pub name: String,
     #[serde(default)]
@@ -923,6 +1027,7 @@ pub struct PluginCatalogUpgradeParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginConnectStartParams {
     pub selector: String,
     pub component_id: String,
@@ -934,14 +1039,11 @@ pub struct PluginConnectStartParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PluginConnectStatusParams {
     pub session_id: String,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_plugin_catalog_kind() -> String {
@@ -950,6 +1052,7 @@ fn default_plugin_catalog_kind() -> String {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ToolListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -957,6 +1060,7 @@ pub struct ToolListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ToolReadParams {
     pub name: String,
     #[serde(default)]
@@ -965,6 +1069,7 @@ pub struct ToolReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ToolSetEnabledParams {
     pub name: String,
     pub mode: String,
@@ -977,6 +1082,7 @@ pub struct ToolSetEnabledParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ToolCreateParams {
     pub name: String,
     #[serde(default)]
@@ -995,6 +1101,7 @@ pub struct ToolCreateParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ToolRemoveParams {
     pub name: String,
     #[serde(default)]
@@ -1005,6 +1112,7 @@ pub struct ToolRemoveParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -1012,6 +1120,7 @@ pub struct McpListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpReadParams {
     pub name: String,
     #[serde(default)]
@@ -1020,6 +1129,7 @@ pub struct McpReadParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpUpsertParams {
     pub name: String,
     pub transport: String,
@@ -1054,8 +1164,14 @@ pub struct McpUpsertParams {
     #[serde(default, rename = "supportsParallelToolCalls")]
     pub supports_parallel_tool_calls: Option<bool>,
     #[serde(default, rename = "startupTimeoutSecs")]
+    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub startup_timeout_secs: Option<u64>,
     #[serde(default, rename = "toolTimeoutSecs")]
+    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub tool_timeout_secs: Option<u64>,
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -1063,6 +1179,7 @@ pub struct McpUpsertParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpNameParams {
     pub name: String,
     #[serde(default)]
@@ -1071,6 +1188,7 @@ pub struct McpNameParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpSetEnabledParams {
     pub name: String,
     pub enabled: bool,
@@ -1080,6 +1198,7 @@ pub struct McpSetEnabledParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpSetToolPolicyParams {
     pub name: String,
     #[serde(default, rename = "enabledTools")]
@@ -1092,6 +1211,7 @@ pub struct McpSetToolPolicyParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpOAuthStartParams {
     pub name: String,
     #[serde(default)]
@@ -1100,6 +1220,7 @@ pub struct McpOAuthStartParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct McpOAuthStatusParams {
     pub session_id: String,
     #[serde(default)]
@@ -1108,6 +1229,7 @@ pub struct McpOAuthStatusParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendConfigView {
     pub id: String,
     pub kind: String,
@@ -1135,12 +1257,14 @@ pub struct BackendConfigView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendListResult {
     pub backends: Vec<BackendConfigView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendDiagnosticView {
     pub kind: String,
     pub message: String,
@@ -1148,6 +1272,7 @@ pub struct BackendDiagnosticView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendDoctorCheck {
     pub name: String,
     pub ok: bool,
@@ -1158,6 +1283,7 @@ pub struct BackendDoctorCheck {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendDoctorResult {
     pub id: String,
     pub kind: String,
@@ -1167,6 +1293,7 @@ pub struct BackendDoctorResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendWriteResult {
     pub written: bool,
     pub changed: bool,
@@ -1177,6 +1304,7 @@ pub struct BackendWriteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendDeleteResult {
     pub deleted: bool,
     pub changed: bool,
@@ -1187,6 +1315,7 @@ pub struct BackendDeleteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct BackendManageResult {
     pub id: String,
     pub operation: String,
@@ -1198,6 +1327,7 @@ pub struct BackendManageResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileView {
     pub id: String,
     pub runtime: String,
@@ -1243,17 +1373,22 @@ pub struct RuntimeProfileView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeHealthView {
     pub status: String,
     pub summary: String,
     #[serde(default)]
     pub command_path: Option<String>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub checked_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum RuntimeReadinessStatusView {
     Unchecked,
     Ready,
@@ -1265,16 +1400,21 @@ pub enum RuntimeReadinessStatusView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeReadinessStageView {
     pub id: String,
     pub status: RuntimeReadinessStatusView,
     pub summary: String,
     #[serde(default, rename = "observedAtMs")]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub observed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum RuntimeStabilityView {
     Stable,
     Experimental,
@@ -1283,6 +1423,7 @@ pub enum RuntimeStabilityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeCapabilityView {
     pub id: String,
     pub enabled: bool,
@@ -1293,12 +1434,14 @@ pub struct RuntimeCapabilityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileListResult {
     pub profiles: Vec<RuntimeProfileView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileReadResult {
     pub profile: RuntimeProfileView,
     #[serde(default)]
@@ -1308,6 +1451,7 @@ pub struct RuntimeProfileReadResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileWriteResult {
     pub written: bool,
     pub changed: bool,
@@ -1318,6 +1462,7 @@ pub struct RuntimeProfileWriteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeProfileDeleteResult {
     pub deleted: bool,
     pub changed: bool,
@@ -1328,6 +1473,7 @@ pub struct RuntimeProfileDeleteResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum RuntimeBindingOwnershipView {
     ReadWrite,
     ReadOnly,
@@ -1336,6 +1482,7 @@ pub enum RuntimeBindingOwnershipView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadControlSurfaceRoleView {
     Mode,
     Model,
@@ -1345,6 +1492,7 @@ pub enum ThreadControlSurfaceRoleView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadControlMutabilityView {
     ReadOnly,
     Selectable,
@@ -1352,6 +1500,7 @@ pub enum ThreadControlMutabilityView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadControlEffectiveSourceView {
     RuntimeDefault,
     ProfileDefault,
@@ -1363,6 +1512,7 @@ pub enum ThreadControlEffectiveSourceView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadControlApplyScopeView {
     TurnDraft,
     Session,
@@ -1370,6 +1520,7 @@ pub enum ThreadControlApplyScopeView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadControlChoiceView {
     #[ts(type = "unknown")]
     pub value: Value,
@@ -1380,6 +1531,7 @@ pub struct ThreadControlChoiceView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadControlDependencyView {
     #[serde(rename = "controlId")]
     pub control_id: String,
@@ -1389,6 +1541,7 @@ pub struct ThreadControlDependencyView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadControlDescriptorView {
     pub id: String,
     pub label: String,
@@ -1421,6 +1574,7 @@ pub struct ThreadControlDescriptorView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeBindingView {
     #[serde(rename = "threadId")]
     pub thread_id: String,
@@ -1441,11 +1595,15 @@ pub struct RuntimeBindingView {
     pub profile_fingerprint: String,
     pub ownership: RuntimeBindingOwnershipView,
     #[serde(rename = "bindingRevision")]
+    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub binding_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RunnableTargetView {
     #[serde(rename = "targetId")]
     pub target_id: String,
@@ -1465,6 +1623,7 @@ pub struct RunnableTargetView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadInputCapabilityView {
     pub kind: String,
     pub enabled: bool,
@@ -1474,6 +1633,7 @@ pub struct ThreadInputCapabilityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadActionDescriptorView {
     pub id: ThreadActionKind,
     pub label: String,
@@ -1487,6 +1647,7 @@ pub struct ThreadActionDescriptorView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadSendabilityView {
     pub allowed: bool,
     #[serde(default)]
@@ -1497,6 +1658,7 @@ pub struct ThreadSendabilityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadContextReadResult {
     #[serde(default, rename = "selectedTargetId")]
     pub selected_target_id: Option<String>,
@@ -1534,6 +1696,7 @@ pub struct ThreadContextReadResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadDraftPrepareResult {
     pub context: ThreadContextReadResult,
     #[serde(default)]
@@ -1542,6 +1705,7 @@ pub struct ThreadDraftPrepareResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadDraftOpenResult {
     pub snapshot: ThreadSnapshot,
     pub context: ThreadContextReadResult,
@@ -1551,6 +1715,7 @@ pub struct ThreadDraftOpenResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadImportListParams {
     pub scope: GatewayRequestScope,
     #[serde(default)]
@@ -1559,6 +1724,7 @@ pub struct ThreadImportListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadImportCandidateView {
     #[serde(rename = "candidateId")]
     pub candidate_id: String,
@@ -1571,6 +1737,7 @@ pub struct ThreadImportCandidateView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadImportProfileView {
     #[serde(rename = "runtimeProfileRef")]
     pub runtime_profile_ref: String,
@@ -1584,6 +1751,9 @@ pub struct ThreadImportProfileView {
     #[serde(default, rename = "nextCursor")]
     pub next_cursor: Option<String>,
     #[serde(default, rename = "alreadyImportedCount")]
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub already_imported_count: usize,
     #[serde(default)]
     pub error: Option<AgentErrorView>,
@@ -1591,12 +1761,14 @@ pub struct ThreadImportProfileView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadImportListResult {
     pub profiles: Vec<ThreadImportProfileView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadImportParams {
     pub scope: GatewayRequestScope,
     #[serde(rename = "candidateId")]
@@ -1609,12 +1781,14 @@ pub struct ThreadImportParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadImportResult {
     pub snapshot: Box<ThreadSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadControlReceiptStatusView {
     Rejected,
     Stored,
@@ -1624,12 +1798,16 @@ pub enum ThreadControlReceiptStatusView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadControlSetResult {
     pub changed: bool,
     pub status: ThreadControlReceiptStatusView,
     pub control: ThreadControlDescriptorView,
     pub context: ThreadContextReadResult,
     #[serde(rename = "bindingRevision")]
+    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub binding_revision: u64,
     #[serde(rename = "contextRevision")]
     pub context_revision: String,
@@ -1639,6 +1817,7 @@ pub struct ThreadControlSetResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum RuntimeRetryClassView {
     Never,
     UserAction,
@@ -1649,6 +1828,7 @@ pub enum RuntimeRetryClassView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct RuntimeErrorView {
     pub code: String,
     pub stage: String,
@@ -1661,6 +1841,7 @@ pub struct RuntimeErrorView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ReadyzResult {
     pub ok: bool,
     pub server: String,
@@ -1669,6 +1850,7 @@ pub struct ReadyzResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct CreateLaunchParams {
     pub cwd: String,
     #[serde(default)]
@@ -1677,14 +1859,19 @@ pub struct CreateLaunchParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct CreateLaunchResult {
     pub launch_id: String,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub expires_at_ms: i64,
     pub open_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ManagedServerState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -1692,12 +1879,21 @@ pub struct ManagedServerState {
     pub pid: u32,
     pub base_url: String,
     pub readyz_url: String,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub started_at_ms: i64,
     pub version: String,
     pub executable_path: Option<String>,
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub executable_modified_ms: Option<i64>,
+    #[serde(serialize_with = "option_json_safe_u64::serialize", deserialize_with = "option_json_safe_u64::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
     pub executable_size: Option<u64>,
-    pub executable_inode: Option<u64>,
+    pub executable_inode: Option<String>,
     pub static_dir: Option<String>,
 }
 
@@ -1705,12 +1901,13 @@ pub struct ManagedServerState {
 #[serde(untagged)]
 pub enum JsonRpcId {
     String(String),
-    Number(i64),
+    Number(JsonSafeI64),
     Null,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: JsonRpcId,
@@ -1722,6 +1919,7 @@ pub struct JsonRpcRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct JsonRpcNotification {
     pub jsonrpc: String,
     pub method: String,
@@ -1732,6 +1930,7 @@ pub struct JsonRpcNotification {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct JsonRpcSuccess {
     pub jsonrpc: String,
     pub id: JsonRpcId,
@@ -1741,6 +1940,7 @@ pub struct JsonRpcSuccess {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct JsonRpcErrorResponse {
     pub jsonrpc: String,
     pub id: JsonRpcId,
@@ -1749,7 +1949,11 @@ pub struct JsonRpcErrorResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct JsonRpcError {
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub code: i64,
     pub message: String,
     #[serde(default)]

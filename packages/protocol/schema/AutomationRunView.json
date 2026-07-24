@@ -1,16 +1,26 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "automationId": {
       "type": "string"
     },
     "completedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "error": {
       "default": null,
@@ -33,8 +43,7 @@
       ]
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "status": {
       "type": "string"

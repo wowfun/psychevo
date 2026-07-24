@@ -295,44 +295,59 @@ export const settingsSchemas = {
           ]
         },
         "lastHealthyPollAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "lastIlinkErrcode": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "lastInboundAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "lastOutboundAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "lastPollAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "reason": {
           "default": null,
@@ -350,25 +365,39 @@ export const settingsSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ModelLimitView": {
       "properties": {
         "context": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "output": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "type": "object"
@@ -975,25 +1004,34 @@ export const settingsSchemas = {
   WorkbenchControlsView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ModelLimitView": {
       "properties": {
         "context": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "output": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "type": "object"

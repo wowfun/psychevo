@@ -68,13 +68,6 @@ export const clientRequestPluginInstallSchema = {
     },
     "PluginInstallParams": {
       "properties": {
-        "adapterMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "force": {
           "default": false,
           "type": "boolean"

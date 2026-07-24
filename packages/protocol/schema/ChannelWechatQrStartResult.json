@@ -1,14 +1,23 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "properties": {
-    "expiresAtMs": {
-      "format": "int64",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
       "type": "integer"
     },
-    "intervalMs": {
-      "format": "uint64",
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
       "minimum": 0.0,
       "type": "integer"
+    }
+  },
+  "properties": {
+    "expiresAtMs": {
+      "$ref": "#/definitions/JsonSafeI64"
+    },
+    "intervalMs": {
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "message": {
       "type": "string"

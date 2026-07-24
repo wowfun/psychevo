@@ -811,6 +811,11 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamDefinitionView": {
       "properties": {
         "description": {
@@ -829,9 +834,7 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxParallelAgents": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "members": {
           "items": {
@@ -900,13 +903,15 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -1011,6 +1016,11 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamDefinitionView": {
       "properties": {
         "description": {
@@ -1029,9 +1039,7 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxParallelAgents": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "members": {
           "items": {
@@ -1100,13 +1108,15 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -1195,6 +1205,11 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamDefinitionView": {
       "properties": {
         "description": {
@@ -1213,9 +1228,7 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxParallelAgents": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "members": {
           "items": {
@@ -1284,13 +1297,15 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -1421,6 +1436,11 @@ export const gatewayAgentResultSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamDefinitionView": {
       "properties": {
         "description": {
@@ -1439,9 +1459,7 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxParallelAgents": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "members": {
           "items": {
@@ -1510,13 +1528,15 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -1623,12 +1643,15 @@ export const gatewayAgentResultSchemas = {
           ]
         },
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "error": {
           "default": null,
@@ -1668,8 +1691,7 @@ export const gatewayAgentResultSchemas = {
           "type": "string"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "type": "string"
@@ -1721,13 +1743,15 @@ export const gatewayAgentResultSchemas = {
     "AgentStatusControlView": {
       "properties": {
         "concurrencyCap": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "maxSpawnDepthCap": {
           "format": "uint8",
@@ -1743,6 +1767,16 @@ export const gatewayAgentResultSchemas = {
         "spawningPaused"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {

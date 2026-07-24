@@ -68,13 +68,6 @@ export const clientRequestPluginImportInspectSchema = {
     },
     "PluginInspectParams": {
       "properties": {
-        "adapterMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "gitRef": {
           "default": null,
           "type": [

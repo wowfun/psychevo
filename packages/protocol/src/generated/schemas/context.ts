@@ -87,6 +87,13 @@ export const contextSchemas = {
 },
   ContextUsageCategoryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "details": {
       "default": null
@@ -112,9 +119,7 @@ export const contextSchemas = {
       "type": "string"
     },
     "tokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     }
   },
   "required": [
@@ -156,9 +161,7 @@ export const contextSchemas = {
           "type": "string"
         },
         "tokens": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         }
       },
       "required": [
@@ -169,6 +172,16 @@ export const contextSchemas = {
         "tokens"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -180,12 +193,15 @@ export const contextSchemas = {
       "type": "array"
     },
     "appliesToSessionSeq": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "available": {
       "type": "boolean"
@@ -200,13 +216,15 @@ export const contextSchemas = {
       "type": "array"
     },
     "contextLimit": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "label": {
       "type": "string"
@@ -223,9 +241,7 @@ export const contextSchemas = {
       "type": "string"
     },
     "usedTokens": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     }
   },
   "required": [

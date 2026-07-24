@@ -53,6 +53,11 @@ export const transcriptSchemas = {
   TranscriptToolResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "TranscriptBlockStatus": {
       "enum": [
         "pending",
@@ -71,8 +76,7 @@ export const transcriptSchemas = {
       "type": "string"
     },
     "createdAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "isError": {
       "type": "boolean"
@@ -81,15 +85,13 @@ export const transcriptSchemas = {
       "default": null
     },
     "resultMessageSeq": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "status": {
       "$ref": "#/definitions/TranscriptBlockStatus"
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     }
   },
   "required": [
@@ -106,6 +108,11 @@ export const transcriptSchemas = {
   TranscriptBlock: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "TranscriptBlockKind": {
       "enum": [
         "text",
@@ -147,8 +154,7 @@ export const transcriptSchemas = {
           "type": "string"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "isError": {
           "type": "boolean"
@@ -157,15 +163,13 @@ export const transcriptSchemas = {
           "default": null
         },
         "resultMessageSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -193,8 +197,7 @@ export const transcriptSchemas = {
       ]
     },
     "createdAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "detail": {
       "type": [
@@ -210,8 +213,7 @@ export const transcriptSchemas = {
     },
     "metadata": true,
     "order": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "phaseOrdinal": {
       "format": "uint32",
@@ -251,8 +253,7 @@ export const transcriptSchemas = {
       ]
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     }
   },
   "required": [
@@ -271,6 +272,11 @@ export const transcriptSchemas = {
   TranscriptEntry: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "TranscriptBlock": {
       "properties": {
         "artifactIds": {
@@ -286,8 +292,7 @@ export const transcriptSchemas = {
           ]
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "detail": {
           "type": [
@@ -303,8 +308,7 @@ export const transcriptSchemas = {
         },
         "metadata": true,
         "order": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "phaseOrdinal": {
           "format": "uint32",
@@ -344,8 +348,7 @@ export const transcriptSchemas = {
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -409,8 +412,7 @@ export const transcriptSchemas = {
           "type": "string"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "isError": {
           "type": "boolean"
@@ -419,15 +421,13 @@ export const transcriptSchemas = {
           "default": null
         },
         "resultMessageSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -450,17 +450,19 @@ export const transcriptSchemas = {
       "type": "array"
     },
     "createdAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "id": {
       "type": "string"
     },
     "messageSeq": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "metadata": true,
@@ -483,8 +485,7 @@ export const transcriptSchemas = {
       ]
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "usage": true
   },

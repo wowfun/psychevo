@@ -66,15 +66,18 @@ export const clientRequestThreadControlSetSchema = {
       ],
       "type": "string"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ThreadControlSetParams": {
       "properties": {
         "controlId": {
           "type": "string"
         },
         "expectedBindingRevision": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "expectedCapabilityRevision": {
           "type": "string"

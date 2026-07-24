@@ -32,6 +32,16 @@
       ],
       "type": "string"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "PendingActionView": {
       "properties": {
         "actionId": {
@@ -47,10 +57,13 @@
           "$ref": "#/definitions/GatewayActionKind"
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -168,9 +181,7 @@
           "type": "string"
         },
         "bindingRevision": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "cwd": {
           "type": "string"
@@ -243,12 +254,15 @@
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "commandPath": {
           "default": null,
@@ -418,12 +432,15 @@
           "type": "string"
         },
         "observedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/definitions/RuntimeReadinessStatusView"
@@ -875,9 +892,7 @@
   },
   "properties": {
     "bindingRevision": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "changed": {
       "type": "boolean"

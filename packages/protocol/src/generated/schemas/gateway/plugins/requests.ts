@@ -327,13 +327,6 @@ export const gatewayPluginRequestSchemas = {
     }
   },
   "properties": {
-    "adapterMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "gitRef": {
       "default": null,
       "type": [
@@ -450,13 +443,6 @@ export const gatewayPluginRequestSchemas = {
     }
   },
   "properties": {
-    "adapterMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "force": {
       "default": false,
       "type": "boolean"
@@ -714,105 +700,6 @@ export const gatewayPluginRequestSchemas = {
   "title": "PluginSetEnabledParams",
   "type": "object"
 },
-  PluginSetTrustParams: {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
-    "GatewayRequestScope": {
-      "properties": {
-        "cwd": {
-          "type": "string"
-        },
-        "source": {
-          "$ref": "#/definitions/GatewaySourceInput"
-        }
-      },
-      "required": [
-        "cwd",
-        "source"
-      ],
-      "type": "object"
-    },
-    "GatewaySourceInput": {
-      "properties": {
-        "kind": {
-          "type": "string"
-        },
-        "lifetime": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GatewaySourceLifetime"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "rawId": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "rawIdentity": {
-          "default": null
-        },
-        "visibleName": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "type": "object"
-    },
-    "GatewaySourceLifetime": {
-      "enum": [
-        "invocation",
-        "process",
-        "persistent"
-      ],
-      "type": "string"
-    }
-  },
-  "properties": {
-    "scope": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/GatewayRequestScope"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "scopeName": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "selector": {
-      "type": "string"
-    },
-    "trusted": {
-      "default": true,
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "selector"
-  ],
-  "title": "PluginSetTrustParams",
-  "type": "object"
-},
   PluginAuthorityWriteParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -990,6 +877,98 @@ export const gatewayPluginRequestSchemas = {
   "title": "PluginAuthorityRefreshParams",
   "type": "object"
 },
+  PluginAuthoritySetTrustParams: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GatewayRequestScope": {
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/GatewaySourceInput"
+        }
+      },
+      "required": [
+        "cwd",
+        "source"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceInput": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GatewaySourceLifetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rawId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rawIdentity": {
+          "default": null
+        },
+        "visibleName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "GatewaySourceLifetime": {
+      "enum": [
+        "invocation",
+        "process",
+        "persistent"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "selector": {
+      "type": "string"
+    },
+    "trusted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selector",
+    "trusted"
+  ],
+  "title": "PluginAuthoritySetTrustParams",
+  "type": "object"
+},
   PluginCatalogListParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
@@ -1153,13 +1132,6 @@ export const gatewayPluginRequestSchemas = {
     }
   },
   "properties": {
-    "adapterMode": {
-      "default": null,
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "authority": {
       "default": null,
       "type": [

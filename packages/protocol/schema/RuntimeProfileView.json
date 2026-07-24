@@ -23,6 +23,11 @@
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeCapabilityView": {
       "properties": {
         "enabled": {
@@ -52,12 +57,15 @@
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "commandPath": {
           "default": null,
@@ -85,12 +93,15 @@
           "type": "string"
         },
         "observedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/definitions/RuntimeReadinessStatusView"

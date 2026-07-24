@@ -1,12 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "WorkspaceFileEntry": {
       "properties": {
         "depth": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "kind": {
           "$ref": "#/definitions/WorkspaceFileKind"

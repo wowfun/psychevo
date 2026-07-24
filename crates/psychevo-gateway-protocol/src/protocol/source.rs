@@ -7,6 +7,7 @@ pub struct SourceKey(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum GatewaySourceLifetime {
     Invocation,
     Process,
@@ -15,6 +16,7 @@ pub enum GatewaySourceLifetime {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewaySource {
     pub kind: String,
     pub raw_id: String,
@@ -69,6 +71,7 @@ impl GatewaySource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewaySourceInput {
     pub kind: String,
     #[serde(default)]
@@ -84,6 +87,7 @@ pub struct GatewaySourceInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayRequestScope {
     pub cwd: String,
     pub source: GatewaySourceInput,
@@ -120,6 +124,7 @@ impl GatewayThreadSelector {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum BackendKind {
     Native,
     Acp,
@@ -136,6 +141,7 @@ impl BackendKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayBackendInfo {
     pub kind: BackendKind,
     #[serde(
@@ -151,6 +157,7 @@ pub struct GatewayBackendInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayThread {
     pub id: String,
     pub backend: GatewayBackendInfo,
@@ -163,6 +170,7 @@ pub struct GatewayThread {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayTurn {
     pub id: String,
     #[serde(default)]
@@ -178,6 +186,9 @@ pub struct GatewayTurn {
         skip_serializing_if = "Option::is_none"
     )]
     #[ts(optional)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub started_at_ms: Option<i64>,
     #[serde(
         rename = "completedAtMs",
@@ -185,11 +196,15 @@ pub struct GatewayTurn {
         skip_serializing_if = "Option::is_none"
     )]
     #[ts(optional)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub completed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum AgentDeliveryStatusView {
     NotDelivered,
     #[default]
@@ -199,6 +214,7 @@ pub enum AgentDeliveryStatusView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct AgentErrorView {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -233,6 +249,7 @@ pub type GatewayTurnError = AgentErrorView;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum GatewayTurnStatus {
     Queued,
     Running,
@@ -277,14 +294,24 @@ pub enum GatewayInputPart {
         #[serde(default, rename = "mimeType")]
         mime_type: Option<String>,
         #[serde(default)]
+        #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+        #[schemars(with = "Option<JsonSafeI64>")]
+        #[ts(type = "number | null")]
         size: Option<i64>,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayMentionRange {
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub start: usize,
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub end: usize,
 }
 
@@ -324,6 +351,7 @@ pub enum GatewayMentionTarget {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayMention {
     pub visible_text: String,
     pub range: GatewayMentionRange,

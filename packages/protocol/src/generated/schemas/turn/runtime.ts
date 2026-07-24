@@ -567,6 +567,11 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeCapabilityView": {
       "properties": {
         "enabled": {
@@ -596,12 +601,15 @@ export const turnRuntimeSchemas = {
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "commandPath": {
           "default": null,
@@ -629,12 +637,15 @@ export const turnRuntimeSchemas = {
           "type": "string"
         },
         "observedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/definitions/RuntimeReadinessStatusView"
@@ -814,14 +825,24 @@ export const turnRuntimeSchemas = {
 },
   RuntimeHealthView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "checkedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "commandPath": {
       "default": null,
@@ -860,6 +881,11 @@ export const turnRuntimeSchemas = {
   RuntimeReadinessStageView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeReadinessStatusView": {
       "enum": [
         "unchecked",
@@ -877,12 +903,15 @@ export const turnRuntimeSchemas = {
       "type": "string"
     },
     "observedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "status": {
       "$ref": "#/definitions/RuntimeReadinessStatusView"
@@ -972,6 +1001,11 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeCapabilityView": {
       "properties": {
         "enabled": {
@@ -1001,12 +1035,15 @@ export const turnRuntimeSchemas = {
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "commandPath": {
           "default": null,
@@ -1176,12 +1213,15 @@ export const turnRuntimeSchemas = {
           "type": "string"
         },
         "observedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/definitions/RuntimeReadinessStatusView"
@@ -1256,6 +1296,11 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeCapabilityView": {
       "properties": {
         "enabled": {
@@ -1285,12 +1330,15 @@ export const turnRuntimeSchemas = {
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "commandPath": {
           "default": null,
@@ -1460,12 +1508,15 @@ export const turnRuntimeSchemas = {
           "type": "string"
         },
         "observedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/definitions/RuntimeReadinessStatusView"
@@ -1540,6 +1591,11 @@ export const turnRuntimeSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "RuntimeCapabilityView": {
       "properties": {
         "enabled": {
@@ -1569,12 +1625,15 @@ export const turnRuntimeSchemas = {
     "RuntimeHealthView": {
       "properties": {
         "checkedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "commandPath": {
           "default": null,
@@ -1744,12 +1803,15 @@ export const turnRuntimeSchemas = {
           "type": "string"
         },
         "observedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "status": {
           "$ref": "#/definitions/RuntimeReadinessStatusView"
@@ -1863,6 +1925,11 @@ export const turnRuntimeSchemas = {
   RuntimeBindingView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "RuntimeBindingOwnershipView": {
       "enum": [
         "readWrite",
@@ -1887,9 +1954,7 @@ export const turnRuntimeSchemas = {
       "type": "string"
     },
     "bindingRevision": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "cwd": {
       "type": "string"

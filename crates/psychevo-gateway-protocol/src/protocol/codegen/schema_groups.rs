@@ -1,5 +1,8 @@
 fn schema_group_module(name: &str) -> &'static str {
-    if name.starts_with("JsonRpc") || matches!(name, "ClientRequest" | "ServerNotification") {
+    if name.starts_with("JsonRpc")
+        || name.starts_with("JsonSafe")
+        || matches!(name, "ClientRequest" | "ServerNotification")
+    {
         return "rpc";
     }
     if name.starts_with("Source") || name.starts_with("GatewaySource") {

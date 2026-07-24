@@ -66,6 +66,11 @@ export const clientRequestThreadHistoryReadSchema = {
       ],
       "type": "string"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ThreadHistoryReadParams": {
       "properties": {
         "cursor": {
@@ -76,13 +81,15 @@ export const clientRequestThreadHistoryReadSchema = {
           ]
         },
         "limit": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "scope": {
           "$ref": "#/definitions/GatewayRequestScope"

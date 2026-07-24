@@ -47,6 +47,11 @@ export const interactionSchemas = {
         "userInput"
       ],
       "type": "string"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -63,10 +68,13 @@ export const interactionSchemas = {
       "$ref": "#/definitions/GatewayActionKind"
     },
     "leaseExpiresAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "ownerId": {

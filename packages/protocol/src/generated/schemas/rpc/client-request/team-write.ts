@@ -73,6 +73,11 @@ export const clientRequestTeamWriteSchema = {
       ],
       "type": "string"
     },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamMemberInput": {
       "properties": {
         "agent": {
@@ -89,13 +94,15 @@ export const clientRequestTeamWriteSchema = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -152,13 +159,15 @@ export const clientRequestTeamWriteSchema = {
           "type": "string"
         },
         "maxParallelAgents": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "members": {
           "default": [],

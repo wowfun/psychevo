@@ -5,12 +5,18 @@
       "type": "string"
     },
     {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     {
       "type": "null"
     }
   ],
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "title": "JsonRpcId"
 }

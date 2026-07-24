@@ -235,6 +235,11 @@ export const gatewayMcpRequestSchemas = {
         "persistent"
       ],
       "type": "string"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -347,13 +352,15 @@ export const gatewayMcpRequestSchemas = {
       "type": "array"
     },
     "startupTimeoutSecs": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "supportsParallelToolCalls": {
       "default": null,
@@ -363,13 +370,15 @@ export const gatewayMcpRequestSchemas = {
       ]
     },
     "toolTimeoutSecs": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "transport": {
       "type": "string"

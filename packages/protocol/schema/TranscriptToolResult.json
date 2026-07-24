@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
     "TranscriptBlockStatus": {
       "enum": [
         "pending",
@@ -19,8 +24,7 @@
       "type": "string"
     },
     "createdAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "isError": {
       "type": "boolean"
@@ -29,15 +33,13 @@
       "default": null
     },
     "resultMessageSeq": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "status": {
       "$ref": "#/definitions/TranscriptBlockStatus"
     },
     "updatedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     }
   },
   "required": [

@@ -1,5 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "binary": {
       "type": "boolean"
@@ -37,10 +44,12 @@
       "type": "string"
     },
     "sizeBytes": {
-      "default": 0,
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "allOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        }
+      ],
+      "default": 0
     },
     "truncated": {
       "type": "boolean"

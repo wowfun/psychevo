@@ -62,13 +62,16 @@
         "persistent"
       ],
       "type": "string"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
     "cursor": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "scope": {
       "$ref": "#/definitions/GatewayRequestScope"

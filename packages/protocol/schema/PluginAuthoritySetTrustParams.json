@@ -1,5 +1,4 @@
 {
-  "$id": "ClientRequest/plugin-set-trust.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "GatewayRequestScope": {
@@ -63,56 +62,31 @@
         "persistent"
       ],
       "type": "string"
-    },
-    "PluginSetTrustParams": {
-      "properties": {
-        "scope": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/GatewayRequestScope"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "scopeName": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "selector": {
-          "type": "string"
-        },
-        "trusted": {
-          "default": true,
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "selector"
-      ],
-      "type": "object"
     }
   },
   "properties": {
-    "method": {
-      "enum": [
-        "plugin/setTrust"
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GatewayRequestScope"
+        },
+        {
+          "type": "null"
+        }
       ],
+      "default": null
+    },
+    "selector": {
       "type": "string"
     },
-    "params": {
-      "$ref": "#/definitions/PluginSetTrustParams"
+    "trusted": {
+      "type": "boolean"
     }
   },
   "required": [
-    "method",
-    "params"
+    "selector",
+    "trusted"
   ],
-  "title": "ClientRequest plugin/setTrust",
+  "title": "PluginAuthoritySetTrustParams",
   "type": "object"
 }

@@ -241,14 +241,22 @@ export const gatewayCoreSchemas = {
         "interrupted"
       ],
       "type": "string"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "properties": {
     "completedAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "error": {
@@ -273,10 +281,13 @@ export const gatewayCoreSchemas = {
       ]
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "status": {
@@ -351,6 +362,11 @@ export const gatewayCoreSchemas = {
           "type": "object"
         }
       ]
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
     }
   },
   "oneOf": [
@@ -475,12 +491,15 @@ export const gatewayCoreSchemas = {
           "type": "string"
         },
         "size": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "type": {
           "enum": [
@@ -504,16 +523,19 @@ export const gatewayCoreSchemas = {
 },
   GatewayMentionRange: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "end": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "start": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     }
   },
   "required": [
@@ -654,14 +676,10 @@ export const gatewayCoreSchemas = {
     "GatewayMentionRange": {
       "properties": {
         "end": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "start": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         }
       },
       "required": [
@@ -792,6 +810,11 @@ export const gatewayCoreSchemas = {
           "type": "object"
         }
       ]
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {

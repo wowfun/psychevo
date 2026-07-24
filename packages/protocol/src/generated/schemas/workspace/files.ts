@@ -455,6 +455,11 @@ export const workspaceFileSchemas = {
   WorkspaceFileEntry: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "WorkspaceFileKind": {
       "enum": [
         "file",
@@ -465,9 +470,7 @@ export const workspaceFileSchemas = {
   },
   "properties": {
     "depth": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "kind": {
       "$ref": "#/definitions/WorkspaceFileKind"
@@ -568,12 +571,15 @@ export const workspaceFileSchemas = {
   WorkspaceFilesResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "WorkspaceFileEntry": {
       "properties": {
         "depth": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "kind": {
           "$ref": "#/definitions/WorkspaceFileKind"
@@ -1007,6 +1013,13 @@ export const workspaceFileSchemas = {
 },
   WorkspaceFileReadResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "binary": {
       "type": "boolean"
@@ -1044,10 +1057,12 @@ export const workspaceFileSchemas = {
       "type": "string"
     },
     "sizeBytes": {
-      "default": 0,
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "allOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        }
+      ],
+      "default": 0
     },
     "truncated": {
       "type": "boolean"
@@ -1151,6 +1166,18 @@ export const workspaceFileSchemas = {
 },
   WorkspaceFilePreviewOpenResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "binary": {
       "type": "boolean"
@@ -1174,8 +1201,7 @@ export const workspaceFileSchemas = {
       ]
     },
     "expiresAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "lineEnding": {
       "default": null,
@@ -1201,10 +1227,12 @@ export const workspaceFileSchemas = {
       "type": "string"
     },
     "sizeBytes": {
-      "default": 0,
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "allOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        }
+      ],
+      "default": 0
     },
     "truncated": {
       "type": "boolean"
@@ -1353,6 +1381,13 @@ export const workspaceFileSchemas = {
 },
   WorkspaceFileWriteResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "lineEnding": {
       "default": null,
@@ -1368,9 +1403,7 @@ export const workspaceFileSchemas = {
       "type": "string"
     },
     "sizeBytes": {
-      "format": "uint",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     }
   },
   "required": [

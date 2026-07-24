@@ -27,10 +27,13 @@
           ]
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -46,18 +49,19 @@
           ]
         },
         "queuedTurns": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "running": {
           "type": "boolean"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "takeoverState": {
@@ -67,10 +71,13 @@
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -263,6 +270,16 @@
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "PendingActionView": {
       "properties": {
         "actionId": {
@@ -278,10 +295,13 @@
           "$ref": "#/definitions/GatewayActionKind"
         },
         "leaseExpiresAtMs": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "ownerId": {
@@ -333,16 +353,13 @@
     "ThreadCompactionCheckpointView": {
       "properties": {
         "checkpointId": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "firstKeptSessionSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "reason": {
           "type": "string"
@@ -366,19 +383,23 @@
           ]
         },
         "tokensAfter": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "tokensBefore": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -441,19 +462,23 @@
           ]
         },
         "tokensAfter": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "tokensBefore": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "unavailable": {
@@ -545,10 +570,12 @@
           ]
         },
         "hiddenEntryCount": {
-          "default": 0,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "allOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            }
+          ],
+          "default": 0
         },
         "kind": {
           "$ref": "#/definitions/ThreadHistoryEditingKind"
@@ -705,8 +732,7 @@
           ]
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "detail": {
           "type": [
@@ -722,8 +748,7 @@
         },
         "metadata": true,
         "order": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "phaseOrdinal": {
           "format": "uint32",
@@ -763,8 +788,7 @@
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -824,17 +848,19 @@
           "type": "array"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "id": {
           "type": "string"
         },
         "messageSeq": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "metadata": true,
@@ -857,8 +883,7 @@
           ]
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "usage": true
       },
@@ -888,8 +913,7 @@
           "type": "string"
         },
         "createdAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "isError": {
           "type": "boolean"
@@ -898,15 +922,13 @@
           "default": null
         },
         "resultMessageSeq": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "$ref": "#/definitions/TranscriptBlockStatus"
         },
         "updatedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         }
       },
       "required": [
@@ -939,9 +961,7 @@
     {
       "properties": {
         "cleared": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "interrupted": {
           "type": "boolean"
@@ -952,7 +972,7 @@
           ],
           "type": "string"
         },
-        "thread_id": {
+        "threadId": {
           "type": "string"
         }
       },
@@ -960,7 +980,7 @@
         "cleared",
         "interrupted",
         "kind",
-        "thread_id"
+        "threadId"
       ],
       "type": "object"
     },
@@ -975,14 +995,14 @@
           ],
           "type": "string"
         },
-        "thread_id": {
+        "threadId": {
           "type": "string"
         }
       },
       "required": [
         "accepted",
         "kind",
-        "thread_id"
+        "threadId"
       ],
       "type": "object"
     },
@@ -997,14 +1017,14 @@
         "result": {
           "$ref": "#/definitions/ThreadCompactionResult"
         },
-        "thread_id": {
+        "threadId": {
           "type": "string"
         }
       },
       "required": [
         "kind",
         "result",
-        "thread_id"
+        "threadId"
       ],
       "type": "object"
     },
@@ -1069,7 +1089,7 @@
         "staged": {
           "type": "boolean"
         },
-        "thread_id": {
+        "threadId": {
           "type": "string"
         }
       },
@@ -1078,7 +1098,7 @@
         "noOp",
         "snapshot",
         "staged",
-        "thread_id"
+        "threadId"
       ],
       "type": "object"
     },
@@ -1096,7 +1116,7 @@
         "snapshot": {
           "$ref": "#/definitions/ThreadSnapshot"
         },
-        "thread_id": {
+        "threadId": {
           "type": "string"
         }
       },
@@ -1104,7 +1124,7 @@
         "draft",
         "kind",
         "snapshot",
-        "thread_id"
+        "threadId"
       ],
       "type": "object"
     }

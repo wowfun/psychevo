@@ -187,12 +187,15 @@ export const turnControlSchemas = {
               "type": "string"
             },
             "size": {
-              "default": null,
-              "format": "int64",
-              "type": [
-                "integer",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/JsonSafeI64"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "type": {
               "enum": [
@@ -235,14 +238,10 @@ export const turnControlSchemas = {
     "GatewayMentionRange": {
       "properties": {
         "end": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "start": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         }
       },
       "required": [
@@ -435,6 +434,16 @@ export const turnControlSchemas = {
         "persistent"
       ],
       "type": "string"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     },
     "RunnableTargetInput": {
       "properties": {

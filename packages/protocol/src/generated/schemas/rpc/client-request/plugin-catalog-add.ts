@@ -68,13 +68,6 @@ export const clientRequestPluginCatalogAddSchema = {
     },
     "PluginCatalogAddParams": {
       "properties": {
-        "adapterMode": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "authority": {
           "default": null,
           "type": [

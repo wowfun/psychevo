@@ -197,13 +197,13 @@
       "$ref": "ClientRequest/plugin-set-enabled.json"
     },
     {
-      "$ref": "ClientRequest/plugin-set-trust.json"
-    },
-    {
       "$ref": "ClientRequest/plugin-authority-write.json"
     },
     {
       "$ref": "ClientRequest/plugin-authority-refresh.json"
+    },
+    {
+      "$ref": "ClientRequest/plugin-authority-set-trust.json"
     },
     {
       "$ref": "ClientRequest/plugin-catalog-list.json"

@@ -19,6 +19,9 @@ pub enum GatewayEvent {
         #[serde(rename = "turnId")]
         turn_id: String,
         #[serde(rename = "queuePosition")]
+        #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+        #[schemars(with = "JsonSafeU64")]
+        #[ts(type = "number")]
         queue_position: usize,
     },
     TurnCompleted {
@@ -89,6 +92,7 @@ pub enum GatewayEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewaySelectedSkill {
     pub name: String,
     pub path: String,
@@ -96,6 +100,7 @@ pub struct GatewaySelectedSkill {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum PermissionDecision {
     AllowOnce,
     AllowTurn,
@@ -106,6 +111,7 @@ pub enum PermissionDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum GatewayActionKind {
     Permission,
     Clarify,
@@ -115,6 +121,7 @@ pub enum GatewayActionKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum GatewayActionOutcome {
     Accepted,
     Rejected,
@@ -125,6 +132,7 @@ pub enum GatewayActionOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum TranscriptEntryRole {
     User,
     Assistant,
@@ -133,6 +141,7 @@ pub enum TranscriptEntryRole {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum TranscriptBlockKind {
     Text,
     Reasoning,
@@ -156,6 +165,7 @@ pub enum TranscriptBlockKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum TranscriptBlockStatus {
     Pending,
     Running,
@@ -168,8 +178,12 @@ pub enum TranscriptBlockStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TranscriptToolResult {
     #[serde(rename = "resultMessageSeq")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub result_message_seq: i64,
     pub status: TranscriptBlockStatus,
     pub content: String,
@@ -179,17 +193,27 @@ pub struct TranscriptToolResult {
     #[ts(type = "unknown | null")]
     pub metadata: Option<Value>,
     #[serde(rename = "createdAtMs")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TranscriptBlock {
     pub id: String,
     pub kind: TranscriptBlockKind,
     pub status: TranscriptBlockStatus,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub order: i64,
     #[serde(default, rename = "phaseOrdinal", skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -206,13 +230,20 @@ pub struct TranscriptBlock {
     #[serde(default)]
     pub result: Option<TranscriptToolResult>,
     #[serde(rename = "createdAtMs")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TranscriptEntry {
     pub id: String,
     #[serde(rename = "threadId")]
@@ -220,6 +251,9 @@ pub struct TranscriptEntry {
     #[serde(rename = "turnId")]
     pub turn_id: Option<String>,
     #[serde(rename = "messageSeq")]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub message_seq: Option<i64>,
     pub role: TranscriptEntryRole,
     pub status: TranscriptBlockStatus,
@@ -232,23 +266,39 @@ pub struct TranscriptEntry {
     #[ts(type = "unknown | null")]
     pub accounting: Option<Value>,
     #[serde(rename = "createdAtMs")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub created_at_ms: i64,
     #[serde(rename = "updatedAtMs")]
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct GatewayActivityView {
     pub running: bool,
     #[serde(default)]
     pub active_turn_id: Option<String>,
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub queued_turns: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub started_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub updated_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -258,6 +308,9 @@ pub struct GatewayActivityView {
     pub owner_surface: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub lease_expires_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -266,6 +319,7 @@ pub struct GatewayActivityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct PendingActionView {
     pub action_id: String,
     pub kind: GatewayActionKind,
@@ -295,11 +349,15 @@ pub struct PendingActionView {
     pub owner_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub lease_expires_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct TurnStartReceipt {
     pub client_turn_id: String,
     pub turn_id: String,
@@ -307,6 +365,7 @@ pub struct TurnStartReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
     pub source: GatewaySource,
     pub scope: GatewayRequestScope,
@@ -326,6 +385,7 @@ pub struct ThreadSnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadHistoryEditingKind {
     WorkspaceUndo,
     ConversationEdit,
@@ -333,6 +393,7 @@ pub enum ThreadHistoryEditingKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadHistoryRecoveryActionKind {
     RedoWorkspace,
     RestoreHistory,
@@ -340,11 +401,15 @@ pub enum ThreadHistoryRecoveryActionKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadHistoryEditingView {
     pub kind: ThreadHistoryEditingKind,
     #[serde(default, rename = "boundaryMessageId")]
     pub boundary_message_id: Option<String>,
     #[serde(default, rename = "hiddenEntryCount")]
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub hidden_entry_count: usize,
     #[serde(default, rename = "replacementDraft")]
     pub replacement_draft: Option<ThreadEditableDraft>,
@@ -354,6 +419,7 @@ pub struct ThreadHistoryEditingView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadHistoryOwnerView {
     Psychevo,
     Agent,
@@ -362,6 +428,7 @@ pub enum ThreadHistoryOwnerView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ThreadHistoryFidelityView {
     Full,
     Summary,
@@ -371,6 +438,7 @@ pub enum ThreadHistoryFidelityView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ThreadHistoryView {
     pub owner: ThreadHistoryOwnerView,
     pub fidelity: ThreadHistoryFidelityView,
@@ -382,6 +450,7 @@ pub struct ThreadHistoryView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SessionProjectView {
     pub cwd: String,
     pub label: String,
@@ -390,6 +459,7 @@ pub struct SessionProjectView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum SessionLifecycleActionKind {
     Fork,
     Delete,
@@ -397,6 +467,7 @@ pub enum SessionLifecycleActionKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SessionLifecycleActionView {
     pub id: SessionLifecycleActionKind,
     pub enabled: bool,
@@ -406,6 +477,7 @@ pub struct SessionLifecycleActionView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SessionLifecycleView {
     #[serde(default, rename = "targetLabel")]
     pub target_label: Option<String>,
@@ -415,6 +487,7 @@ pub struct SessionLifecycleView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct SessionSummaryView {
     pub id: String,
     pub cwd: String,
@@ -423,16 +496,34 @@ pub struct SessionSummaryView {
     pub model: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub started_at_ms: i64,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub updated_at_ms: Option<i64>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
     #[serde(default)]
     pub end_reason: Option<String>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub archived_at_ms: Option<i64>,
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub message_count: usize,
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub tool_call_count: usize,
     #[serde(default)]
     pub activity: GatewayActivityView,

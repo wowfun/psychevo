@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelListParams {
     #[serde(default)]
     pub scope: Option<GatewayRequestScope>,
@@ -7,6 +8,7 @@ pub struct ChannelListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelIdParams {
     pub id: String,
     #[serde(default)]
@@ -15,6 +17,7 @@ pub struct ChannelIdParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelEnableParams {
     pub id: String,
     pub enabled: bool,
@@ -24,6 +27,7 @@ pub struct ChannelEnableParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelUpdateParams {
     pub id: String,
     #[serde(default)]
@@ -59,6 +63,7 @@ pub struct ChannelUpdateParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelDoctorParams {
     #[serde(default)]
     pub id: Option<String>,
@@ -70,6 +75,7 @@ pub struct ChannelDoctorParams {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelWechatQrStartParams {
     #[serde(default)]
     pub id: Option<String>,
@@ -83,6 +89,7 @@ pub struct ChannelWechatQrStartParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelWechatQrStartResult {
     pub session_id: String,
     pub qr_url: String,
@@ -92,12 +99,19 @@ pub struct ChannelWechatQrStartResult {
     pub qr_svg: Option<String>,
     pub status: String,
     pub message: String,
+    #[serde(serialize_with = "json_safe_u64::serialize", deserialize_with = "json_safe_u64::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub interval_ms: u64,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub expires_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelWechatQrPollParams {
     pub session_id: String,
     #[serde(default)]
@@ -108,6 +122,7 @@ pub struct ChannelWechatQrPollParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelWechatQrPollResult {
     pub done: bool,
     pub status: String,
@@ -115,29 +130,36 @@ pub struct ChannelWechatQrPollResult {
     #[serde(default)]
     pub channel: Option<ChannelConfigView>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub expires_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelListResult {
     pub channels: Vec<ChannelConfigView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelEnableResult {
     pub channel: ChannelConfigView,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelSourceListResult {
     pub sources: Vec<ChannelSourceBindingView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelSourceBindingView {
     pub source_key: String,
     pub connection_id: String,
@@ -157,12 +179,19 @@ pub struct ChannelSourceBindingView {
     pub thread_title: Option<String>,
     pub cwd: String,
     pub activity_status: String,
+    #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+    #[schemars(with = "JsonSafeU64")]
+    #[ts(type = "number")]
     pub queued_turns: usize,
+    #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+    #[schemars(with = "JsonSafeI64")]
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelConfigView {
     pub id: String,
     pub channel: String,
@@ -197,19 +226,35 @@ pub struct ChannelConfigView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelRunnerView {
     pub state: String,
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub last_poll_at_ms: Option<i64>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub last_healthy_poll_at_ms: Option<i64>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub last_inbound_at_ms: Option<i64>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub last_outbound_at_ms: Option<i64>,
     #[serde(default)]
+    #[serde(serialize_with = "option_json_safe_i64::serialize", deserialize_with = "option_json_safe_i64::deserialize")]
+    #[schemars(with = "Option<JsonSafeI64>")]
+    #[ts(type = "number | null")]
     pub last_ilink_errcode: Option<i64>,
     #[serde(default)]
     pub last_error: Option<String>,
@@ -217,6 +262,7 @@ pub struct ChannelRunnerView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelCredentialView {
     #[serde(default)]
     pub env: Option<String>,
@@ -225,6 +271,7 @@ pub struct ChannelCredentialView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelAllowlistView {
     #[serde(default)]
     pub users: Vec<String>,
@@ -235,6 +282,7 @@ pub struct ChannelAllowlistView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelDoctorCheck {
     pub name: String,
     pub status: String,
@@ -243,6 +291,7 @@ pub struct ChannelDoctorCheck {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelDoctorChannelView {
     pub id: String,
     pub channel: String,
@@ -255,6 +304,7 @@ pub struct ChannelDoctorChannelView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ChannelDoctorResult {
     pub live: bool,
     pub channels: Vec<ChannelDoctorChannelView>,

@@ -76,10 +76,16 @@ export const launchSchemas = {
 },
   CreateLaunchResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "expiresAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "launchId": {
       "type": "string"
@@ -98,23 +104,36 @@ export const launchSchemas = {
 },
   ManagedServerState: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "baseUrl": {
       "type": "string"
     },
     "executableInode": {
-      "format": "uint64",
-      "minimum": 0.0,
       "type": [
-        "integer",
+        "string",
         "null"
       ]
     },
     "executableModifiedMs": {
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "executablePath": {
@@ -124,11 +143,13 @@ export const launchSchemas = {
       ]
     },
     "executableSize": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "instanceId": {
@@ -146,8 +167,7 @@ export const launchSchemas = {
       "type": "string"
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "staticDir": {
       "type": [

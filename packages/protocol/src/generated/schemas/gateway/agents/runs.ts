@@ -188,6 +188,13 @@ export const gatewayAgentRunSchemas = {
 },
   AgentRunView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "agentName": {
       "type": "string"
@@ -226,12 +233,15 @@ export const gatewayAgentRunSchemas = {
       ]
     },
     "endedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "error": {
       "default": null,
@@ -271,8 +281,7 @@ export const gatewayAgentRunSchemas = {
       "type": "string"
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "status": {
       "type": "string"
@@ -324,15 +333,24 @@ export const gatewayAgentRunSchemas = {
 },
   AgentStatusControlView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "concurrencyCap": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "maxSpawnDepthCap": {
       "format": "uint8",
@@ -353,6 +371,16 @@ export const gatewayAgentRunSchemas = {
   TeamRunView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "TeamMemberView": {
       "properties": {
         "agent": {
@@ -369,13 +397,15 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -422,12 +452,15 @@ export const gatewayAgentRunSchemas = {
       ]
     },
     "endedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "finalSummary": {
       "default": null,
@@ -443,9 +476,7 @@ export const gatewayAgentRunSchemas = {
       "type": "string"
     },
     "maxParallelAgents": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "members": {
       "items": {
@@ -471,8 +502,7 @@ export const gatewayAgentRunSchemas = {
       ]
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "status": {
       "type": "string"
@@ -496,14 +526,24 @@ export const gatewayAgentRunSchemas = {
 },
   MissionRunView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "endedAtMs": {
-      "default": null,
-      "format": "int64",
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeI64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "finalSummary": {
       "default": null,
@@ -525,8 +565,7 @@ export const gatewayAgentRunSchemas = {
       "type": "string"
     },
     "startedAtMs": {
-      "format": "int64",
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeI64"
     },
     "status": {
       "type": "string"
@@ -599,12 +638,15 @@ export const gatewayAgentRunSchemas = {
           ]
         },
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "error": {
           "default": null,
@@ -644,8 +686,7 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "type": "string"
@@ -697,13 +738,15 @@ export const gatewayAgentRunSchemas = {
     "AgentStatusControlView": {
       "properties": {
         "concurrencyCap": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "maxSpawnDepthCap": {
           "format": "uint8",
@@ -719,6 +762,16 @@ export const gatewayAgentRunSchemas = {
         "spawningPaused"
       ],
       "type": "object"
+    },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
     }
   },
   "properties": {
@@ -781,12 +834,15 @@ export const gatewayAgentRunSchemas = {
           ]
         },
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "error": {
           "default": null,
@@ -826,8 +882,7 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "type": "string"
@@ -879,13 +934,15 @@ export const gatewayAgentRunSchemas = {
     "AgentStatusControlView": {
       "properties": {
         "concurrencyCap": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "maxSpawnDepthCap": {
           "format": "uint8",
@@ -902,15 +959,28 @@ export const gatewayAgentRunSchemas = {
       ],
       "type": "object"
     },
+    "JsonSafeI64": {
+      "maximum": 9007199254740991.0,
+      "minimum": -9007199254740991.0,
+      "type": "integer"
+    },
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "MissionRunView": {
       "properties": {
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "finalSummary": {
           "default": null,
@@ -932,8 +1002,7 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "type": "string"
@@ -979,13 +1048,15 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "maxTurns": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "role": {
           "default": null,
@@ -1032,12 +1103,15 @@ export const gatewayAgentRunSchemas = {
           ]
         },
         "endedAtMs": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "$ref": "#/definitions/JsonSafeI64"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "finalSummary": {
           "default": null,
@@ -1053,9 +1127,7 @@ export const gatewayAgentRunSchemas = {
           "type": "string"
         },
         "maxParallelAgents": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeU64"
         },
         "members": {
           "items": {
@@ -1081,8 +1153,7 @@ export const gatewayAgentRunSchemas = {
           ]
         },
         "startedAtMs": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/definitions/JsonSafeI64"
         },
         "status": {
           "type": "string"

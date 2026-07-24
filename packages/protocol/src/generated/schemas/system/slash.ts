@@ -37,6 +37,11 @@ export const systemSlashSchemas = {
   SlashSettingsUpdateParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ModelSettingsScope": {
       "enum": [
         "global"
@@ -118,13 +123,15 @@ export const systemSlashSchemas = {
       ]
     },
     "leaderTimeoutMs": {
-      "default": null,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": [
-        "integer",
-        "null"
-      ]
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"
@@ -187,6 +194,11 @@ export const systemSlashSchemas = {
   SlashSettingsResult: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "ModelSettingsScope": {
       "enum": [
         "global"
@@ -265,9 +277,7 @@ export const systemSlashSchemas = {
       "type": "string"
     },
     "leaderTimeoutMs": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
+      "$ref": "#/definitions/JsonSafeU64"
     },
     "scope": {
       "$ref": "#/definitions/ModelSettingsScope"
