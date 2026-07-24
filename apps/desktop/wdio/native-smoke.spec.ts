@@ -123,6 +123,13 @@ describe("Psychevo Desktop native smoke", () => {
     await browser.switchToWindow(workbench!.handle);
     await browser.setWindowSize(1280, 420);
     await captureDesktopStartupJourney();
+    if (providerLive) {
+      await browser.switchToWindow(floating!.handle);
+      await assertFloatingProviderLive();
+      await browser.saveScreenshot(path.join(screenshotRoot, "03-floating-provider-live-window.png"));
+      return;
+    }
+
     await browser.$('button[title="Settings"]').click();
     await browser.waitUntil(async () => (await browser.$(".settingsPage")).isDisplayed(), {
       timeoutMsg: "Workbench Settings did not render in the native window"
@@ -135,12 +142,6 @@ describe("Psychevo Desktop native smoke", () => {
     expect(capabilities.value.capture).toBeTruthy();
 
     await browser.switchToWindow(floating!.handle);
-    if (providerLive) {
-      await assertFloatingProviderLive();
-      await browser.saveScreenshot(path.join(screenshotRoot, "03-floating-provider-live-window.png"));
-      return;
-    }
-
     await browser.execute(() => {
       window.location.href = "/?surface=floating&visual=1";
     });

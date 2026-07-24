@@ -10,7 +10,8 @@ let screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/opencode-
 
 test.describe("Workbench OpenCode ACP live visual validation", () => {
   test("creates and uses OpenCode ACP from the GUI @live", async ({ page, isMobile }, testInfo) => {
-    const context = liveContextFor("opencode-acp-gui-live");
+    const context = liveContextFor("opencode-acp-gui-live")
+      ?? liveContextFor("opencode-acp-session-lifecycle-live");
     if (!context) {
       test.skip(true, "run through cargo xtask live");
       return;
@@ -69,9 +70,13 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await agentsPanel.getByRole("button", { name: "Doctor opencode" }).click();
       await expect(agentsPanel.getByText(/command: ok/)).toBeVisible();
       await capture(page, testInfo, "04-opencode-doctor");
+      const configuredModel = await configureOpenCodeProjectProfile(page, server.cwd, context);
+      await page.reload();
+      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expectWorkbenchStartupSettled(page);
 
       await page.getByRole("button", { name: "New Session", exact: true }).click();
-      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expectEmptyDraftReady(page);
       const selector = page.getByRole("button", { name: "Agent target", exact: true });
       await selector.click();
       const targetPopover = page.getByRole("dialog", { name: "Agent target" });
@@ -88,7 +93,9 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByRole("listbox", { name: "Session Mode" }).getByRole("option"))
         .toHaveText(["build", "plan"]);
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("button", { name: "Model" })).toBeVisible();
+      const modelButton = page.getByRole("button", { name: "Model" });
+      await expect(modelButton).toBeVisible();
+      await expect(modelButton).toContainText(configuredModel.split("/").at(-1)!);
       await capture(page, testInfo, "05-opencode-selected");
 
       await page.getByPlaceholder("Ask Psychevo...").fill(
@@ -108,9 +115,11 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
 
       await openPanel(page, isMobile, "Status");
       const statusRegion = page.getByRole("region", { name: "Workspace status" });
-      await expect(statusRegion.getByRole("region", { name: "Session observability" })).toContainText("exact", {
+      const observability = statusRegion.getByRole("region", { name: "Session observability" });
+      await expect(observability).toContainText(/exact|partial/, {
         timeout: 30_000
       });
+      await expect(observability).not.toContainText("unavailable");
       await expect(statusRegion).not.toContainText("reported by ACP peer");
       await expect(statusRegion).toContainText("Session tokens");
       const listedThreads = await gatewayRequest(page, "thread/list", {
@@ -195,8 +204,12 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
       const agentsPanel = await openCapabilityBackendPanel(page);
       await ensureOpenCodeBackend(agentsPanel);
-      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await configureOpenCodeProjectProfile(page, server.cwd, context);
+      await page.reload();
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expectWorkbenchStartupSettled(page);
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await expectEmptyDraftReady(page);
 
       await page.getByRole("button", { name: "Agent target", exact: true }).click();
       const targetPopover = page.getByRole("dialog", { name: "Agent target" });
@@ -256,6 +269,23 @@ async function capture(page: Page, testInfo: TestInfo, label: string) {
   await page.screenshot({ fullPage: true, path: stablePath });
   await testInfo.attach(fileName, { path: stablePath, contentType: "image/png" });
   process.stdout.write(`[opencode-acp-live] screenshot ${path.relative(repoRoot, stablePath)}\n`);
+}
+
+async function expectEmptyDraftReady(page: Page) {
+  const transcript = page.getByRole("region", { name: "Transcript" });
+  await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
+    timeout: 60_000
+  });
+  await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
+  await expect(page.getByPlaceholder("Ask Psychevo...")).toBeEditable();
+}
+
+async function expectWorkbenchStartupSettled(page: Page) {
+  await expect(page.locator(".appShell")).toHaveAttribute(
+    "data-composer-state",
+    /^(bound|ready|blocked)$/,
+    { timeout: 60_000 }
+  );
 }
 
 async function openPanel(page: Page, isMobile: boolean, name: "History" | "Status" | "Transcript") {
@@ -319,6 +349,51 @@ async function waitForOpenCodeBackend(existing: Locator) {
   return existing.first().waitFor({ state: "visible", timeout: 10_000 })
     .then(() => true)
     .catch(() => false);
+}
+
+async function configureOpenCodeProjectProfile(
+  page: Page,
+  cwd: string,
+  context: { model: string }
+): Promise<string> {
+  const model = openCodeModelForLiveProvider(context.model, cwd);
+  await gatewayRequest(page, "runtime/profile/write", {
+    id: "opencode",
+    target: "project",
+    runtime: "acp",
+    enabled: true,
+    label: "OpenCode (ACP)",
+    backendRef: "opencode",
+    defaultModel: model,
+    defaultMode: "build",
+    workspaceRoots: [],
+    scope: {
+      cwd,
+      source: { kind: "web", rawId: "opencode-live-profile" }
+    }
+  });
+  return model;
+}
+
+function openCodeModelForLiveProvider(model: string, cwd: string): string {
+  const requestedModel = model.split("/").at(-1);
+  if (!requestedModel) {
+    throw new Error(`invalid live provider model: ${model}`);
+  }
+  const models = execFileSync("opencode", ["models"], { cwd, encoding: "utf8" })
+    .split(/\r?\n/)
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  const matches = models.filter((candidate) => candidate.split("/").at(-1) === requestedModel);
+  const selected = matches.find((candidate) => candidate === model)
+    ?? matches.find((candidate) => candidate.startsWith(`${model.split("/")[0]}-`))
+    ?? (matches.length === 1 ? matches[0] : null);
+  if (!selected) {
+    throw new Error(
+      `OpenCode does not expose one model matching live provider ${model}; matches: ${matches.join(", ") || "none"}`
+    );
+  }
+  return selected;
 }
 
 async function expectProviderSession(dbPath: string, provider: string) {

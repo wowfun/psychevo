@@ -733,6 +733,34 @@ describe("Workbench capabilities management", () => {
     });
   });
 
+  it("keeps fingerprint trust on the isolated Codex authority RPC", async () => {
+    gatewayMock.codexPluginInstalled = true;
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+    fireEvent.click(await within(region).findByRole("button", { name: "Plugin review" }));
+
+    const trust = await within(region).findByRole("button", { name: "Trust" });
+    fireEvent.click(trust);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Trust Codex plugin review for its current package fingerprint?"
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Trust fingerprint" }));
+
+    await waitFor(() => {
+      expect(gatewayMock.requestLog).toContainEqual({
+        method: "plugin/authority/setTrust",
+        params: expect.objectContaining({
+          selector: "codex:review@openai",
+          trusted: true
+        })
+      });
+    });
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/setTrust")).toBe(false);
+  });
+
   it("manages the isolated Codex plugin authority without exposing app-server RPC", async () => {
     render(<App />);
 
@@ -974,8 +1002,44 @@ describe("Workbench capabilities management", () => {
     await waitFor(() => {
       expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/import/inspect")).toBe(true);
     });
-    expect(within(region).getByText("codex / Available")).toBeTruthy();
+    expect(within(region).getByText("codex / installable")).toBeTruthy();
     expect(within(region).getByText("skills, mcp")).toBeTruthy();
     expect(within(region).getByText("apps")).toBeTruthy();
+    expect(within(region).queryByLabelText("Plugin adapter mode")).toBeNull();
+  });
+
+  it("keeps foreign plugin sources inspection-only", async () => {
+    gatewayMock.pluginInspectionResult = {
+      success: true,
+      inspection: {
+        name: "hermes-cleanup",
+        framework: "hermes",
+        support: "inspection_only",
+        source_kind: "local",
+        declared_lanes: ["tools"],
+        unsupported_lanes: ["provider_execution"],
+        stages: []
+      }
+    };
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capabilities" }));
+    const region = await screen.findByRole("region", { name: "Capabilities" });
+    fireEvent.click(within(region).getByRole("tab", { name: "Plugins" }));
+    await within(region).findByRole("button", { name: /writer-kit/i });
+    fireEvent.click(within(region).getByRole("button", { name: "Install plugin" }));
+    fireEvent.change(await within(region).findByLabelText("Plugin source"), {
+      target: { value: "/tmp/plugins/hermes-cleanup" }
+    });
+    fireEvent.click(within(region).getByRole("button", { name: "Inspect" }));
+
+    expect(await within(region).findByText("hermes / inspection_only")).toBeTruthy();
+    expect(
+      within(region).getByText(/Configure its Hermes or OpenCode ACP Agent runtime profile/)
+    ).toBeTruthy();
+    expect(
+      (within(region).getByRole("button", { name: "Install" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    expect(gatewayMock.requestLog.some((entry) => entry.method === "plugin/setTrust")).toBe(false);
   });
 });

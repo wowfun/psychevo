@@ -30,7 +30,6 @@ type PluginInstallDraft = {
   kind: "local" | "git" | "npm";
   npmVersion: string;
   npmRegistry: string;
-  adapterMode: "manifest_only" | "adapter_host" | "disabled";
   force: boolean;
   inspection: JsonObject | null;
 };
@@ -260,7 +259,7 @@ export function CapabilitiesPage({
   const [refreshToken, setRefreshToken] = useState(0);
   const [createPanel, setCreatePanel] = useState<CapabilityTab | null>(null);
   const [skillInstall, setSkillInstall] = useState<SkillInstallDraft>({ source: "", name: "", target: "profile", force: false });
-  const [pluginInstall, setPluginInstall] = useState<PluginInstallDraft>({ source: "", kind: "local", npmVersion: "", npmRegistry: "", adapterMode: "manifest_only", force: false, inspection: null });
+  const [pluginInstall, setPluginInstall] = useState<PluginInstallDraft>({ source: "", kind: "local", npmVersion: "", npmRegistry: "", force: false, inspection: null });
   const [toolDraft, setToolDraft] = useState({ name: "", description: "", tools: "", includes: "", force: false });
   const [mcpDraft, setMcpDraft] = useState({
     name: "",
@@ -2389,13 +2388,16 @@ function CapabilityActions({
     const trust = Object.keys(detailPlugin).length > 0
       ? objectField(detailPlugin, "trust")
       : objectField(row.raw, "trust");
-    const needsTrust = boolField(trust, "required") && stringField(trust, "status") !== "trusted";
     const selector = pluginSelector(row);
     const scopeName = pluginMutationScope(row);
     const packageMutable = pluginPackageMutable(row);
     const removable = pluginRemovable(row);
     const codexAuthority = pluginAuthorityKind(row) === "codex";
     const installed = boolField(row.raw, "installed");
+    const needsTrust = codexAuthority
+      && installed
+      && boolField(trust, "required")
+      && stringField(trust, "status") !== "trusted";
     const policy = objectField(row.raw, "policy");
     const profileEnabled = boolField(policy, "profileEnabled");
     const projectOverride = objectValue(policy).projectOverride;
@@ -2405,7 +2407,7 @@ function CapabilityActions({
       <div className="capabilityActionGrid">
         <ActionButton disabled={busy} icon={<Play size={14} />} onClick={() => void mutate(() => client.request("plugin/doctor", { selector, scope }), { receipt: false })} size="compact" type="button">Doctor</ActionButton>
         {needsTrust && packageMutable && (
-          <ActionButton disabled={busy} icon={<LogIn size={14} />} onClick={() => runConfirmed(`Trust plugin ${row.name} for its current package fingerprint?`, "Trust fingerprint", () => mutate(() => client.request("plugin/setTrust", { selector, scopeName, trusted: true, scope })), "caution")} size="compact" type="button" variant="caution">Trust</ActionButton>
+          <ActionButton disabled={busy} icon={<LogIn size={14} />} onClick={() => runConfirmed(`Trust Codex plugin ${row.name} for its current package fingerprint?`, "Trust fingerprint", () => mutate(() => client.request("plugin/authority/setTrust", { selector, trusted: true, scope })), "caution")} size="compact" type="button" variant="caution">Trust</ActionButton>
         )}
         {codexAuthority && installed && (
           <>
@@ -2536,19 +2538,20 @@ function CapabilityForms(props: {
   if (!client || !scope || !open) return null;
   if (tab === "plugins") {
     const draft = props.pluginInstall;
+    const inspectionOnly = stringField(draft.inspection ?? {}, "support") === "inspection_only";
     const inspectParams = {
       source: draft.source,
       sourceKind: draft.kind,
       gitRef: null,
       npmVersion: draft.kind === "npm" ? draft.npmVersion || null : null,
       npmRegistry: draft.kind === "npm" ? draft.npmRegistry || null : null,
-      adapterMode: draft.adapterMode,
       scope
     };
     return (
       <CreatePanel className="capabilityCreatePanel" description="Inspect and install a plugin package." icon={<Plus size={14} />} id="capability-create-plugins" layout="side" onClose={onClose} title="Install plugin">
         <form className="capabilityForm" onSubmit={async (event) => {
           event.preventDefault();
+          if (inspectionOnly) return;
           const install = async () => {
             const ok = await mutate(() => client.request("plugin/install", { ...inspectParams, force: draft.force }));
             if (ok) onClose();
@@ -2577,11 +2580,6 @@ function CapabilityForms(props: {
               <input aria-label="Npm registry" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, npmRegistry: event.target.value, inspection: null })} placeholder="registry" value={draft.npmRegistry} />
             </>
           )}
-          <select aria-label="Plugin adapter mode" className="pevo-fieldControl" onChange={(event) => props.setPluginInstall({ ...draft, adapterMode: pluginAdapterModeValue(event.target.value), inspection: null })} value={draft.adapterMode}>
-            <option value="manifest_only">Manifest only</option>
-            <option value="adapter_host">Adapter host</option>
-            <option value="disabled">Disabled</option>
-          </select>
           <label><input checked={draft.force} className="pevo-choiceControl" onChange={(event) => props.setPluginInstall({ ...draft, force: event.target.checked })} type="checkbox" /> Force</label>
           <div className="capabilityFormActions">
             <ActionButton disabled={busy || !draft.source.trim()} icon={<Search size={14} />} onClick={() => {
@@ -2591,8 +2589,9 @@ function CapabilityForms(props: {
                 return result;
               }, { receipt: false, refresh: false });
             }} type="button" variant="secondary">Inspect</ActionButton>
-            <ActionButton disabled={busy || !draft.source.trim()} icon={<Plus size={14} />} type="submit" variant="primary">Install</ActionButton>
+            <ActionButton disabled={busy || !draft.source.trim() || inspectionOnly} icon={<Plus size={14} />} type="submit" variant="primary">Install</ActionButton>
           </div>
+          {inspectionOnly && <p className="capabilityFormHint">This source is inspection-only. Configure its Hermes or OpenCode ACP Agent runtime profile to execute it.</p>}
           {draft.inspection && <PluginInspectionSummary inspection={draft.inspection} />}
         </form>
       </CreatePanel>
@@ -3551,18 +3550,18 @@ function isBuiltInToolsetName(value: string): boolean {
 }
 
 function PluginInspectionSummary({ inspection }: { inspection: JsonObject }) {
-  const lanes = arrayStrings(inspection.target_lanes);
+  const lanes = arrayStrings(inspection.declared_lanes);
   const unsupported = arrayStrings(inspection.unsupported_lanes);
   const stages = arrayObjects(inspection.stages);
   return (
     <section className="pluginInspection" aria-label="Plugin inspection">
       <div>
         <strong>{stringField(inspection, "name") || "Plugin"}</strong>
-        <span>{[stringField(inspection, "framework"), stringField(inspection, "status")].filter(Boolean).join(" / ")}</span>
+        <span>{[stringField(inspection, "framework"), stringField(inspection, "support")].filter(Boolean).join(" / ")}</span>
       </div>
       <dl className="capabilityKeyValues pluginInspectionGrid">
         <div><dt>Source</dt><dd>{stringField(inspection, "source_kind") || "local"}</dd></div>
-        <div><dt>Mode</dt><dd>{stringField(inspection, "adapter_mode") || "manifest_only"}</dd></div>
+        <div><dt>Support</dt><dd>{stringField(inspection, "support") || "unsupported"}</dd></div>
         {lanes.length > 0 && <div><dt>Lanes</dt><dd>{lanes.join(", ")}</dd></div>}
         {unsupported.length > 0 && <div><dt>Unsupported</dt><dd>{unsupported.join(", ")}</dd></div>}
       </dl>
@@ -3581,11 +3580,6 @@ function PluginInspectionSummary({ inspection }: { inspection: JsonObject }) {
 
 function pluginKindValue(value: string): PluginInstallDraft["kind"] {
   return value === "git" || value === "npm" ? value : "local";
-}
-
-function pluginAdapterModeValue(value: string): PluginInstallDraft["adapterMode"] {
-  if (value === "adapter_host" || value === "disabled") return value;
-  return "manifest_only";
 }
 
 function KeyValueView({ value }: { value: JsonObject }) {

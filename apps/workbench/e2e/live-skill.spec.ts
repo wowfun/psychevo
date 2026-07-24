@@ -63,7 +63,17 @@ test.describe("pevo Web live skill validation", () => {
     let sample = 0;
     try {
       await page.goto(server.url);
-      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const transcript = page.getByRole("region", { name: "Transcript" });
+      await expect(page.locator(".appShell")).toHaveAttribute(
+        "data-composer-state",
+        /^(bound|ready|blocked)$/,
+        { timeout: 60_000 }
+      );
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
+        timeout: 60_000
+      });
+      await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
       const composer = page.getByPlaceholder("Ask Psychevo...");
       await expect(composer).toBeVisible();
       const send = page.getByRole("button", { name: "Send" });
@@ -84,6 +94,7 @@ test.describe("pevo Web live skill validation", () => {
       let completed = false;
       while (Date.now() < deadline) {
         await page.waitForTimeout(intervalMs);
+        await approvePendingPermissionOnce(page);
         await captureAndAssert(page, testInfo, server.dbPath, screenshotDir, sample++, "sample");
         if (await liveSkillCompleted(page)) {
           completed = true;
@@ -97,6 +108,18 @@ test.describe("pevo Web live skill validation", () => {
     }
   });
 });
+
+async function approvePendingPermissionOnce(page: Page) {
+  const onceButtons = page.getByRole("button", { name: "Once", exact: true });
+  for (let index = await onceButtons.count() - 1; index >= 0; index -= 1) {
+    const button = onceButtons.nth(index);
+    if (await button.isVisible()) {
+      await button.click();
+      process.stdout.write("[live-skill] approved pending permission scope=once\n");
+      return;
+    }
+  }
+}
 
 async function captureAndAssert(
   page: Page,

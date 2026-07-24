@@ -18,6 +18,7 @@ test.describe("pevo Web Workbench", () => {
       return;
     }
     test.skip(isMobile, "live provider validation runs once on the desktop project");
+    test.setTimeout(context.timeoutMs);
     const server = await startPevoWeb({
       live: true,
       model: context.model,
@@ -28,7 +29,11 @@ test.describe("pevo Web Workbench", () => {
     });
     try {
       await page.goto(server.url);
-      await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      const transcript = page.getByRole("region", { name: "Transcript" });
+      await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
+        timeout: 60_000
+      });
+      await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
 
       await page.getByPlaceholder("Ask Psychevo...").fill(
         "Reply with exactly this text and nothing else: psychevo web live ok"
@@ -81,6 +86,17 @@ test.describe("pevo Web Workbench", () => {
       await expect(automations.getByText("every 1m").first()).toBeVisible();
       await assertNoHorizontalOverflow(page, automations);
       await captureWorkbench(page, testInfo, "live-automation-list");
+
+      const createdAutomation = automations.locator("article.automationRow")
+        .filter({ hasText: "pevo-live-engineering-tip" })
+        .last();
+      await createdAutomation.getByRole("button", { name: "Delete", exact: true }).click();
+      const deleteDialog = page.getByRole("dialog", {
+        name: "Delete pevo-live-engineering-tip?"
+      });
+      await expect(deleteDialog).toBeVisible();
+      await deleteDialog.getByRole("button", { name: "Delete automation" }).click();
+      await expect(deleteDialog).toBeHidden();
     } finally {
       await server.stop();
     }

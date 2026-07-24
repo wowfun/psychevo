@@ -2063,10 +2063,6 @@ vi.mock("@psychevo/client", async () => {
               manifest_kind: "built_in",
               enabled: true,
               status: "Installed",
-              readiness: "Installed",
-              adapter_mode: "built_in",
-              package_fingerprint: "builtin-browser",
-              trust: { required: false, status: "not_required", fingerprint: "builtin-browser" },
               contributions: {
                 right_workspace: ["browser", "preview"],
                 desktop: ["managed_browser_host"],
@@ -2091,10 +2087,6 @@ vi.mock("@psychevo/client", async () => {
               manifest_kind: "psychevo",
               enabled: true,
               status: "Installed",
-              readiness: "Installed",
-              adapter_mode: "manifest_only",
-              package_fingerprint: "abc123",
-              trust: { required: false, status: "not_required", fingerprint: "abc123" },
               diagnostics: []
             },
             {
@@ -2113,10 +2105,6 @@ vi.mock("@psychevo/client", async () => {
               manifest_kind: "psychevo",
               enabled: true,
               status: "Installed",
-              readiness: "Installed",
-              adapter_mode: "manifest_only",
-              package_fingerprint: "dual-profile",
-              trust: { required: false, status: "not_required", fingerprint: "dual-profile" },
               diagnostics: []
             },
             {
@@ -2135,10 +2123,6 @@ vi.mock("@psychevo/client", async () => {
               manifest_kind: "psychevo",
               enabled: false,
               status: "Disabled",
-              readiness: "Disabled",
-              adapter_mode: "manifest_only",
-              package_fingerprint: "dual-project",
-              trust: { required: false, status: "not_required", fingerprint: "dual-project" },
               diagnostics: []
             },
             {
@@ -2151,7 +2135,7 @@ vi.mock("@psychevo/client", async () => {
               removable: false,
               package_mutable: true,
               enablement_mutable: false,
-              installed: false,
+              installed: gatewayMock.codexPluginInstalled,
               description: "Review changes with Codex Apps",
               source_id: "codex:openai",
               source: "openai",
@@ -2160,9 +2144,9 @@ vi.mock("@psychevo/client", async () => {
               manifest_kind: "codex",
               compatibility_profile: "codex-plugin/8604689e",
               component_statuses: [],
-              enabled: false,
-              status: "Available",
-              readiness: "Available",
+              enabled: gatewayMock.codexPluginInstalled,
+              status: gatewayMock.codexPluginInstalled ? "Installed" : "Available",
+              readiness: gatewayMock.codexPluginInstalled ? "Needs trust" : "Available",
               diagnostics: []
             }
           ],
@@ -2177,6 +2161,11 @@ vi.mock("@psychevo/client", async () => {
               name: "review",
               selector: record.selector,
               authority: { kind: "codex", plugin: "review", marketplace: "openai" },
+              installed: gatewayMock.codexPluginInstalled,
+              trust: {
+                required: true,
+                status: gatewayMock.codexPluginInstalled ? "untrusted" : "not_installed"
+              },
               compatibility_profile: "codex-plugin/8604689e",
               component_statuses: [
                 {
@@ -2201,16 +2190,28 @@ vi.mock("@psychevo/client", async () => {
         }
         return { plugin: {} };
       }
+      if (method === "plugin/authority/setTrust") {
+        const record = params as { selector?: string; trusted?: boolean } | undefined;
+        return {
+          success: true,
+          selector: record?.selector ?? "",
+          trusted: record?.trusted ?? false,
+          trust: {
+            required: true,
+            status: record?.trusted ? "trusted" : "untrusted"
+          }
+        };
+      }
       if (method === "plugin/import/inspect") {
+        if (gatewayMock.pluginInspectionResult) return gatewayMock.pluginInspectionResult;
         return {
           success: true,
           inspection: {
             name: "writer-kit",
             framework: "codex",
-            status: "Available",
+            support: "installable",
             source_kind: "local",
-            adapter_mode: "manifest_only",
-            target_lanes: ["skills", "mcp"],
+            declared_lanes: ["skills", "mcp"],
             unsupported_lanes: ["apps"],
             stages: [
               { stage: "resolve/fetch", status: "ok", message: "resolved local source" },
@@ -2218,9 +2219,6 @@ vi.mock("@psychevo/client", async () => {
             ]
           }
         };
-      }
-      if (method === "plugin/setTrust") {
-        return { success: true, trusted: true };
       }
       if (method === "plugin/install" && gatewayMock.pluginInstallResult) {
         return gatewayMock.pluginInstallResult;

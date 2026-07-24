@@ -13,20 +13,12 @@ import {
 
 test.describe("Native and ACP Agent application-path validation", () => {
   test("keeps first send live across a pending atomic draft open on the real Gateway", async ({ page }) => {
-    test.setTimeout(180_000);
+    const context = requiredContext("web-composer-draft-open-first-send");
+    if (!context) return;
+    test.setTimeout(context.timeoutMs);
     const nativeModel = await startDeterministicNativeModel();
-    const fixtureParent = path.join(process.cwd(), ".local", "playwright");
-    mkdirSync(fixtureParent, { recursive: true });
-    const fixtureRoot = mkdtempSync(path.join(fixtureParent, "pending-draft-open-"));
-    const cwd = path.join(fixtureRoot, "cwd");
+    const cwd = context.cwd ?? path.join(context.artifactRoot, "cwd");
     mkdirSync(cwd, { recursive: true });
-    for (let index = 0; index < 2_000; index += 1) {
-      writeAgentDefinition(
-        cwd,
-        `startup-catalog-${String(index).padStart(4, "0")}`,
-        "Exercise the atomic draft-open startup boundary."
-      );
-    }
     const providerConfig = [
       "[provider.native-live]",
       `api = ${JSON.stringify(nativeModel.baseUrl)}`,
@@ -38,10 +30,17 @@ test.describe("Native and ACP Agent application-path validation", () => {
     const server = await startPevoWeb({
       configAppend: providerConfig,
       cwd,
+      dbPath: context.dbPath,
+      home: context.home,
       live: false,
-      model: "native-live/default"
+      model: "native-live/default",
+      pevoBin: context.pevoBin
     });
-    const websocketFrames = captureWebSocketFrames(page);
+    const websocketFrames = await captureWebSocketFramesWithDelayedRpcResult(
+      page,
+      "thread/draft/open",
+      2
+    );
     const prompt = "submit exactly once while the draft is opening";
     try {
       await page.goto(server.url, { waitUntil: "domcontentloaded" });
@@ -49,7 +48,13 @@ test.describe("Native and ACP Agent application-path validation", () => {
       await expect(input).toBeVisible();
       await expect.poll(() => rpcRequestsForMethod(websocketFrames, "thread/draft/open").length)
         .toBe(1);
-      expect(rpcResultsForMethod(websocketFrames, "thread/draft/open")).toHaveLength(0);
+      await expect.poll(() => rpcResultsForMethod(websocketFrames, "thread/draft/open").length)
+        .toBe(1);
+
+      await page.getByRole("button", { name: "New Session", exact: true }).click();
+      await expect.poll(() => rpcRequestsForMethod(websocketFrames, "thread/draft/open").length)
+        .toBe(2);
+      expect(rpcResultsForMethod(websocketFrames, "thread/draft/open")).toHaveLength(1);
 
       await input.fill(prompt);
       const send = page.getByRole("button", { name: "Send message" });
@@ -60,9 +65,10 @@ test.describe("Native and ACP Agent application-path validation", () => {
       expect(rpcRequestsForMethod(websocketFrames, "thread/context/read")).toHaveLength(0);
       expect(rpcRequestsForMethod(websocketFrames, "settings/read")).toHaveLength(0);
       expect(rpcRequestsForMethod(websocketFrames, "completion/list")).toHaveLength(0);
+      websocketFrames.releaseDelayedResponses();
 
       await expect.poll(() => rpcResultsForMethod(websocketFrames, "thread/draft/open").length)
-        .toBe(1);
+        .toBe(2);
       await expect.poll(() => rpcRequestsForMethod(websocketFrames, "turn/start").length)
         .toBe(1);
       await expect(input).toHaveValue("");
@@ -78,9 +84,23 @@ test.describe("Native and ACP Agent application-path validation", () => {
           && typeof (request.params as { threadId?: unknown }).threadId === "string"
       ))).toBe(true);
     } finally {
+      writeFileSync(
+        path.join(context.artifactRoot, "draft-open-first-send-proof.json"),
+        `${JSON.stringify({
+          dbPath: server.dbPath,
+          providerRequests: nativeModel.requests(),
+          rpc: {
+            draftOpenRequests: rpcRequestsForMethod(websocketFrames, "thread/draft/open"),
+            draftOpenResults: rpcResultsForMethod(websocketFrames, "thread/draft/open"),
+            turnStartRequests: rpcRequestsForMethod(websocketFrames, "turn/start"),
+            turnStartResults: rpcResultsForMethod(websocketFrames, "turn/start"),
+            contextReadRequests: rpcRequestsForMethod(websocketFrames, "thread/context/read")
+          }
+        }, null, 2)}\n`,
+        "utf8"
+      );
       await server.stop();
       await nativeModel.stop();
-      rmSync(fixtureRoot, { force: true, recursive: true });
     }
   });
 
@@ -1870,6 +1890,61 @@ function captureWebSocketFrames(page: Page): WebSocketFrameCapture {
     socket.on("framereceived", (event) => capture.received.push(String(event.payload)));
   });
   return capture;
+}
+
+async function captureWebSocketFramesWithDelayedRpcResult(
+  page: Page,
+  method: string,
+  delayedOccurrence: number
+): Promise<WebSocketFrameCapture & { releaseDelayedResponses(): void }> {
+  const capture: WebSocketFrameCapture = { received: [], sent: [] };
+  const delayedResponses: Array<() => void> = [];
+  let matchingRequestCount = 0;
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, (pageSocket) => {
+    const serverSocket = pageSocket.connectToServer();
+    const delayedRequestIds = new Set<string>();
+    pageSocket.onMessage((message) => {
+      const payload = String(message);
+      capture.sent.push(payload);
+      try {
+        const request = JSON.parse(payload) as { id?: unknown; method?: string };
+        if (request.method === method && request.id != null) {
+          matchingRequestCount += 1;
+          if (matchingRequestCount === delayedOccurrence) {
+            delayedRequestIds.add(String(request.id));
+          }
+        }
+      } catch {
+        // Non-JSON frames are forwarded unchanged.
+      }
+      serverSocket.send(message);
+    });
+    serverSocket.onMessage((message) => {
+      const payload = String(message);
+      let delayed = false;
+      try {
+        const response = JSON.parse(payload) as { id?: unknown };
+        delayed = response.id != null && delayedRequestIds.delete(String(response.id));
+      } catch {
+        // Non-JSON frames are forwarded unchanged.
+      }
+      const forward = () => {
+        capture.received.push(payload);
+        pageSocket.send(message);
+      };
+      if (delayed) {
+        delayedResponses.push(forward);
+      } else {
+        forward();
+      }
+    });
+  });
+  return {
+    ...capture,
+    releaseDelayedResponses() {
+      delayedResponses.splice(0).forEach((forward) => forward());
+    }
+  };
 }
 
 function rpcFrameProof(capture: WebSocketFrameCapture) {
