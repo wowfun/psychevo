@@ -26,6 +26,32 @@ const CHANGED_STEPS: &[WorkflowStep] = &[
 
 const RUST_BROAD_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
+        id: "gateway-protocol-check",
+        description: "Check generated Gateway protocol bindings",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "--quiet",
+            "xtask",
+            "gateway-protocol",
+            "generate",
+            "--check",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "rust-core-check",
+        description: "Check the CLI core graph without default features",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "check",
+            "-p",
+            "psychevo-cli",
+            "--no-default-features",
+            "--quiet",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
         id: "rust-format",
         description: "Check Rust formatting",
         action: WorkflowStepAction::Command(&["cargo", "fmt", "--all", "--check", "--quiet"]),
@@ -61,6 +87,12 @@ const RUST_BROAD_STEPS: &[WorkflowStep] = &[
 ];
 
 const DESKTOP_RUST_STEPS: &[WorkflowStep] = &[
+    WorkflowStep {
+        id: "desktop-manifest-parity",
+        description: "Check root and Desktop Cargo manifest parity",
+        action: WorkflowStepAction::DesktopManifestParity,
+        live: false,
+    },
     WorkflowStep {
         id: "desktop-format",
         description: "Check Desktop Rust formatting",
@@ -468,12 +500,17 @@ mod tests {
         let plan = plan_profile("desktop-rust", None).expect("desktop-rust profile");
         assert_eq!(
             plan.steps.iter().map(|step| step.id).collect::<Vec<_>>(),
-            vec!["desktop-format", "desktop-clippy", "desktop-tests"]
+            vec![
+                "desktop-manifest-parity",
+                "desktop-format",
+                "desktop-clippy",
+                "desktop-tests"
+            ]
         );
 
         let manifest = "apps/desktop/src-tauri/Cargo.toml";
         assert_eq!(
-            plan.steps[0].command,
+            plan.steps[1].command,
             vec![
                 "cargo",
                 "fmt",
@@ -484,7 +521,7 @@ mod tests {
                 "--quiet"
             ]
         );
-        for step in &plan.steps[1..] {
+        for step in &plan.steps[2..] {
             assert!(
                 step.command
                     .windows(2)
@@ -498,7 +535,7 @@ mod tests {
             assert!(step.command.iter().any(|part| part == "--all-targets"));
             assert!(!step.command.iter().any(|part| part == "wdio-test"));
         }
-        assert!(plan.steps[1].command.ends_with(&[
+        assert!(plan.steps[2].command.ends_with(&[
             "--".to_string(),
             "-D".to_string(),
             "warnings".to_string()

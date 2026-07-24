@@ -39,6 +39,7 @@ pub(crate) struct WorkflowStep {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum WorkflowStepAction {
     Command(&'static [&'static str]),
+    DesktopManifestParity,
     SingleProviderLive,
     DesktopVisual,
     SurfaceProfile,
@@ -50,6 +51,7 @@ impl WorkflowStepAction {
     pub(crate) fn command_for_plan(self) -> &'static [&'static str] {
         match self {
             Self::Command(command) => command,
+            Self::DesktopManifestParity => &["xtask-internal", "desktop-manifest-parity"],
             Self::SingleProviderLive => &["xtask-internal", "single-provider-live"],
             Self::DesktopVisual => &["xtask-internal", "desktop-visual"],
             Self::SurfaceProfile => &["xtask-internal", "surface-profile"],

@@ -13,7 +13,7 @@ use super::process::{
 const SPEC: &str = "apps/workbench/e2e/surface-comparison.spec.ts";
 const DEFAULT_MEASURED_SAMPLES: usize = 20;
 const DEFAULT_TRACKED_DIRTY_FILES: usize = 200;
-const PLAYWRIGHT_INSTALL_HINT: &str = "cargo xtask doctor deps install --only playwright";
+const PLAYWRIGHT_INSTALL_HINT: &str = "pnpm exec playwright install chromium";
 
 pub(crate) fn run_surface_profile(
     root: &Path,

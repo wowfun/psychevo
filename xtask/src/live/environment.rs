@@ -131,6 +131,11 @@ impl LiveEnvironment {
         &self.db_path
     }
 
+    pub(crate) fn with_config_path(mut self, config_path: PathBuf) -> Self {
+        self.config_path = config_path;
+        self
+    }
+
     pub(crate) fn to_output(&self) -> LiveEnvironmentPathsOutput {
         LiveEnvironmentPathsOutput {
             mode: self.mode,

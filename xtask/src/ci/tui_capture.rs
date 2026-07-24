@@ -43,7 +43,7 @@ const TUI_CAPTURE_SCREENSHOTS: &[&str] = &[
 ];
 
 const TUI_CAPTURE_DEPS: &[&str] = &["vhs", "ttyd", "ffmpeg", "python3", "git"];
-const TUI_CAPTURE_DEPS_INSTALL_HINT: &str = "cargo xtask doctor deps install --only vhs";
+const TUI_CAPTURE_DEPS_INSTALL_HINT: &str = "cargo xtask doctor deps check --only vhs";
 
 pub(crate) fn run_tui_vhs_demo(
     root: &Path,
@@ -701,7 +701,7 @@ mod tests {
     fn missing_vhs_dependency_hint_points_to_xtask_doctor_deps() {
         assert_eq!(
             TUI_CAPTURE_DEPS_INSTALL_HINT,
-            "cargo xtask doctor deps install --only vhs"
+            "cargo xtask doctor deps check --only vhs"
         );
     }
 }

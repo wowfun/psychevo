@@ -1,8 +1,6 @@
-use std::fs;
 use std::path::Path;
-use std::process::{Command as ProcessCommand, Stdio};
 
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use clap::{Subcommand, ValueEnum};
 use serde::Serialize;
 
@@ -13,10 +11,6 @@ pub(crate) enum DepsCommand {
         only: DepsScope,
         #[arg(long)]
         json: bool,
-    },
-    Install {
-        #[arg(long, value_enum)]
-        only: DepsScope,
     },
 }
 
@@ -134,11 +128,9 @@ impl DependencyGroup {
                 "install git, Rust/Cargo, a native C compiler/linker, Node.js, and pnpm with your platform package manager or upstream installers".to_string(),
             ],
             Self::Sqlite => vec![
-                "cargo xtask doctor deps install --only sqlite".to_string(),
                 "sudo apt-get update && sudo apt-get install -y sqlite3".to_string(),
             ],
             Self::Vhs => vec![
-                "cargo xtask doctor deps install --only vhs".to_string(),
                 "sudo apt-get update".to_string(),
                 "sudo apt-get install -y ca-certificates curl gpg python3 git".to_string(),
                 "curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg".to_string(),
@@ -146,8 +138,7 @@ impl DependencyGroup {
                 "sudo apt-get update && sudo apt-get install -y vhs ttyd ffmpeg".to_string(),
             ],
             Self::Playwright => vec![
-                "cargo xtask doctor deps install --only playwright".to_string(),
-                "pnpm exec playwright install --with-deps chromium".to_string(),
+                "pnpm exec playwright install chromium".to_string(),
             ],
         }
     }
@@ -185,7 +176,7 @@ impl CommandProbe for SystemProbe {
     }
 }
 
-pub(crate) fn run(command: DepsCommand, root: &Path) -> Result<()> {
+pub(crate) fn run(command: DepsCommand, _root: &Path) -> Result<()> {
     match command {
         DepsCommand::Check { only, json } => {
             let report = check_deps(only, &SystemProbe);
@@ -196,7 +187,6 @@ pub(crate) fn run(command: DepsCommand, root: &Path) -> Result<()> {
             }
             Ok(())
         }
-        DepsCommand::Install { only } => install_deps(root, only),
     }
 }
 
@@ -245,132 +235,6 @@ fn print_report(report: &DepsReport) {
     }
 }
 
-fn install_deps(root: &Path, scope: DepsScope) -> Result<()> {
-    if scope == DepsScope::Core {
-        bail!(
-            "xtask does not install core toolchains; use scripts/install.sh or your normal Rust/Node/pnpm setup"
-        );
-    }
-    if scope == DepsScope::Install {
-        bail!(
-            "xtask does not install source-install prerequisites; install git, Rust/Cargo, a native C compiler/linker, Node.js, and pnpm with your platform package manager or upstream installers"
-        );
-    }
-    let installer = SystemInstaller::new()?;
-    for group in scope.rows().iter().copied() {
-        match group {
-            DependencyGroup::Core => {
-                eprintln!(
-                    "core: check only; use scripts/install.sh or your normal Rust/Node/pnpm setup"
-                );
-            }
-            DependencyGroup::Install => {
-                eprintln!(
-                    "install: check only; install source-install prerequisites with your platform package manager or upstream installers"
-                );
-            }
-            DependencyGroup::Sqlite => installer.install_sqlite()?,
-            DependencyGroup::Vhs => installer.install_vhs()?,
-            DependencyGroup::Playwright => installer.install_playwright(root)?,
-        }
-    }
-    let report = check_deps(scope, &SystemProbe);
-    print_report(&report);
-    Ok(())
-}
-
-struct SystemInstaller {
-    apt_updated: std::cell::Cell<bool>,
-}
-
-impl SystemInstaller {
-    fn new() -> Result<Self> {
-        require_debian_install()?;
-        Ok(Self {
-            apt_updated: std::cell::Cell::new(false),
-        })
-    }
-
-    fn install_sqlite(&self) -> Result<()> {
-        if command_exists("sqlite3") {
-            return Ok(());
-        }
-        self.apt_install(&["sqlite3"])
-    }
-
-    fn install_vhs(&self) -> Result<()> {
-        let base_missing: Vec<_> = ["python3", "git"]
-            .into_iter()
-            .filter(|command| !command_exists(command))
-            .collect();
-        if !base_missing.is_empty() {
-            self.apt_install(&base_missing)?;
-        }
-
-        let charm_missing: Vec<_> = ["vhs", "ttyd", "ffmpeg"]
-            .into_iter()
-            .filter(|command| !command_exists(command))
-            .collect();
-        if !charm_missing.is_empty() {
-            self.install_charm_repo()?;
-            self.apt_install(&["vhs", "ttyd", "ffmpeg"])?;
-        }
-        Ok(())
-    }
-
-    fn install_playwright(&self, root: &Path) -> Result<()> {
-        if !command_exists("pnpm") {
-            bail!(
-                "pnpm is required for Playwright browser installation. Install Node.js/pnpm first."
-            );
-        }
-        run_status(
-            ProcessCommand::new("pnpm")
-                .args(["exec", "playwright", "install", "--with-deps", "chromium"])
-                .current_dir(root),
-        )
-    }
-
-    fn install_charm_repo(&self) -> Result<()> {
-        let bootstrap_missing = !command_exists("curl")
-            || !command_exists("gpg")
-            || !debian_package_installed("ca-certificates");
-        if bootstrap_missing {
-            self.apt_install(&["ca-certificates", "curl", "gpg"])?;
-        }
-
-        self.run_root(ProcessCommand::new("mkdir").args(["-p", "/etc/apt/keyrings"]))?;
-        run_shell_root(
-            "curl -fsSL https://repo.charm.sh/apt/gpg.key | gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg",
-        )?;
-        run_shell_root(
-            "printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *' > /etc/apt/sources.list.d/charm.list",
-        )?;
-        self.apt_updated.set(false);
-        self.apt_update_once()
-    }
-
-    fn apt_install(&self, packages: &[&str]) -> Result<()> {
-        self.apt_update_once()?;
-        let mut command = ProcessCommand::new("apt-get");
-        command.arg("install").arg("-y").args(packages);
-        self.run_root(&mut command)
-    }
-
-    fn apt_update_once(&self) -> Result<()> {
-        if self.apt_updated.get() {
-            return Ok(());
-        }
-        self.run_root(ProcessCommand::new("apt-get").arg("update"))?;
-        self.apt_updated.set(true);
-        Ok(())
-    }
-
-    fn run_root(&self, command: &mut ProcessCommand) -> Result<()> {
-        run_root(command)
-    }
-}
-
 fn command_exists(command: &str) -> bool {
     let path = Path::new(command);
     if path.components().count() > 1 {
@@ -380,97 +244,6 @@ fn command_exists(command: &str) -> bool {
         return false;
     };
     std::env::split_paths(&paths).any(|dir| dir.join(command).is_file())
-}
-
-fn debian_package_installed(package: &str) -> bool {
-    ProcessCommand::new("dpkg")
-        .args(["-s", package])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn require_debian_install() -> Result<()> {
-    if is_debian_like() {
-        Ok(())
-    } else {
-        bail!(
-            "--install currently supports Debian/Ubuntu systems with apt-get only. Install the reported tools with your platform package manager, then rerun check."
-        )
-    }
-}
-
-fn is_debian_like() -> bool {
-    if !command_exists("apt-get") {
-        return false;
-    }
-    let Ok(contents) = fs::read_to_string("/etc/os-release") else {
-        return false;
-    };
-    os_release_field(&contents, "ID")
-        .map(|id| id == "debian" || id == "ubuntu")
-        .unwrap_or(false)
-        || os_release_field(&contents, "ID_LIKE")
-            .map(|id_like| id_like.split_whitespace().any(|value| value == "debian"))
-            .unwrap_or(false)
-}
-
-fn os_release_field(contents: &str, key: &str) -> Option<String> {
-    contents.lines().find_map(|line| {
-        let (field, value) = line.split_once('=')?;
-        if field == key {
-            Some(value.trim_matches('"').to_string())
-        } else {
-            None
-        }
-    })
-}
-
-fn run_root(command: &mut ProcessCommand) -> Result<()> {
-    if is_root() {
-        run_status(command)
-    } else {
-        command_exists("sudo")
-            .then_some(())
-            .ok_or_else(|| anyhow::anyhow!("sudo is required for --install on Debian/Ubuntu."))?;
-        let mut sudo = ProcessCommand::new("sudo");
-        sudo.arg(command.get_program()).args(command.get_args());
-        run_status(&mut sudo)
-    }
-}
-
-fn run_shell_root(script: &str) -> Result<()> {
-    if is_root() {
-        run_status(ProcessCommand::new("sh").arg("-c").arg(script))
-    } else {
-        command_exists("sudo")
-            .then_some(())
-            .ok_or_else(|| anyhow::anyhow!("sudo is required for --install on Debian/Ubuntu."))?;
-        run_status(ProcessCommand::new("sudo").args(["sh", "-c", script]))
-    }
-}
-
-fn run_status(command: &mut ProcessCommand) -> Result<()> {
-    let status = command
-        .status()
-        .with_context(|| format!("spawn command {command:?}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("command failed with status {status}: {command:?}")
-    }
-}
-
-fn is_root() -> bool {
-    ProcessCommand::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|value| value.trim() == "0")
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -505,11 +278,7 @@ mod tests {
         assert_eq!(row.scope, "vhs");
         assert_eq!(row.status, DependencyStatus::Missing);
         assert_eq!(row.missing, vec!["vhs", "ttyd", "ffmpeg"]);
-        assert!(
-            row.install_hint
-                .iter()
-                .any(|hint| hint == "cargo xtask doctor deps install --only vhs")
-        );
+        assert!(row.install_hint.iter().any(|hint| hint.contains("apt-get")));
     }
 
     #[test]
@@ -564,7 +333,7 @@ mod tests {
         assert_eq!(json["scopes"][0]["missing"][0], "sqlite3");
         assert_eq!(
             json["scopes"][0]["install_hint"][0],
-            "cargo xtask doctor deps install --only sqlite"
+            "sudo apt-get update && sudo apt-get install -y sqlite3"
         );
     }
 
@@ -576,30 +345,5 @@ mod tests {
         assert_eq!(json["scopes"][0]["status"], "missing");
         assert_eq!(json["scopes"][0]["missing"][0], "git");
         assert_eq!(json["scopes"][0]["missing"][2], "cc|gcc|clang");
-    }
-
-    #[test]
-    fn install_core_is_rejected() {
-        let err = install_deps(Path::new("."), DepsScope::Core).expect_err("core install");
-        assert!(err.to_string().contains("does not install core toolchains"));
-    }
-
-    #[test]
-    fn install_scope_install_is_rejected() {
-        let err = install_deps(Path::new("."), DepsScope::Install).expect_err("install scope");
-        assert!(
-            err.to_string()
-                .contains("does not install source-install prerequisites")
-        );
-    }
-
-    #[test]
-    fn os_release_parsing_detects_debian_like() {
-        let ubuntu = "ID=ubuntu\nID_LIKE=\"debian\"\n";
-        assert_eq!(os_release_field(ubuntu, "ID").as_deref(), Some("ubuntu"));
-        assert_eq!(
-            os_release_field(ubuntu, "ID_LIKE").as_deref(),
-            Some("debian")
-        );
     }
 }

@@ -36,9 +36,6 @@ jobs:
       - name: Run Desktop Rust gate
         run: cargo xtask ci run --profile desktop-rust
 
-      - name: Check Gateway protocol bindings
-        run: cargo xtask gateway-protocol generate --check
-
   web:
     name: Web
     runs-on: ubuntu-24.04

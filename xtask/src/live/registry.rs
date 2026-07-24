@@ -115,11 +115,11 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
     },
     LiveCheck {
         id: "codex-plugin-broker-live",
-        description: "Read the current Codex plugin catalog through the capability broker",
+        description: "Read installed Codex plugins through the capability broker",
         suites: &["plugin"],
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-gateway",
-            test: "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_current_catalog",
+            test: "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_installed_plugins",
             provider_required: false,
         },
     },

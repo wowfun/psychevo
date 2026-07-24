@@ -9,7 +9,7 @@ use super::process::{
     ProcessOutcome, command_exists, run_logged_process, write_log_line, write_mirrored_line,
 };
 
-const PLAYWRIGHT_INSTALL_HINT: &str = "cargo xtask doctor deps install --only playwright";
+const PLAYWRIGHT_INSTALL_HINT: &str = "pnpm exec playwright install chromium";
 const DESKTOP_VISUAL_SPEC: &str = "apps/workbench/e2e/desktop-visual.spec.ts";
 
 pub(crate) fn run_desktop_visual(

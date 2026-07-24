@@ -5,6 +5,7 @@ use std::process::Command as ProcessCommand;
 use anyhow::{Context, Result, anyhow, bail};
 
 use super::artifacts::{default_artifact_root, display_path};
+use super::desktop_manifest_parity::check_desktop_manifest_parity;
 use super::desktop_visual::run_desktop_visual;
 use super::model::{
     CiEnvironmentOutput, RunOutput, StepRunOutput, StepStatus, WorkflowProfile, WorkflowStep,
@@ -129,6 +130,19 @@ fn run_step(
     match step.action {
         WorkflowStepAction::Command(command) => {
             run_command_step(root, artifact_root, step, command, log_path)
+        }
+        WorkflowStepAction::DesktopManifestParity => {
+            create_step_log(log_path)?;
+            check_desktop_manifest_parity(root)?;
+            println!("ci step {}: ok", step.id);
+            Ok(step_execution(
+                step,
+                log_path,
+                step.action.command_for_plan(),
+                true,
+                Some(0),
+                false,
+            ))
         }
         WorkflowStepAction::SingleProviderLive => {
             run_single_provider_live_step(root, artifact_root, profile, step, live_env, log_path)

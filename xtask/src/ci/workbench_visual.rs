@@ -10,7 +10,7 @@ use super::process::{
     ProcessOutcome, command_exists, run_logged_process, write_log_line, write_mirrored_line,
 };
 
-const PLAYWRIGHT_INSTALL_HINT: &str = "cargo xtask doctor deps install --only playwright";
+const PLAYWRIGHT_INSTALL_HINT: &str = "pnpm exec playwright install chromium";
 const CRITICAL_JOURNEY_SPEC: &str = "apps/workbench/e2e/critical-journey.spec.ts";
 const CRITICAL_JOURNEY_PROFILE_SAMPLES: usize = 20;
 const WORKBENCH_VISUAL_SPECS: &[&str] = &[

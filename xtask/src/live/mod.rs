@@ -2,6 +2,7 @@ mod environment;
 mod registry;
 mod verifier;
 
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -539,7 +540,7 @@ fn run_deterministic_playwright_check(
     if !command_exists("pnpm") {
         return blocked(
             log,
-            "missing pnpm; run: cargo xtask doctor deps install --only playwright".to_string(),
+            "missing pnpm; run: pnpm exec playwright install chromium".to_string(),
         );
     }
     let spec_path = root.join(spec);
@@ -655,16 +656,19 @@ fn run_desktop_native_smoke_check(
         Ok(prerequisites) => prerequisites,
         Err(reason) => return blocked(log, reason),
     };
-    let live_env = match prerequisites.resolve(env_mode, check_dir) {
-        Ok(live_env) => live_env,
-        Err(error) => return failed_result(log, format!("{error:#}"), None),
-    };
-    let environment = Some(live_env.to_output());
-    let live_environment = Some(live_env);
+    let mut live_env =
+        match prerequisites.resolve(desktop_live_environment_mode(env_mode), check_dir) {
+            Ok(live_env) => live_env,
+            Err(error) => return failed_result(log, format!("{error:#}"), None),
+        };
     let mut provider = None;
     if provider_required {
         let Some(selected_provider) = providers.first().copied() else {
-            return blocked_with_env(log, "no live provider selected".to_string(), environment);
+            return blocked_with_env(
+                log,
+                "no live provider selected".to_string(),
+                Some(live_env.to_output()),
+            );
         };
         if !prerequisites.provider_credentials_available(&selected_provider) {
             return blocked_with_env(
@@ -673,11 +677,16 @@ fn run_desktop_native_smoke_check(
                     "{} credentials missing from .local/.psychevo-dev/.env",
                     selected_provider.id
                 ),
-                environment,
+                Some(live_env.to_output()),
             );
         }
+        let config_path = check_dir.join("desktop-provider-config.toml");
+        write_desktop_provider_live_config(&config_path, selected_provider)?;
+        live_env = live_env.with_config_path(config_path);
         provider = Some(selected_provider);
     }
+    let environment = Some(live_env.to_output());
+    let live_environment = Some(live_env);
 
     let skip_reason = desktop_native_skip_reason();
     write_desktop_capability_snapshot(check_dir, provider_required, skip_reason.clone())?;
@@ -687,7 +696,7 @@ fn run_desktop_native_smoke_check(
     if !command_exists("pnpm") {
         return blocked_with_env(
             log,
-            "missing pnpm; run: cargo xtask doctor deps install --only playwright".to_string(),
+            "missing pnpm; run: pnpm exec playwright install chromium".to_string(),
             environment,
         );
     }
@@ -702,7 +711,7 @@ fn run_desktop_native_smoke_check(
     let wdio_artifact_root = check_dir.join("wdio");
     fs::create_dir_all(&wdio_artifact_root)
         .with_context(|| format!("create {}", wdio_artifact_root.display()))?;
-    let provider_token = provider.map(desktop_provider_live_token);
+    let provider_token = provider.map(|_| desktop_provider_live_sentinel());
     let floating_text = desktop_floating_live_text(provider_token.as_deref());
 
     let mut build = ProcessCommand::new("pnpm");
@@ -743,6 +752,24 @@ fn run_desktop_native_smoke_check(
     );
     let outcome = run_logged_process("desktop native WDIO smoke", &mut wdio, Arc::clone(&log))?;
     let outcome_had_suppressed_output = outcome.had_suppressed_output;
+    let cleanup_outcome = stop_desktop_live_gateway(
+        root,
+        &pevo_bin,
+        live_environment
+            .as_ref()
+            .expect("Desktop live environment is always configured"),
+        Arc::clone(&log),
+    )?;
+    had_suppressed_output |= cleanup_outcome.had_suppressed_output;
+    if !cleanup_outcome.passed {
+        let detail = if outcome.passed {
+            "Desktop native WDIO Gateway cleanup failed"
+        } else {
+            "Desktop native WDIO smoke and Gateway cleanup failed"
+        };
+        return Ok(failed_result(log, detail.to_string(), environment)?
+            .include_suppressed_output(had_suppressed_output || outcome_had_suppressed_output));
+    }
     if outcome.passed
         && let Err(error) = validate_desktop_startup_artifacts(&wdio_artifact_root)
     {
@@ -757,6 +784,30 @@ fn run_desktop_native_smoke_check(
         check_result_from_outcome(outcome, "Desktop native WDIO smoke failed", environment)?
             .include_suppressed_output(had_suppressed_output),
     )
+}
+
+fn desktop_live_environment_mode(_requested: LiveEnvMode) -> LiveEnvMode {
+    LiveEnvMode::Isolated
+}
+
+fn stop_desktop_live_gateway(
+    root: &Path,
+    pevo_bin: &Path,
+    live_env: &LiveEnvironment,
+    log: Arc<Mutex<fs::File>>,
+) -> Result<ProcessOutcome> {
+    let mut command = ProcessCommand::new(pevo_bin);
+    configure_desktop_gateway_stop_command(&mut command, root, live_env);
+    run_logged_process("desktop native managed Gateway cleanup", &mut command, log)
+}
+
+fn configure_desktop_gateway_stop_command(
+    command: &mut ProcessCommand,
+    root: &Path,
+    live_env: &LiveEnvironment,
+) {
+    command.args(["gateway", "stop"]).current_dir(root);
+    live_env.apply_to_command(command, None);
 }
 
 fn validate_desktop_startup_artifacts(wdio_artifact_root: &Path) -> Result<()> {
@@ -893,17 +944,24 @@ fn configure_desktop_wdio_command(
     }
 }
 
-fn desktop_provider_live_token(provider: LiveProvider) -> String {
-    format!(
-        "PEVO_DF_{}_OK",
-        provider.id.replace('-', "_").to_ascii_uppercase()
-    )
+fn desktop_provider_live_sentinel() -> String {
+    "psychevo desktop live response ok".to_string()
+}
+
+fn write_desktop_provider_live_config(config: &Path, provider: LiveProvider) -> Result<()> {
+    let mut root = toml::map::Map::new();
+    root.insert(
+        "model".to_string(),
+        toml::Value::String(provider.model.to_string()),
+    );
+    fs::write(config, toml::to_string(&toml::Value::Table(root))?)
+        .with_context(|| format!("write Desktop provider live config {}", config.display()))
 }
 
 fn desktop_floating_live_text(provider_token: Option<&str>) -> String {
     provider_token.map_or_else(
         || "Psychevo floating live smoke selected text".to_string(),
-        |token| format!("Floating provider live token: {token}"),
+        |token| format!("Selected text for live check: {token}"),
     )
 }
 
@@ -1026,6 +1084,30 @@ fn run_cargo_ignored_live_check(
     test: &'static str,
     log: Arc<Mutex<fs::File>>,
 ) -> Result<CheckResult> {
+    run_cargo_ignored_live_check_with_command_resolver(
+        root,
+        check_dir,
+        providers,
+        env_mode,
+        (package, test),
+        log,
+        resolve_live_command_path,
+    )
+}
+
+fn run_cargo_ignored_live_check_with_command_resolver<F>(
+    root: &Path,
+    check_dir: &Path,
+    providers: &[LiveProvider],
+    env_mode: LiveEnvMode,
+    cargo_test: (&'static str, &'static str),
+    log: Arc<Mutex<fs::File>>,
+    resolve_command: F,
+) -> Result<CheckResult>
+where
+    F: Fn(&str) -> Option<PathBuf>,
+{
+    let (package, test) = cargo_test;
     let prerequisites = match LivePrerequisites::load(root) {
         Ok(prerequisites) => prerequisites,
         Err(reason) => return blocked(log, reason),
@@ -1034,7 +1116,36 @@ fn run_cargo_ignored_live_check(
         Ok(live_env) => live_env,
         Err(error) => return failed_result(log, format!("{error:#}"), None),
     };
-    let environment = live_env.to_output();
+    let mut environment = live_env.to_output();
+    let codex_broker_profile = if test
+        == "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_installed_plugins"
+    {
+        let Some(binary) = resolve_command("codex") else {
+            return blocked_with_env(
+                log,
+                "codex-plugin-broker-live requires a Codex executable on PATH".to_string(),
+                Some(environment),
+            );
+        };
+        match prepare_codex_broker_live_profile(check_dir, binary) {
+            Ok(profile) => Some(profile),
+            Err(error) => {
+                return failed_result(
+                    log,
+                    format!("failed to prepare codex-plugin-broker-live profile: {error:#}"),
+                    Some(environment),
+                );
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(profile) = codex_broker_profile.as_ref() {
+        environment.mode = LiveEnvMode::Isolated;
+        environment.home_path = profile.home.display().to_string();
+        environment.config_path = profile.config.display().to_string();
+        environment.db_path = profile.db.display().to_string();
+    }
     for provider in providers {
         if !prerequisites.provider_credentials_available(provider) {
             return blocked_with_env(
@@ -1052,12 +1163,91 @@ fn run_cargo_ignored_live_check(
         .args(["test", "-p", package, test, "--", "--ignored", "--exact"])
         .current_dir(root);
     live_env.apply_to_command(&mut command, providers.first().copied());
+    if let Some(profile) = codex_broker_profile {
+        command
+            .env("PSYCHEVO_HOME", profile.home)
+            .env("PSYCHEVO_CONFIG", profile.config)
+            .env("PSYCHEVO_DB", profile.db)
+            .env("PSYCHEVO_CODEX_BIN", profile.binary);
+    }
     let outcome = run_logged_process(test, &mut command, log)?;
-    check_result_from_outcome(
-        outcome,
-        &format!("{test} failed"),
-        Some(live_env.to_output()),
-    )
+    check_result_from_outcome(outcome, &format!("{test} failed"), Some(environment))
+}
+
+struct CodexBrokerLiveProfile {
+    home: PathBuf,
+    config: PathBuf,
+    db: PathBuf,
+    binary: PathBuf,
+}
+
+fn prepare_codex_broker_live_profile(
+    check_dir: &Path,
+    binary: PathBuf,
+) -> Result<CodexBrokerLiveProfile> {
+    let home = check_dir.join("codex-authority-home");
+    let config = home.join("config.toml");
+    let db = check_dir.join("codex-authority-state.db");
+    write_codex_broker_live_profile(&config, &binary)?;
+    Ok(CodexBrokerLiveProfile {
+        home,
+        config,
+        db,
+        binary,
+    })
+}
+
+fn write_codex_broker_live_profile(config: &Path, binary: &Path) -> Result<()> {
+    let mut authority = toml::map::Map::new();
+    authority.insert("enabled".to_string(), toml::Value::Boolean(true));
+    authority.insert(
+        "binary".to_string(),
+        toml::Value::String(binary.display().to_string()),
+    );
+    let mut profile = toml::map::Map::new();
+    profile.insert("codex_plugins".to_string(), toml::Value::Table(authority));
+    let parent = config
+        .parent()
+        .context("Codex broker live profile has no parent directory")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("create Codex broker live home {}", parent.display()))?;
+    fs::write(config, toml::to_string(&toml::Value::Table(profile))?)
+        .with_context(|| format!("write {}", config.display()))
+}
+
+fn resolve_live_command_path(command: &str) -> Option<PathBuf> {
+    let path = Path::new(command);
+    if path.components().count() > 1 {
+        return path.is_file().then(|| absolute_command_path(path));
+    }
+    let paths = env::var_os("PATH")?;
+    let extensions = if cfg!(windows) {
+        env::var_os("PATHEXT")
+            .map(|value| {
+                value
+                    .to_string_lossy()
+                    .split(';')
+                    .filter(|extension| !extension.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|extensions| !extensions.is_empty())
+            .unwrap_or_else(|| vec![".EXE".to_string()])
+    } else {
+        vec![String::new()]
+    };
+    env::split_paths(&paths).find_map(|directory| {
+        extensions.iter().find_map(|extension| {
+            let candidate = directory.join(format!("{command}{extension}"));
+            candidate
+                .is_file()
+                .then(|| absolute_command_path(&candidate))
+        })
+    })
+}
+
+fn absolute_command_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1103,7 +1293,7 @@ fn run_playwright_live_check(
     if !command_exists("pnpm") {
         return blocked_with_env(
             log,
-            "missing pnpm; run: cargo xtask doctor deps install --only playwright".to_string(),
+            "missing pnpm; run: pnpm exec playwright install chromium".to_string(),
             Some(environment),
         );
     }
@@ -1705,6 +1895,74 @@ mod tests {
     }
 
     #[test]
+    fn codex_broker_live_profile_is_enabled_only_in_the_check_home() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-codex-broker-live-profile-{}",
+            std::process::id()
+        ));
+        let config = root.join("home/config.toml");
+        let binary = root.join("bin/codex");
+
+        write_codex_broker_live_profile(&config, &binary).expect("write live profile");
+
+        let parsed = fs::read_to_string(&config)
+            .expect("read live profile")
+            .parse::<toml::Value>()
+            .expect("parse live profile");
+        assert_eq!(parsed["codex_plugins"]["enabled"].as_bool(), Some(true));
+        assert_eq!(
+            parsed["codex_plugins"]["binary"].as_str(),
+            Some(binary.to_string_lossy().as_ref())
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_codex_executable_blocks_only_the_broker_live_check() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-xtask-missing-codex-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let dev_home = root.join(".local").join(".psychevo-dev");
+        fs::create_dir_all(&dev_home).expect("dev home");
+        fs::write(dev_home.join("config.toml"), "").expect("config");
+        fs::write(dev_home.join(".env"), "").expect("env");
+        let check_dir = root.join("check");
+        fs::create_dir_all(&check_dir).expect("check dir");
+        let log = Arc::new(Mutex::new(
+            fs::File::create(check_dir.join("check.log")).expect("log"),
+        ));
+
+        let result = run_cargo_ignored_live_check_with_command_resolver(
+            &root,
+            &check_dir,
+            &[],
+            LiveEnvMode::Shared,
+            (
+                "psychevo-gateway",
+                "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_installed_plugins",
+            ),
+            log,
+            |_| None,
+        )
+        .expect("check result");
+
+        assert_eq!(result.status, LiveStatus::Blocked);
+        assert!(
+            result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("Codex executable"))
+        );
+        assert!(result.environment.is_some());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn plan_expands_desktop_suite_with_provider_live_check() {
         let plan = plan_output(
             &LiveSelection {
@@ -1746,6 +2004,18 @@ mod tests {
     }
 
     #[test]
+    fn desktop_live_checks_are_isolated_from_a_shared_live_run() {
+        assert_eq!(
+            desktop_live_environment_mode(LiveEnvMode::Shared),
+            LiveEnvMode::Isolated
+        );
+        assert_eq!(
+            desktop_live_environment_mode(LiveEnvMode::Isolated),
+            LiveEnvMode::Isolated
+        );
+    }
+
+    #[test]
     fn agent_suite_plan_uses_only_deterministic_fakes_and_no_provider() {
         let plan = plan_output(
             &LiveSelection {
@@ -1766,14 +2036,39 @@ mod tests {
     }
 
     #[test]
-    fn desktop_provider_live_probe_text_exposes_token_in_preview() {
-        let token = desktop_provider_live_token(registry::XIAOMI_TOKEN_PLAN);
-        let text = desktop_floating_live_text(Some(&token));
-        assert!(text.contains(&token));
+    fn desktop_provider_live_probe_text_exposes_benign_sentinel_in_preview() {
+        let sentinel = desktop_provider_live_sentinel();
+        let text = desktop_floating_live_text(Some(&sentinel));
+        assert!(text.contains(&sentinel));
+        assert_eq!(sentinel, "psychevo desktop live response ok");
+        assert!(!text.to_ascii_lowercase().contains("token:"));
         assert!(
             text.chars().count() <= 80,
             "Desktop activation preview truncates after 80 characters: {text}"
         );
+    }
+
+    #[test]
+    fn desktop_provider_live_config_selects_the_claimed_model() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-desktop-provider-live-config-{}",
+            std::process::id()
+        ));
+        let config = root.join("config.toml");
+        fs::create_dir_all(&root).expect("config parent");
+
+        write_desktop_provider_live_config(&config, registry::XIAOMI_TOKEN_PLAN)
+            .expect("write provider config");
+
+        let parsed = fs::read_to_string(&config)
+            .expect("read provider config")
+            .parse::<toml::Value>()
+            .expect("parse provider config");
+        assert_eq!(
+            parsed["model"].as_str(),
+            Some(registry::XIAOMI_TOKEN_PLAN.model)
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1822,6 +2117,50 @@ mod tests {
         assert_eq!(command_env(&command, "DUMMY_ENV").as_deref(), Some("1"));
         assert!(command_env(&command, "PSYCHEVO_INFERENCE_PROVIDER").is_none());
         assert!(command_env(&command, "PSYCHEVO_DESKTOP_PROVIDER_LIVE").is_none());
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn desktop_gateway_cleanup_uses_check_local_environment() {
+        let root = std::env::temp_dir().join(format!(
+            "psychevo-xtask-desktop-cleanup-env-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let dev_home = root.join(".local").join(".psychevo-dev");
+        fs::create_dir_all(&dev_home).expect("dev home");
+        fs::write(dev_home.join("config.toml"), "").expect("config");
+        fs::write(dev_home.join(".env"), "DUMMY_ENV=1\n").expect("env");
+        let prerequisites = LivePrerequisites::load(&root).expect("prerequisites");
+        let check_dir = root.join("check");
+        let live_env = prerequisites
+            .resolve(LiveEnvMode::Isolated, &check_dir)
+            .expect("live env");
+        let mut command = ProcessCommand::new("/tmp/pevo");
+
+        configure_desktop_gateway_stop_command(&mut command, &root, &live_env);
+
+        assert_eq!(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            ["gateway", "stop"]
+        );
+        assert_eq!(command.get_current_dir(), Some(root.as_path()));
+        assert_eq!(
+            command_env(&command, "PSYCHEVO_HOME").as_deref(),
+            Some(check_dir.join("home").to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            command_env(&command, "PSYCHEVO_DB").as_deref(),
+            Some(check_dir.join("state.db").to_string_lossy().as_ref())
+        );
+        assert_eq!(command_env(&command, "DUMMY_ENV").as_deref(), Some("1"));
 
         fs::remove_dir_all(root).expect("cleanup");
     }
