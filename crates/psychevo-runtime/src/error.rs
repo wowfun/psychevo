@@ -6,7 +6,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("sqlite failed: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    Sqlx(#[from] sqlx::Error),
+    #[error("sqlite migration failed: {0}")]
+    SqlxMigration(#[from] sqlx::migrate::MigrateError),
     #[error("io failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("HTTP request failed: {0}")]

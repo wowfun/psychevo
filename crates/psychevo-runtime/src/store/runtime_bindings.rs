@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use psychevo_agent_core::now_ms;
-use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
+use sqlx::Row;
 
 use crate::error::{Error, Result};
 
@@ -12,17 +12,18 @@ use super::{
 };
 
 impl StateRuntime {
-    pub fn create_gateway_runtime_binding(
+    pub async fn create_gateway_runtime_binding(
         &self,
         input: GatewayRuntimeBindingInput<'_>,
     ) -> Result<GatewayRuntimeBindingRecord> {
         validate_runtime_binding_input(&input)?;
-        validate_runtime_binding_threads(self, &input)?;
+        validate_runtime_binding_threads(self, &input).await?;
 
         let now = now_ms();
-        let inserted = self.write_retry(|conn| {
-            conn.execute(
-                r#"
+        let inserted = self
+            .runtime_binding_write(
+                sqlx::query(
+                    r#"
                 INSERT INTO gateway_runtime_bindings (
                     thread_id, resolution_status, agent_ref, agent_fingerprint,
                     agent_definition_json, runtime_ref, backend_kind, native_kind,
@@ -38,30 +39,30 @@ impl StateRuntime {
                 )
                 ON CONFLICT(thread_id) DO NOTHING
                 "#,
-                params![
-                    input.thread_id,
-                    input.agent_ref,
-                    input.agent_fingerprint,
-                    input.agent_definition_json,
-                    input.runtime_ref,
-                    input.backend_kind,
-                    input.native_kind,
-                    input.native_session_id,
-                    input.cwd,
-                    input.profile_fingerprint,
-                    input.profile_revision,
-                    input.profile_config_json,
-                    input.adapter_kind,
-                    input.adapter_revision,
-                    input.ownership.as_str(),
-                    input.parent_thread_id,
-                    now,
-                ],
+                )
+                .bind(input.thread_id)
+                .bind(input.agent_ref)
+                .bind(input.agent_fingerprint)
+                .bind(input.agent_definition_json)
+                .bind(input.runtime_ref)
+                .bind(input.backend_kind)
+                .bind(input.native_kind)
+                .bind(input.native_session_id)
+                .bind(input.cwd)
+                .bind(input.profile_fingerprint)
+                .bind(input.profile_revision)
+                .bind(input.profile_config_json)
+                .bind(input.adapter_kind)
+                .bind(input.adapter_revision)
+                .bind(input.ownership.as_str())
+                .bind(input.parent_thread_id)
+                .bind(now),
             )
-        })?;
+            .await?;
 
         let record = self
-            .gateway_runtime_binding(input.thread_id)?
+            .gateway_runtime_binding(input.thread_id)
+            .await?
             .ok_or_else(|| {
                 Error::Message(format!(
                     "runtime binding not found after create: {}",
@@ -83,7 +84,7 @@ impl StateRuntime {
     /// and adapter observations are intentionally reset. The caller supplies the
     /// parent's resolved live controls so the child requests the same effective
     /// values from its new runtime session.
-    pub fn create_gateway_runtime_binding_from_parent_snapshot(
+    pub async fn create_gateway_runtime_binding_from_parent_snapshot(
         &self,
         parent_thread_id: &str,
         child_thread_id: &str,
@@ -95,7 +96,8 @@ impl StateRuntime {
             ));
         }
         let parent = self
-            .gateway_runtime_binding(parent_thread_id)?
+            .gateway_runtime_binding(parent_thread_id)
+            .await?
             .ok_or_else(|| {
                 Error::Message(format!(
                     "resolved runtime binding not found for parent Thread `{parent_thread_id}`"
@@ -107,7 +109,8 @@ impl StateRuntime {
             )));
         }
         let child = self
-            .session_summary(child_thread_id)?
+            .session_summary(child_thread_id)
+            .await?
             .ok_or_else(|| Error::Message(format!("session not found: {child_thread_id}")))?;
         if child.cwd != parent.cwd {
             return Err(Error::Message(format!(
@@ -120,9 +123,10 @@ impl StateRuntime {
             .then(|| serde_json::to_string(effective_controls))
             .transpose()?;
         let now = now_ms();
-        let inserted = self.write_retry(|conn| {
-            conn.execute(
-                r#"
+        let inserted = self
+            .runtime_binding_write(
+                sqlx::query(
+                    r#"
                 INSERT INTO gateway_runtime_bindings (
                     thread_id, resolution_status, agent_ref, agent_fingerprint,
                     agent_definition_json, runtime_ref, backend_kind, native_kind,
@@ -141,20 +145,20 @@ impl StateRuntime {
                 WHERE thread_id = ?4 AND resolution_status = 'resolved'
                 ON CONFLICT(thread_id) DO NOTHING
                 "#,
-                params![
-                    child_thread_id,
-                    inherited_preferences_json,
-                    now,
-                    parent_thread_id,
-                ],
+                )
+                .bind(child_thread_id)
+                .bind(inherited_preferences_json)
+                .bind(now)
+                .bind(parent_thread_id),
             )
-        })?;
+            .await?;
         if inserted != 1 {
             return Err(Error::Message(format!(
                 "runtime binding conflict for child Thread `{child_thread_id}`"
             )));
         }
-        self.gateway_runtime_binding(child_thread_id)?
+        self.gateway_runtime_binding(child_thread_id)
+            .await?
             .ok_or_else(|| {
                 Error::Message(format!(
                     "runtime binding not found after snapshot: {child_thread_id}"
@@ -162,13 +166,13 @@ impl StateRuntime {
             })
     }
 
-    pub fn resolve_gateway_runtime_binding(
+    pub async fn resolve_gateway_runtime_binding(
         &self,
         input: GatewayRuntimeBindingInput<'_>,
         expected_binding_revision: i64,
     ) -> Result<GatewayRuntimeBindingRecord> {
         validate_runtime_binding_input(&input)?;
-        validate_runtime_binding_threads(self, &input)?;
+        validate_runtime_binding_threads(self, &input).await?;
         if expected_binding_revision < 1 {
             return Err(Error::Message(
                 "expected binding revision must be positive".to_string(),
@@ -176,9 +180,10 @@ impl StateRuntime {
         }
 
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
-                r#"
+        let changed = self
+            .runtime_binding_write(
+                sqlx::query(
+                    r#"
                 UPDATE gateway_runtime_bindings
                 SET resolution_status = 'resolved',
                     agent_ref = ?2,
@@ -213,31 +218,31 @@ impl StateRuntime {
                   AND ownership = ?15
                   AND (parent_thread_id IS NULL OR parent_thread_id IS ?16)
                 "#,
-                params![
-                    input.thread_id,
-                    input.agent_ref,
-                    input.agent_fingerprint,
-                    input.agent_definition_json,
-                    input.runtime_ref,
-                    input.backend_kind,
-                    input.native_kind,
-                    input.native_session_id,
-                    input.cwd,
-                    input.profile_fingerprint,
-                    input.profile_revision,
-                    input.profile_config_json,
-                    input.adapter_kind,
-                    input.adapter_revision,
-                    input.ownership.as_str(),
-                    input.parent_thread_id,
-                    now,
-                    expected_binding_revision,
-                ],
+                )
+                .bind(input.thread_id)
+                .bind(input.agent_ref)
+                .bind(input.agent_fingerprint)
+                .bind(input.agent_definition_json)
+                .bind(input.runtime_ref)
+                .bind(input.backend_kind)
+                .bind(input.native_kind)
+                .bind(input.native_session_id)
+                .bind(input.cwd)
+                .bind(input.profile_fingerprint)
+                .bind(input.profile_revision)
+                .bind(input.profile_config_json)
+                .bind(input.adapter_kind)
+                .bind(input.adapter_revision)
+                .bind(input.ownership.as_str())
+                .bind(input.parent_thread_id)
+                .bind(now)
+                .bind(expected_binding_revision),
             )
-        })?;
+            .await?;
 
         let record = self
-            .gateway_runtime_binding(input.thread_id)?
+            .gateway_runtime_binding(input.thread_id)
+            .await?
             .ok_or_else(|| {
                 Error::Message(format!(
                     "runtime binding not found for thread `{}`",
@@ -262,73 +267,85 @@ impl StateRuntime {
         )))
     }
 
-    pub fn gateway_runtime_binding(
+    pub async fn gateway_runtime_binding(
         &self,
         thread_id: &str,
     ) -> Result<Option<GatewayRuntimeBindingRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        conn.query_row(
-            runtime_binding_select_sql("WHERE thread_id = ?1").as_str(),
-            params![thread_id],
-            gateway_runtime_binding_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+        let sql = runtime_binding_select_sql("WHERE thread_id = ?1");
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(thread_id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .map(|row| gateway_runtime_binding_from_row(&row))
+                .transpose()
+        })
+        .await
     }
 
-    pub fn gateway_runtime_binding_by_native_session(
+    pub async fn gateway_runtime_binding_by_native_session(
         &self,
         runtime_ref: &str,
         native_session_id: &str,
     ) -> Result<Option<GatewayRuntimeBindingRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        conn.query_row(
-            runtime_binding_select_sql(
-                "WHERE resolution_status = 'resolved' AND runtime_ref = ?1 AND native_session_id = ?2",
-            )
-            .as_str(),
-            params![runtime_ref, native_session_id],
-            gateway_runtime_binding_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+        let sql = runtime_binding_select_sql(
+            "WHERE resolution_status = 'resolved' AND runtime_ref = ?1 AND native_session_id = ?2",
+        );
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(runtime_ref)
+                .bind(native_session_id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .map(|row| gateway_runtime_binding_from_row(&row))
+                .transpose()
+        })
+        .await
     }
 
-    pub fn gateway_runtime_bindings_for_runtime(
+    pub async fn gateway_runtime_bindings_for_runtime(
         &self,
         runtime_ref: &str,
     ) -> Result<Vec<GatewayRuntimeBindingRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let sql = runtime_binding_select_sql(
             "WHERE resolution_status = 'resolved' AND runtime_ref = ?1 ORDER BY created_at_ms ASC, thread_id ASC",
         );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![runtime_ref], gateway_runtime_binding_from_row)?;
-        let mut bindings = Vec::new();
-        for row in rows {
-            bindings.push(row?);
-        }
-        Ok(bindings)
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(runtime_ref)
+                .fetch_all(&mut *conn)
+                .await?;
+            rows.into_iter()
+                .map(|row| gateway_runtime_binding_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn gateway_runtime_child_bindings(
+    pub async fn gateway_runtime_child_bindings(
         &self,
         parent_thread_id: &str,
     ) -> Result<Vec<GatewayRuntimeBindingRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let sql = runtime_binding_select_sql(
             "WHERE resolution_status = 'resolved' AND parent_thread_id = ?1 ORDER BY created_at_ms ASC, thread_id ASC",
         );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![parent_thread_id], gateway_runtime_binding_from_row)?;
-        let mut bindings = Vec::new();
-        for row in rows {
-            bindings.push(row?);
-        }
-        Ok(bindings)
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(parent_thread_id)
+                .fetch_all(&mut *conn)
+                .await?;
+            rows.into_iter()
+                .map(|row| gateway_runtime_binding_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn attach_gateway_runtime_native_session(
+    pub async fn attach_gateway_runtime_native_session(
         &self,
         thread_id: &str,
         expected_binding_revision: i64,
@@ -347,9 +364,10 @@ impl StateRuntime {
         }
 
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
-                r#"
+        let changed = self
+            .runtime_binding_write(
+                sqlx::query(
+                    r#"
                 UPDATE gateway_runtime_bindings
                 SET native_session_id = ?1,
                     binding_revision = binding_revision + 1,
@@ -359,15 +377,22 @@ impl StateRuntime {
                   AND binding_revision = ?4
                   AND native_session_id IS NULL
                 "#,
-                params![native_session_id, now, thread_id, expected_binding_revision,],
+                )
+                .bind(native_session_id)
+                .bind(now)
+                .bind(thread_id)
+                .bind(expected_binding_revision),
             )
-        })?;
+            .await?;
 
-        let record = self.gateway_runtime_binding(thread_id)?.ok_or_else(|| {
-            Error::Message(format!(
-                "runtime binding not found for thread `{thread_id}`"
-            ))
-        })?;
+        let record = self
+            .gateway_runtime_binding(thread_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "runtime binding not found for thread `{thread_id}`"
+                ))
+            })?;
         if changed > 0 {
             return Ok(record);
         }
@@ -394,7 +419,7 @@ impl StateRuntime {
         )))
     }
 
-    pub fn compare_and_set_gateway_runtime_control_state(
+    pub async fn compare_and_set_gateway_runtime_control_state(
         &self,
         thread_id: &str,
         expected_binding_revision: i64,
@@ -423,11 +448,14 @@ impl StateRuntime {
             validate_runtime_control_map("runtime observation", values)?;
         }
 
-        let before = self.gateway_runtime_binding(thread_id)?.ok_or_else(|| {
-            Error::Message(format!(
-                "runtime binding not found for thread `{thread_id}`"
-            ))
-        })?;
+        let before = self
+            .gateway_runtime_binding(thread_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "runtime binding not found for thread `{thread_id}`"
+                ))
+            })?;
         validate_runtime_control_cas(
             &before,
             expected_binding_revision,
@@ -452,9 +480,10 @@ impl StateRuntime {
             .map(serde_json::to_string)
             .transpose()?;
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
-                r#"
+        let changed = self
+            .runtime_binding_write(
+                sqlx::query(
+                    r#"
                 UPDATE gateway_runtime_bindings
                 SET thread_preferences_json = CASE WHEN ?1 THEN ?2 ELSE thread_preferences_json END,
                     runtime_observed_json = CASE WHEN ?3 THEN ?4 ELSE runtime_observed_json END,
@@ -466,23 +495,25 @@ impl StateRuntime {
                   AND binding_revision = ?7
                   AND control_revision = ?8
                 "#,
-                params![
-                    patch.thread_preferences.is_some(),
-                    preferences_json,
-                    patch.runtime_observed.is_some(),
-                    observed_json,
-                    now,
-                    thread_id,
-                    expected_binding_revision,
-                    expected_control_revision,
-                ],
+                )
+                .bind(patch.thread_preferences.is_some())
+                .bind(preferences_json)
+                .bind(patch.runtime_observed.is_some())
+                .bind(observed_json)
+                .bind(now)
+                .bind(thread_id)
+                .bind(expected_binding_revision)
+                .bind(expected_control_revision),
             )
-        })?;
-        let after = self.gateway_runtime_binding(thread_id)?.ok_or_else(|| {
-            Error::Message(format!(
-                "runtime binding not found for thread `{thread_id}`"
-            ))
-        })?;
+            .await?;
+        let after = self
+            .gateway_runtime_binding(thread_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "runtime binding not found for thread `{thread_id}`"
+                ))
+            })?;
         if changed > 0 {
             return Ok(after);
         }
@@ -490,6 +521,20 @@ impl StateRuntime {
         Err(Error::Message(format!(
             "runtime control state for thread `{thread_id}` was not updated"
         )))
+    }
+
+    async fn runtime_binding_write<'q>(
+        &self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
+    ) -> Result<u64> {
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let changed = query.execute(&mut *tx).await?.rows_affected();
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(changed)
+        })
+        .await
     }
 }
 
@@ -571,12 +616,13 @@ fn validate_runtime_binding_input(input: &GatewayRuntimeBindingInput<'_>) -> Res
     Ok(())
 }
 
-fn validate_runtime_binding_threads(
+async fn validate_runtime_binding_threads(
     store: &StateRuntime,
     input: &GatewayRuntimeBindingInput<'_>,
 ) -> Result<()> {
     let thread = store
-        .session_summary(input.thread_id)?
+        .session_summary(input.thread_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {}", input.thread_id)))?;
     if thread.cwd != input.cwd {
         return Err(Error::Message(format!(
@@ -585,9 +631,12 @@ fn validate_runtime_binding_threads(
         )));
     }
     if let Some(parent_thread_id) = input.parent_thread_id {
-        store.session_summary(parent_thread_id)?.ok_or_else(|| {
-            Error::Message(format!("parent session not found: {parent_thread_id}"))
-        })?;
+        store
+            .session_summary(parent_thread_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Message(format!("parent session not found: {parent_thread_id}"))
+            })?;
     }
     Ok(())
 }
@@ -631,72 +680,54 @@ fn runtime_binding_select_sql(where_clause: &str) -> String {
 }
 
 fn gateway_runtime_binding_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<GatewayRuntimeBindingRecord> {
-    let status_raw: String = row.get(1)?;
-    let ownership_raw: String = row.get(15)?;
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<GatewayRuntimeBindingRecord> {
+    let status_raw: String = row.try_get(1)?;
+    let ownership_raw: String = row.try_get(15)?;
     let status = GatewayRuntimeBindingStatus::parse(&status_raw)
-        .ok_or_else(|| invalid_runtime_binding_enum(1, "resolution_status", &status_raw))?;
+        .ok_or_else(|| invalid_runtime_binding_enum("resolution_status", &status_raw))?;
     let ownership = GatewayRuntimeBindingOwnership::parse(&ownership_raw)
-        .ok_or_else(|| invalid_runtime_binding_enum(15, "ownership", &ownership_raw))?;
+        .ok_or_else(|| invalid_runtime_binding_enum("ownership", &ownership_raw))?;
     Ok(GatewayRuntimeBindingRecord {
-        thread_id: row.get(0)?,
+        thread_id: row.try_get(0)?,
         status,
-        agent_ref: row.get(2)?,
-        agent_fingerprint: row.get(3)?,
-        agent_definition_json: row.get(4)?,
-        runtime_ref: row.get(5)?,
-        backend_kind: row.get(6)?,
-        native_kind: row.get(7)?,
-        native_session_id: row.get(8)?,
-        cwd: row.get(9)?,
-        profile_fingerprint: row.get(10)?,
-        profile_revision: row.get(11)?,
-        profile_config_json: row.get(12)?,
-        adapter_kind: row.get(13)?,
-        adapter_revision: row.get(14)?,
+        agent_ref: row.try_get(2)?,
+        agent_fingerprint: row.try_get(3)?,
+        agent_definition_json: row.try_get(4)?,
+        runtime_ref: row.try_get(5)?,
+        backend_kind: row.try_get(6)?,
+        native_kind: row.try_get(7)?,
+        native_session_id: row.try_get(8)?,
+        cwd: row.try_get(9)?,
+        profile_fingerprint: row.try_get(10)?,
+        profile_revision: row.try_get(11)?,
+        profile_config_json: row.try_get(12)?,
+        adapter_kind: row.try_get(13)?,
+        adapter_revision: row.try_get(14)?,
         ownership,
-        parent_thread_id: row.get(16)?,
-        binding_revision: row.get(17)?,
+        parent_thread_id: row.try_get(16)?,
+        binding_revision: row.try_get(17)?,
         thread_preferences: decode_runtime_control_map(
-            row.get::<_, Option<String>>(18)?.as_deref(),
-            18,
+            row.try_get::<Option<String>, _>(18)?.as_deref(),
         )?,
         runtime_observed: decode_runtime_control_map(
-            row.get::<_, Option<String>>(19)?.as_deref(),
-            19,
+            row.try_get::<Option<String>, _>(19)?.as_deref(),
         )?,
-        control_revision: row.get(20)?,
-        unresolved_reason: row.get(21)?,
-        created_at_ms: row.get(22)?,
-        updated_at_ms: row.get(23)?,
+        control_revision: row.try_get(20)?,
+        unresolved_reason: row.try_get(21)?,
+        created_at_ms: row.try_get(22)?,
+        updated_at_ms: row.try_get(23)?,
     })
 }
 
-fn decode_runtime_control_map(
-    value: Option<&str>,
-    column: usize,
-) -> rusqlite::Result<BTreeMap<String, Value>> {
+fn decode_runtime_control_map(value: Option<&str>) -> Result<BTreeMap<String, Value>> {
     value
         .map(serde_json::from_str)
         .transpose()
         .map(Option::unwrap_or_default)
-        .map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(
-                column,
-                rusqlite::types::Type::Text,
-                Box::new(err),
-            )
-        })
+        .map_err(Into::into)
 }
 
-fn invalid_runtime_binding_enum(index: usize, field: &str, value: &str) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        index,
-        rusqlite::types::Type::Text,
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("invalid runtime binding {field}: {value}"),
-        )),
-    )
+fn invalid_runtime_binding_enum(field: &str, value: &str) -> Error {
+    Error::Message(format!("invalid runtime binding {field}: {value}"))
 }

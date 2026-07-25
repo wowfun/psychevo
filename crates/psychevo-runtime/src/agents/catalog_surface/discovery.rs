@@ -48,20 +48,20 @@ pub type AgentRun = AgentRunRecord;
 pub struct AgentControl;
 
 impl AgentControl {
-    pub fn status_value() -> Value {
-        agent_status_value(None, None, false)
+    pub async fn status_value() -> Value {
+        agent_status_value(None, None, false).await
     }
 
     pub async fn wait(id: &str, timeout: Duration) -> Result<Option<AgentRunRecord>> {
         wait_agent_id(id, timeout).await
     }
 
-    pub fn close(id: &str) -> Result<Option<AgentRunRecord>> {
-        close_agent_id(id, None)
+    pub async fn close(id: &str) -> Result<Option<AgentRunRecord>> {
+        close_agent_id(id, None).await
     }
 
-    pub fn send(id: &str, message: &str) -> Result<Option<AgentRunRecord>> {
-        send_agent_message(id, message, None)
+    pub async fn send(id: &str, message: &str) -> Result<Option<AgentRunRecord>> {
+        send_agent_message(id, message, None).await
     }
 }
 
@@ -664,12 +664,12 @@ pub(crate) fn agent_tools(context: AgentToolContext) -> Vec<Arc<dyn ToolBinding>
     tools
 }
 
-pub fn agent_status_value(
+pub async fn agent_status_value(
     store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
-    let records = agent_status_records(store, parent_session_id, all);
+    let records = agent_status_records(store, parent_session_id, all).await;
     json!({
         "agents": records,
         "control": {
@@ -680,15 +680,16 @@ pub fn agent_status_value(
     })
 }
 
-pub(crate) fn agent_status_model_value(
+pub(crate) async fn agent_status_model_value(
     store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
-    let agents = agent_status_records(store, parent_session_id, all)
-        .iter()
-        .map(|record| subagent_summary_value(store, record, true))
-        .collect::<Vec<_>>();
+    let records = agent_status_records(store, parent_session_id, all).await;
+    let mut agents = Vec::with_capacity(records.len());
+    for record in &records {
+        agents.push(subagent_summary_value(store, record, true).await);
+    }
     json!({
         "agents": agents,
         "control": {
@@ -698,7 +699,7 @@ pub(crate) fn agent_status_model_value(
     })
 }
 
-pub fn agent_status_records(
+pub async fn agent_status_records(
     store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
@@ -707,10 +708,12 @@ pub fn agent_status_records(
     let mut scope_sessions = BTreeSet::new();
     if let Some(store) = store {
         let edges = if all {
-            store.list_agent_edges().unwrap_or_default()
+            store.list_agent_edges().await.unwrap_or_default()
         } else if let Some(parent) = parent_session_id {
             scope_sessions.insert(parent.to_string());
-            collect_agent_edge_tree(store, parent).unwrap_or_default()
+            collect_agent_edge_tree(store, parent)
+                .await
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -718,7 +721,7 @@ pub fn agent_status_records(
             scope_sessions.insert(edge.child_session_id.clone());
         }
         for edge in edges {
-            records.push(agent_record_from_edge(store, edge));
+            records.push(agent_record_from_edge(store, edge).await);
         }
     }
     let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
@@ -763,7 +766,10 @@ pub async fn wait_agent_mailbox(
 ) -> Result<Value> {
     let started = Instant::now();
     loop {
-        if store.has_pending_agent_mailbox_events(parent_session_id)? {
+        if store
+            .has_pending_agent_mailbox_events(parent_session_id)
+            .await?
+        {
             return Ok(json!({
                 "message": "Wait completed.",
                 "timed_out": false,
@@ -779,53 +785,68 @@ pub async fn wait_agent_mailbox(
     }
 }
 
-pub fn close_agent_id(id: &str, store: Option<&StateRuntime>) -> Result<Option<AgentRunRecord>> {
-    let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? else {
-        drop(runs);
-        if let Some(store) = store
-            && let Some(edge) = find_agent_edge_for_target(store, id)?
-        {
-            let previous = agent_record_from_edge(store, edge.clone());
-            store.close_agent_edge_subtree(&edge.child_session_id)?;
-            return Ok(Some(previous));
+pub async fn close_agent_id(
+    id: &str,
+    store: Option<&StateRuntime>,
+) -> Result<Option<AgentRunRecord>> {
+    let live = {
+        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        if let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? {
+            let child_session = {
+                let state = runs.get_mut(&live_id).expect("live record exists");
+                if let Some(control) = &state.control {
+                    control.stop();
+                }
+                state.record.status = AgentRunStatus::Shutdown;
+                state.record.edge_status = Some(AgentEdgeStatus::Closed);
+                state.record.ended_at_ms = Some(now_ms());
+                state.record.outcome = Some("shutdown".to_string());
+                state.record.child_session_id.clone()
+            };
+            if let Some(child_session) = child_session.as_deref() {
+                close_live_descendants_locked(&mut runs, child_session);
+            }
+            Some((previous, child_session))
+        } else {
+            None
         }
-        return Ok(None);
     };
-    let child_session = {
-        let state = runs.get_mut(&live_id).expect("live record exists");
-        if let Some(control) = &state.control {
-            control.stop();
-        }
-        state.record.status = AgentRunStatus::Shutdown;
-        state.record.edge_status = Some(AgentEdgeStatus::Closed);
-        state.record.ended_at_ms = Some(now_ms());
-        state.record.outcome = Some("shutdown".to_string());
-        state.record.child_session_id.clone()
+    let Some((previous, child_session)) = live else {
+        return close_persisted_agent(id, store).await;
     };
-    if let Some(child_session) = child_session.as_deref() {
-        close_live_descendants_locked(&mut runs, child_session);
-    }
-    drop(runs);
     if let Some(store) = store
         && let Some(child_session) = child_session
     {
-        store.close_agent_edge_subtree(&child_session)?;
+        store.close_agent_edge_subtree(&child_session).await?;
     }
     Ok(Some(previous))
 }
 
-pub fn stop_agent_id_with_grace(
+async fn close_persisted_agent(
+    id: &str,
+    store: Option<&StateRuntime>,
+) -> Result<Option<AgentRunRecord>> {
+    if let Some(store) = store
+        && let Some(edge) = find_agent_edge_for_target(store, id).await?
+    {
+        let previous = agent_record_from_edge(store, edge.clone()).await;
+        store.close_agent_edge_subtree(&edge.child_session_id).await?;
+        return Ok(Some(previous));
+    }
+    Ok(None)
+}
+
+pub async fn stop_agent_id_with_grace(
     id: &str,
     store: Option<&StateRuntime>,
     grace: Duration,
 ) -> Result<Option<AgentRunRecord>> {
     let requested = request_agent_stop_id(id)?;
     if requested.is_none() {
-        return close_agent_id(id, store);
+        return close_agent_id(id, store).await;
     }
-    std::thread::sleep(grace);
-    force_stop_agent_id(id, store)
+    tokio::time::sleep(grace).await;
+    force_stop_agent_id(id, store).await
 }
 
 pub(crate) fn request_agent_stop_id(id: &str) -> Result<Option<AgentRunRecord>> {

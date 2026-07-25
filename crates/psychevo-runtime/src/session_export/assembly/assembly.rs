@@ -183,18 +183,19 @@ pub fn default_session_export_filename(
     }
 }
 
-pub fn render_session_export(
+pub async fn render_session_export(
     store: &StateRuntime,
     session_id: &str,
     options: SessionExportOptions,
 ) -> Result<SessionExportArtifact> {
     let summary = store
-        .session_summary(session_id)?
+        .session_summary(session_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
     let include_messages = options.include.contains(SessionExportInclude::Messages);
     let include_reasoning = options.include.contains(SessionExportInclude::Reasoning);
     let messages = if include_messages {
-        Some(load_export_messages(store, session_id, include_reasoning)?)
+        Some(load_export_messages(store, session_id, include_reasoning).await?)
     } else {
         None
     };
@@ -205,19 +206,20 @@ pub fn render_session_export(
         if let Some(messages) = messages.as_ref() {
             latest_provider_response_from_messages(&summary, messages)
         } else {
-            let response_messages = load_export_messages(store, session_id, include_reasoning)?;
+            let response_messages =
+                load_export_messages(store, session_id, include_reasoning).await?;
             latest_provider_response_from_messages(&summary, &response_messages)
         }
     } else {
         None
     };
-    let prompt_prefix_record = store.load_session_prompt_prefix(session_id)?;
+    let prompt_prefix_record = store.load_session_prompt_prefix(session_id).await?;
     let last_request = if options
         .include
         .contains(SessionExportInclude::LastProviderRequest)
     {
-        let unfiltered_messages = load_unfiltered_export_messages(store, session_id)?;
-        reconstruct_last_provider_request(store, session_id, &summary, &unfiltered_messages)?
+        let unfiltered_messages = load_unfiltered_export_messages(store, session_id).await?;
+        reconstruct_last_provider_request(store, session_id, &summary, &unfiltered_messages).await?
     } else {
         None
     };
@@ -225,12 +227,13 @@ pub fn render_session_export(
         .include
         .contains(SessionExportInclude::ProviderInputEvidence)
     {
-        Some(load_provider_input_evidence(store, session_id)?)
+        Some(load_provider_input_evidence(store, session_id).await?)
     } else {
         None
     };
     let mailbox_events = store
-        .load_agent_mailbox_events(session_id)?
+        .load_agent_mailbox_events(session_id)
+        .await?
         .into_iter()
         .map(export_mailbox_event_value)
         .collect::<Vec<_>>();
@@ -259,13 +262,13 @@ pub fn render_session_export(
     })
 }
 
-pub fn write_session_export(
+pub async fn write_session_export(
     store: &StateRuntime,
     session_id: &str,
     output_path: &Path,
     options: SessionExportOptions,
 ) -> Result<SessionExportWriteResult> {
-    let artifact = render_session_export(store, session_id, options)?;
+    let artifact = render_session_export(store, session_id, options).await?;
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -280,13 +283,14 @@ pub fn write_session_export(
     })
 }
 
-pub(crate) fn load_export_messages(
+pub(crate) async fn load_export_messages(
     store: &StateRuntime,
     session_id: &str,
     include_reasoning: bool,
 ) -> Result<Vec<ExportMessageRecord>> {
     store
-        .load_export_message_summaries(session_id)?
+        .load_export_message_summaries(session_id)
+        .await?
         .into_iter()
         .map(|record| {
             let message = if include_reasoning {
@@ -304,12 +308,13 @@ pub(crate) fn load_export_messages(
         .collect()
 }
 
-pub(crate) fn load_unfiltered_export_messages(
+pub(crate) async fn load_unfiltered_export_messages(
     store: &StateRuntime,
     session_id: &str,
 ) -> Result<Vec<ExportMessageRecord>> {
     store
-        .load_export_message_summaries(session_id)?
+        .load_export_message_summaries(session_id)
+        .await?
         .into_iter()
         .map(|record| {
             Ok(ExportMessageRecord {
@@ -382,16 +387,18 @@ pub(crate) fn export_prompt_prefix_value(record: PromptPrefixRecord) -> ExportPr
     }
 }
 
-pub(crate) fn load_provider_input_evidence(
+pub(crate) async fn load_provider_input_evidence(
     store: &StateRuntime,
     session_id: &str,
 ) -> Result<Vec<ExportPromptEvidence>> {
     let mut prompts = Vec::new();
-    for record in store.load_export_message_summaries(session_id)? {
+    for record in store.load_export_message_summaries(session_id).await? {
         if !matches!(record.message, Message::User { .. }) {
             continue;
         }
-        let items = store.load_context_evidence(session_id, record.session_seq)?;
+        let items = store
+            .load_context_evidence(session_id, record.session_seq)
+            .await?;
         if items.is_empty() {
             continue;
         }
@@ -439,13 +446,16 @@ pub(crate) fn export_mailbox_event_value(
     }
 }
 
-pub(crate) fn reconstruct_last_provider_request(
+pub(crate) async fn reconstruct_last_provider_request(
     store: &StateRuntime,
     session_id: &str,
     summary: &SessionSummary,
     messages: &[ExportMessageRecord],
 ) -> Result<Option<ProviderRequestExport>> {
-    let metadata = store.session_metadata(session_id)?.unwrap_or(Value::Null);
+    let metadata = store
+        .session_metadata(session_id)
+        .await?
+        .unwrap_or(Value::Null);
     let base_url = metadata
         .get("base_url")
         .and_then(Value::as_str)
@@ -478,7 +488,8 @@ pub(crate) fn reconstruct_last_provider_request(
             prompt_metadata,
             &record.metadata,
             &mut request_warnings,
-        )?;
+        )
+        .await?;
         if let Some(prefix) = prompt_prefix_record.as_ref()
             && prefix.tool_declarations_hash != reconstructed_tool_declarations_hash
         {
@@ -508,7 +519,8 @@ pub(crate) fn reconstruct_last_provider_request(
             prompt_metadata,
             &record.metadata,
             &mut request_warnings,
-        )?;
+        )
+        .await?;
         let request = GenerationRequest {
             model: ModelTarget {
                 provider: summary.provider.clone(),
@@ -543,7 +555,7 @@ pub(crate) struct ProviderMessageReconstruction<'a> {
     pub(crate) prompt_prefix: Option<&'a PromptPrefixRecord>,
 }
 
-pub(crate) fn reconstructed_provider_messages(
+pub(crate) async fn reconstructed_provider_messages(
     context: &ProviderMessageReconstruction<'_>,
     assistant_index: usize,
     prompt_session_seq: i64,
@@ -553,10 +565,12 @@ pub(crate) fn reconstructed_provider_messages(
 ) -> Result<Vec<Value>> {
     let evidence = context
         .store
-        .load_context_evidence(context.session_id, prompt_session_seq)?;
+        .load_context_evidence(context.session_id, prompt_session_seq)
+        .await?;
     let mailbox_events = context
         .store
-        .load_agent_mailbox_events(context.session_id)?;
+        .load_agent_mailbox_events(context.session_id)
+        .await?;
     let _ = (prompt_metadata, assistant_metadata);
     if let Some(prefix) = context.prompt_prefix {
         return reconstructed_provider_messages_from_prefix(
@@ -680,7 +694,7 @@ pub(crate) fn reconstructed_provider_messages_from_prefix(
     Ok(provider_messages)
 }
 
-pub(crate) fn matching_prompt_prefix(
+pub(crate) async fn matching_prompt_prefix(
     store: &StateRuntime,
     session_id: &str,
     prompt_metadata: &Option<Value>,
@@ -717,7 +731,10 @@ pub(crate) fn matching_prompt_prefix(
         ));
     }
     let prefix = if let Some(version) = prompt_version.or(assistant_version) {
-        let Some(prefix) = store.load_session_prompt_prefix_version(session_id, version)? else {
+        let Some(prefix) = store
+            .load_session_prompt_prefix_version(session_id, version)
+            .await?
+        else {
             warnings.push(format!(
                 "prompt prefix snapshot version `{version}` from {source} is unavailable; hidden prefix text cannot be reconstructed and the request is approximate"
             ));
@@ -728,7 +745,7 @@ pub(crate) fn matching_prompt_prefix(
         warnings.push(format!(
             "{source} prompt prefix metadata does not include a version; using latest stored prompt prefix as an approximate fallback"
         ));
-        let Some(prefix) = store.load_session_prompt_prefix(session_id)? else {
+        let Some(prefix) = store.load_session_prompt_prefix(session_id).await? else {
             warnings.push(format!(
                 "prompt prefix snapshot `{recorded_hash}` from {source} is unavailable; hidden prefix text cannot be reconstructed and the request is approximate"
             ));

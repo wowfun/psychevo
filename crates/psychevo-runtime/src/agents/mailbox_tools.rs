@@ -16,7 +16,7 @@ use super::{
     },
 };
 
-pub(crate) fn append_parent_agent_start_notification(
+pub(crate) async fn append_parent_agent_start_notification(
     store: &StateRuntime,
     parent_session_id: &str,
     record: &AgentRunRecord,
@@ -26,59 +26,63 @@ pub(crate) fn append_parent_agent_start_notification(
         record.agent_name, record.task
     );
     let message = user_text_message(text);
-    store.append_message_with_metrics(
-        parent_session_id,
-        &message,
-        None,
-        Some(json!({
-            AGENT_NOTIFICATION_METADATA_KEY: {
-                "type": "agent_started",
-                "agent_id": record.id,
-                "task_name": record.task_name,
-                "agent_name": record.agent_name,
-                "child_session_id": record.child_session_id,
-                "status": record.status,
-                "summary": record.task,
-                "effective_max_spawn_depth": record.effective_max_spawn_depth,
-                "hidden": false
-            }
-        })),
-    )
+    store
+        .append_message_with_metrics(
+            parent_session_id,
+            &message,
+            None,
+            Some(json!({
+                AGENT_NOTIFICATION_METADATA_KEY: {
+                    "type": "agent_started",
+                    "agent_id": record.id,
+                    "task_name": record.task_name,
+                    "agent_name": record.agent_name,
+                    "child_session_id": record.child_session_id,
+                    "status": record.status,
+                    "summary": record.task,
+                    "effective_max_spawn_depth": record.effective_max_spawn_depth,
+                    "hidden": false
+                }
+            })),
+        )
+        .await
 }
 
-pub(crate) fn append_parent_agent_mailbox_event(
+pub(crate) async fn append_parent_agent_mailbox_event(
     store: &StateRuntime,
     parent_session_id: &str,
     record: &AgentRunRecord,
     outcome: &str,
     final_answer: &str,
 ) -> Result<()> {
-    let summary = subagent_summary_value(Some(store), record, false);
+    let summary = subagent_summary_value(Some(store), record, false).await;
     let content = subagent_notification_content(&summary);
     let payload = inter_agent_communication_payload(record, content.clone());
     let content_text = serde_json::to_string(&payload)?;
-    store.append_agent_mailbox_event(AgentMailboxEventInput {
-        parent_session_id: parent_session_id.to_string(),
-        child_session_id: record.child_session_id.clone(),
-        agent_id: record.id.clone(),
-        task_name: record.task_name.clone(),
-        agent_name: record.agent_name.clone(),
-        content_text,
-        payload,
-        metadata: Some(json!({
-            "type": "agent_completed",
-            "agent_id": record.id,
-            "task_name": record.task_name,
-            "agent_name": record.agent_name,
-            "child_session_id": record.child_session_id,
-            "status": record.status,
-            "outcome": outcome,
-            "summary": final_answer,
-            "model_visible_summary": summary,
-            "background": record.background,
-            "effective_max_spawn_depth": record.effective_max_spawn_depth
-        })),
-    })?;
+    store
+        .append_agent_mailbox_event(AgentMailboxEventInput {
+            parent_session_id: parent_session_id.to_string(),
+            child_session_id: record.child_session_id.clone(),
+            agent_id: record.id.clone(),
+            task_name: record.task_name.clone(),
+            agent_name: record.agent_name.clone(),
+            content_text,
+            payload,
+            metadata: Some(json!({
+                "type": "agent_completed",
+                "agent_id": record.id,
+                "task_name": record.task_name,
+                "agent_name": record.agent_name,
+                "child_session_id": record.child_session_id,
+                "status": record.status,
+                "outcome": outcome,
+                "summary": final_answer,
+                "model_visible_summary": summary,
+                "background": record.background,
+                "effective_max_spawn_depth": record.effective_max_spawn_depth
+            })),
+        })
+        .await?;
     Ok(())
 }
 
@@ -223,8 +227,8 @@ impl ToolBinding for ListAgentsTool {
         let store = self.context.state.clone();
         let parent = self.context.parent_session_id.clone();
         Box::pin(async move {
-            let system_value = agent_status_value(Some(&store), Some(&parent), false);
-            let model_value = agent_status_model_value(Some(&store), Some(&parent), false);
+            let system_value = agent_status_value(Some(&store), Some(&parent), false).await;
+            let model_value = agent_status_model_value(Some(&store), Some(&parent), false).await;
             ToolOutput::ok_with_model_content(system_value, model_content_string(&model_value))
         })
     }
@@ -296,15 +300,18 @@ impl ToolBinding for WaitAgentTool {
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             if !timed_out {
-                let delivered_after_seq = match store.next_message_seq(&parent_session_id) {
+                let delivered_after_seq = match store.next_message_seq(&parent_session_id).await {
                     Ok(seq) => seq,
                     Err(err) => return ToolOutput::error(err.to_string()),
                 };
-                let delivered = match store.deliver_pending_agent_mailbox_events_for_tool(
-                    &parent_session_id,
-                    &tool_call_id,
-                    delivered_after_seq,
-                ) {
+                let delivered = match store
+                    .deliver_pending_agent_mailbox_events_for_tool(
+                        &parent_session_id,
+                        &tool_call_id,
+                        delivered_after_seq,
+                    )
+                    .await
+                {
                     Ok(records) => records,
                     Err(err) => return ToolOutput::error(err.to_string()),
                 };
@@ -383,8 +390,7 @@ impl ToolBinding for SendMessageTool {
             match send_agent_message_with_context(context, target, message, abort).await {
                 Ok(Some(record)) => {
                     let system_value = json!({ "agent": record.clone() });
-                    let model_value =
-                        json!({ "agent": subagent_summary_value(Some(&store), &record, true) });
+                    let model_value = json!({ "agent": subagent_summary_value(Some(&store), &record, true).await });
                     ToolOutput::ok_with_model_content(
                         system_value,
                         model_content_string(&model_value),
@@ -446,11 +452,11 @@ impl ToolBinding for CloseAgentTool {
                 .get("target")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            match close_agent_id(target, Some(&store)) {
+            match close_agent_id(target, Some(&store)).await {
                 Ok(Some(record)) => {
                     let system_value = json!({ "previous_status": record.clone() });
                     let model_value = json!({
-                        "previous_status": subagent_summary_value(Some(&store), &record, true)
+                        "previous_status": subagent_summary_value(Some(&store), &record, true).await
                     });
                     ToolOutput::ok_with_model_content(
                         system_value,
@@ -510,11 +516,10 @@ impl ToolBinding for ResumeAgentTool {
         let store = self.context.state.clone();
         Box::pin(async move {
             let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
-            match resume_agent_id(id, Some(&store)) {
+            match resume_agent_id(id, Some(&store)).await {
                 Ok(Some(record)) => {
                     let system_value = json!({ "agent": record.clone() });
-                    let model_value =
-                        json!({ "agent": subagent_summary_value(Some(&store), &record, true) });
+                    let model_value = json!({ "agent": subagent_summary_value(Some(&store), &record, true).await });
                     ToolOutput::ok_with_model_content(
                         system_value,
                         model_content_string(&model_value),

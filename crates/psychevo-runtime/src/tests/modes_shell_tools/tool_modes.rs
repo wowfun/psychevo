@@ -3,8 +3,8 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn run_mode_tool_names_enforce_plan_read_only_surface() {
+#[tokio::test]
+pub(crate) async fn run_mode_tool_names_enforce_plan_read_only_surface() {
     assert_eq!(RunMode::Default.as_str(), "default");
     assert_eq!(RunMode::parse("default"), Some(RunMode::Default));
     assert_eq!(RunMode::parse("build"), None);
@@ -98,8 +98,8 @@ pub(crate) async fn exec_command_prepends_managed_tool_path() {
     );
 }
 
-#[test]
-pub(crate) fn exec_command_provider_schema_replaces_bash() {
+#[tokio::test]
+pub(crate) async fn exec_command_provider_schema_replaces_bash() {
     let temp = tempdir().expect("temp");
     let tools = crate::tools::coding_core_tools(temp.path());
     let names = tools.iter().map(|tool| tool.name()).collect::<Vec<_>>();
@@ -187,8 +187,8 @@ pub(crate) fn exec_command_provider_schema_replaces_bash() {
     assert!(!web_fetch.description().contains("default to markdown"));
 }
 
-#[test]
-pub(crate) fn toolset_config_controls_effective_core_tools() {
+#[tokio::test]
+pub(crate) async fn toolset_config_controls_effective_core_tools() {
     let mut selection = crate::config::ToolSelectionConfig::default();
     selection.modes.insert(
         "plan".to_string(),
@@ -229,8 +229,8 @@ pub(crate) fn toolset_config_controls_effective_core_tools() {
     assert_eq!(names, vec!["web_fetch"]);
 }
 
-#[test]
-pub(crate) fn first_party_core_and_clarify_declarations_hide_implementation_details() {
+#[tokio::test]
+pub(crate) async fn first_party_core_and_clarify_declarations_hide_implementation_details() {
     let temp = tempdir().expect("temp");
     let mut tools = crate::tools::coding_core_tools_for_mode(temp.path(), RunMode::Plan);
     tools.extend(crate::tools::coding_core_tools(temp.path()));
@@ -255,8 +255,8 @@ pub(crate) fn first_party_core_and_clarify_declarations_hide_implementation_deta
     );
 }
 
-#[test]
-pub(crate) fn cross_tool_guidance_lives_in_mode_instructions() {
+#[tokio::test]
+pub(crate) async fn cross_tool_guidance_lives_in_mode_instructions() {
     let default = crate::tools::mode_instruction(RunMode::Default);
     assert!(default.contains("read, write, and edit for project file I/O"));
     assert!(default.contains("shell-local temporary artifacts"));
@@ -714,7 +714,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     let temp = tempdir().expect("temp");
     let cwd = temp.path().join("work");
     fs::create_dir_all(&cwd).expect("cwd");
-    let context = configured_user_shell_context(&temp, &cwd);
+    let context = configured_user_shell_context(&temp, &cwd).await;
     let stream: RunStreamSink = Arc::new(|_| {});
     let (_handle, control) = run_control();
 
@@ -739,8 +739,10 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     assert!(context_text.contains("Truncated: false"));
     assert!(context_text.contains("Output:\ncontext-ok\n"));
 
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
-    let messages = store.load_messages(session_id).expect("messages");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let messages = store.load_messages(session_id).await.expect("messages");
     assert_eq!(messages.len(), 1);
     match &messages[0] {
         Message::User { content, .. } => {
@@ -751,6 +753,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     }
     let summary = store
         .session_summary(session_id)
+        .await
         .expect("summary")
         .expect("session summary");
     assert_eq!(
@@ -759,6 +762,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     );
     let tui = store
         .load_tui_message_summaries(session_id)
+        .await
         .expect("summaries");
     assert_eq!(
         tui[0]
@@ -770,7 +774,7 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
         Some("printf 'context-ok\\n'")
     );
 
-    let mut resume_context = configured_user_shell_context(&temp, &cwd);
+    let mut resume_context = configured_user_shell_context(&temp, &cwd).await;
     resume_context.session = Some(session_id.to_string());
     let (_handle, control) = run_control();
     let resumed = run_user_shell_command_streaming_controlled(
@@ -786,7 +790,14 @@ pub(crate) async fn user_shell_context_persists_user_xml_record() {
     .await
     .expect("resumed user shell");
     assert_eq!(resumed.session_id.as_deref(), Some(session_id));
-    assert_eq!(store.load_messages(session_id).expect("messages").len(), 2);
+    assert_eq!(
+        store
+            .load_messages(session_id)
+            .await
+            .expect("messages")
+            .len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -796,7 +807,9 @@ pub(crate) async fn user_shell_context_missing_config_rejects_before_execution()
     fs::create_dir_all(&cwd).expect("cwd");
     let marker = cwd.join("marker");
     let context = UserShellContextOptions {
-        state: StateRuntime::open(temp.path().join("state.db")).expect("state runtime"),
+        state: StateRuntime::open(temp.path().join("state.db"))
+            .await
+            .expect("state runtime"),
         session: None,
         continue_latest: true,
         source: "tui".to_string(),
@@ -837,7 +850,7 @@ pub(crate) async fn user_shell_context_records_bounded_truncated_output() {
     let temp = tempdir().expect("temp");
     let cwd = temp.path().join("work");
     fs::create_dir_all(&cwd).expect("cwd");
-    let context = configured_user_shell_context(&temp, &cwd);
+    let context = configured_user_shell_context(&temp, &cwd).await;
     let stream: RunStreamSink = Arc::new(|_| {});
     let (_handle, control) = run_control();
 

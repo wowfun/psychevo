@@ -40,15 +40,18 @@ fn automation_activity_claim<'a>(
     }
 }
 
-#[test]
-fn automation_task_upsert_lists_due_and_deletes() {
+#[tokio::test]
+async fn automation_task_upsert_lists_due_and_deletes() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
 
     let created = store
         .upsert_automation_task(automation_input(&cwd_str))
+        .await
         .expect("create automation");
     assert_eq!(created.id, "automation-1");
     assert_eq!(created.schedule["everyMinutes"], 30);
@@ -60,13 +63,17 @@ fn automation_task_upsert_lists_due_and_deletes() {
     update.next_run_at_ms = Some(2_000);
     let updated = store
         .upsert_automation_task(update)
+        .await
         .expect("update automation");
     assert_eq!(updated.created_at_ms, created.created_at_ms);
     assert!(updated.updated_at_ms >= created.updated_at_ms);
     assert_eq!(updated.title, "Updated check");
     assert!(!updated.enabled);
 
-    let tasks = store.automation_tasks_for_cwd(&cwd_str).expect("tasks");
+    let tasks = store
+        .automation_tasks_for_cwd(&cwd_str)
+        .await
+        .expect("tasks");
     assert_eq!(
         tasks
             .iter()
@@ -77,6 +84,7 @@ fn automation_task_upsert_lists_due_and_deletes() {
     assert!(
         store
             .due_automation_tasks(3_000, 10)
+            .await
             .expect("disabled tasks are not due")
             .is_empty()
     );
@@ -85,39 +93,50 @@ fn automation_task_upsert_lists_due_and_deletes() {
     enabled.next_run_at_ms = Some(2_000);
     store
         .upsert_automation_task(enabled)
+        .await
         .expect("enable automation");
-    let due = store.due_automation_tasks(3_000, 10).expect("due tasks");
+    let due = store
+        .due_automation_tasks(3_000, 10)
+        .await
+        .expect("due tasks");
     assert_eq!(due.len(), 1);
     assert_eq!(due[0].id, "automation-1");
 
     assert!(
         store
             .delete_automation_task("automation-1")
+            .await
             .expect("delete automation")
     );
     assert!(
         store
             .automation_tasks_for_cwd(&cwd_str)
+            .await
             .expect("empty")
             .is_empty()
     );
 }
 
-#[test]
-fn automation_run_claim_is_single_running_and_finish_updates_task() {
+#[tokio::test]
+async fn automation_run_claim_is_single_running_and_finish_updates_task() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
     let thread_id = store
         .create_session_with_metadata(&cwd, "automation", "model", "provider", None)
+        .await
         .expect("session");
     store
         .upsert_automation_task(automation_input(&cwd_str))
+        .await
         .expect("create automation");
 
     let first = store
         .claim_automation_run("automation-1", "scheduler")
+        .await
         .expect("first claim")
         .expect("running record");
     assert_eq!(first.status, "running");
@@ -125,11 +144,13 @@ fn automation_run_claim_is_single_running_and_finish_updates_task() {
     assert!(
         store
             .claim_automation_run("automation-1", "scheduler")
+            .await
             .expect("second claim")
             .is_none()
     );
     let task = store
         .automation_task("automation-1")
+        .await
         .expect("task")
         .expect("task record");
     assert_eq!(task.last_status.as_deref(), Some("running"));
@@ -145,6 +166,7 @@ fn automation_run_claim_is_single_running_and_finish_updates_task() {
             metadata: Some(json!({"turnId": "turn-1"})),
             next_run_at_ms: Some(99_000),
         })
+        .await
         .expect("finish")
         .expect("finished run");
     assert_eq!(finished.status, "completed");
@@ -159,6 +181,7 @@ fn automation_run_claim_is_single_running_and_finish_updates_task() {
 
     let task = store
         .automation_task("automation-1")
+        .await
         .expect("task")
         .expect("task record");
     assert_eq!(task.last_status.as_deref(), Some("completed"));
@@ -168,23 +191,25 @@ fn automation_run_claim_is_single_running_and_finish_updates_task() {
 
     let second = store
         .claim_automation_run("automation-1", "manual")
+        .await
         .expect("claim after finish")
         .expect("new run");
     assert_ne!(second.id, first.id);
     assert_eq!(
         store
             .automation_runs_for_task("automation-1", 10)
+            .await
             .expect("runs")
             .len(),
         2
     );
 }
 
-#[test]
-fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
+#[tokio::test]
+async fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("state.db");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
     let source_key = "automation:automation-1";
@@ -192,9 +217,11 @@ fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
     input.source_key = Some(source_key.to_string());
     store
         .upsert_automation_task(input)
+        .await
         .expect("create automation");
     let run = store
         .claim_automation_run("automation-1", "scheduler")
+        .await
         .expect("claim")
         .expect("run");
     let old_started_at = now_ms() - 10 * 60 * 1000;
@@ -209,6 +236,7 @@ fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
     let now = now_ms();
     let stale_without_activity = store
         .stale_automation_runs_for_recovery(now, 5 * 60 * 1000, 10)
+        .await
         .expect("stale candidates");
     assert_eq!(stale_without_activity.len(), 1);
     assert_eq!(stale_without_activity[0].run.id, run.id);
@@ -219,10 +247,12 @@ fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
             source_key,
             now_ms() + 60_000,
         ))
+        .await
         .expect("active activity");
     assert!(
         store
             .stale_automation_runs_for_recovery(now_ms(), 5 * 60 * 1000, 10)
+            .await
             .expect("active protected candidates")
             .is_empty()
     );
@@ -234,26 +264,30 @@ fn stale_automation_run_recovery_candidates_ignore_active_gateway_activity() {
                 activity.generation,
                 now_ms() - 1,
             )
+            .await
             .expect("expire activity")
     );
     let stale_after_expiry = store
         .stale_automation_runs_for_recovery(now_ms(), 5 * 60 * 1000, 10)
+        .await
         .expect("expired candidates");
     assert_eq!(stale_after_expiry.len(), 1);
 }
 
-#[test]
-fn recovered_stale_automation_run_allows_new_claim() {
+#[tokio::test]
+async fn recovered_stale_automation_run_allows_new_claim() {
     let temp = tempdir().expect("tempdir");
     let db_path = temp.path().join("state.db");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_str = cwd.to_string_lossy().to_string();
     store
         .upsert_automation_task(automation_input(&cwd_str))
+        .await
         .expect("create automation");
     let run = store
         .claim_automation_run("automation-1", "scheduler")
+        .await
         .expect("claim")
         .expect("run");
     rusqlite::Connection::open(&db_path)
@@ -265,6 +299,7 @@ fn recovered_stale_automation_run_allows_new_claim() {
         .expect("age run");
     let candidate = store
         .stale_automation_runs_for_recovery(now_ms(), 5 * 60 * 1000, 10)
+        .await
         .expect("stale candidates")
         .pop()
         .expect("candidate");
@@ -279,9 +314,11 @@ fn recovered_stale_automation_run_allows_new_claim() {
             metadata: Some(json!({"trigger": candidate.run.trigger})),
             next_run_at_ms: Some(99_000),
         })
+        .await
         .expect("finish stale run");
     let next = store
         .claim_automation_run("automation-1", "manual")
+        .await
         .expect("new claim")
         .expect("new run");
     assert_ne!(next.id, run.id);

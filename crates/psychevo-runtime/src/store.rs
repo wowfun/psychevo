@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
 use psychevo_agent_core::Message;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -666,14 +665,71 @@ pub struct StateRuntime {
 
 pub(crate) struct StateRuntimeInner {
     pub(crate) db_path: PathBuf,
-    pub(crate) conn: Mutex<Connection>,
+    pub(crate) pool: sqlx::SqlitePool,
     pub(crate) successful_writes: AtomicUsize,
+    pub(crate) in_flight_operations: AtomicU64,
+    pub(crate) completed_operations: AtomicU64,
+    pub(crate) failed_operations: AtomicU64,
+    pub(crate) busy_operations: AtomicU64,
+    pub(crate) acquire_latency_micros: AtomicU64,
+    pub(crate) execute_latency_micros: AtomicU64,
+    pub(crate) checkpoint_count: AtomicU64,
     pub(crate) filesystem_grants: Mutex<HashMap<String, crate::sandbox::SandboxWriteGrants>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StateRuntimeDiagnostics {
+    pub pool_size: u32,
+    pub pool_idle: usize,
+    pub in_flight_operations: u64,
+    pub completed_operations: u64,
+    pub failed_operations: u64,
+    pub busy_operations: u64,
+    pub acquire_latency_micros: u64,
+    pub execute_latency_micros: u64,
+    pub checkpoint_count: u64,
 }
 
 impl StateRuntime {
     pub fn db_path(&self) -> &Path {
         &self.inner.db_path
+    }
+
+    pub fn diagnostics(&self) -> StateRuntimeDiagnostics {
+        let completed_operations = self
+            .inner
+            .completed_operations
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let failed_operations = self
+            .inner
+            .failed_operations
+            .load(std::sync::atomic::Ordering::Relaxed);
+        StateRuntimeDiagnostics {
+            pool_size: self.inner.pool.size(),
+            pool_idle: self.inner.pool.num_idle(),
+            in_flight_operations: self
+                .inner
+                .in_flight_operations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            completed_operations,
+            failed_operations,
+            busy_operations: self
+                .inner
+                .busy_operations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            acquire_latency_micros: self
+                .inner
+                .acquire_latency_micros
+                .load(std::sync::atomic::Ordering::Relaxed),
+            execute_latency_micros: self
+                .inner
+                .execute_latency_micros
+                .load(std::sync::atomic::Ordering::Relaxed),
+            checkpoint_count: self
+                .inner
+                .checkpoint_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+        }
     }
 
     pub fn read_session_trace(
@@ -774,18 +830,20 @@ pub(crate) mod store_compactions;
 pub(crate) mod store_gateway_activity;
 #[path = "store/gateway_bindings.rs"]
 pub(crate) mod store_gateway_bindings;
+#[path = "store/gateway_control.rs"]
+pub(crate) mod store_gateway_control;
+#[path = "store/gateway_live_state.rs"]
+pub(crate) mod store_gateway_live_state;
 #[path = "store/lifecycle.rs"]
 pub(crate) mod store_lifecycle;
 #[path = "store/message_fields.rs"]
 pub(crate) mod store_message_fields;
 #[path = "store/metadata.rs"]
 pub(crate) mod store_metadata;
-#[path = "store/retry.rs"]
-pub(crate) mod store_retry;
 #[path = "store/runtime_bindings.rs"]
 pub(crate) mod store_runtime_bindings;
-#[path = "store/schema_helpers.rs"]
-pub(crate) mod store_schema_helpers;
+#[path = "store/sqlx_runtime.rs"]
+pub(crate) mod store_sqlx_runtime;
 #[path = "store/turn_delivery.rs"]
 pub(crate) mod store_turn_delivery;
 #[path = "store/undo_helpers.rs"]
@@ -796,14 +854,16 @@ mod state_runtime_tests {
     use super::*;
     use crate::types::{FilesystemApprovalLifetime, FilesystemApprovalScope};
 
-    #[test]
-    fn filesystem_grants_follow_turn_and_session_lifecycles() {
+    #[tokio::test]
+    async fn filesystem_grants_follow_turn_and_session_lifecycles() {
         let temp = tempfile::tempdir().expect("temp");
         let turn_root = temp.path().join("turn");
         let session_root = temp.path().join("session");
         std::fs::create_dir_all(&turn_root).expect("turn root");
         std::fs::create_dir_all(&session_root).expect("session root");
-        let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let state = StateRuntime::open(temp.path().join("state.db"))
+            .await
+            .expect("state");
         let grants = state.filesystem_grants("session-1");
         let turn_guard = state.turn_filesystem_grant_guard("session-1");
         grants

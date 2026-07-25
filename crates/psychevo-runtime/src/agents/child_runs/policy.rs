@@ -6,19 +6,21 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 .context
                 .state
 
-                .set_agent_edge_status(child_session, AgentEdgeStatus::Closed);
+                .set_agent_edge_status(child_session, AgentEdgeStatus::Closed)
+                .await;
         }
         update_run_failed(&child.id, "parent invocation aborted");
         return Err(Error::Message("parent invocation aborted".to_string()));
     }
     let child_model = child_model(&child);
     let child_session = if let Some(child_session) = child.existing_child_session.clone() {
-        child.context.state.resume_session(&child_session)?;
+        child.context.state.resume_session(&child_session).await?;
         child
             .context
             .state
 
-            .set_agent_edge_status(&child_session, AgentEdgeStatus::Open)?;
+            .set_agent_edge_status(&child_session, AgentEdgeStatus::Open)
+            .await?;
         child_session
     } else {
         child
@@ -45,7 +47,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                     context: Some(&child.context),
                     parent_tool_call_id: child.parent_tool_call_id.as_deref(),
                 })),
-            )?
+            )
+            .await?
     };
     update_run_child_session(&child.id, &child_session);
     emit_agent_session_start(&child, &child_session);
@@ -68,7 +71,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 context: Some(&child.context),
                 parent_tool_call_id: child.parent_tool_call_id.as_deref(),
             })),
-        )?;
+        )
+        .await?;
     }
     let hook_runtime = child_hook_runtime(&child)?;
     if let Some(runtime) = &hook_runtime {
@@ -84,7 +88,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 .context
                 .state
 
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
+                .await;
             return Err(Error::Message(reason));
         }
     }
@@ -95,7 +100,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     let previous_messages = match child.previous_messages_override.clone() {
         Some(messages) => messages,
         None if child.existing_child_session.is_some() => {
-            load_projected_messages(&child.context.state, &child_session, None)?
+            load_projected_messages(&child.context.state, &child_session, None).await?
         }
         None => fork_messages(
             &child.context.parent_context_snapshot,
@@ -247,7 +252,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .context
         .state
 
-        .upsert_session_prompt_prefix(prefix_record)?;
+        .upsert_session_prompt_prefix(prefix_record)
+        .await?;
     let prompt_prefix_metadata = json!({
         "hash": prefix_record.prefix_hash,
         "version": prefix_record.version,
@@ -347,7 +353,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 .context
                 .state
 
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
+                .await;
             if let Some(runtime) = &hook_runtime {
                 let _ = runtime.run_subagent_stop(&json!({
                     "id": child.id.clone(),
@@ -378,7 +385,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                 .context
                 .state
 
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
+                .await;
             return Err(Error::Message(reason));
         }
     }
@@ -387,7 +395,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         .context
         .state
 
-        .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+        .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
+        .await;
     if child.background {
         let _ = append_parent_agent_mailbox_event(
             &parent_store,
@@ -395,7 +404,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             &record,
             completion.outcome.as_str(),
             &final_answer,
-        );
+        )
+        .await;
     }
     Ok(record)
 }

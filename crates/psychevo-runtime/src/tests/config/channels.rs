@@ -3,8 +3,8 @@ pub(crate) use super::*;
 
 use crate::config::config_parse::parse_run_config;
 
-#[test]
-pub(crate) fn parse_channels_config_defaults_and_channel_constraints() {
+#[tokio::test]
+pub(crate) async fn parse_channels_config_defaults_and_channel_constraints() {
     let config = parse_run_config(json!({
         "channels": {
             "connections": [
@@ -59,8 +59,8 @@ pub(crate) fn parse_channels_config_defaults_and_channel_constraints() {
     assert_eq!(feishu.allow_groups, ["oc_abc"]);
 }
 
-#[test]
-pub(crate) fn parse_channels_config_rejects_duplicate_ids_and_invalid_transport() {
+#[tokio::test]
+pub(crate) async fn parse_channels_config_rejects_duplicate_ids_and_invalid_transport() {
     let duplicate = parse_run_config(json!({
         "channels": {
             "connections": [
@@ -93,8 +93,8 @@ pub(crate) fn parse_channels_config_rejects_duplicate_ids_and_invalid_transport(
     );
 }
 
-#[test]
-pub(crate) fn parse_channels_config_rejects_old_platform_field() {
+#[tokio::test]
+pub(crate) async fn parse_channels_config_rejects_old_platform_field() {
     let err = parse_run_config(json!({
         "channels": {
             "connections": [
@@ -110,8 +110,9 @@ pub(crate) fn parse_channels_config_rejects_old_platform_field() {
     );
 }
 
-#[test]
-pub(crate) fn upsert_channel_connection_updates_wechat_credentials_and_preserves_runtime_fields() {
+#[tokio::test]
+pub(crate) async fn upsert_channel_connection_updates_wechat_credentials_and_preserves_runtime_fields()
+ {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -183,8 +184,8 @@ allow_users = ["existing-user"]
     assert!(!env.contains("old-token"));
 }
 
-#[test]
-pub(crate) fn update_channel_connection_writes_config_fields_and_preserves_secrets() {
+#[tokio::test]
+pub(crate) async fn update_channel_connection_writes_config_fields_and_preserves_secrets() {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -335,8 +336,8 @@ allow_groups = ["old-group"]
     assert!(unknown.to_string().contains("unknown channel connection"));
 }
 
-#[test]
-pub(crate) fn delete_channel_connection_removes_connection_and_preserves_secrets() {
+#[tokio::test]
+pub(crate) async fn delete_channel_connection_removes_connection_and_preserves_secrets() {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");

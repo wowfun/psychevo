@@ -54,8 +54,8 @@ pub(crate) fn write_root_skill(root: &std::path::Path, name: &str, description: 
     .expect("skill");
 }
 
-#[test]
-pub(crate) fn skills_discovery_loads_overlapping_home_agents_root_once() {
+#[tokio::test]
+pub(crate) async fn skills_discovery_loads_overlapping_home_agents_root_once() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("workspaces").join("chat");
@@ -81,8 +81,8 @@ pub(crate) fn skills_discovery_loads_overlapping_home_agents_root_once() {
     assert!(!catalog.collisions.contains_key("shared-home"));
 }
 
-#[test]
-pub(crate) fn skill_source_display_label_groups_raw_sources() {
+#[tokio::test]
+pub(crate) async fn skill_source_display_label_groups_raw_sources() {
     for source in ["project", "agents"] {
         assert_eq!(skill_source_display_label(Some(source)), Some("Project"));
     }
@@ -103,8 +103,8 @@ pub(crate) fn skill_source_display_label_groups_raw_sources() {
     assert_eq!(skill_source_display_label(None), None);
 }
 
-#[test]
-pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_files() {
+#[tokio::test]
+pub(crate) async fn skills_discovery_uses_deterministic_precedence_and_native_root_files() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let repo = temp.path().join("repo");
@@ -189,8 +189,8 @@ pub(crate) fn skills_discovery_uses_deterministic_precedence_and_native_root_fil
     );
 }
 
-#[test]
-pub(crate) fn skills_discovery_skips_missing_descriptions_and_honors_disabled_and_hidden() {
+#[tokio::test]
+pub(crate) async fn skills_discovery_skips_missing_descriptions_and_honors_disabled_and_hidden() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -269,8 +269,8 @@ pub(crate) fn skills_discovery_skips_missing_descriptions_and_honors_disabled_an
     );
 }
 
-#[test]
-pub(crate) fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
+#[tokio::test]
+pub(crate) async fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -294,8 +294,8 @@ pub(crate) fn skills_prompt_escapes_xml_and_uses_view_skill_wording() {
     assert!(!prompt.contains("<tags>"));
 }
 
-#[test]
-pub(crate) fn skills_prompt_applies_hermes_tool_activation_hints() {
+#[tokio::test]
+pub(crate) async fn skills_prompt_applies_hermes_tool_activation_hints() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -327,8 +327,8 @@ pub(crate) fn skills_prompt_applies_hermes_tool_activation_hints() {
     assert!(!full_prompt.contains("<name>fallback-edit</name>"));
 }
 
-#[test]
-pub(crate) fn skills_prompt_applies_hermes_toolset_activation_hints() {
+#[tokio::test]
+pub(crate) async fn skills_prompt_applies_hermes_toolset_activation_hints() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -370,8 +370,8 @@ pub(crate) fn skills_prompt_applies_hermes_toolset_activation_hints() {
     assert!(!web_prompt.contains("<name>fallback-web</name>"));
 }
 
-#[test]
-pub(crate) fn skills_selection_parses_markers_and_dedupes_unknowns() {
+#[tokio::test]
+pub(crate) async fn skills_selection_parses_markers_and_dedupes_unknowns() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -397,8 +397,8 @@ pub(crate) fn skills_selection_parses_markers_and_dedupes_unknowns() {
     assert_eq!(names, vec!["reviewer", "audit"]);
 }
 
-#[test]
-pub(crate) fn skills_selection_excludes_hidden_and_disabled_markers() {
+#[tokio::test]
+pub(crate) async fn skills_selection_excludes_hidden_and_disabled_markers() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -442,8 +442,8 @@ pub(crate) fn skills_selection_excludes_hidden_and_disabled_markers() {
     assert_eq!(selected_by_path[0].name, "hidden");
 }
 
-#[test]
-pub(crate) fn explicit_skill_selection_accepts_name_and_path() {
+#[tokio::test]
+pub(crate) async fn explicit_skill_selection_accepts_name_and_path() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -500,8 +500,8 @@ pub(crate) fn explicit_skill_selection_accepts_name_and_path() {
     assert_eq!(by_root_file[0].name, "root-one");
 }
 
-#[test]
-pub(crate) fn selected_skill_context_contains_body_without_frontmatter() {
+#[tokio::test]
+pub(crate) async fn selected_skill_context_contains_body_without_frontmatter() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -533,8 +533,8 @@ pub(crate) fn selected_skill_context_contains_body_without_frontmatter() {
     assert!(!contexts[0].contains("description:"));
 }
 
-#[test]
-pub(crate) fn view_skill_reads_linked_files_but_rejects_path_escape() {
+#[tokio::test]
+pub(crate) async fn view_skill_reads_linked_files_but_rejects_path_escape() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -566,8 +566,8 @@ pub(crate) fn view_skill_reads_linked_files_but_rejects_path_escape() {
     assert!(view_skill_value(&catalog, "reader", Some("/tmp/outside.md")).is_err());
 }
 
-#[test]
-pub(crate) fn view_skill_reports_hermes_metadata_and_setup_readiness() {
+#[tokio::test]
+pub(crate) async fn view_skill_reports_hermes_metadata_and_setup_readiness() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -612,8 +612,8 @@ pub(crate) fn view_skill_reports_hermes_metadata_and_setup_readiness() {
     );
 }
 
-#[test]
-pub(crate) fn skill_name_collisions_require_explicit_resolution_for_view() {
+#[tokio::test]
+pub(crate) async fn skill_name_collisions_require_explicit_resolution_for_view() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -643,8 +643,8 @@ pub(crate) fn skill_name_collisions_require_explicit_resolution_for_view() {
     assert_eq!(selected["description"], "project");
 }
 
-#[test]
-pub(crate) fn skill_install_force_overwrites_existing_target() {
+#[tokio::test]
+pub(crate) async fn skill_install_force_overwrites_existing_target() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -683,8 +683,8 @@ pub(crate) fn skill_install_force_overwrites_existing_target() {
     assert!(!content.contains("stale description"));
 }
 
-#[test]
-pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_namespaced() {
+#[tokio::test]
+pub(crate) async fn skill_bundles_project_scope_overrides_global_and_config_set_is_namespaced() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -756,8 +756,8 @@ pub(crate) fn skill_bundles_project_scope_overrides_global_and_config_set_is_nam
     );
 }
 
-#[test]
-pub(crate) fn skill_scanner_flags_dangerous_content() {
+#[tokio::test]
+pub(crate) async fn skill_scanner_flags_dangerous_content() {
     let temp = tempdir().expect("temp");
     let skill_dir = temp.path().join("danger");
     fs::create_dir_all(&skill_dir).expect("skill dir");
@@ -781,8 +781,8 @@ pub(crate) fn skill_scanner_flags_dangerous_content() {
     );
 }
 
-#[test]
-pub(crate) fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
+#[tokio::test]
+pub(crate) async fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -815,8 +815,8 @@ pub(crate) fn skill_tools_are_read_only_in_plan_and_mutating_in_default() {
     );
 }
 
-#[test]
-pub(crate) fn first_party_skill_declarations_hide_implementation_details() {
+#[tokio::test]
+pub(crate) async fn first_party_skill_declarations_hide_implementation_details() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");

@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn model_catalog_endpoint_follows_chat_base_url() {
+#[tokio::test]
+pub(crate) async fn model_catalog_endpoint_follows_chat_base_url() {
     assert_eq!(
         model_catalog_endpoint("https://api.example.com/v1"),
         "https://api.example.com/v1/models"
@@ -20,10 +20,10 @@ pub(crate) fn model_catalog_endpoint_follows_chat_base_url() {
     );
 }
 
-#[test]
-pub(crate) fn model_catalog_providers_resolve_auth_and_no_auth() {
+#[tokio::test]
+pub(crate) async fn model_catalog_providers_resolve_auth_and_no_auth() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -109,8 +109,8 @@ pub(crate) async fn model_catalog_fetch_parses_models_and_sends_auth() {
     assert!(request.to_lowercase().contains("user-agent: psychevo/"));
 }
 
-#[test]
-pub(crate) fn provider_model_cache_writes_reads_and_strips_private_data() {
+#[tokio::test]
+pub(crate) async fn provider_model_cache_writes_reads_and_strips_private_data() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
     let provider = cached_provider("openai", "https://api.example.com/v1", Some("mock-api-key"));
@@ -140,8 +140,8 @@ pub(crate) fn provider_model_cache_writes_reads_and_strips_private_data() {
     assert!(!text.contains("\"raw\""));
 }
 
-#[test]
-pub(crate) fn provider_model_cache_ignores_invalid_json_and_fingerprint_mismatch() {
+#[tokio::test]
+pub(crate) async fn provider_model_cache_ignores_invalid_json_and_fingerprint_mismatch() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
     let cache_path = provider_models_cache_path_for_home(&home);
@@ -228,10 +228,10 @@ fn cached_provider(provider: &str, base_url: &str, api_key: Option<&str>) -> Mod
     }
 }
 
-#[test]
-pub(crate) fn opencode_zen_catalog_provider_allows_no_auth_without_config_entry() {
+#[tokio::test]
+pub(crate) async fn opencode_zen_catalog_provider_allows_no_auth_without_config_entry() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let home = home_dir(&temp);
     fs::create_dir_all(&home).expect("home");
     write_config(home.join("config.toml"), "# initialized\n").expect("config");
@@ -246,8 +246,8 @@ pub(crate) fn opencode_zen_catalog_provider_allows_no_auth_without_config_entry(
     assert!(provider.fetchable());
 }
 
-#[test]
-pub(crate) fn opencode_zen_free_models_are_classified_from_ids() {
+#[tokio::test]
+pub(crate) async fn opencode_zen_free_models_are_classified_from_ids() {
     let free = ModelCatalogEntry {
         id: "mimo-v2.5-free".to_string(),
         context_limit: None,

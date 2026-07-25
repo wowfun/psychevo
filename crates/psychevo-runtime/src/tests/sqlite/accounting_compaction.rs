@@ -1,14 +1,16 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metrics_separately() {
+#[tokio::test]
+pub(crate) async fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metrics_separately()
+{
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
     store
         .append_message_with_metrics(
@@ -34,6 +36,7 @@ pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metric
             Some(json!({"total_tokens": 12, "input_tokens": 5, "output_tokens": 7})),
             Some(json!({"provider_response_id": "resp_1", "model": "model"})),
         )
+        .await
         .expect("append");
 
     let conn = Connection::open(&db).expect("db");
@@ -75,6 +78,7 @@ pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metric
 
     let summaries = store
         .load_sanitized_message_summaries(&session_id)
+        .await
         .expect("summaries");
     assert_eq!(summaries[0].usage.as_ref().unwrap()["total_tokens"], 12);
     assert_eq!(
@@ -86,6 +90,7 @@ pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metric
 
     let tui_summaries = store
         .load_tui_message_summaries(&session_id)
+        .await
         .expect("tui summaries");
     let tui_message = serde_json::to_value(&tui_summaries[0].message).expect("tui message");
     assert_eq!(tui_message["content"][0]["type"], "reasoning");
@@ -93,21 +98,27 @@ pub(crate) fn sqlite_schema_v15_stores_reasoning_only_in_message_json_and_metric
     assert!(tui_message["content"][0].get("provider_evidence").is_none());
 }
 
-#[test]
-pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
+#[tokio::test]
+pub(crate) async fn session_compaction_checkpoint_respects_revert_boundary() {
     let temp = tempdir().expect("temp");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let session = store
         .create_session_with_metadata(temp.path(), "run", "model", "provider", None)
+        .await
         .expect("session");
     store
         .append_message(&session, &psychevo_agent_core::user_text_message("one"))
+        .await
         .expect("message one");
     store
         .append_message(&session, &psychevo_agent_core::user_text_message("two"))
+        .await
         .expect("message two");
     store
         .append_message(&session, &psychevo_agent_core::user_text_message("three"))
+        .await
         .expect("message three");
 
     let record = store
@@ -124,10 +135,12 @@ pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
             instructions: None,
             metadata: None,
         })
+        .await
         .expect("compaction");
     assert_eq!(
         store
             .latest_valid_session_compaction(&session)
+            .await
             .expect("latest")
             .map(|record| record.id),
         Some(record.id)
@@ -138,24 +151,30 @@ pub(crate) fn session_compaction_checkpoint_respects_revert_boundary() {
             &session,
             crate::store::SessionRevertState::workspace_undo(3, "snapshot".to_string()),
         )
+        .await
         .expect("revert");
     assert_eq!(
         store
             .latest_valid_session_compaction(&session)
+            .await
             .expect("latest after revert"),
         None
     );
 }
 
-#[test]
-pub(crate) fn projection_only_compaction_is_visible_but_never_drives_context() {
+#[tokio::test]
+pub(crate) async fn projection_only_compaction_is_visible_but_never_drives_context() {
     let temp = tempdir().expect("temp");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let session = store
         .create_session_with_metadata(temp.path(), "run", "model", "provider", None)
+        .await
         .expect("session");
     store
         .append_message(&session, &psychevo_agent_core::user_text_message("one"))
+        .await
         .expect("message");
     let context_checkpoint = store
         .append_session_compaction(SessionCompactionInput {
@@ -171,6 +190,7 @@ pub(crate) fn projection_only_compaction_is_visible_but_never_drives_context() {
             instructions: None,
             metadata: None,
         })
+        .await
         .expect("context checkpoint");
     let projection_checkpoint = store
         .append_session_compaction(SessionCompactionInput {
@@ -186,17 +206,20 @@ pub(crate) fn projection_only_compaction_is_visible_but_never_drives_context() {
             instructions: None,
             metadata: Some(json!({"projection_only": true})),
         })
+        .await
         .expect("projection checkpoint");
 
     assert_eq!(
         store
             .latest_valid_session_compaction(&session)
+            .await
             .expect("context checkpoint")
             .map(|record| record.id),
         Some(context_checkpoint.id)
     );
     let visible = store
         .list_valid_session_compactions(&session)
+        .await
         .expect("visible checkpoints");
     assert!(
         visible
@@ -205,14 +228,15 @@ pub(crate) fn projection_only_compaction_is_visible_but_never_drives_context() {
     );
 }
 
-#[test]
-pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
+#[tokio::test]
+pub(crate) async fn sqlite_stats_aggregate_accounting_columns() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "mimo-v2.5-pro", "xiaomi", None)
+        .await
         .expect("session");
     store
         .append_message_with_metrics_and_accounting(
@@ -249,29 +273,32 @@ pub(crate) fn sqlite_stats_aggregate_accounting_columns() {
                 pricing_version: None,
             }),
         )
+        .await
         .expect("append");
 
     let report = usage_stats(StatsOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         cwd,
         all: false,
         days: None,
         limit: 5,
     })
+    .await
     .expect("stats");
     assert_eq!(report["totals"]["estimated_cost_nanodollars"], 42);
     assert_eq!(report["totals"]["cache_write_tokens"], 10);
     assert_eq!(report["provider_models"][0]["model"], "mimo-v2.5-pro");
 }
 
-#[test]
-pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounting() {
+#[tokio::test]
+pub(crate) async fn session_usage_summary_sums_accounting_and_handles_missing_accounting() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "mimo-v2.5-pro", "xiaomi", None)
+        .await
         .expect("session");
     store
         .append_message_with_metrics_and_accounting(
@@ -308,6 +335,7 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
                 pricing_version: None,
             }),
         )
+        .await
         .expect("append accounting");
     store
         .append_message_with_metrics(
@@ -330,6 +358,7 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
             })),
             None,
         )
+        .await
         .expect("append usage");
     store
         .append_message(
@@ -345,12 +374,14 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
                 provider: Some("xiaomi".to_string()),
             },
         )
+        .await
         .expect("append missing");
 
     let summary = session_usage_summary(SessionUsageOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         session_id: session_id.clone(),
     })
+    .await
     .expect("summary");
     assert_eq!(summary.session_id, session_id);
     assert_eq!(summary.message_count, 3);
@@ -376,8 +407,8 @@ pub(crate) fn session_usage_summary_sums_accounting_and_handles_missing_accounti
     );
 }
 
-#[test]
-pub(crate) fn effective_usage_total_never_double_counts_token_subcategories() {
+#[tokio::test]
+pub(crate) async fn effective_usage_total_never_double_counts_token_subcategories() {
     use crate::accounting::{UsageTotalStatus, effective_usage_total};
 
     let reported = effective_usage_total(Some(&json!({
@@ -409,17 +440,19 @@ pub(crate) fn effective_usage_total_never_double_counts_token_subcategories() {
     );
 }
 
-#[test]
-pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
+#[tokio::test]
+pub(crate) async fn session_usage_summary_respects_session_and_revert_boundaries() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model-a", "provider-a", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&cwd, "run", "model-b", "provider-b", None)
+        .await
         .expect("second");
     for (timestamp_ms, session_id, tokens) in [
         (1_i64, &first, 100_u64),
@@ -457,6 +490,7 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
                     pricing_version: None,
                 }),
             )
+            .await
             .expect("append");
     }
     store
@@ -464,17 +498,20 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
             &first,
             crate::store::SessionRevertState::workspace_undo(2, "snapshot".to_string()),
         )
+        .await
         .expect("revert");
 
     let first_summary = session_usage_summary(SessionUsageOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         session_id: first,
     })
+    .await
     .expect("first summary");
     let second_summary = session_usage_summary(SessionUsageOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         session_id: second,
     })
+    .await
     .expect("second summary");
     assert_eq!(first_summary.context_input_tokens, 100);
     assert_eq!(first_summary.reported_total_tokens, 100);
@@ -482,14 +519,15 @@ pub(crate) fn session_usage_summary_respects_session_and_revert_boundaries() {
     assert_eq!(second_summary.reported_total_tokens, 900);
 }
 
-#[test]
-pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
+#[tokio::test]
+pub(crate) async fn usage_read_returns_all_recent_windows_and_activity() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
     let now = psychevo_agent_core::now_ms();
     for (timestamp_ms, total, cache_read, billable_input) in [
@@ -532,6 +570,7 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
                     pricing_version: None,
                 }),
             )
+            .await
             .expect("append");
     }
     store
@@ -568,12 +607,14 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
                 pricing_version: None,
             }),
         )
+        .await
         .expect("append derived total");
 
     let result = usage_read(UsageReadOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         activity_days: 365,
     })
+    .await
     .expect("usage read");
     let all = result
         .windows
@@ -619,8 +660,8 @@ pub(crate) fn usage_read_returns_all_recent_windows_and_activity() {
     }));
 }
 
-#[test]
-pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
+#[tokio::test]
+pub(crate) async fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
     let metadata = ModelMetadata {
         cost: Some(ModelCost {
             input: Some(1.0),
@@ -664,8 +705,8 @@ pub(crate) fn accounting_uses_cache_reasoning_and_over_200k_pricing() {
     );
 }
 
-#[test]
-pub(crate) fn accounting_marks_missing_cache_pricing_unknown() {
+#[tokio::test]
+pub(crate) async fn accounting_marks_missing_cache_pricing_unknown() {
     let metadata = ModelMetadata {
         cost: Some(ModelCost {
             input: Some(1.0),

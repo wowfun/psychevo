@@ -22,8 +22,8 @@ mod image_generation;
 #[allow(unused_imports)]
 pub use image_generation::*;
 
-#[test]
-fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
+#[tokio::test]
+async fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
     let config = crate::config::config_parse::parse_run_config(json!({
         "tools": {
             "tool_search": {
@@ -105,8 +105,8 @@ fn profile_mcp_servers_parse_stdio_and_http_descriptors() {
     ));
 }
 
-#[test]
-fn profile_mcp_servers_reject_inline_http_tokens_and_stdio_oauth() {
+#[tokio::test]
+async fn profile_mcp_servers_reject_inline_http_tokens_and_stdio_oauth() {
     let inline = crate::config::config_parse::parse_run_config(json!({
         "mcp_servers": {
             "docs": {

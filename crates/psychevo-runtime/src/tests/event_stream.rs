@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn run_start_projects_to_session_configured_bootstrap_event() {
+#[tokio::test]
+pub(crate) async fn run_start_projects_to_session_configured_bootstrap_event() {
     let event = RunStreamEvent::value(json!({
         "type": "run_start",
         "session_id": "session-1",
@@ -53,8 +53,8 @@ pub(crate) fn run_start_projects_to_session_configured_bootstrap_event() {
     );
 }
 
-#[test]
-pub(crate) fn blocking_action_events_project_to_typed_session_payloads() {
+#[tokio::test]
+pub(crate) async fn blocking_action_events_project_to_typed_session_payloads() {
     let requested = RunStreamEvent::value(json!({
         "type": "action_requested",
         "action_id": "clarify-1",

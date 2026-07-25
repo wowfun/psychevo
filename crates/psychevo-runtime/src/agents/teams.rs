@@ -105,14 +105,16 @@ impl ActiveAgentTeamContext {
     }
 }
 
-pub fn active_agent_team_context_for_session(
+pub async fn active_agent_team_context_for_session(
     store: &StateRuntime,
     parent_session_id: &str,
 ) -> Result<Option<ActiveAgentTeamContext>> {
-    let Some(team) = store.find_active_agent_team_run(parent_session_id)? else {
+    let Some(team) = store.find_active_agent_team_run(parent_session_id).await? else {
         return Ok(None);
     };
-    let mission = store.find_active_agent_mission_run(parent_session_id)?;
+    let mission = store
+        .find_active_agent_mission_run(parent_session_id)
+        .await?;
     active_agent_team_context_from_runs(team, mission)
 }
 

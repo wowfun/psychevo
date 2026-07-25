@@ -249,7 +249,7 @@ impl ContextSnapshot {
     }
 }
 
-pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
+pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     let store = options.state.clone();
     let selector = options.session.trim();
     if selector.is_empty() {
@@ -259,7 +259,9 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
     }
     let summary = if selector == "latest" {
         let cwd = canonical_cwd(&options.cwd)?;
-        let Some(session_id) = store.latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])?
+        let Some(session_id) = store
+            .latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])
+            .await?
         else {
             return Err(Error::Message(format!(
                 "no active run or tui session for {}",
@@ -267,14 +269,19 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
             )));
         };
         store
-            .session_summary(&session_id)?
+            .session_summary(&session_id)
+            .await?
             .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?
     } else {
         store
-            .session_summary(selector)?
+            .session_summary(selector)
+            .await?
             .ok_or_else(|| Error::Message(format!("session not found: {selector}")))?
     };
-    let session_metadata = store.session_metadata(&summary.id)?.unwrap_or(Value::Null);
+    let session_metadata = store
+        .session_metadata(&summary.id)
+        .await?
+        .unwrap_or(Value::Null);
     let cwd = PathBuf::from(&summary.cwd);
     let mode = session_metadata
         .get("mode")
@@ -286,16 +293,17 @@ pub fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot> {
         .and_then(Value::as_u64)
         .or_else(|| configured_context_limit(&options, &summary.provider, &summary.model, &cwd));
     let message_summaries = store
-        .load_tui_message_summaries(&summary.id)?
+        .load_tui_message_summaries(&summary.id)
+        .await?
         .into_iter()
         .collect::<Vec<_>>();
-    let latest_compaction = store.latest_valid_session_compaction(&summary.id)?;
+    let latest_compaction = store.latest_valid_session_compaction(&summary.id).await?;
     let after_session_seq = latest_compaction
         .as_ref()
         .map(|compaction| compaction.created_after_session_seq);
     let latest_provider_total = latest_assistant_usage_total(&message_summaries, after_session_seq);
-    let persisted_request_count = persisted_provider_request_count(&store, &summary)?;
-    let messages = load_projected_messages(&store, &summary.id, None)?;
+    let persisted_request_count = persisted_provider_request_count(&store, &summary).await?;
+    let messages = load_projected_messages(&store, &summary.id, None).await?;
     let env = options
         .inherited_env
         .clone()
@@ -465,17 +473,19 @@ struct PersistedProviderRequestCount {
     partial: bool,
 }
 
-fn persisted_provider_request_count(
+async fn persisted_provider_request_count(
     store: &crate::store::StateRuntime,
     summary: &crate::types::SessionSummary,
 ) -> Result<Option<PersistedProviderRequestCount>> {
-    let messages = crate::session_export::load_unfiltered_export_messages(store, &summary.id)?;
+    let messages =
+        crate::session_export::load_unfiltered_export_messages(store, &summary.id).await?;
     let Some(reconstructed) = crate::session_export::reconstruct_last_provider_request(
         store,
         &summary.id,
         summary,
         &messages,
-    )?
+    )
+    .await?
     else {
         return Ok(None);
     };

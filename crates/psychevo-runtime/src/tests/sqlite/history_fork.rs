@@ -28,17 +28,21 @@ fn native_binding_input<'a>(
     }
 }
 
-#[test]
-fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
+#[tokio::test]
+async fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let source = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
         .expect("source");
     store
         .set_session_title(&source, "Kept title")
+        .await
         .expect("title");
     store
         .create_gateway_runtime_binding(native_binding_input(
@@ -46,6 +50,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             &cwd_text,
             Some("resident-native-handle"),
         ))
+        .await
         .expect("binding");
     store
         .upsert_gateway_source_binding(GatewaySourceBindingInput {
@@ -58,6 +63,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             backend_native_id: Some(&source),
             lineage: None,
         })
+        .await
         .expect("source binding");
 
     store
@@ -73,6 +79,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             slots: Vec::new(),
             metadata: None,
         })
+        .await
         .expect("prompt prefix");
     let first = store
         .append_message_with_undo_snapshot_metadata_and_context_evidence(
@@ -92,9 +99,11 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
                 metadata: None,
             }],
         )
+        .await
         .expect("first");
     store
         .append_message(&source, &assistant_message("answer", 2))
+        .await
         .expect("assistant");
     let selected = store
         .append_message_with_undo_snapshot_and_context_evidence(
@@ -103,9 +112,11 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             None,
             &[],
         )
+        .await
         .expect("selected");
     store
         .append_message(&source, &assistant_message("suffix", 4))
+        .await
         .expect("suffix");
     store
         .append_session_compaction(SessionCompactionInput {
@@ -121,6 +132,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             instructions: None,
             metadata: None,
         })
+        .await
         .expect("kept compaction");
     store
         .append_session_compaction(SessionCompactionInput {
@@ -136,6 +148,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             instructions: None,
             metadata: None,
         })
+        .await
         .expect("suffix compaction");
     store
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
@@ -148,6 +161,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             completed_at_ms: 2,
             metadata: Some(json!({"firstCommittedSeq": 1, "lastCommittedSeq": 2})),
         })
+        .await
         .expect("kept terminal");
     store
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
@@ -160,12 +174,14 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             completed_at_ms: 4,
             metadata: Some(json!({"firstCommittedSeq": 3, "lastCommittedSeq": 4})),
         })
+        .await
         .expect("suffix terminal");
     store
         .set_session_revert_state(
             &source,
             SessionRevertState::workspace_undo(selected, "snapshot".to_string()),
         )
+        .await
         .expect("source revert");
     assert!(
         store
@@ -173,12 +189,14 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
                 source_session_id: &source,
                 before_session_seq: Some(selected),
             })
+            .await
             .expect_err("staged source must reject fork")
             .to_string()
             .contains("not an eligible root interactive Thread")
     );
     store
         .clear_session_revert_state(&source)
+        .await
         .expect("clear source revert");
 
     let child = store
@@ -186,10 +204,12 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             source_session_id: &source,
             before_session_seq: Some(selected),
         })
+        .await
         .expect("point fork");
 
     let child_summary = store
         .session_summary(&child)
+        .await
         .expect("child summary")
         .expect("child exists");
     assert_eq!(child_summary.parent_session_id, None);
@@ -200,6 +220,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     assert_eq!(
         store
             .session_metadata(&child)
+            .await
             .expect("metadata")
             .and_then(|metadata| metadata.get("forkedFromThreadId").cloned()),
         Some(json!(source))
@@ -207,12 +228,14 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     assert!(
         store
             .session_revert_state(&child)
+            .await
             .expect("revert")
             .is_none()
     );
     assert_eq!(
         store
             .load_context_evidence(&child, first)
+            .await
             .expect("evidence")
             .len(),
         1
@@ -220,6 +243,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     assert_eq!(
         store
             .load_session_prompt_prefix_version(&child, 1)
+            .await
             .expect("child prompt prefix")
             .map(|prefix| prefix.prefix_hash),
         Some("prefix-hash".to_string())
@@ -227,6 +251,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     assert_eq!(
         store
             .list_valid_session_compactions(&child)
+            .await
             .expect("child compactions")
             .into_iter()
             .map(|compaction| compaction.summary_text)
@@ -235,6 +260,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     );
     let child_terminals = store
         .list_gateway_turn_terminals_for_thread(&child)
+        .await
         .expect("child terminals");
     assert_eq!(child_terminals.len(), 1);
     assert_eq!(child_terminals[0].thread_id, child);
@@ -245,6 +271,7 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     );
     let child_binding = store
         .gateway_runtime_binding(&child)
+        .await
         .expect("binding")
         .expect("child binding");
     assert_eq!(child_binding.backend_kind.as_deref(), Some("native"));
@@ -253,11 +280,16 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
     assert!(
         store
             .gateway_source_binding("web:fork-source")
+            .await
             .expect("source binding")
             .is_some_and(|binding| binding.thread_id == source)
     );
     assert_eq!(
-        store.load_messages(&source).expect("source messages").len(),
+        store
+            .load_messages(&source)
+            .await
+            .expect("source messages")
+            .len(),
         4
     );
 
@@ -266,10 +298,12 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             source_session_id: &source,
             before_session_seq: Some(first),
         })
+        .await
         .expect("empty prefix fork");
     assert!(
         store
             .load_messages(&empty_child)
+            .await
             .expect("empty child")
             .is_empty()
     );
@@ -279,34 +313,46 @@ fn native_history_fork_copies_prefix_and_omits_transient_ownership() {
             source_session_id: &source,
             before_session_seq: None,
         })
+        .await
         .expect("full fork");
     assert_eq!(
-        store.load_messages(&full_child).expect("full child").len(),
+        store
+            .load_messages(&full_child)
+            .await
+            .expect("full child")
+            .len(),
         4
     );
 }
 
-#[test]
-fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
+#[tokio::test]
+async fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let root = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
         .expect("root");
     store
         .create_gateway_runtime_binding(native_binding_input(&root, &cwd_text, Some(&root)))
+        .await
         .expect("root binding");
 
     let child = store
         .create_child_session_with_metadata(&root, &cwd, "tui", "model", "provider", None)
+        .await
         .expect("child");
     store
         .create_gateway_runtime_binding(native_binding_input(&child, &cwd_text, Some(&child)))
+        .await
         .expect("child binding");
     let dedicated = store
         .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
+        .await
         .expect("dedicated");
     store
         .create_gateway_runtime_binding(native_binding_input(
@@ -314,6 +360,7 @@ fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
             &cwd_text,
             Some(&dedicated),
         ))
+        .await
         .expect("dedicated binding");
     let side = store
         .create_session_with_metadata(
@@ -323,9 +370,11 @@ fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
             "provider",
             Some(json!({"side_conversation": true})),
         )
+        .await
         .expect("side");
     store
         .create_gateway_runtime_binding(native_binding_input(&side, &cwd_text, Some(&side)))
+        .await
         .expect("side binding");
 
     for session_id in [&child, &dedicated, &side] {
@@ -335,6 +384,7 @@ fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
                     source_session_id: session_id,
                     before_session_seq: None,
                 })
+                .await
                 .expect_err("ineligible session")
                 .to_string()
                 .contains("not an eligible root interactive Thread")
@@ -355,6 +405,7 @@ fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
             superseded_activity_id: None,
             intent: None,
         })
+        .await
         .expect("running activity");
     assert!(
         store
@@ -362,6 +413,7 @@ fn native_history_fork_rejects_non_root_dedicated_side_and_running_sessions() {
                 source_session_id: &root,
                 before_session_seq: None,
             })
+            .await
             .expect_err("running session")
             .to_string()
             .contains("running Thread cannot be forked")

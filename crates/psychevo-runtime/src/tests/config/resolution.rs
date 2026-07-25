@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn aliases_and_auto_resolution_use_local_env_map() {
+#[tokio::test]
+pub(crate) async fn aliases_and_auto_resolution_use_local_env_map() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     options.model = Some("qwen/qwen-test".to_string());
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -53,10 +53,10 @@ pub(crate) fn aliases_and_auto_resolution_use_local_env_map() {
     assert_eq!(resolved.provider, "openrouter");
 }
 
-#[test]
-pub(crate) fn explicit_config_replaces_home_and_project_config_but_loads_project_env() {
+#[tokio::test]
+pub(crate) async fn explicit_config_replaces_home_and_project_config_but_loads_project_env() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     let explicit_dir = temp.path().join("explicit");
     let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&explicit_dir).expect("explicit dir");
@@ -101,10 +101,10 @@ api = "http://127.0.0.1:1234/v1"
     assert_eq!(resolved.api_key, "project-key");
 }
 
-#[test]
-pub(crate) fn explicit_config_agent_backends_still_load_project_overlay() {
+#[tokio::test]
+pub(crate) async fn explicit_config_agent_backends_still_load_project_overlay() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let home = home_dir(&temp);
     let explicit_dir = temp.path().join("explicit");
     let project_dir = options.cwd.join(".psychevo");
@@ -162,10 +162,10 @@ args = ["acp"]
     assert!(!backends.contains_key("ignored"));
 }
 
-#[test]
-pub(crate) fn runtime_profile_configs_merge_profile_and_project_overlay() {
+#[tokio::test]
+pub(crate) async fn runtime_profile_configs_merge_profile_and_project_overlay() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let home = home_dir(&temp);
     let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&home).expect("home dir");
@@ -212,8 +212,8 @@ pub(crate) fn runtime_profile_configs_merge_profile_and_project_overlay() {
     assert_eq!(opencode.default_agent.as_deref(), Some("build"));
 }
 
-#[test]
-pub(crate) fn codex_plugins_are_default_off_and_profile_configurable() {
+#[tokio::test]
+pub(crate) async fn codex_plugins_are_default_off_and_profile_configurable() {
     let config = crate::config::config_parse::parse_run_config(json!({})).expect("default config");
     assert!(!config.codex_plugins.enabled);
     assert_eq!(config.codex_plugins.binary, None);
@@ -240,10 +240,10 @@ pub(crate) fn codex_plugins_are_default_off_and_profile_configurable() {
     );
 }
 
-#[test]
-pub(crate) fn project_cannot_configure_or_enable_codex_authority() {
+#[tokio::test]
+pub(crate) async fn project_cannot_configure_or_enable_codex_authority() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let home = home_dir(&temp);
     let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&home).expect("home dir");
@@ -276,8 +276,8 @@ pub(crate) fn project_cannot_configure_or_enable_codex_authority() {
     assert!(!loaded.config.plugins.plugins["codex:review@openai"].plugin_enabled());
 }
 
-#[test]
-pub(crate) fn runtime_profile_backend_ref_validation_is_fail_closed() {
+#[tokio::test]
+pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
     let profiles = crate::config::parse_runtime_profile_configs(&json!({
         "cursor-acp": {
             "runtime": "acp",
@@ -328,10 +328,10 @@ pub(crate) fn runtime_profile_backend_ref_validation_is_fail_closed() {
     assert!(launch.to_string().contains("profile_launch_config_removed"));
 }
 
-#[test]
-pub(crate) fn psychevo_config_env_is_supported_and_config_dir_is_ignored() {
+#[tokio::test]
+pub(crate) async fn psychevo_config_env_is_supported_and_config_dir_is_ignored() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     let old_dir = temp.path().join("old-config-dir");
     let explicit_dir = temp.path().join("explicit");
     fs::create_dir_all(&old_dir).expect("old dir");
@@ -380,19 +380,19 @@ api = "http://127.0.0.1:1234/v1"
     assert_eq!(resolved.model, "local");
 }
 
-#[test]
-pub(crate) fn missing_home_config_rejects_before_agent_start() {
+#[tokio::test]
+pub(crate) async fn missing_home_config_rejects_before_agent_start() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let cwd = canonical_cwd(&options.cwd).expect("cwd");
     let err = load_run_config(&options, &cwd).expect_err("missing home");
     assert!(err.to_string().contains("pevo init"));
 }
 
-#[test]
-pub(crate) fn config_jsonc_without_toml_is_ignored_and_missing_home_rejects() {
+#[tokio::test]
+pub(crate) async fn config_jsonc_without_toml_is_ignored_and_missing_home_rejects() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::write(
@@ -408,10 +408,10 @@ pub(crate) fn config_jsonc_without_toml_is_ignored_and_missing_home_rejects() {
     assert!(!err.to_string().contains("config.jsonc"));
 }
 
-#[test]
-pub(crate) fn config_jsonc_is_ignored_when_toml_exists() {
+#[tokio::test]
+pub(crate) async fn config_jsonc_is_ignored_when_toml_exists() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::write(
@@ -429,10 +429,10 @@ pub(crate) fn config_jsonc_is_ignored_when_toml_exists() {
     load_run_config(&options, &cwd).expect("config.jsonc ignored");
 }
 
-#[test]
-pub(crate) fn workspace_root_defaults_to_home_workspaces() {
+#[tokio::test]
+pub(crate) async fn workspace_root_defaults_to_home_workspaces() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(config_dir.join("config.toml"), "").expect("toml config");
@@ -445,10 +445,10 @@ pub(crate) fn workspace_root_defaults_to_home_workspaces() {
     assert_eq!(default_cwd, temp.path().join("workspaces").join("general"));
 }
 
-#[test]
-pub(crate) fn workspace_root_uses_profile_config_without_cwd_overlay() {
+#[tokio::test]
+pub(crate) async fn workspace_root_uses_profile_config_without_cwd_overlay() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -476,10 +476,10 @@ root = "~/ignored-workspaces"
     assert_eq!(root, temp.path().join("shared-workspaces"));
 }
 
-#[test]
-pub(crate) fn empty_workspace_root_is_rejected() {
+#[tokio::test]
+pub(crate) async fn empty_workspace_root_is_rejected() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -500,10 +500,10 @@ root = "  "
     );
 }
 
-#[test]
-pub(crate) fn project_context_config_parses_and_cli_override_wins() {
+#[tokio::test]
+pub(crate) async fn project_context_config_parses_and_cli_override_wins() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -530,10 +530,10 @@ instructions = "cwd"
     );
 }
 
-#[test]
-pub(crate) fn project_context_lightweight_load_does_not_require_home_config() {
+#[tokio::test]
+pub(crate) async fn project_context_lightweight_load_does_not_require_home_config() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let cwd = canonical_cwd(&options.cwd).expect("cwd");
     fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
     write_config(
@@ -550,10 +550,10 @@ instructions = "cwd"
     assert!(load_run_config(&options, &cwd).is_err());
 }
 
-#[test]
-pub(crate) fn invalid_project_context_config_is_rejected() {
+#[tokio::test]
+pub(crate) async fn invalid_project_context_config_is_rejected() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -573,10 +573,10 @@ instructions = "repo-root"
     );
 }
 
-#[test]
-pub(crate) fn reasoning_effort_values_are_validated_and_none_disables() {
+#[tokio::test]
+pub(crate) async fn reasoning_effort_values_are_validated_and_none_disables() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(

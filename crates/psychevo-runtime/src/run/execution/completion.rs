@@ -49,16 +49,19 @@ pub(crate) fn prompt_prefix_invalidation_reason(
     None
 }
 
-pub(crate) fn take_prompt_prefix_notice(
+pub(crate) async fn take_prompt_prefix_notice(
     store: &StateRuntime,
     session_id: &str,
 ) -> Result<Option<String>> {
     let notice = store
-        .session_metadata(session_id)?
+        .session_metadata(session_id)
+        .await?
         .and_then(|metadata| metadata.get(PROMPT_PREFIX_NOTICE_METADATA_KEY).cloned())
         .and_then(|value| value.as_str().map(str::to_string));
     if notice.is_some() {
-        store.set_session_metadata_field(session_id, PROMPT_PREFIX_NOTICE_METADATA_KEY, None)?;
+        store
+            .set_session_metadata_field(session_id, PROMPT_PREFIX_NOTICE_METADATA_KEY, None)
+            .await?;
     }
     Ok(notice)
 }
@@ -209,7 +212,7 @@ pub(crate) async fn smart_review_permission(
     }
 }
 
-pub(crate) fn record_missed_required_agents(
+pub(crate) async fn record_missed_required_agents(
     store: &StateRuntime,
     session_id: &str,
     messages: &[Message],
@@ -243,6 +246,7 @@ pub(crate) fn record_missed_required_agents(
             }
         })),
     )
+    .await
 }
 
 #[cfg(test)]

@@ -50,10 +50,12 @@ pub(crate) use rusqlite::Connection;
 pub(crate) use serde_json::{Value, json};
 pub(crate) use tempfile::tempdir;
 
-pub(crate) fn base_options(temp: &tempfile::TempDir) -> RunOptions {
+pub(crate) async fn base_options(temp: &tempfile::TempDir) -> RunOptions {
     seed_managed_rg(&home_dir(temp));
     RunOptions {
-        state: StateRuntime::open(temp.path().join("state.db")).expect("state runtime"),
+        state: StateRuntime::open(temp.path().join("state.db"))
+            .await
+            .expect("state runtime"),
         cwd: temp.path().join("work"),
         snapshot_root: Some(temp.path().join("snapshots")),
         session: None,

@@ -22,10 +22,12 @@ fn gateway_activity_claim<'a>(
     }
 }
 
-#[test]
-fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() {
+#[tokio::test]
+async fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let source_key = "source:test";
     let first = store
         .claim_gateway_activity(gateway_activity_claim(
@@ -34,14 +36,17 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
             "owner-a",
             now_ms() + 60_000,
         ))
+        .await
         .expect("first claim");
 
-    let conflict = store.claim_gateway_activity(gateway_activity_claim(
-        "activity-2",
-        source_key,
-        "owner-b",
-        now_ms() + 60_000,
-    ));
+    let conflict = store
+        .claim_gateway_activity(gateway_activity_claim(
+            "activity-2",
+            source_key,
+            "owner-b",
+            now_ms() + 60_000,
+        ))
+        .await;
     assert!(conflict.is_err());
 
     assert!(
@@ -52,6 +57,7 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
                 first.generation,
                 now_ms() - 1,
             )
+            .await
             .expect("expire first")
     );
     let reclaimed = store
@@ -61,6 +67,7 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
             "owner-b",
             now_ms() + 60_000,
         ))
+        .await
         .expect("stale reclaim");
 
     assert_eq!(reclaimed.generation, first.generation + 1);
@@ -71,6 +78,7 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
     assert_eq!(
         store
             .gateway_activity("activity-1")
+            .await
             .expect("old record")
             .expect("activity-1")
             .status,
@@ -78,11 +86,13 @@ fn gateway_activity_claim_rejects_live_foreign_owner_and_reclaims_stale_owner() 
     );
 }
 
-#[test]
-fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
+#[tokio::test]
+async fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
-    let thread_id = store.create_session(temp.path()).expect("thread");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let thread_id = store.create_session(temp.path()).await.expect("thread");
 
     for index in 0..34 {
         store
@@ -91,14 +101,17 @@ fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
                 &format!("client-{index}"),
                 &format!("turn-{index}"),
             )
+            .await
             .expect("record receipt");
     }
     store
         .record_gateway_turn_start_receipt(&thread_id, "client-10", "turn-10-replaced")
+        .await
         .expect("replace receipt");
 
     let receipts = store
         .gateway_turn_start_receipts(&thread_id)
+        .await
         .expect("read receipts");
     assert_eq!(receipts.len(), 32);
     assert_eq!(
@@ -116,10 +129,12 @@ fn turn_start_receipts_are_persisted_and_bounded_per_thread() {
     );
 }
 
-#[test]
-fn gateway_activity_release_is_generation_guarded() {
+#[tokio::test]
+async fn gateway_activity_release_is_generation_guarded() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let record = store
         .claim_gateway_activity(gateway_activity_claim(
             "activity-1",
@@ -127,6 +142,7 @@ fn gateway_activity_release_is_generation_guarded() {
             "owner-a",
             now_ms() + 60_000,
         ))
+        .await
         .expect("claim");
 
     assert!(
@@ -137,11 +153,13 @@ fn gateway_activity_release_is_generation_guarded() {
                 record.generation + 1,
                 "completed",
             )
+            .await
             .expect("wrong generation ignored")
     );
     assert_eq!(
         store
             .gateway_activity(&record.activity_id)
+            .await
             .expect("record")
             .expect("activity")
             .status,
@@ -155,11 +173,13 @@ fn gateway_activity_release_is_generation_guarded() {
                 record.generation,
                 "completed",
             )
+            .await
             .expect("release")
     );
     assert_eq!(
         store
             .gateway_activity(&record.activity_id)
+            .await
             .expect("record")
             .expect("activity")
             .status,
@@ -167,10 +187,12 @@ fn gateway_activity_release_is_generation_guarded() {
     );
 }
 
-#[test]
-fn gateway_live_events_are_ordered_and_control_commands_track_status() {
+#[tokio::test]
+async fn gateway_live_events_are_ordered_and_control_commands_track_status() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let first_seq = store
         .append_gateway_live_event(
             Some("activity-1"),
@@ -179,6 +201,7 @@ fn gateway_live_events_are_ordered_and_control_commands_track_status() {
             Some("turn-1"),
             &json!({"type": "activityChanged"}),
         )
+        .await
         .expect("first event");
     let second_seq = store
         .append_gateway_live_event(
@@ -188,11 +211,13 @@ fn gateway_live_events_are_ordered_and_control_commands_track_status() {
             Some("turn-1"),
             &json!({"type": "titleChanged"}),
         )
+        .await
         .expect("second event");
 
     assert!(second_seq > first_seq);
     let events = store
         .list_gateway_live_events_after(first_seq - 1, 10)
+        .await
         .expect("events");
     assert_eq!(
         events.iter().map(|event| event.seq).collect::<Vec<_>>(),
@@ -206,28 +231,34 @@ fn gateway_live_events_are_ordered_and_control_commands_track_status() {
             command_kind: "interrupt",
             payload: json!({"reason": "test"}),
         })
+        .await
         .expect("command");
     let pending = store
         .pending_gateway_control_commands("owner-a", 10)
+        .await
         .expect("pending");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].id, command_id);
     store
         .mark_gateway_control_command_applied(command_id)
+        .await
         .expect("applied");
     assert!(
         store
             .pending_gateway_control_commands("owner-a", 10)
+            .await
             .expect("no pending")
             .is_empty()
     );
 }
 
-#[test]
-fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
+#[tokio::test]
+async fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
-    let session_id = store.create_session(temp.path()).expect("session");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
+    let session_id = store.create_session(temp.path()).await.expect("session");
 
     let first_revision = store
         .upsert_gateway_live_snapshot(GatewayLiveSnapshotInput {
@@ -239,6 +270,7 @@ fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
             event_kind: "entryUpdated",
             event: json!({"type": "entryUpdated", "value": "first"}),
         })
+        .await
         .expect("first snapshot");
     let second_revision = store
         .upsert_gateway_live_snapshot(GatewayLiveSnapshotInput {
@@ -250,12 +282,14 @@ fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
             event_kind: "entryUpdated",
             event: json!({"type": "entryUpdated", "value": "second"}),
         })
+        .await
         .expect("second snapshot");
 
     assert_eq!(first_revision, 1);
     assert_eq!(second_revision, 2);
     let snapshots = store
         .list_gateway_live_snapshots_for_thread(&session_id, Some("turn-1"), 10)
+        .await
         .expect("snapshots");
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].revision, 2);
@@ -264,24 +298,29 @@ fn gateway_live_snapshots_upsert_latest_revision_and_delete_by_activity() {
     assert_eq!(
         store
             .delete_gateway_live_snapshots_for_activity("activity-1")
+            .await
             .expect("delete snapshots"),
         1
     );
     assert!(
         store
             .list_gateway_live_snapshots(10)
+            .await
             .expect("no snapshots")
             .is_empty()
     );
 }
 
-#[test]
-fn gateway_turn_terminals_round_trip_and_order_by_thread() {
+#[tokio::test]
+async fn gateway_turn_terminals_round_trip_and_order_by_thread() {
     let temp = tempdir().expect("tempdir");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let thread_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
 
     let failed = store
@@ -295,6 +334,7 @@ fn gateway_turn_terminals_round_trip_and_order_by_thread() {
             completed_at_ms: 20,
             metadata: Some(json!({"source": "test"})),
         })
+        .await
         .expect("failed terminal");
     assert_eq!(failed.status, "failed");
     assert_eq!(failed.started_at_ms, Some(10));
@@ -314,6 +354,7 @@ fn gateway_turn_terminals_round_trip_and_order_by_thread() {
             completed_at_ms: 30,
             metadata: None,
         })
+        .await
         .expect("updated terminal");
     assert_eq!(updated.status, "interrupted");
     assert_eq!(updated.outcome.as_deref(), Some("aborted"));
@@ -331,10 +372,12 @@ fn gateway_turn_terminals_round_trip_and_order_by_thread() {
             completed_at_ms: 2,
             metadata: None,
         })
+        .await
         .expect("completed terminal");
 
     let records = store
         .list_gateway_turn_terminals_for_thread(&thread_id)
+        .await
         .expect("list terminals");
     assert_eq!(
         records

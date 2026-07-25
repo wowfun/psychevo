@@ -36,12 +36,16 @@ pub async fn run_live_streaming_controlled(
     .await
 }
 
-pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadContextResult> {
+pub async fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadContextResult> {
     let store = options.state.clone();
     let summary = store
-        .session_summary(&options.session)?
+        .session_summary(&options.session)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
-    let metadata = store.session_metadata(&summary.id)?.unwrap_or(json!({}));
+    let metadata = store
+        .session_metadata(&summary.id)
+        .await?
+        .unwrap_or(json!({}));
     let cwd = canonical_cwd(std::path::Path::new(&summary.cwd))?;
     let mode = options
         .mode
@@ -223,6 +227,7 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
                 &options.state,
                 &summary.id,
             )
+            .await
             .ok()
             .flatten(),
             external_delegate: None,
@@ -330,13 +335,15 @@ pub fn reload_session_context(options: ReloadContextOptions) -> Result<ReloadCon
             "cwd": cwd.display().to_string(),
         })),
     });
-    let record = store.upsert_session_prompt_prefix(record)?;
+    let record = store.upsert_session_prompt_prefix(record).await?;
     if let Some(notice) = options.notice {
-        store.set_session_metadata_field(
-            &summary.id,
-            PROMPT_PREFIX_NOTICE_METADATA_KEY,
-            Some(serde_json::Value::String(notice)),
-        )?;
+        store
+            .set_session_metadata_field(
+                &summary.id,
+                PROMPT_PREFIX_NOTICE_METADATA_KEY,
+                Some(serde_json::Value::String(notice)),
+            )
+            .await?;
     }
     Ok(ReloadContextResult {
         session_id: summary.id,
@@ -483,31 +490,33 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     let store = options.state.clone();
     let selected_parent_summary = selected_agent_for_result(selected_parent_agent.as_ref());
     let parent_session_id = if let Some(session_id) = options.parent_session.clone() {
-        store.resume_session(&session_id)?;
+        store.resume_session(&session_id).await?;
         session_id
     } else {
-        store.create_session_with_metadata(
-            &cwd,
-            "tui",
-            &resolved.model,
-            &resolved.provider,
-            Some(json!({
-                "provider_label": resolved.display_label.clone(),
-                "base_url": resolved.base_url.clone(),
-                "api_key_env": resolved.api_key_env.clone(),
-                "reasoning_effort": resolved.reasoning_effort.clone(),
-                "context_limit": resolved.context_limit,
-                "model_metadata": resolved.metadata.public_json(),
-                "mode": options.mode.as_str(),
-                "permission_mode": permission_mode.as_str(),
-                "approval_mode": approval_mode.as_str(),
-                "project_context": {
-                    "instructions": loaded.config.project_context.instructions.as_str(),
-                },
-                "cwd": cwd.display().to_string(),
-                "selected_agent": selected_parent_summary,
-            })),
-        )?
+        store
+            .create_session_with_metadata(
+                &cwd,
+                "tui",
+                &resolved.model,
+                &resolved.provider,
+                Some(json!({
+                    "provider_label": resolved.display_label.clone(),
+                    "base_url": resolved.base_url.clone(),
+                    "api_key_env": resolved.api_key_env.clone(),
+                    "reasoning_effort": resolved.reasoning_effort.clone(),
+                    "context_limit": resolved.context_limit,
+                    "model_metadata": resolved.metadata.public_json(),
+                    "mode": options.mode.as_str(),
+                    "permission_mode": permission_mode.as_str(),
+                    "approval_mode": approval_mode.as_str(),
+                    "project_context": {
+                        "instructions": loaded.config.project_context.instructions.as_str(),
+                    },
+                    "cwd": cwd.display().to_string(),
+                    "selected_agent": selected_parent_summary,
+                })),
+            )
+            .await?
     };
     let image_generation =
         crate::config::resolve_image_generation_config_from_loaded(&loaded, None, None, None, None)
@@ -579,11 +588,12 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             &options.state,
             &parent_session_id,
         )
+        .await
         .ok()
         .flatten(),
         external_delegate: None,
     };
-    let agent = spawn_child_agent_background(context, child_agent, options.prompt)?;
+    let agent = spawn_child_agent_background(context, child_agent, options.prompt).await?;
     Ok(AgentSpawnResult {
         parent_session_id,
         agent,

@@ -1,6 +1,5 @@
 use psychevo_agent_core::now_ms;
-use rusqlite::{OptionalExtension, params};
-use serde_json::Value;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -11,7 +10,7 @@ use super::{
 };
 
 impl StateRuntime {
-    pub fn upsert_automation_task(
+    pub async fn upsert_automation_task(
         &self,
         input: AutomationTaskInput,
     ) -> Result<AutomationTaskRecord> {
@@ -19,8 +18,8 @@ impl StateRuntime {
         let now = now_ms();
         let schedule_json = serde_json::to_string(&input.schedule)?;
         let execution_json = serde_json::to_string(&input.execution)?;
-        self.write_retry(|conn| {
-            conn.execute(
+        self.automation_write(
+            sqlx::query(
                 r#"
                 INSERT INTO automations (
                     id, cwd, kind, target_thread_id, title, prompt, schedule_json,
@@ -42,211 +41,255 @@ impl StateRuntime {
                     updated_at_ms = excluded.updated_at_ms,
                     next_run_at_ms = excluded.next_run_at_ms
                 "#,
-                params![
-                    id,
-                    input.cwd,
-                    input.kind,
-                    input.target_thread_id,
-                    input.title,
-                    input.prompt,
-                    schedule_json,
-                    if input.enabled { 1_i64 } else { 0_i64 },
-                    execution_json,
-                    input.model,
-                    input.reasoning_effort,
-                    input.source_key,
-                    now,
-                    input.next_run_at_ms,
-                ],
-            )?;
-            Ok(())
-        })?;
-        self.automation_task(&id)?
+            )
+            .bind(&id)
+            .bind(input.cwd)
+            .bind(input.kind)
+            .bind(input.target_thread_id)
+            .bind(input.title)
+            .bind(input.prompt)
+            .bind(schedule_json)
+            .bind(i64::from(input.enabled))
+            .bind(execution_json)
+            .bind(input.model)
+            .bind(input.reasoning_effort)
+            .bind(input.source_key)
+            .bind(now)
+            .bind(input.next_run_at_ms),
+        )
+        .await?;
+        self.automation_task(&id)
+            .await?
             .ok_or_else(|| Error::Message(format!("automation task not found after upsert: {id}")))
     }
 
-    pub fn automation_task(&self, id: &str) -> Result<Option<AutomationTaskRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        conn.query_row(
-            automation_task_select_sql("WHERE id = ?1").as_str(),
-            params![id],
-            automation_task_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+    pub async fn automation_task(&self, id: &str) -> Result<Option<AutomationTaskRecord>> {
+        let sql = automation_task_select_sql("WHERE id = ?1");
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .map(|row| automation_task_from_row(&row))
+                .transpose()
+        })
+        .await
     }
 
-    pub fn automation_tasks_for_cwd(&self, cwd: &str) -> Result<Vec<AutomationTaskRecord>> {
-        self.automation_tasks_for_optional_cwd(Some(cwd))
+    pub async fn automation_tasks_for_cwd(&self, cwd: &str) -> Result<Vec<AutomationTaskRecord>> {
+        self.automation_tasks_for_optional_cwd(Some(cwd)).await
     }
 
-    pub fn automation_tasks_for_optional_cwd(
+    pub async fn automation_tasks_for_optional_cwd(
         &self,
         cwd: Option<&str>,
     ) -> Result<Vec<AutomationTaskRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            automation_task_select_sql(
-                "WHERE (?1 IS NULL OR cwd = ?1)
-                 ORDER BY enabled DESC, next_run_at_ms IS NULL, next_run_at_ms ASC, updated_at_ms DESC",
-            )
-            .as_str(),
-        )?;
-        let rows = stmt.query_map(params![cwd], automation_task_from_row)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+        let sql = automation_task_select_sql(
+            "WHERE (?1 IS NULL OR cwd = ?1)
+             ORDER BY enabled DESC, next_run_at_ms IS NULL, next_run_at_ms ASC, updated_at_ms DESC",
+        );
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(cwd)
+                .fetch_all(&mut *conn)
+                .await?;
+            rows.into_iter()
+                .map(|row| automation_task_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn due_automation_tasks(
+    pub async fn due_automation_tasks(
         &self,
         now_ms: i64,
         limit: usize,
     ) -> Result<Vec<AutomationTaskRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            automation_task_select_sql(
-                "WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND next_run_at_ms <= ?1
-                 ORDER BY next_run_at_ms ASC, updated_at_ms ASC
-                 LIMIT ?2",
-            )
-            .as_str(),
-        )?;
-        let rows = stmt.query_map(params![now_ms, limit as i64], automation_task_from_row)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+        let sql = automation_task_select_sql(
+            "WHERE enabled = 1 AND next_run_at_ms IS NOT NULL AND next_run_at_ms <= ?1
+             ORDER BY next_run_at_ms ASC, updated_at_ms ASC
+             LIMIT ?2",
+        );
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(now_ms)
+                .bind(limit as i64)
+                .fetch_all(&mut *conn)
+                .await?;
+            rows.into_iter()
+                .map(|row| automation_task_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn delete_automation_task(&self, id: &str) -> Result<bool> {
-        let changed = self.write_retry(|conn| {
-            conn.execute("DELETE FROM automations WHERE id = ?1", params![id])
-        })?;
-        Ok(changed > 0)
+    pub async fn delete_automation_task(&self, id: &str) -> Result<bool> {
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let changed = sqlx::query("DELETE FROM automations WHERE id = ?1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(changed > 0)
+        })
+        .await
     }
 
-    pub fn claim_automation_run(
+    pub async fn claim_automation_run(
         &self,
         automation_id: &str,
         trigger: &str,
     ) -> Result<Option<AutomationRunRecord>> {
         let id = Uuid::now_v7().to_string();
         let now = now_ms();
-        let inserted = self.write_retry(|conn| {
-            let running: Option<String> = conn
-                .query_row(
+        let inserted = self
+            .observe_sqlx(async {
+                let mut tx = self.begin_sqlx_write().await?;
+                let running = sqlx::query_scalar::<_, String>(
                     "SELECT id FROM automation_runs WHERE automation_id = ?1 AND status = 'running' LIMIT 1",
-                    params![automation_id],
-                    |row| row.get(0),
                 )
-                .optional()?;
-            if running.is_some() {
-                return Ok(false);
-            }
-            conn.execute(
-                r#"
-                INSERT INTO automation_runs (
-                    id, automation_id, trigger, status, started_at_ms
-                ) VALUES (?1, ?2, ?3, 'running', ?4)
-                "#,
-                params![id, automation_id, trigger, now],
-            )?;
-            conn.execute(
-                r#"
-                UPDATE automations
-                SET last_run_at_ms = ?2,
-                    last_status = 'running',
-                    last_error = NULL,
-                    updated_at_ms = ?2
-                WHERE id = ?1
-                "#,
-                params![automation_id, now],
-            )?;
-            Ok(true)
-        })?;
+                .bind(automation_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if running.is_some() {
+                    return Ok(false);
+                }
+                sqlx::query(
+                    r#"
+                    INSERT INTO automation_runs (
+                        id, automation_id, trigger, status, started_at_ms
+                    ) VALUES (?1, ?2, ?3, 'running', ?4)
+                    "#,
+                )
+                .bind(&id)
+                .bind(automation_id)
+                .bind(trigger)
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    r#"
+                    UPDATE automations
+                    SET last_run_at_ms = ?2,
+                        last_status = 'running',
+                        last_error = NULL,
+                        updated_at_ms = ?2
+                    WHERE id = ?1
+                    "#,
+                )
+                .bind(automation_id)
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                self.finish_sqlx_write().await;
+                Ok(true)
+            })
+            .await?;
         if !inserted {
             return Ok(None);
         }
-        self.automation_run(&id)
+        self.automation_run(&id).await
     }
 
-    pub fn automation_run(&self, id: &str) -> Result<Option<AutomationRunRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        conn.query_row(
-            automation_run_select_sql("WHERE id = ?1").as_str(),
-            params![id],
-            automation_run_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+    pub async fn automation_run(&self, id: &str) -> Result<Option<AutomationRunRecord>> {
+        let sql = automation_run_select_sql("WHERE id = ?1");
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(id)
+                .fetch_optional(&mut *conn)
+                .await?
+                .map(|row| automation_run_from_row(&row))
+                .transpose()
+        })
+        .await
     }
 
-    pub fn automation_runs_for_task(
+    pub async fn automation_runs_for_task(
         &self,
         automation_id: &str,
         limit: usize,
     ) -> Result<Vec<AutomationRunRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            automation_run_select_sql(
-                "WHERE automation_id = ?1 ORDER BY started_at_ms DESC LIMIT ?2",
-            )
-            .as_str(),
-        )?;
-        let rows = stmt.query_map(
-            params![automation_id, limit as i64],
-            automation_run_from_row,
-        )?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+        let sql = automation_run_select_sql(
+            "WHERE automation_id = ?1 ORDER BY started_at_ms DESC LIMIT ?2",
+        );
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(automation_id)
+                .bind(limit as i64)
+                .fetch_all(&mut *conn)
+                .await?;
+            rows.into_iter()
+                .map(|row| automation_run_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn stale_automation_runs_for_recovery(
+    pub async fn stale_automation_runs_for_recovery(
         &self,
         now_ms: i64,
         stale_after_ms: i64,
         limit: usize,
     ) -> Result<Vec<AutomationRunRecoveryCandidate>> {
         let stale_before_ms = now_ms.saturating_sub(stale_after_ms);
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            r#"
-            SELECT
-                a.id, a.cwd, a.kind, a.target_thread_id, a.title, a.prompt,
-                a.schedule_json, a.enabled, a.execution_json, a.model,
-                a.reasoning_effort, a.source_key, a.created_at_ms, a.updated_at_ms,
-                a.last_run_at_ms, a.next_run_at_ms, a.last_status, a.last_error,
-                r.id, r.automation_id, r.trigger, r.status, r.started_at_ms,
-                r.completed_at_ms, r.thread_id, r.source_key, r.error, r.metadata_json
-            FROM automation_runs r
-            INNER JOIN automations a ON a.id = r.automation_id
-            WHERE r.status = 'running'
-              AND r.started_at_ms <= ?1
-              AND NOT EXISTS (
-                SELECT 1
-                FROM gateway_activities g
-                WHERE g.status IN ('running', 'queued')
-                  AND g.lease_expires_at_ms >= ?2
-                  AND (
-                    (r.thread_id IS NOT NULL AND g.thread_id = r.thread_id)
-                    OR (r.source_key IS NOT NULL AND g.source_key = r.source_key)
-                    OR (a.target_thread_id IS NOT NULL AND g.thread_id = a.target_thread_id)
-                    OR (a.source_key IS NOT NULL AND g.source_key = a.source_key)
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    a.id, a.cwd, a.kind, a.target_thread_id, a.title, a.prompt,
+                    a.schedule_json, a.enabled, a.execution_json, a.model,
+                    a.reasoning_effort, a.source_key, a.created_at_ms, a.updated_at_ms,
+                    a.last_run_at_ms, a.next_run_at_ms, a.last_status, a.last_error,
+                    r.id, r.automation_id, r.trigger, r.status, r.started_at_ms,
+                    r.completed_at_ms, r.thread_id, r.source_key, r.error, r.metadata_json
+                FROM automation_runs r
+                INNER JOIN automations a ON a.id = r.automation_id
+                WHERE r.status = 'running'
+                  AND r.started_at_ms <= ?1
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM gateway_activities g
+                    WHERE g.status IN ('running', 'queued')
+                      AND g.lease_expires_at_ms >= ?2
+                      AND (
+                        (r.thread_id IS NOT NULL AND g.thread_id = r.thread_id)
+                        OR (r.source_key IS NOT NULL AND g.source_key = r.source_key)
+                        OR (a.target_thread_id IS NOT NULL AND g.thread_id = a.target_thread_id)
+                        OR (a.source_key IS NOT NULL AND g.source_key = a.source_key)
+                      )
                   )
-              )
-            ORDER BY r.started_at_ms ASC
-            LIMIT ?3
-            "#,
-        )?;
-        let rows = stmt.query_map(params![stale_before_ms, now_ms, limit as i64], |row| {
-            Ok(AutomationRunRecoveryCandidate {
-                task: automation_task_from_row(row)?,
-                run: automation_run_from_row_at(row, 18)?,
-            })
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+                ORDER BY r.started_at_ms ASC
+                LIMIT ?3
+                "#,
+            )
+            .bind(stale_before_ms)
+            .bind(now_ms)
+            .bind(limit as i64)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(AutomationRunRecoveryCandidate {
+                        task: automation_task_from_row(&row)?,
+                        run: automation_run_from_row_at(&row, 18)?,
+                    })
+                })
+                .collect()
+        })
+        .await
     }
 
-    pub fn finish_automation_run(
+    pub async fn finish_automation_run(
         &self,
         input: AutomationRunFinishInput<'_>,
     ) -> Result<Option<AutomationRunRecord>> {
@@ -257,18 +300,18 @@ impl StateRuntime {
             .map(serde_json::to_string)
             .transpose()?;
         let error = input.error.map(bounded_automation_error);
-        let changed = self.write_retry(|conn| {
-            let automation_id: Option<String> = conn
-                .query_row(
-                    "SELECT automation_id FROM automation_runs WHERE id = ?1",
-                    params![input.run_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let automation_id = sqlx::query_scalar::<_, String>(
+                "SELECT automation_id FROM automation_runs WHERE id = ?1",
+            )
+            .bind(input.run_id)
+            .fetch_optional(&mut *tx)
+            .await?;
             let Some(automation_id) = automation_id else {
                 return Ok(false);
             };
-            let changed = conn.execute(
+            let changed = sqlx::query(
                 r#"
                 UPDATE automation_runs
                 SET status = ?2,
@@ -279,20 +322,21 @@ impl StateRuntime {
                     metadata_json = ?7
                 WHERE id = ?1 AND status = 'running'
                 "#,
-                params![
-                    input.run_id,
-                    input.status,
-                    now,
-                    input.thread_id,
-                    input.source_key,
-                    error,
-                    metadata_json,
-                ],
-            )?;
+            )
+            .bind(input.run_id)
+            .bind(input.status)
+            .bind(now)
+            .bind(input.thread_id)
+            .bind(input.source_key)
+            .bind(error.as_deref())
+            .bind(metadata_json)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
             if changed == 0 {
                 return Ok(false);
             }
-            conn.execute(
+            sqlx::query(
                 r#"
                 UPDATE automations
                 SET last_status = ?2,
@@ -302,21 +346,35 @@ impl StateRuntime {
                     updated_at_ms = ?6
                 WHERE id = ?1
                 "#,
-                params![
-                    automation_id,
-                    input.status,
-                    error,
-                    input.next_run_at_ms,
-                    input.source_key,
-                    now
-                ],
-            )?;
+            )
+            .bind(automation_id)
+            .bind(input.status)
+            .bind(error.as_deref())
+            .bind(input.next_run_at_ms)
+            .bind(input.source_key)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
             Ok(true)
-        })?;
-        if !changed {
-            return self.automation_run(input.run_id);
-        }
-        self.automation_run(input.run_id)
+        })
+        .await?;
+        self.automation_run(input.run_id).await
+    }
+
+    async fn automation_write<'q>(
+        &self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
+    ) -> Result<()> {
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            query.execute(&mut *tx).await?;
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -344,64 +402,56 @@ fn automation_run_select_sql(where_clause: &str) -> String {
     )
 }
 
-fn automation_task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationTaskRecord> {
-    let schedule_json: String = row.get(6)?;
-    let execution_json: String = row.get(8)?;
-    let schedule = json_from_column(&schedule_json, 6)?;
-    let execution = json_from_column(&execution_json, 8)?;
-    let enabled: i64 = row.get(7)?;
+fn automation_task_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<AutomationTaskRecord> {
+    let schedule_json: String = row.try_get(6)?;
+    let execution_json: String = row.try_get(8)?;
+    let enabled: i64 = row.try_get(7)?;
     Ok(AutomationTaskRecord {
-        id: row.get(0)?,
-        cwd: row.get(1)?,
-        kind: row.get(2)?,
-        target_thread_id: row.get(3)?,
-        title: row.get(4)?,
-        prompt: row.get(5)?,
-        schedule,
+        id: row.try_get(0)?,
+        cwd: row.try_get(1)?,
+        kind: row.try_get(2)?,
+        target_thread_id: row.try_get(3)?,
+        title: row.try_get(4)?,
+        prompt: row.try_get(5)?,
+        schedule: serde_json::from_str(&schedule_json)?,
         enabled: enabled != 0,
-        execution,
-        model: row.get(9)?,
-        reasoning_effort: row.get(10)?,
-        source_key: row.get(11)?,
-        created_at_ms: row.get(12)?,
-        updated_at_ms: row.get(13)?,
-        last_run_at_ms: row.get(14)?,
-        next_run_at_ms: row.get(15)?,
-        last_status: row.get(16)?,
-        last_error: row.get(17)?,
+        execution: serde_json::from_str(&execution_json)?,
+        model: row.try_get(9)?,
+        reasoning_effort: row.try_get(10)?,
+        source_key: row.try_get(11)?,
+        created_at_ms: row.try_get(12)?,
+        updated_at_ms: row.try_get(13)?,
+        last_run_at_ms: row.try_get(14)?,
+        next_run_at_ms: row.try_get(15)?,
+        last_status: row.try_get(16)?,
+        last_error: row.try_get(17)?,
     })
 }
 
-fn automation_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AutomationRunRecord> {
+fn automation_run_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<AutomationRunRecord> {
     automation_run_from_row_at(row, 0)
 }
 
 fn automation_run_from_row_at(
-    row: &rusqlite::Row<'_>,
+    row: &sqlx::sqlite::SqliteRow,
     offset: usize,
-) -> rusqlite::Result<AutomationRunRecord> {
-    let metadata_json: Option<String> = row.get(offset + 9)?;
+) -> Result<AutomationRunRecord> {
+    let metadata_json: Option<String> = row.try_get(offset + 9)?;
     let metadata = metadata_json
         .as_deref()
-        .map(|value| json_from_column(value, offset + 9))
+        .map(serde_json::from_str)
         .transpose()?;
     Ok(AutomationRunRecord {
-        id: row.get(offset)?,
-        automation_id: row.get(offset + 1)?,
-        trigger: row.get(offset + 2)?,
-        status: row.get(offset + 3)?,
-        started_at_ms: row.get(offset + 4)?,
-        completed_at_ms: row.get(offset + 5)?,
-        thread_id: row.get(offset + 6)?,
-        source_key: row.get(offset + 7)?,
-        error: row.get(offset + 8)?,
+        id: row.try_get(offset)?,
+        automation_id: row.try_get(offset + 1)?,
+        trigger: row.try_get(offset + 2)?,
+        status: row.try_get(offset + 3)?,
+        started_at_ms: row.try_get(offset + 4)?,
+        completed_at_ms: row.try_get(offset + 5)?,
+        thread_id: row.try_get(offset + 6)?,
+        source_key: row.try_get(offset + 7)?,
+        error: row.try_get(offset + 8)?,
         metadata,
-    })
-}
-
-fn json_from_column(value: &str, index: usize) -> rusqlite::Result<Value> {
-    serde_json::from_str(value).map_err(|err| {
-        rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(err))
     })
 }
 

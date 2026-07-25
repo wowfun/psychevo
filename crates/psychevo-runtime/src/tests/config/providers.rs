@@ -3,10 +3,10 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn default_global_config_uses_home_psychevo_config_toml() {
+#[tokio::test]
+pub(crate) async fn default_global_config_uses_home_psychevo_config_toml() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let global_dir = home_dir(&temp);
     fs::create_dir_all(&global_dir).expect("global dir");
     write_config(
@@ -36,10 +36,10 @@ api = "http://home.example/v1"
     );
 }
 
-#[test]
-pub(crate) fn provider_inference_idle_timeout_accepts_zero_to_disable() {
+#[tokio::test]
+pub(crate) async fn provider_inference_idle_timeout_accepts_zero_to_disable() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -63,10 +63,10 @@ inference_idle_timeout_secs = 0
     assert_eq!(resolved.inference_idle_timeout_secs, 0);
 }
 
-#[test]
-pub(crate) fn opencode_zen_no_auth_resolves_without_api_key() {
+#[tokio::test]
+pub(crate) async fn opencode_zen_no_auth_resolves_without_api_key() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -95,10 +95,10 @@ no_auth = true
     assert_eq!(resolved.api_key, "");
 }
 
-#[test]
-pub(crate) fn provider_api_key_env_override_is_used_for_credentials() {
+#[tokio::test]
+pub(crate) async fn provider_api_key_env_override_is_used_for_credentials() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -124,11 +124,11 @@ api_key_env = "GLM_API_KEY"
     assert_eq!(resolved.api_key, "glm-key");
 }
 
-#[test]
-pub(crate) fn psychevo_home_overrides_default_home() {
+#[tokio::test]
+pub(crate) async fn psychevo_home_overrides_default_home() {
     let temp = tempdir().expect("temp");
     let custom_home = temp.path().join("custom-home");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     options.inherited_env = Some(BTreeMap::from([
         (
             "HOME".to_string(),
@@ -161,10 +161,10 @@ api = "http://custom-home.example/v1"
     assert_eq!(resolved.api_key, "custom-key");
 }
 
-#[test]
-pub(crate) fn config_merge_dotenv_precedence_and_provider_qualified_model() {
+#[tokio::test]
+pub(crate) async fn config_merge_dotenv_precedence_and_provider_qualified_model() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     let project_dir = options.cwd.join(".psychevo");
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -207,10 +207,10 @@ reasoning_effort = "high"
     assert_eq!(resolved.reasoning_effort.as_deref(), Some("high"));
 }
 
-#[test]
-pub(crate) fn model_object_provider_and_reasoning_effort_are_resolved() {
+#[tokio::test]
+pub(crate) async fn model_object_provider_and_reasoning_effort_are_resolved() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -236,10 +236,10 @@ reasoning_effort = "medium"
     assert_eq!(resolved.reasoning_effort.as_deref(), Some("medium"));
 }
 
-#[test]
-pub(crate) fn xiaomi_token_plan_builtin_resolves_default_url_and_env() {
+#[tokio::test]
+pub(crate) async fn xiaomi_token_plan_builtin_resolves_default_url_and_env() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -267,10 +267,10 @@ model = "xiaomi-token-plan/mimo-v2.5-pro"
     assert_eq!(resolved.model, "mimo-v2.5-pro");
 }
 
-#[test]
-pub(crate) fn selected_configured_model_reports_effective_reasoning_without_credentials() {
+#[tokio::test]
+pub(crate) async fn selected_configured_model_reports_effective_reasoning_without_credentials() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -312,10 +312,10 @@ reasoning_effort = "low"
     assert_eq!(selected.reasoning_effort.as_deref(), Some("xhigh"));
 }
 
-#[test]
-pub(crate) fn models_dev_cache_enriches_configured_model_by_base_url() {
+#[tokio::test]
+pub(crate) async fn models_dev_cache_enriches_configured_model_by_base_url() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::write(
@@ -379,10 +379,10 @@ name = "Explicit other"
     assert_eq!(explicit.model_name.as_deref(), Some("Explicit other"));
 }
 
-#[test]
-pub(crate) fn models_dev_cache_enriches_xiaomi_omni_capabilities_and_modalities() {
+#[tokio::test]
+pub(crate) async fn models_dev_cache_enriches_xiaomi_omni_capabilities_and_modalities() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     fs::write(
@@ -565,10 +565,10 @@ pub(crate) async fn refresh_model_metadata_cache_preserves_old_cache_on_failure(
     assert_eq!(fs::read_to_string(path).expect("cache"), r#"{"old":true}"#);
 }
 
-#[test]
-pub(crate) fn explicit_metadata_config_override_wins_and_disables_reasoning() {
+#[tokio::test]
+pub(crate) async fn explicit_metadata_config_override_wins_and_disables_reasoning() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -609,10 +609,10 @@ output = 2.5
     );
 }
 
-#[test]
-pub(crate) fn legacy_context_limit_config_field_is_rejected() {
+#[tokio::test]
+pub(crate) async fn legacy_context_limit_config_field_is_rejected() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -634,10 +634,10 @@ context_limit = 1234
     assert!(err.to_string().contains("use limit.context"));
 }
 
-#[test]
-pub(crate) fn raw_api_keys_are_rejected() {
+#[tokio::test]
+pub(crate) async fn raw_api_keys_are_rejected() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -657,10 +657,10 @@ api_key = "secret"
     assert!(err.to_string().contains("raw API keys"));
 }
 
-#[test]
-pub(crate) fn provider_label_is_display_only() {
+#[tokio::test]
+pub(crate) async fn provider_label_is_display_only() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -687,8 +687,8 @@ api = "http://127.0.0.1:1234/v1"
     assert_eq!(models[0].provider_label, "Xiaomi Token Plan CN");
 }
 
-#[test]
-pub(crate) fn create_global_custom_provider_writes_config_and_env() {
+#[tokio::test]
+pub(crate) async fn create_global_custom_provider_writes_config_and_env() {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -724,10 +724,10 @@ model = "deepseek/deepseek-chat"
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_CN_API_KEY=secret-key\n");
 }
 
-#[test]
-pub(crate) fn set_default_model_writes_local_by_default_and_global_when_requested() {
+#[tokio::test]
+pub(crate) async fn set_default_model_writes_local_by_default_and_global_when_requested() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let home = home_dir(&temp);
     let cwd = options.cwd.clone();
     fs::create_dir_all(&home).expect("home");
@@ -767,8 +767,8 @@ api = "http://127.0.0.1:9"
     assert!(global_config.contains("model = \"mock/global-model\""));
 }
 
-#[test]
-pub(crate) fn set_default_model_with_reasoning_writes_model_object() {
+#[tokio::test]
+pub(crate) async fn set_default_model_with_reasoning_writes_model_object() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
     let cwd = temp.path().join("work");
@@ -800,8 +800,8 @@ api = "http://127.0.0.1:9"
     assert!(err.to_string().contains("reasoning_effort"));
 }
 
-#[test]
-pub(crate) fn set_default_model_validates_provider_scope_without_catalog_fetch() {
+#[tokio::test]
+pub(crate) async fn set_default_model_validates_provider_scope_without_catalog_fetch() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
     let cwd = temp.path().join("work");
@@ -829,10 +829,10 @@ api = "http://127.0.0.1:9"
     assert!(!home.join("models_dev_cache.json").exists());
 }
 
-#[test]
-pub(crate) fn auxiliary_compression_model_precedes_legacy_compression_model() {
+#[tokio::test]
+pub(crate) async fn auxiliary_compression_model_precedes_legacy_compression_model() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let home = home_dir(&temp);
     fs::create_dir_all(&home).expect("home");
     write_config(
@@ -876,8 +876,8 @@ model = "aux-model"
     assert_eq!(compression.provider.model, "aux-model");
 }
 
-#[test]
-pub(crate) fn auxiliary_model_assignment_writes_hermes_style_task_slot() {
+#[tokio::test]
+pub(crate) async fn auxiliary_model_assignment_writes_hermes_style_task_slot() {
     let temp = tempdir().expect("temp");
     let home = home_dir(&temp);
     let cwd = temp.path().join("work");
@@ -914,8 +914,8 @@ no_auth = true
     assert!(config.contains("reasoning_effort = \"high\""));
 }
 
-#[test]
-pub(crate) fn create_global_custom_provider_reuses_existing_env_without_overwrite() {
+#[tokio::test]
+pub(crate) async fn create_global_custom_provider_reuses_existing_env_without_overwrite() {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -942,8 +942,9 @@ pub(crate) fn create_global_custom_provider_reuses_existing_env_without_overwrit
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_CN_API_KEY=existing-key\n");
 }
 
-#[test]
-pub(crate) fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_keyless_create() {
+#[tokio::test]
+pub(crate) async fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_keyless_create()
+ {
     let temp = tempdir().expect("temp");
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
@@ -993,10 +994,10 @@ pub(crate) fn create_global_custom_provider_rejects_duplicates_aliases_and_raw_k
     );
 }
 
-#[test]
-pub(crate) fn unique_model_default_and_multiple_model_rejection() {
+#[tokio::test]
+pub(crate) async fn unique_model_default_and_multiple_model_rejection() {
     let temp = tempdir().expect("temp");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");
     write_config(
@@ -1029,10 +1030,10 @@ pub(crate) fn unique_model_default_and_multiple_model_rejection() {
     assert_eq!(resolved.model, "mimo-v2.5");
 }
 
-#[test]
-pub(crate) fn cli_provider_qualified_model_selects_provider() {
+#[tokio::test]
+pub(crate) async fn cli_provider_qualified_model_selects_provider() {
     let temp = tempdir().expect("temp");
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     options.model = Some("deepseek/deepseek-chat".to_string());
     let config_dir = home_dir(&temp);
     fs::create_dir_all(&config_dir).expect("config dir");

@@ -2,10 +2,10 @@
 pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let id = format!("list-agent-{}", Uuid::now_v7());
     {
         let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
@@ -79,8 +79,8 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     runs.remove(&id);
 }
 
-#[test]
-pub(crate) fn control_targets_resolve_by_model_visible_task_or_report_ambiguity() {
+#[tokio::test]
+pub(crate) async fn control_targets_resolve_by_model_visible_task_or_report_ambiguity() {
     let task = format!(
         "duplicate_task_{}",
         Uuid::now_v7().to_string().replace('-', "_")
@@ -122,7 +122,7 @@ pub(crate) fn control_targets_resolve_by_model_visible_task_or_report_ambiguity(
         }
     }
 
-    let err = close_agent_id(&task, None).expect_err("ambiguous task");
+    let err = close_agent_id(&task, None).await.expect_err("ambiguous task");
     assert!(err.to_string().contains("multiple agents match task"));
     assert!(err.to_string().contains("use agent_id"));
 
@@ -131,11 +131,11 @@ pub(crate) fn control_targets_resolve_by_model_visible_task_or_report_ambiguity(
         runs.remove(&id_two);
     }
     let resolved = resume_agent_id(&task, None)
-        .expect("resolve task")
+        .await.expect("resolve task")
         .expect("record");
     assert_eq!(resolved.id, id_one);
     let resolved = resume_agent_id(&id_one, None)
-        .expect("resolve agent id")
+        .await.expect("resolve agent id")
         .expect("record");
     assert_eq!(resolved.id, id_one);
 
@@ -143,8 +143,8 @@ pub(crate) fn control_targets_resolve_by_model_visible_task_or_report_ambiguity(
     runs.remove(&id_one);
 }
 
-#[test]
-pub(crate) fn agent_permission_mode_can_only_narrow_parent_mode() {
+#[tokio::test]
+pub(crate) async fn agent_permission_mode_can_only_narrow_parent_mode() {
     let mut agent = AgentDefinition {
         name: "worker".to_string(),
         description: "Worker".to_string(),
@@ -188,8 +188,8 @@ pub(crate) fn agent_permission_mode_can_only_narrow_parent_mode() {
     );
 }
 
-#[test]
-pub(crate) fn empty_tools_array_is_explicit_empty_allowlist() {
+#[tokio::test]
+pub(crate) async fn empty_tools_array_is_explicit_empty_allowlist() {
     let tmp = TempDir::new().expect("tmp");
     let inherit_path = tmp.path().join("inherit.md");
     fs::write(
@@ -239,8 +239,8 @@ pub(crate) fn empty_tools_array_is_explicit_empty_allowlist() {
     ));
 }
 
-#[test]
-pub(crate) fn clarify_tool_policy_is_plan_safe_and_allow_deny_controllable() {
+#[tokio::test]
+pub(crate) async fn clarify_tool_policy_is_plan_safe_and_allow_deny_controllable() {
     let tmp = TempDir::new().expect("tmp");
     let allow_path = tmp.path().join("clarifier.md");
     fs::write(
@@ -289,8 +289,8 @@ pub(crate) fn clarify_tool_policy_is_plan_safe_and_allow_deny_controllable() {
     assert_eq!(plan, vec!["read", "exec_command", "clarify"]);
 }
 
-#[test]
-pub(crate) fn project_instructions_policy_parses_boolean_and_defaults_to_injected() {
+#[tokio::test]
+pub(crate) async fn project_instructions_policy_parses_boolean_and_defaults_to_injected() {
     let tmp = TempDir::new().expect("tmp");
     let omitted_path = tmp.path().join("omitted.md");
     fs::write(
@@ -342,8 +342,8 @@ pub(crate) fn project_instructions_policy_parses_boolean_and_defaults_to_injecte
     );
 }
 
-#[test]
-pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
+#[tokio::test]
+pub(crate) async fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
     let agent = built_in_agent(
         "translate",
         "Translate only",
@@ -428,8 +428,8 @@ pub(crate) fn empty_tools_suppresses_agent_and_skill_prompt_catalogs() {
     assert!(!assembly.prefix_slots[0].content.contains("read, edit"));
 }
 
-#[test]
-pub(crate) fn prompt_prefix_includes_runtime_cwd_environment() {
+#[tokio::test]
+pub(crate) async fn prompt_prefix_includes_runtime_cwd_environment() {
     let cwd = PathBuf::from("/tmp/repo/task");
     let assembly = crate::prompt_assembly::assemble_main_prompt_prefix(
         crate::prompt_assembly::MainPromptPrefixInput {
@@ -454,8 +454,8 @@ pub(crate) fn prompt_prefix_includes_runtime_cwd_environment() {
     assert!(environment_slot.content.contains("Relative file paths"));
 }
 
-#[test]
-pub(crate) fn runtime_time_context_is_turn_scoped_auditable_base_policy() {
+#[tokio::test]
+pub(crate) async fn runtime_time_context_is_turn_scoped_auditable_base_policy() {
     let capabilities = crate::types::ModelCapabilities {
         developer_role: Some(true),
         ..Default::default()
@@ -521,8 +521,8 @@ pub(crate) fn runtime_time_context_is_turn_scoped_auditable_base_policy() {
     );
 }
 
-#[test]
-pub(crate) fn project_instructions_are_developer_prompt_slots_with_system_fallback() {
+#[tokio::test]
+pub(crate) async fn project_instructions_are_developer_prompt_slots_with_system_fallback() {
     let fragment = crate::project_instructions::ProjectInstructionFragment {
             source_name: "AGENTS.md".to_string(),
             source_path: PathBuf::from("/tmp/repo/AGENTS.md"),

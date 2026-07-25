@@ -1,15 +1,14 @@
 use psychevo_agent_core::{TerminalReason, now_ms};
 use psychevo_ai::Outcome;
-use rusqlite::{OptionalExtension, params};
 use serde_json::{Map, Value};
+use sqlx::Row;
 
 use crate::error::Result;
 
-use super::store_undo_helpers::undo_target_from_row;
 use super::{StateRuntime, UndoTarget};
 
 impl StateRuntime {
-    pub fn finish_session(
+    pub async fn finish_session(
         &self,
         session_id: &str,
         outcome: Outcome,
@@ -19,7 +18,8 @@ impl StateRuntime {
         let metadata_json = match terminal_reason {
             Some(reason) => {
                 let mut metadata = self
-                    .session_metadata(session_id)?
+                    .session_metadata(session_id)
+                    .await?
                     .unwrap_or_else(|| Value::Object(Map::new()));
                 if !metadata.is_object() {
                     metadata = Value::Object(Map::new());
@@ -32,59 +32,102 @@ impl StateRuntime {
             }
             None => None,
         };
-        self.write_retry(|conn| {
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
             if let Some(metadata_json) = metadata_json.as_deref() {
-                conn.execute(
+                sqlx::query(
                     "UPDATE sessions SET updated_at_ms = ?1, ended_at_ms = ?1, end_reason = ?2, metadata_json = ?3 WHERE id = ?4",
-                    params![now, outcome.as_str(), metadata_json, session_id],
-                )?;
+                )
+                .bind(now)
+                .bind(outcome.as_str())
+                .bind(metadata_json)
+                .bind(session_id)
+                .execute(&mut *tx)
+                .await?;
             } else {
-                conn.execute(
+                sqlx::query(
                     "UPDATE sessions SET updated_at_ms = ?1, ended_at_ms = ?1, end_reason = ?2 WHERE id = ?3",
-                    params![now, outcome.as_str(), session_id],
-                )?;
+                )
+                .bind(now)
+                .bind(outcome.as_str())
+                .bind(session_id)
+                .execute(&mut *tx)
+                .await?;
             }
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
             Ok(())
         })
+        .await
     }
 
-    pub(crate) fn user_target_before(
+    pub(crate) async fn user_target_before(
         &self,
         session_id: &str,
         boundary: i64,
     ) -> Result<Option<UndoTarget>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
             SELECT session_seq, message_json, content_text, metadata_json
             FROM messages
             WHERE session_id = ?1 AND role = 'user' AND session_seq < ?2
             ORDER BY session_seq DESC
             LIMIT 1
             "#,
-        )?;
-        stmt.query_row(params![session_id, boundary], undo_target_from_row)
-            .optional()
-            .map_err(Into::into)
+            )
+            .bind(session_id)
+            .bind(boundary)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| undo_target_from_sqlx_row(&row))
+            .transpose()
+        })
+        .await
     }
 
-    pub(crate) fn user_target_after(
+    pub(crate) async fn user_target_after(
         &self,
         session_id: &str,
         boundary: i64,
     ) -> Result<Option<UndoTarget>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
             SELECT session_seq, message_json, content_text, metadata_json
             FROM messages
             WHERE session_id = ?1 AND role = 'user' AND session_seq > ?2
             ORDER BY session_seq ASC
             LIMIT 1
             "#,
-        )?;
-        stmt.query_row(params![session_id, boundary], undo_target_from_row)
-            .optional()
-            .map_err(Into::into)
+            )
+            .bind(session_id)
+            .bind(boundary)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| undo_target_from_sqlx_row(&row))
+            .transpose()
+        })
+        .await
     }
+}
+
+fn undo_target_from_sqlx_row(row: &sqlx::sqlite::SqliteRow) -> Result<UndoTarget> {
+    let seq = row.try_get(0)?;
+    let message_json: String = row.try_get(1)?;
+    let content_text: Option<String> = row.try_get(2)?;
+    let metadata_json: Option<String> = row.try_get(3)?;
+    let prompt = content_text
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            super::store_undo_helpers::user_prompt_from_message_json(&message_json)
+                .unwrap_or_default()
+        });
+    Ok(UndoTarget {
+        seq,
+        prompt,
+        snapshot: super::store_undo_helpers::undo_snapshot_from_metadata(metadata_json.as_deref()),
+    })
 }

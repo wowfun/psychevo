@@ -89,7 +89,8 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     let cwd = canonical_cwd(&options.cwd)?;
     let store = options.state.clone();
     let summary = store
-        .session_summary(&options.session)?
+        .session_summary(&options.session)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {}", options.session)))?;
     if side_conversation_session_source(&summary.source) {
         return Ok(skipped_result(
@@ -99,7 +100,7 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         ));
     }
 
-    let records = store.load_message_records(&summary.id)?;
+    let records = store.load_message_records(&summary.id).await?;
     if records.len() < MIN_SUMMARIZED_MESSAGES + 1 {
         return Ok(skipped_result(
             &summary.id,
@@ -129,7 +130,7 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     }
     let current = resolve_run_provider(&run_options, &loaded)?;
 
-    let previous = store.latest_valid_session_compaction(&summary.id)?;
+    let previous = store.latest_valid_session_compaction(&summary.id).await?;
     let preparation = prepare_compaction(
         &records,
         previous.as_ref(),
@@ -228,7 +229,8 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
             "keep_recent_tokens": compression_config.keep_recent_tokens,
             "previous_compaction_id": previous.as_ref().map(|record| record.id),
         })),
-    })?;
+    })
+    .await?;
     if let Some(runtime) = &hook_runtime {
         let post = runtime.run_post_compact(&json!({
             "session_id": summary.id.clone(),
@@ -259,13 +261,13 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     })
 }
 
-pub(crate) fn load_projected_messages(
+pub(crate) async fn load_projected_messages(
     store: &StateRuntime,
     session_id: &str,
     max_context_messages: Option<usize>,
 ) -> Result<Vec<Message>> {
-    let records = store.load_message_records(session_id)?;
-    let Some(compaction) = store.latest_valid_session_compaction(session_id)? else {
+    let records = store.load_message_records(session_id).await?;
+    let Some(compaction) = store.latest_valid_session_compaction(session_id).await? else {
         return Ok(prune_context(
             records.into_iter().map(|record| record.message).collect(),
             max_context_messages,

@@ -180,6 +180,7 @@ impl EventSink for PersistenceSink {
                                 content_text_override.clone(),
                                 prompt_context_evidence.as_slice(),
                             )
+                            .await
                             .map(|_| ())
                             .map_err(|err| {
                                 psychevo_agent_core::Error::EventSink(err.to_string())
@@ -197,6 +198,7 @@ impl EventSink for PersistenceSink {
                                     content_text_override: None,
                                 },
                             )
+                            .await
                             .map(|_| ())
                             .map_err(|err| {
                                 psychevo_agent_core::Error::EventSink(err.to_string())
@@ -209,6 +211,7 @@ impl EventSink for PersistenceSink {
                     ..
                 } => store
                     .finish_session(&session_id, outcome, terminal_reason)
+                    .await
                     .map_err(|err| psychevo_agent_core::Error::EventSink(err.to_string()))?,
                 _ => {}
             }

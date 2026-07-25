@@ -49,15 +49,16 @@ pub(crate) async fn run_live_internal(
     let resumed_session_id = if let Some(session_id) = &options.session {
         Some(session_id.clone())
     } else if options.continue_latest {
-        store.latest_session_for_cwd_with_sources(&cwd, continue_sources)?
+        store
+            .latest_session_for_cwd_with_sources(&cwd, continue_sources)
+            .await?
     } else {
         None
     };
-    let session_metadata_for_agent = resumed_session_id
-        .as_deref()
-        .map(|session_id| store.session_metadata(session_id))
-        .transpose()?
-        .flatten();
+    let session_metadata_for_agent = match resumed_session_id.as_deref() {
+        Some(session_id) => store.session_metadata(session_id).await?,
+        None => None,
+    };
     let agents_home = resolve_agents_home(&loaded.env, &cwd)?;
     let agent_input = main_agent_input_from_sources(
         options.no_agents,
@@ -182,40 +183,42 @@ pub(crate) async fn run_live_internal(
         }
         metadata
     };
-    let first_use_empty_visible_session = options
-        .session
-        .as_deref()
-        .map(|session_id| first_use_empty_visible_session(&store, session_id))
-        .transpose()?
-        .unwrap_or(false);
+    let first_use_empty_visible_session = match options.session.as_deref() {
+        Some(session_id) => first_use_empty_visible_session(&store, session_id).await?,
+        None => false,
+    };
     let (session_id, created_session) = if let Some(session_id) = options.session.clone() {
-        store.resume_session(&session_id)?;
+        store.resume_session(&session_id).await?;
         (session_id, false)
     } else if options.continue_latest {
         if let Some(session_id) = resumed_session_id {
-            store.resume_session(&session_id)?;
+            store.resume_session(&session_id).await?;
             (session_id, false)
         } else {
             (
-                store.create_session_with_metadata(
+                store
+                    .create_session_with_metadata(
                     &cwd,
                     source,
                     &resolved.model,
                     &resolved.provider,
                     Some(session_metadata()),
-                )?,
+                )
+                .await?,
                 true,
             )
         }
     } else {
         (
-            store.create_session_with_metadata(
+            store
+                .create_session_with_metadata(
                 &cwd,
                 source,
                 &resolved.model,
                 &resolved.provider,
                 Some(session_metadata()),
-            )?,
+            )
+            .await?,
             true,
         )
     };
@@ -226,7 +229,8 @@ pub(crate) async fn run_live_internal(
             &resolved.provider,
             &resolved.model,
             session_metadata(),
-        )?;
+        )
+        .await?;
     }
     let invocation_started = Instant::now();
     let trace_warning_emitted = Arc::new(Mutex::new(false));
@@ -237,7 +241,7 @@ pub(crate) async fn run_live_internal(
             Err(err) => (None, Some(err)),
         };
 
-    store.cleanup_reverted_messages(&session_id)?;
+    store.cleanup_reverted_messages(&session_id).await?;
     maybe_preflight_compact_session(
         &options,
         &cwd,
@@ -349,10 +353,11 @@ pub(crate) async fn run_live_internal(
     emit_warning_events(&extension_warnings, &events, stream_events.as_ref());
 
     let previous_messages =
-        load_projected_messages(&store, &session_id, options.max_context_messages)?;
-    let prompt_session_seq = store.next_message_seq(&session_id)?;
+        load_projected_messages(&store, &session_id, options.max_context_messages).await?;
+    let prompt_session_seq = store.next_message_seq(&session_id).await?;
     let mailbox_context_messages = store
-        .deliver_pending_agent_mailbox_events_for_prompt(&session_id, prompt_session_seq)?
+        .deliver_pending_agent_mailbox_events_for_prompt(&session_id, prompt_session_seq)
+        .await?
         .into_iter()
         .filter(|record| record.delivered_at_ms.is_some())
         .map(|record| agent_mailbox_event_message(&record))
@@ -475,6 +480,7 @@ pub(crate) async fn run_live_internal(
                 &options.state,
                 &session_id,
             )
+            .await
             .ok()
             .flatten(),
             external_delegate: options.external_agent_delegate.clone(),
@@ -658,7 +664,7 @@ pub(crate) async fn run_live_internal(
         "project_instructions_visible": !prompt_project_instructions.is_empty(),
         "project_instructions_role": project_instructions_role,
     });
-    let stored_prefix = store.load_session_prompt_prefix(&session_id)?;
+    let stored_prefix = store.load_session_prompt_prefix(&session_id).await?;
     let invalidation_reason = stored_prefix.as_ref().and_then(|record| {
         prompt_prefix_invalidation_reason(
             record,
@@ -698,13 +704,13 @@ pub(crate) async fn run_live_internal(
             slots: assembly.prefix_slots.clone(),
             metadata: Some(prefix_metadata.clone()),
         });
-        let record = store.upsert_session_prompt_prefix(record)?;
+        let record = store.upsert_session_prompt_prefix(record).await?;
         (assembly, record)
     } else {
         let record = stored_prefix.expect("checked above");
         (assembly_from_prefix_record(&record), record)
     };
-    let prefix_notice = take_prompt_prefix_notice(&store, &session_id)?;
+    let prefix_notice = take_prompt_prefix_notice(&store, &session_id).await?;
     let runtime_time_context = RuntimeTimeContext::local_now();
     let mut turn_prompt_instructions = vec![turn_runtime_time_instruction(
         &runtime_time_context,
@@ -841,7 +847,9 @@ pub(crate) async fn run_live_internal(
         Err(err) => {
             let err = Error::from(err);
             if !overflow_retry_attempted && !controlled_run && is_context_overflow_error(&err) {
-                store.delete_messages_from_seq(&session_id, prompt_session_seq)?;
+                store
+                    .delete_messages_from_seq(&session_id, prompt_session_seq)
+                    .await?;
                 compact_session(CompactSessionOptions {
                     state: options.state.clone(),
                     cwd: cwd.clone(),
@@ -891,7 +899,8 @@ pub(crate) async fn run_live_internal(
         &session_id,
         &completion.messages,
         &required_agent_mentions,
-    )?;
+    )
+    .await?;
     let final_answer = completion
         .messages
         .iter()
@@ -942,7 +951,9 @@ pub(crate) async fn run_live_internal(
                 .await
                 {
                     Ok(()) => {
-                        if let Ok(Some(summary)) = title_store.session_summary(&title_session_id) {
+                        if let Ok(Some(summary)) =
+                            title_store.session_summary(&title_session_id).await
+                        {
                             title_stream(RunStreamEvent::value(json!({
                                 "type": "session_title_changed",
                                 "session_id": title_session_id,

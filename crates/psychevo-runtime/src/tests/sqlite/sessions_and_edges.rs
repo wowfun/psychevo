@@ -3,8 +3,8 @@ pub(crate) use super::*;
 use crate::store::{PromptPrefixRecord, PromptPrefixSlotRecord};
 use psychevo_agent_core::now_ms;
 
-#[test]
-pub(crate) fn sqlite_schema_v28_rejects_legacy_state_databases_with_reset_guidance() {
+#[tokio::test]
+pub(crate) async fn sqlite_schema_v28_rejects_legacy_state_databases_with_reset_guidance() {
     for version in 1..=27 {
         let temp = tempdir().expect("temp");
         let db = temp.path().join(format!("v{version}.db"));
@@ -16,7 +16,7 @@ pub(crate) fn sqlite_schema_v28_rejects_legacy_state_databases_with_reset_guidan
                 .expect("version");
         }
 
-        let err = match StateRuntime::open(&db) {
+        let err = match StateRuntime::open(&db).await {
             Ok(_) => panic!("v{version} db opened successfully"),
             Err(err) => err,
         };
@@ -29,8 +29,8 @@ pub(crate) fn sqlite_schema_v28_rejects_legacy_state_databases_with_reset_guidan
     }
 }
 
-#[test]
-pub(crate) fn sqlite_schema_v28_rejects_unknown_state_database() {
+#[tokio::test]
+pub(crate) async fn sqlite_schema_v28_rejects_unknown_state_database() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("old.db");
     {
@@ -41,7 +41,7 @@ pub(crate) fn sqlite_schema_v28_rejects_unknown_state_database() {
             .expect("schema");
     }
 
-    let err = match StateRuntime::open(&db) {
+    let err = match StateRuntime::open(&db).await {
         Ok(_) => panic!("old db opened successfully"),
         Err(err) => err,
     };
@@ -49,14 +49,15 @@ pub(crate) fn sqlite_schema_v28_rejects_unknown_state_database() {
     assert!(err.to_string().contains("pevo init --reset-state"));
 }
 
-#[test]
-pub(crate) fn sqlite_schema_v28_creates_current_gateway_coordination_schema() {
+#[tokio::test]
+pub(crate) async fn sqlite_schema_v28_creates_current_gateway_coordination_schema() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
     let message_seq = store
         .append_message_with_undo_snapshot_and_context_evidence(
@@ -65,6 +66,7 @@ pub(crate) fn sqlite_schema_v28_creates_current_gateway_coordination_schema() {
             None,
             &[],
         )
+        .await
         .expect("message");
 
     assert_eq!(message_seq, 1);
@@ -176,20 +178,24 @@ fn gateway_runtime_binding_input<'a>(
     }
 }
 
-#[test]
-pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_cas() {
+#[tokio::test]
+pub(crate) async fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_cas() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .await
         .expect("session");
 
     let created = store
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
             &thread_id, &cwd_text, "codex", None,
         ))
+        .await
         .expect("create binding");
     assert_eq!(created.binding_revision, 1);
     assert_eq!(created.agent_ref.as_deref(), Some("reviewer"));
@@ -202,6 +208,7 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
             &thread_id, &cwd_text, "codex", None,
         ))
+        .await
         .expect("idempotent create");
     assert_eq!(same, created);
 
@@ -211,6 +218,7 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
     different_agent.agent_definition_json = r#"{"name":"other-reviewer"}"#;
     let agent_conflict = store
         .create_gateway_runtime_binding(different_agent)
+        .await
         .expect_err("immutable Agent Definition identity");
     assert!(
         agent_conflict
@@ -222,24 +230,29 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
             &thread_id, &cwd_text, "opencode", None,
         ))
+        .await
         .expect_err("immutable runtime identity");
     assert!(conflict.to_string().contains("bindings are immutable"));
 
     let attached = store
         .attach_gateway_runtime_native_session(&thread_id, 1, "native-codex")
+        .await
         .expect("attach native session");
     assert_eq!(attached.binding_revision, 2);
     assert_eq!(attached.native_session_id.as_deref(), Some("native-codex"));
     let idempotent_from_pre_attach_revision = store
         .attach_gateway_runtime_native_session(&thread_id, 1, "native-codex")
+        .await
         .expect("same native identity is idempotent across the attach revision");
     assert_eq!(idempotent_from_pre_attach_revision, attached);
     let idempotent = store
         .attach_gateway_runtime_native_session(&thread_id, 2, "native-codex")
+        .await
         .expect("idempotent attach");
     assert_eq!(idempotent.binding_revision, 2);
     let native_conflict = store
         .attach_gateway_runtime_native_session(&thread_id, 2, "different-native")
+        .await
         .expect_err("different native identity stays immutable");
     assert!(
         native_conflict
@@ -249,25 +262,31 @@ pub(crate) fn sqlite_runtime_binding_create_is_immutable_and_native_attach_is_ca
     assert_eq!(
         store
             .gateway_runtime_binding_by_native_session("codex", "native-codex")
+            .await
             .expect("native lookup")
             .expect("native binding"),
         attached
     );
 }
 
-#[test]
-pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_and_cas_revision() {
+#[tokio::test]
+pub(crate) async fn sqlite_runtime_control_state_separates_preferences_observations_and_cas_revision()
+ {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .await
         .expect("session");
     let created = store
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
             &thread_id, &cwd_text, "codex", None,
         ))
+        .await
         .expect("create binding");
     assert_eq!(created.binding_revision, 1);
     assert_eq!(created.control_revision, 1);
@@ -288,6 +307,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
                 runtime_observed: None,
             },
         )
+        .await
         .expect("store preferences");
     assert_eq!(stored.binding_revision, 1);
     assert_eq!(stored.control_revision, 2);
@@ -304,6 +324,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
                 runtime_observed: None,
             },
         )
+        .await
         .expect("same preference is idempotent");
     assert_eq!(idempotent.control_revision, 2);
 
@@ -317,6 +338,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
                 runtime_observed: None,
             },
         )
+        .await
         .expect_err("stale control revision");
     assert!(stale.to_string().contains("stale runtime control revision"));
 
@@ -334,6 +356,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
                 runtime_observed: Some(&observed),
             },
         )
+        .await
         .expect("record runtime observation");
     assert_eq!(observed_record.control_revision, 3);
     assert_eq!(observed_record.thread_preferences, preferences);
@@ -341,6 +364,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
 
     let attached = store
         .attach_gateway_runtime_native_session(&thread_id, 1, "native-codex")
+        .await
         .expect("binding revision advances independently");
     assert_eq!(attached.binding_revision, 2);
     assert_eq!(attached.control_revision, 3);
@@ -354,6 +378,7 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
                 runtime_observed: None,
             },
         )
+        .await
         .expect_err("stale binding revision");
     assert!(
         stale_binding
@@ -362,17 +387,21 @@ pub(crate) fn sqlite_runtime_control_state_separates_preferences_observations_an
     );
 }
 
-#[test]
-pub(crate) fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
+#[tokio::test]
+pub(crate) async fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let cwd_text = cwd.display().to_string();
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .await
         .expect("first session");
     let second = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .await
         .expect("second session");
 
     store
@@ -382,6 +411,7 @@ pub(crate) fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
             "codex",
             Some("native-shared"),
         ))
+        .await
         .expect("first binding");
     let error = store
         .create_gateway_runtime_binding(gateway_runtime_binding_input(
@@ -390,15 +420,18 @@ pub(crate) fn sqlite_runtime_binding_native_identity_is_unique_per_profile() {
             "codex",
             Some("native-shared"),
         ))
+        .await
         .expect_err("duplicate native identity");
     assert!(error.to_string().contains("UNIQUE constraint failed"));
 }
 
-#[test]
-pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
+#[tokio::test]
+pub(crate) async fn sqlite_source_lane_persists_draft_without_thread() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
 
     let draft_control_values = BTreeMap::from([
         ("model".to_string(), "gpt-fixture".to_string()),
@@ -416,6 +449,7 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
             draft_control_values: &draft_control_values,
             lineage: None,
         })
+        .await
         .expect("draft lane");
     assert_eq!(draft.thread_id, None);
     assert_eq!(draft.draft_agent_ref.as_deref(), Some("reviewer"));
@@ -424,12 +458,14 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
     assert!(
         store
             .gateway_source_binding("im.wechat:user-1")
+            .await
             .expect("compat binding")
             .is_none()
     );
 
     let thread_id = store
         .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .await
         .expect("session");
     store
         .upsert_gateway_source_lane(GatewaySourceLaneInput {
@@ -443,14 +479,17 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
             draft_control_values: &Default::default(),
             lineage: None,
         })
+        .await
         .expect("bound lane");
     assert!(
         store
             .clear_gateway_source_lane_thread("im.wechat:user-1")
+            .await
             .expect("clear thread")
     );
     let cleared = store
         .gateway_source_lane("im.wechat:user-1")
+        .await
         .expect("lane")
         .expect("lane exists");
     assert_eq!(cleared.thread_id, None);
@@ -458,13 +497,16 @@ pub(crate) fn sqlite_source_lane_persists_draft_without_thread() {
     assert!(cleared.draft_control_values.is_empty());
 }
 
-#[test]
-pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads() {
+#[tokio::test]
+pub(crate) async fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .await
         .expect("session");
 
     store
@@ -486,6 +528,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
                 "input": [{"type": "text", "text": "private prompt"}],
             })),
         })
+        .await
         .expect("activity intent");
 
     let not_delivered = store
@@ -496,6 +539,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
             input_json: r#"[{"type":"text","text":"private prompt"}]"#,
             input_hash: "input-hash",
         })
+        .await
         .expect("delivery");
     assert_eq!(not_delivered.status, "not_delivered");
     assert!(
@@ -507,11 +551,13 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         store
             .mark_gateway_turn_delivery_unknown("turn-1")
+            .await
             .expect("unknown")
     );
     assert!(
         store
             .gateway_turn_delivery("turn-1")
+            .await
             .expect("read unknown")
             .expect("delivery")
             .input_json
@@ -521,6 +567,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         store
             .gateway_activity("turn-1")
+            .await
             .expect("read unknown activity")
             .expect("activity")
             .intent
@@ -532,12 +579,14 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         !store
             .finish_gateway_turn_delivery("turn-1")
+            .await
             .expect("unknown terminal must not scrub"),
         "a terminal projection cannot erase input while delivery remains unknown"
     );
     assert!(
         store
             .gateway_turn_delivery("turn-1")
+            .await
             .expect("read terminal unknown")
             .expect("delivery")
             .input_json
@@ -547,10 +596,12 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         store
             .confirm_gateway_turn_delivery("turn-1")
+            .await
             .expect("confirm")
     );
     let delivered = store
         .gateway_turn_delivery("turn-1")
+        .await
         .expect("read delivered")
         .expect("delivery");
     assert_eq!(delivered.status, "delivered");
@@ -559,6 +610,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(delivered.delivery_confirmed_at_ms.is_some());
     let correlated_activity = store
         .gateway_activity("turn-1")
+        .await
         .expect("read correlated activity")
         .expect("activity")
         .intent
@@ -571,6 +623,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         store
             .finish_gateway_turn_delivery("turn-1")
+            .await
             .expect("finish")
     );
 
@@ -592,6 +645,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
                 "input": [{"type": "text", "text": "uncorrelated prompt"}],
             })),
         })
+        .await
         .expect("uncorrelated activity intent");
     store
         .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
@@ -601,15 +655,18 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
             input_json: r#"[{"type":"text","text":"uncorrelated prompt"}]"#,
             input_hash: "uncorrelated-hash",
         })
+        .await
         .expect("uncorrelated intent");
     assert!(
         store
             .finish_gateway_turn_delivery("turn-2")
+            .await
             .expect("terminal fallback")
     );
     assert_eq!(
         store
             .gateway_turn_delivery("turn-2")
+            .await
             .expect("read terminal delivery")
             .expect("delivery")
             .input_json,
@@ -618,6 +675,7 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         store
             .gateway_activity("turn-2")
+            .await
             .expect("read terminal activity")
             .expect("activity")
             .intent
@@ -637,30 +695,36 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
             payload_text: "final answer",
             payload_hash: "payload-hash",
         })
+        .await
         .expect("outbox");
     assert_eq!(pending.status, "pending");
     assert_eq!(pending.payload_text.as_deref(), Some("final answer"));
     let retryable = store
         .retryable_gateway_channel_outbox("telegram")
+        .await
         .expect("pending outbox list");
     assert_eq!(retryable.as_slice(), std::slice::from_ref(&pending));
     assert!(
         store
             .fail_gateway_channel_outbox("delivery-1")
+            .await
             .expect("mark failed")
     );
     let retryable = store
         .retryable_gateway_channel_outbox("telegram")
+        .await
         .expect("failed outbox list");
     assert_eq!(retryable.len(), 1);
     assert_eq!(retryable[0].status, "failed");
     assert!(
         store
             .acknowledge_gateway_channel_outbox("delivery-1")
+            .await
             .expect("ack")
     );
     let acknowledged = store
         .gateway_channel_outbox("delivery-1")
+        .await
         .expect("read outbox")
         .expect("outbox");
     assert_eq!(acknowledged.status, "acknowledged");
@@ -669,18 +733,22 @@ pub(crate) fn sqlite_turn_delivery_and_channel_outbox_erase_confirmed_payloads()
     assert!(
         store
             .retryable_gateway_channel_outbox("telegram")
+            .await
             .expect("acknowledged outbox list")
             .is_empty()
     );
 }
 
-#[test]
-pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() {
+#[tokio::test]
+pub(crate) async fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() {
     let temp = tempdir().expect("temp");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let thread_id = store
         .create_session_with_metadata(&cwd, "channel", "pending", "pending", None)
+        .await
         .expect("session");
 
     store
@@ -701,6 +769,7 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
                 "input": [{"type": "text", "text": "do not replay me"}],
             })),
         })
+        .await
         .expect("activity intent");
     store
         .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
@@ -710,10 +779,12 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
             input_json: r#"[{"type":"text","text":"do not replay me"}]"#,
             input_hash: "unknown-input-hash",
         })
+        .await
         .expect("delivery");
     assert!(
         store
             .mark_gateway_turn_delivery_unknown("turn-unknown")
+            .await
             .expect("mark unknown")
     );
     store
@@ -727,10 +798,12 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
             completed_at_ms: 20,
             metadata: Some(json!({"source": "transport_failure"})),
         })
+        .await
         .expect("provisional failed terminal");
 
     let unknown = store
         .unknown_gateway_turn_deliveries_for_thread(&thread_id, "turn-new")
+        .await
         .expect("unknown deliveries");
     assert_eq!(unknown.len(), 1);
     assert_eq!(unknown[0].turn_id, "turn-unknown");
@@ -752,11 +825,13 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
                 &thread_id,
                 Some(&reconciliation_metadata),
             )
+            .await
             .expect("reconcile unknown delivery")
     );
 
     let delivery = store
         .gateway_turn_delivery("turn-unknown")
+        .await
         .expect("read delivery")
         .expect("delivery");
     assert_eq!(delivery.status, "terminal");
@@ -766,6 +841,7 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
     assert!(delivery.terminal_at_ms.is_some());
     let activity_intent = store
         .gateway_activity("turn-unknown")
+        .await
         .expect("read activity")
         .expect("activity")
         .intent
@@ -775,6 +851,7 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
 
     let terminal = store
         .gateway_turn_terminal("turn-unknown")
+        .await
         .expect("read terminal")
         .expect("terminal");
     assert_eq!(terminal.status, "completed");
@@ -786,6 +863,7 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
     assert!(
         store
             .unknown_gateway_turn_deliveries_for_thread(&thread_id, "turn-new")
+            .await
             .expect("no unknown deliveries")
             .is_empty()
     );
@@ -796,11 +874,13 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
                 &thread_id,
                 Some(&json!({"mustNotOverwrite": true})),
             )
+            .await
             .expect("idempotent reconciliation")
     );
     assert_eq!(
         store
             .gateway_turn_terminal("turn-unknown")
+            .await
             .expect("read terminal after retry")
             .expect("terminal")
             .metadata
@@ -810,14 +890,15 @@ pub(crate) fn sqlite_unknown_delivery_reconciliation_is_atomic_and_idempotent() 
     );
 }
 
-#[test]
-pub(crate) fn sqlite_agent_team_and_mission_runs_round_trip() {
+#[tokio::test]
+pub(crate) async fn sqlite_agent_team_and_mission_runs_round_trip() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
     let members = json!([
         {"id": "researcher", "agent": "general", "role": "research"},
@@ -838,6 +919,7 @@ pub(crate) fn sqlite_agent_team_and_mission_runs_round_trip() {
             status: "running",
             metadata: Some(json!({"source": "test"})),
         })
+        .await
         .expect("team run");
     let mission = store
         .create_agent_mission_run(AgentMissionRunInput {
@@ -850,33 +932,38 @@ pub(crate) fn sqlite_agent_team_and_mission_runs_round_trip() {
             status: "running",
             metadata: Some(json!({"source": "test"})),
         })
+        .await
         .expect("mission run");
 
     assert_eq!(team.members, members);
     assert_eq!(mission.team_run_id.as_deref(), Some("team-run-1"));
     let active_team = store
         .find_active_agent_team_run(&session_id)
+        .await
         .expect("active team")
         .expect("team");
     let active_mission = store
         .find_active_agent_mission_run(&session_id)
+        .await
         .expect("active mission")
         .expect("mission");
     assert_eq!(active_team.id, "team-run-1");
     assert_eq!(active_mission.id, "mission-run-1");
 }
 
-#[test]
-pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
+#[tokio::test]
+pub(crate) async fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let first_session = store
         .create_session_with_metadata(&cwd, "acp", "model", "provider", None)
+        .await
         .expect("first session");
     let second_session = store
         .create_session_with_metadata(&cwd, "acp", "model", "provider", None)
+        .await
         .expect("second session");
 
     let first = store
@@ -893,6 +980,7 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
             backend_native_id: Some(&first_session),
             lineage: Some(json!({ "source": "test" })),
         })
+        .await
         .expect("insert binding");
 
     assert_eq!(first.source_key, "acp:client-session");
@@ -921,12 +1009,14 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
             backend_native_id: Some(&second_session),
             lineage: Some(json!({ "reason": "gateway_reset" })),
         })
+        .await
         .expect("rebind");
 
     assert_eq!(rebound.thread_id, second_session);
     assert_eq!(
         store
             .gateway_source_binding("acp:client-session")
+            .await
             .expect("load binding")
             .expect("binding")
             .thread_id,
@@ -935,28 +1025,34 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
     assert!(
         store
             .delete_gateway_source_binding("acp:client-session")
+            .await
             .expect("delete binding")
     );
     assert!(
         store
             .gateway_source_binding("acp:client-session")
+            .await
             .expect("load deleted binding")
             .is_none()
     );
     assert!(
         !store
             .delete_gateway_source_binding("acp:client-session")
+            .await
             .expect("delete missing binding")
     );
 
     store
         .mark_session_ended_with_reason(&first_session, "gateway_reset")
+        .await
         .expect("end first session");
     store
         .archive_session(&first_session)
+        .await
         .expect("archive first");
     let first_summary = store
         .session_summary(&first_session)
+        .await
         .expect("summary")
         .expect("first session");
     assert_eq!(first_summary.end_reason.as_deref(), Some("gateway_reset"));
@@ -964,20 +1060,23 @@ pub(crate) fn sqlite_gateway_source_binding_round_trips_and_rebinds() {
     assert!(first_summary.archived_at_ms.is_some());
 }
 
-#[test]
-pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
+#[tokio::test]
+pub(crate) async fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let wechat_session = store
         .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
+        .await
         .expect("wechat session");
     let telegram_session = store
         .create_session_with_metadata(&cwd, "channel", "model", "provider", None)
+        .await
         .expect("telegram session");
     let web_session = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
         .expect("web session");
 
     store
@@ -994,6 +1093,7 @@ pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
             backend_native_id: Some(&wechat_session),
             lineage: None,
         })
+        .await
         .expect("wechat binding");
     store
         .upsert_gateway_source_binding(GatewaySourceBindingInput {
@@ -1009,6 +1109,7 @@ pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
             backend_native_id: Some(&telegram_session),
             lineage: None,
         })
+        .await
         .expect("telegram binding");
     store
         .upsert_gateway_source_binding(GatewaySourceBindingInput {
@@ -1024,24 +1125,27 @@ pub(crate) fn sqlite_gateway_source_bindings_filter_channel_connection_id() {
             backend_native_id: Some(&web_session),
             lineage: None,
         })
+        .await
         .expect("web binding");
 
     let bindings = store
         .gateway_source_bindings_for_connection_id("wechat")
+        .await
         .expect("bindings");
     assert_eq!(bindings.len(), 1);
     assert_eq!(bindings[0].source_key, "im.wechat:user-1");
     assert_eq!(bindings[0].thread_id, wechat_session);
 }
 
-#[test]
-pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
+#[tokio::test]
+pub(crate) async fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
 
     let first = store
@@ -1068,6 +1172,7 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
             }],
             metadata: Some(json!({ "effective_tools": ["read"] })),
         })
+        .await
         .expect("first prefix");
     let second = store
         .upsert_session_prompt_prefix(PromptPrefixRecord {
@@ -1093,6 +1198,7 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
             }],
             metadata: Some(json!({ "effective_tools": ["read", "write"] })),
         })
+        .await
         .expect("second prefix");
 
     assert_eq!(first.version, 1);
@@ -1100,6 +1206,7 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     assert_eq!(
         store
             .load_session_prompt_prefix_version(&session_id, 1)
+            .await
             .expect("load v1")
             .expect("v1")
             .prefix_hash,
@@ -1108,6 +1215,7 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     assert_eq!(
         store
             .load_session_prompt_prefix(&session_id)
+            .await
             .expect("load latest")
             .expect("latest")
             .prefix_hash,
@@ -1115,26 +1223,30 @@ pub(crate) fn sqlite_prompt_prefixes_round_trip_by_session_and_version() {
     );
 }
 
-#[test]
-pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
+#[tokio::test]
+pub(crate) async fn sqlite_session_archive_restore_delete_filters_active_lists() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("second");
     store
         .append_message(&first, &user_message("hello", 1))
+        .await
         .expect("message");
 
-    store.archive_session(&first).expect("archive");
+    store.archive_session(&first).await.expect("archive");
     assert_eq!(
         store
             .list_sessions_for_cwd_with_sources(&cwd, &["run"])
+            .await
             .expect("active")
             .iter()
             .map(|session| session.id.as_str())
@@ -1144,6 +1256,7 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
     assert_eq!(
         store
             .list_archived_sessions_for_cwd_with_sources(&cwd, &["run"])
+            .await
             .expect("archived")
             .iter()
             .map(|session| session.id.as_str())
@@ -1151,82 +1264,115 @@ pub(crate) fn sqlite_session_archive_restore_delete_filters_active_lists() {
         vec![first.as_str()]
     );
 
-    store.archive_session(&second).expect("archive second");
+    store
+        .archive_session(&second)
+        .await
+        .expect("archive second");
     assert_eq!(
-        store.latest_run_session_for_cwd(&cwd).expect("latest"),
+        store
+            .latest_run_session_for_cwd(&cwd)
+            .await
+            .expect("latest"),
         None
     );
 
-    store.restore_session(&first).expect("restore");
+    store.restore_session(&first).await.expect("restore");
     assert_eq!(
-        store.latest_run_session_for_cwd(&cwd).expect("latest"),
+        store
+            .latest_run_session_for_cwd(&cwd)
+            .await
+            .expect("latest"),
         Some(first.clone())
     );
 
-    store.delete_session(&first).expect("delete");
-    assert!(store.session_summary(&first).expect("summary").is_none());
-    assert!(store.load_messages(&first).expect("messages").is_empty());
+    store.delete_session(&first).await.expect("delete");
+    assert!(
+        store
+            .session_summary(&first)
+            .await
+            .expect("summary")
+            .is_none()
+    );
+    assert!(
+        store
+            .load_messages(&first)
+            .await
+            .expect("messages")
+            .is_empty()
+    );
 }
 
-#[test]
-pub(crate) fn sqlite_resume_session_is_non_mutating_and_append_updates_recency() {
+#[tokio::test]
+pub(crate) async fn sqlite_resume_session_is_non_mutating_and_append_updates_recency() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("second");
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
     set_session_times(&conn, &second, 2_000, 2_000);
 
-    store.resume_session(&first).expect("resume");
+    store.resume_session(&first).await.expect("resume");
 
-    assert_eq!(session_updated_at(&store, &first), 1_000);
+    assert_eq!(session_updated_at(&store, &first).await, 1_000);
     assert_eq!(
-        store.latest_run_session_for_cwd(&cwd).expect("latest"),
+        store
+            .latest_run_session_for_cwd(&cwd)
+            .await
+            .expect("latest"),
         Some(second.clone())
     );
 
     store
         .append_message(&first, &user_message("new activity", 1))
+        .await
         .expect("append");
 
-    assert!(session_updated_at(&store, &first) > 2_000);
+    assert!(session_updated_at(&store, &first).await > 2_000);
     assert_eq!(
-        store.latest_run_session_for_cwd(&cwd).expect("latest"),
+        store
+            .latest_run_session_for_cwd(&cwd)
+            .await
+            .expect("latest"),
         Some(first)
     );
 }
 
-#[test]
-pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
+#[tokio::test]
+pub(crate) async fn sqlite_archive_restore_preserve_activity_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("second");
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
     set_session_times(&conn, &second, 2_000, 2_000);
 
-    store.archive_session(&first).expect("archive");
-    assert_eq!(session_updated_at(&store, &first), 1_000);
-    store.restore_session(&first).expect("restore");
+    store.archive_session(&first).await.expect("archive");
+    assert_eq!(session_updated_at(&store, &first).await, 1_000);
+    store.restore_session(&first).await.expect("restore");
 
-    assert_eq!(session_updated_at(&store, &first), 1_000);
+    assert_eq!(session_updated_at(&store, &first).await, 1_000);
     assert_eq!(
         store
             .list_sessions_for_cwd_with_sources(&cwd, &["run"])
+            .await
             .expect("active")
             .iter()
             .map(|session| session.id.as_str())
@@ -1234,38 +1380,46 @@ pub(crate) fn sqlite_archive_restore_preserve_activity_order() {
         vec![second.as_str(), first.as_str()]
     );
     assert_eq!(
-        store.latest_run_session_for_cwd(&cwd).expect("latest"),
+        store
+            .latest_run_session_for_cwd(&cwd)
+            .await
+            .expect("latest"),
         Some(second)
     );
 }
 
-#[test]
-pub(crate) fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
+#[tokio::test]
+pub(crate) async fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("second");
     let conn = Connection::open(&db).expect("db");
     set_session_times(&conn, &first, 1_000, 1_000);
     set_session_times(&conn, &second, 2_000, 2_000);
     store
         .finish_session(&first, Outcome::Normal, None)
+        .await
         .expect("finish");
     set_session_times(&conn, &first, 1_000, 1_000);
-    store.archive_session(&first).expect("archive");
+    store.archive_session(&first).await.expect("archive");
 
     store
         .append_message(&first, &user_message("reopen", 1))
+        .await
         .expect("append");
 
     let summary = store
         .session_summary(&first)
+        .await
         .expect("summary")
         .expect("session");
     assert!(summary.updated_at_ms > 2_000);
@@ -1273,7 +1427,10 @@ pub(crate) fn sqlite_append_to_archived_session_reopens_and_updates_recency() {
     assert_eq!(summary.end_reason, None);
     assert_eq!(summary.archived_at_ms, None);
     assert_eq!(
-        store.latest_run_session_for_cwd(&cwd).expect("latest"),
+        store
+            .latest_run_session_for_cwd(&cwd)
+            .await
+            .expect("latest"),
         Some(first)
     );
 }
@@ -1291,22 +1448,24 @@ pub(crate) fn set_session_times(
     .expect("set session times");
 }
 
-pub(crate) fn session_updated_at(store: &StateRuntime, session_id: &str) -> i64 {
+pub(crate) async fn session_updated_at(store: &StateRuntime, session_id: &str) -> i64 {
     store
         .session_summary(session_id)
+        .await
         .expect("summary")
         .expect("session")
         .updated_at_ms
 }
 
-#[test]
-pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
+#[tokio::test]
+pub(crate) async fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
 
     let prompt_seq = store
@@ -1339,13 +1498,15 @@ pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages(
                 },
             ],
         )
+        .await
         .expect("append");
 
-    let messages = store.load_messages(&session_id).expect("messages");
+    let messages = store.load_messages(&session_id).await.expect("messages");
     assert_eq!(messages.len(), 1);
     assert_eq!(
         store
             .session_summary(&session_id)
+            .await
             .unwrap()
             .unwrap()
             .message_count,
@@ -1354,6 +1515,7 @@ pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages(
 
     let evidence = store
         .load_context_evidence(&session_id, prompt_seq)
+        .await
         .expect("evidence");
     assert_eq!(evidence.len(), 2);
     assert_eq!(evidence[0].source_name.as_deref(), Some("mode"));
@@ -1380,14 +1542,15 @@ pub(crate) fn sqlite_context_evidence_is_prompt_scoped_and_hidden_from_messages(
     assert_eq!(evidence[1].content_text, "<skill>body</skill>");
 }
 
-#[test]
-pub(crate) fn sqlite_user_message_display_metadata_overrides_content_text() {
+#[tokio::test]
+pub(crate) async fn sqlite_user_message_display_metadata_overrides_content_text() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let display_text = "[Image #1] describe it";
     let metadata = json!({
@@ -1412,6 +1575,7 @@ pub(crate) fn sqlite_user_message_display_metadata_overrides_content_text() {
             Some(display_text.to_string()),
             &[],
         )
+        .await
         .expect("append");
 
     let conn = Connection::open(&db).expect("db");
@@ -1430,20 +1594,23 @@ pub(crate) fn sqlite_user_message_display_metadata_overrides_content_text() {
     );
 }
 
-#[test]
-pub(crate) fn sqlite_agent_edges_round_trip_and_close_subtree() {
+#[tokio::test]
+pub(crate) async fn sqlite_agent_edges_round_trip_and_close_subtree() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let parent = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("parent");
     let child = store
         .create_child_session_with_metadata(&parent, &cwd, "agent", "model", "provider", None)
+        .await
         .expect("child");
     let grandchild = store
         .create_child_session_with_metadata(&child, &cwd, "agent", "model", "provider", None)
+        .await
         .expect("grandchild");
     store
         .upsert_agent_edge(
@@ -1452,36 +1619,44 @@ pub(crate) fn sqlite_agent_edges_round_trip_and_close_subtree() {
             AgentEdgeStatus::Open,
             Some(json!({"agent": {"id": "agent-1", "task_name": "review"}})),
         )
+        .await
         .expect("edge");
     store
         .upsert_agent_edge(&child, &grandchild, AgentEdgeStatus::Open, None)
+        .await
         .expect("grandchild edge");
 
     let found = store
         .find_agent_edge("review")
+        .await
         .expect("find")
         .expect("edge found");
     assert_eq!(found.child_session_id, child);
     assert_eq!(found.status, AgentEdgeStatus::Open);
 
-    store.close_agent_edge_subtree(&child).expect("close");
+    store.close_agent_edge_subtree(&child).await.expect("close");
     let closed = store
         .find_agent_edge("agent-1")
+        .await
         .expect("find")
         .expect("closed edge");
     assert_eq!(closed.status, AgentEdgeStatus::Closed);
-    let descendants = store.list_agent_edges_for_parent(&child).expect("children");
+    let descendants = store
+        .list_agent_edges_for_parent(&child)
+        .await
+        .expect("children");
     assert_eq!(descendants[0].status, AgentEdgeStatus::Closed);
 }
 
-#[test]
-pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
+#[tokio::test]
+pub(crate) async fn sqlite_context_evidence_cascades_with_prompt_messages() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("session");
     let prompt_seq = store
         .append_message_with_undo_snapshot_and_context_evidence(
@@ -1500,9 +1675,11 @@ pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
                 metadata: None,
             }],
         )
+        .await
         .expect("append");
     store
         .append_message(&session_id, &assistant_message("hi", 2))
+        .await
         .expect("assistant");
 
     store
@@ -1510,10 +1687,12 @@ pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
             &session_id,
             crate::store::SessionRevertState::workspace_undo(prompt_seq, "snapshot".to_string()),
         )
+        .await
         .expect("revert");
     assert_eq!(
         store
             .load_context_evidence(&session_id, prompt_seq)
+            .await
             .expect("before cleanup")
             .len(),
         1
@@ -1521,10 +1700,12 @@ pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
 
     store
         .cleanup_reverted_messages(&session_id)
+        .await
         .expect("cleanup");
     assert!(
         store
             .load_context_evidence(&session_id, prompt_seq)
+            .await
             .expect("after cleanup")
             .is_empty()
     );
@@ -1546,11 +1727,13 @@ pub(crate) fn sqlite_context_evidence_cascades_with_prompt_messages() {
                 metadata: None,
             }],
         )
+        .await
         .expect("append again");
-    store.delete_session(&session_id).expect("delete");
+    store.delete_session(&session_id).await.expect("delete");
     assert!(
         store
             .load_context_evidence(&session_id, next_seq)
+            .await
             .expect("after delete")
             .is_empty()
     );

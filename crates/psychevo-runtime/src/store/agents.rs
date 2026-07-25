@@ -1,15 +1,14 @@
 use std::collections::BTreeSet;
 
 use psychevo_agent_core::now_ms;
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::Row;
 
 use crate::error::Result;
 
 use super::StateRuntime;
 use super::store_message_fields::optional_json_string;
-use super::store_metadata::json_to_sql;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,7 +104,7 @@ pub struct AgentMissionRunRecord {
 }
 
 impl StateRuntime {
-    pub fn upsert_agent_edge(
+    pub async fn upsert_agent_edge(
         &self,
         parent_session_id: &str,
         child_session_id: &str,
@@ -114,8 +113,8 @@ impl StateRuntime {
     ) -> Result<()> {
         let now = now_ms();
         let metadata_json = optional_json_string(&metadata)?;
-        self.write_retry(|conn| {
-            conn.execute(
+        self.agent_write(
+            sqlx::query(
                 r#"
                 INSERT INTO agent_edges (
                     parent_session_id, child_session_id, status,
@@ -127,50 +126,50 @@ impl StateRuntime {
                     updated_at_ms = excluded.updated_at_ms,
                     metadata_json = excluded.metadata_json
                 "#,
-                params![
-                    parent_session_id,
-                    child_session_id,
-                    status.as_str(),
-                    now,
-                    metadata_json
-                ],
-            )?;
-            Ok(())
-        })
+            )
+            .bind(parent_session_id)
+            .bind(child_session_id)
+            .bind(status.as_str())
+            .bind(now)
+            .bind(metadata_json),
+        )
+        .await
     }
 
-    pub fn set_agent_edge_status(
+    pub async fn set_agent_edge_status(
         &self,
         child_session_id: &str,
         status: AgentEdgeStatus,
     ) -> Result<()> {
         let now = now_ms();
-        self.write_retry(|conn| {
-            conn.execute(
+        self.agent_write(
+            sqlx::query(
                 "UPDATE agent_edges SET status = ?1, updated_at_ms = ?2 WHERE child_session_id = ?3",
-                params![status.as_str(), now, child_session_id],
-            )?;
-            Ok(())
-        })
+            )
+            .bind(status.as_str())
+            .bind(now)
+            .bind(child_session_id),
+        )
+        .await
     }
 
-    pub fn list_agent_edges(&self) -> Result<Vec<AgentEdgeRecord>> {
-        self.query_agent_edges(None)
+    pub async fn list_agent_edges(&self) -> Result<Vec<AgentEdgeRecord>> {
+        self.query_agent_edges(None).await
     }
 
-    pub fn list_agent_edges_for_parent(
+    pub async fn list_agent_edges_for_parent(
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<AgentEdgeRecord>> {
-        self.query_agent_edges(Some(parent_session_id))
+        self.query_agent_edges(Some(parent_session_id)).await
     }
 
-    pub fn find_agent_edge(&self, target: &str) -> Result<Option<AgentEdgeRecord>> {
+    pub async fn find_agent_edge(&self, target: &str) -> Result<Option<AgentEdgeRecord>> {
         let target = target.trim();
         if target.is_empty() {
             return Ok(None);
         }
-        for edge in self.list_agent_edges()? {
+        for edge in self.list_agent_edges().await? {
             if edge.child_session_id == target || agent_edge_metadata_matches(&edge, target) {
                 return Ok(Some(edge));
             }
@@ -178,22 +177,23 @@ impl StateRuntime {
         Ok(None)
     }
 
-    pub fn close_agent_edge_subtree(&self, child_session_id: &str) -> Result<()> {
+    pub async fn close_agent_edge_subtree(&self, child_session_id: &str) -> Result<()> {
         let mut queue = vec![child_session_id.to_string()];
         let mut closed = BTreeSet::new();
         while let Some(current) = queue.pop() {
             if !closed.insert(current.clone()) {
                 continue;
             }
-            self.set_agent_edge_status(&current, AgentEdgeStatus::Closed)?;
-            for child in self.list_agent_edges_for_parent(&current)? {
+            self.set_agent_edge_status(&current, AgentEdgeStatus::Closed)
+                .await?;
+            for child in self.list_agent_edges_for_parent(&current).await? {
                 queue.push(child.child_session_id);
             }
         }
         Ok(())
     }
 
-    pub fn create_agent_team_run(
+    pub async fn create_agent_team_run(
         &self,
         input: AgentTeamRunInput<'_>,
     ) -> Result<AgentTeamRunRecord> {
@@ -201,8 +201,8 @@ impl StateRuntime {
         let members_json = serde_json::to_string(&input.members)?;
         let metadata_json = optional_json_string(&input.metadata)?;
         let max_parallel_agents = i64::try_from(input.max_parallel_agents).unwrap_or(i64::MAX);
-        self.write_retry(|conn| {
-            conn.execute(
+        self.agent_write(
+            sqlx::query(
                 r#"
                 INSERT INTO agent_team_runs (
                     id, parent_session_id, mission_run_id, team_name, description,
@@ -210,23 +210,21 @@ impl StateRuntime {
                     status, started_at_ms, metadata_json
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 "#,
-                params![
-                    input.id,
-                    input.parent_session_id,
-                    input.mission_run_id,
-                    input.team_name,
-                    input.description,
-                    input.source_path,
-                    input.leader_agent_name,
-                    members_json,
-                    max_parallel_agents,
-                    input.status,
-                    now,
-                    metadata_json,
-                ],
-            )?;
-            Ok(())
-        })?;
+            )
+            .bind(input.id)
+            .bind(input.parent_session_id)
+            .bind(input.mission_run_id)
+            .bind(input.team_name)
+            .bind(input.description)
+            .bind(input.source_path)
+            .bind(input.leader_agent_name)
+            .bind(members_json)
+            .bind(max_parallel_agents)
+            .bind(input.status)
+            .bind(now)
+            .bind(metadata_json),
+        )
+        .await?;
         Ok(AgentTeamRunRecord {
             id: input.id.to_string(),
             parent_session_id: input.parent_session_id.to_string(),
@@ -245,34 +243,32 @@ impl StateRuntime {
         })
     }
 
-    pub fn create_agent_mission_run(
+    pub async fn create_agent_mission_run(
         &self,
         input: AgentMissionRunInput<'_>,
     ) -> Result<AgentMissionRunRecord> {
         let now = now_ms();
         let metadata_json = optional_json_string(&input.metadata)?;
-        self.write_retry(|conn| {
-            conn.execute(
+        self.agent_write(
+            sqlx::query(
                 r#"
                 INSERT INTO agent_mission_runs (
                     id, parent_session_id, team_run_id, team_name, goal,
                     lead_agent_name, status, started_at_ms, metadata_json
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 "#,
-                params![
-                    input.id,
-                    input.parent_session_id,
-                    input.team_run_id,
-                    input.team_name,
-                    input.goal,
-                    input.lead_agent_name,
-                    input.status,
-                    now,
-                    metadata_json,
-                ],
-            )?;
-            Ok(())
-        })?;
+            )
+            .bind(input.id)
+            .bind(input.parent_session_id)
+            .bind(input.team_run_id)
+            .bind(input.team_name)
+            .bind(input.goal)
+            .bind(input.lead_agent_name)
+            .bind(input.status)
+            .bind(now)
+            .bind(metadata_json),
+        )
+        .await?;
         Ok(AgentMissionRunRecord {
             id: input.id.to_string(),
             parent_session_id: input.parent_session_id.to_string(),
@@ -288,7 +284,7 @@ impl StateRuntime {
         })
     }
 
-    pub fn update_agent_team_run_status(
+    pub async fn update_agent_team_run_status(
         &self,
         id: &str,
         status: &str,
@@ -296,8 +292,8 @@ impl StateRuntime {
         ended: bool,
     ) -> Result<()> {
         let ended_at_ms = ended.then(now_ms);
-        self.write_retry(|conn| {
-            conn.execute(
+        self.agent_write(
+            sqlx::query(
                 r#"
                 UPDATE agent_team_runs
                 SET status = ?1,
@@ -305,13 +301,16 @@ impl StateRuntime {
                     ended_at_ms = COALESCE(?3, ended_at_ms)
                 WHERE id = ?4
                 "#,
-                params![status, final_summary, ended_at_ms, id],
-            )?;
-            Ok(())
-        })
+            )
+            .bind(status)
+            .bind(final_summary)
+            .bind(ended_at_ms)
+            .bind(id),
+        )
+        .await
     }
 
-    pub fn update_agent_mission_run_status(
+    pub async fn update_agent_mission_run_status(
         &self,
         id: &str,
         status: &str,
@@ -319,8 +318,8 @@ impl StateRuntime {
         ended: bool,
     ) -> Result<()> {
         let ended_at_ms = ended.then(now_ms);
-        self.write_retry(|conn| {
-            conn.execute(
+        self.agent_write(
+            sqlx::query(
                 r#"
                 UPDATE agent_mission_runs
                 SET status = ?1,
@@ -328,19 +327,23 @@ impl StateRuntime {
                     ended_at_ms = COALESCE(?3, ended_at_ms)
                 WHERE id = ?4
                 "#,
-                params![status, final_summary, ended_at_ms, id],
-            )?;
-            Ok(())
-        })
+            )
+            .bind(status)
+            .bind(final_summary)
+            .bind(ended_at_ms)
+            .bind(id),
+        )
+        .await
     }
 
-    pub fn list_agent_team_runs_for_parent(
+    pub async fn list_agent_team_runs_for_parent(
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<AgentTeamRunRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
             SELECT id, parent_session_id, mission_run_id, team_name, description,
                    source_path, leader_agent_name, members_json, max_parallel_agents,
                    status, started_at_ms, ended_at_ms, final_summary, metadata_json
@@ -348,22 +351,25 @@ impl StateRuntime {
             WHERE parent_session_id = ?1
             ORDER BY started_at_ms DESC
             "#,
-        )?;
-        let rows = stmt.query_map(params![parent_session_id], agent_team_run_from_row)?;
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-        Ok(records)
+            )
+            .bind(parent_session_id)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| agent_team_run_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn list_agent_mission_runs_for_parent(
+    pub async fn list_agent_mission_runs_for_parent(
         &self,
         parent_session_id: &str,
     ) -> Result<Vec<AgentMissionRunRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut stmt = conn.prepare(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
             SELECT id, parent_session_id, team_run_id, team_name, goal,
                    lead_agent_name, status, started_at_ms, ended_at_ms,
                    final_summary, metadata_json
@@ -371,40 +377,43 @@ impl StateRuntime {
             WHERE parent_session_id = ?1
             ORDER BY started_at_ms DESC
             "#,
-        )?;
-        let rows = stmt.query_map(params![parent_session_id], agent_mission_run_from_row)?;
-        let mut records = Vec::new();
-        for row in rows {
-            records.push(row?);
-        }
-        Ok(records)
+            )
+            .bind(parent_session_id)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| agent_mission_run_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
-    pub fn find_active_agent_team_run(
+    pub async fn find_active_agent_team_run(
         &self,
         parent_session_id: &str,
     ) -> Result<Option<AgentTeamRunRecord>> {
         Ok(self
-            .list_agent_team_runs_for_parent(parent_session_id)?
+            .list_agent_team_runs_for_parent(parent_session_id)
+            .await?
             .into_iter()
             .find(|record| record.ended_at_ms.is_none()))
     }
 
-    pub fn find_active_agent_mission_run(
+    pub async fn find_active_agent_mission_run(
         &self,
         parent_session_id: &str,
     ) -> Result<Option<AgentMissionRunRecord>> {
         Ok(self
-            .list_agent_mission_runs_for_parent(parent_session_id)?
+            .list_agent_mission_runs_for_parent(parent_session_id)
+            .await?
             .into_iter()
             .find(|record| record.ended_at_ms.is_none()))
     }
 
-    pub(crate) fn query_agent_edges(
+    pub(crate) async fn query_agent_edges(
         &self,
         parent_session_id: Option<&str>,
     ) -> Result<Vec<AgentEdgeRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
         let sql = match parent_session_id {
             Some(_) => {
                 r#"
@@ -424,84 +433,91 @@ impl StateRuntime {
                 "#
             }
         };
-        let mut stmt = conn.prepare(sql)?;
-        let mut records = Vec::new();
-        match parent_session_id {
-            Some(parent) => {
-                let rows = stmt.query_map(params![parent], agent_edge_from_row)?;
-                for row in rows {
-                    records.push(row?);
-                }
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let mut query = sqlx::query(sql);
+            if let Some(parent) = parent_session_id {
+                query = query.bind(parent);
             }
-            None => {
-                let rows = stmt.query_map([], agent_edge_from_row)?;
-                for row in rows {
-                    records.push(row?);
-                }
-            }
-        }
-        Ok(records)
+            let rows = query.fetch_all(&mut *conn).await?;
+            rows.into_iter()
+                .map(|row| agent_edge_from_row(&row))
+                .collect()
+        })
+        .await
+    }
+
+    async fn agent_write<'q>(
+        &self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
+    ) -> Result<()> {
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            query.execute(&mut *tx).await?;
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(())
+        })
+        .await
     }
 }
 
-pub(crate) fn agent_team_run_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<AgentTeamRunRecord> {
-    let members_json: String = row.get(7)?;
-    let metadata_json: Option<String> = row.get(13)?;
-    let max_parallel_agents: i64 = row.get(8)?;
+pub(crate) fn agent_team_run_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<AgentTeamRunRecord> {
+    let members_json: String = row.try_get(7)?;
+    let metadata_json: Option<String> = row.try_get(13)?;
+    let max_parallel_agents: i64 = row.try_get(8)?;
     Ok(AgentTeamRunRecord {
-        id: row.get(0)?,
-        parent_session_id: row.get(1)?,
-        mission_run_id: row.get(2)?,
-        team_name: row.get(3)?,
-        description: row.get(4)?,
-        source_path: row.get(5)?,
-        leader_agent_name: row.get(6)?,
-        members: serde_json::from_str(&members_json).map_err(json_to_sql)?,
+        id: row.try_get(0)?,
+        parent_session_id: row.try_get(1)?,
+        mission_run_id: row.try_get(2)?,
+        team_name: row.try_get(3)?,
+        description: row.try_get(4)?,
+        source_path: row.try_get(5)?,
+        leader_agent_name: row.try_get(6)?,
+        members: serde_json::from_str(&members_json)?,
         max_parallel_agents: max_parallel_agents.max(0) as u64,
-        status: row.get(9)?,
-        started_at_ms: row.get(10)?,
-        ended_at_ms: row.get(11)?,
-        final_summary: row.get(12)?,
+        status: row.try_get(9)?,
+        started_at_ms: row.try_get(10)?,
+        ended_at_ms: row.try_get(11)?,
+        final_summary: row.try_get(12)?,
         metadata: metadata_json
-            .map(|value| serde_json::from_str(&value).map_err(json_to_sql))
+            .map(|value| serde_json::from_str(&value))
             .transpose()?,
     })
 }
 
 pub(crate) fn agent_mission_run_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<AgentMissionRunRecord> {
-    let metadata_json: Option<String> = row.get(10)?;
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<AgentMissionRunRecord> {
+    let metadata_json: Option<String> = row.try_get(10)?;
     Ok(AgentMissionRunRecord {
-        id: row.get(0)?,
-        parent_session_id: row.get(1)?,
-        team_run_id: row.get(2)?,
-        team_name: row.get(3)?,
-        goal: row.get(4)?,
-        lead_agent_name: row.get(5)?,
-        status: row.get(6)?,
-        started_at_ms: row.get(7)?,
-        ended_at_ms: row.get(8)?,
-        final_summary: row.get(9)?,
+        id: row.try_get(0)?,
+        parent_session_id: row.try_get(1)?,
+        team_run_id: row.try_get(2)?,
+        team_name: row.try_get(3)?,
+        goal: row.try_get(4)?,
+        lead_agent_name: row.try_get(5)?,
+        status: row.try_get(6)?,
+        started_at_ms: row.try_get(7)?,
+        ended_at_ms: row.try_get(8)?,
+        final_summary: row.try_get(9)?,
         metadata: metadata_json
-            .map(|value| serde_json::from_str(&value).map_err(json_to_sql))
+            .map(|value| serde_json::from_str(&value))
             .transpose()?,
     })
 }
 
-pub(crate) fn agent_edge_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentEdgeRecord> {
-    let status: String = row.get(2)?;
-    let metadata_json: Option<String> = row.get(5)?;
+pub(crate) fn agent_edge_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<AgentEdgeRecord> {
+    let status: String = row.try_get(2)?;
+    let metadata_json: Option<String> = row.try_get(5)?;
     Ok(AgentEdgeRecord {
-        parent_session_id: row.get(0)?,
-        child_session_id: row.get(1)?,
+        parent_session_id: row.try_get(0)?,
+        child_session_id: row.try_get(1)?,
         status: AgentEdgeStatus::parse(&status),
-        created_at_ms: row.get(3)?,
-        updated_at_ms: row.get(4)?,
+        created_at_ms: row.try_get(3)?,
+        updated_at_ms: row.try_get(4)?,
         metadata: metadata_json
-            .map(|value| serde_json::from_str(&value).map_err(json_to_sql))
+            .map(|value| serde_json::from_str(&value))
             .transpose()?,
     })
 }

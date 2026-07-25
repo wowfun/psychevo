@@ -84,11 +84,11 @@ fn backend_backed_agent(name: &str, backend: &str) -> AgentDefinition {
     agent
 }
 
-#[test]
-pub(crate) fn agent_control_declarations_hide_implementation_details() {
+#[tokio::test]
+pub(crate) async fn agent_control_declarations_hide_implementation_details() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let context = test_agent_tool_context(
         &tmp,
         Arc::new(FakeProvider::new(Vec::new())),
@@ -125,8 +125,8 @@ pub(crate) fn agent_control_declarations_hide_implementation_details() {
     assert!(wait.description().contains("conversation context"));
 }
 
-#[test]
-pub(crate) fn parses_claude_style_agent_frontmatter() {
+#[tokio::test]
+pub(crate) async fn parses_claude_style_agent_frontmatter() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("reviewer.md");
     fs::write(
@@ -183,8 +183,8 @@ Review the code.
     );
 }
 
-#[test]
-pub(crate) fn parses_explicit_optional_contributions_and_diagnoses_unknown_names() {
+#[tokio::test]
+pub(crate) async fn parses_explicit_optional_contributions_and_diagnoses_unknown_names() {
     let agent = parse_agent_definition_text(
         r#"---
 name: flexible-reviewer
@@ -219,8 +219,8 @@ Review carefully.
     );
 }
 
-#[test]
-pub(crate) fn parses_backend_ref_and_peer_entrypoint_defaults() {
+#[tokio::test]
+pub(crate) async fn parses_backend_ref_and_peer_entrypoint_defaults() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("cursor-reviewer.md");
     fs::write(
@@ -245,8 +245,8 @@ Review the code.
     assert!(agent.supports_entrypoint(AgentEntrypoint::Subagent));
 }
 
-#[test]
-pub(crate) fn removed_list_search_tool_names_are_not_aliases() {
+#[tokio::test]
+pub(crate) async fn removed_list_search_tool_names_are_not_aliases() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("legacy-tools.md");
     fs::write(
@@ -277,8 +277,8 @@ Use removed tools.
     );
 }
 
-#[test]
-pub(crate) fn parses_named_agent_tool_restrictions_and_permission_mode() {
+#[tokio::test]
+pub(crate) async fn parses_named_agent_tool_restrictions_and_permission_mode() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("planner.md");
     fs::write(

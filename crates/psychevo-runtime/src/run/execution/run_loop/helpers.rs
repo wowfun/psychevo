@@ -1,8 +1,8 @@
-pub(crate) fn first_use_empty_visible_session(
+pub(crate) async fn first_use_empty_visible_session(
     store: &StateRuntime,
     session_id: &str,
 ) -> Result<bool> {
-    let Some(summary) = store.session_summary(session_id)? else {
+    let Some(summary) = store.session_summary(session_id).await? else {
         return Ok(false);
     };
     Ok(summary.message_count == 0
@@ -11,18 +11,18 @@ pub(crate) fn first_use_empty_visible_session(
         && visible_session_source_allows_auto_title(&summary.source))
 }
 
-pub(crate) fn materialize_first_use_empty_session(
+pub(crate) async fn materialize_first_use_empty_session(
     store: &StateRuntime,
     session_id: &str,
     provider: &str,
     model: &str,
     metadata: Value,
 ) -> Result<bool> {
-    if !first_use_empty_visible_session(store, session_id)? {
+    if !first_use_empty_visible_session(store, session_id).await? {
         return Ok(false);
     }
-    store.set_session_model(session_id, provider, model)?;
-    store.set_session_metadata(session_id, Some(metadata))?;
+    store.set_session_model(session_id, provider, model).await?;
+    store.set_session_metadata(session_id, Some(metadata)).await?;
     Ok(true)
 }
 

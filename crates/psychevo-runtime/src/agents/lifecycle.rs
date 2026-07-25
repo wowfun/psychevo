@@ -14,50 +14,65 @@ use super::{
     mailbox_tools::now_ms,
 };
 
-pub(crate) fn force_stop_agent_id(
+pub(crate) async fn force_stop_agent_id(
     id: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
-    let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? else {
-        drop(runs);
-        if let Some(store) = store
-            && let Some(edge) = find_agent_edge_for_target(store, id)?
-        {
-            let previous = agent_record_from_edge(store, edge.clone());
-            store.close_agent_edge_subtree(&edge.child_session_id)?;
-            return Ok(Some(previous));
+    let live = {
+        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        match resolve_live_key_and_record_locked(&runs, id)? {
+            None => None,
+            Some((live_id, previous)) => {
+                if agent_status_is_final(previous.status) {
+                    return Ok(Some(previous));
+                }
+                let child_session = {
+                    let state = runs.get_mut(&live_id).expect("live record exists");
+                    if let Some(control) = &state.control {
+                        control.stop();
+                        control.abort();
+                    }
+                    state.record.status = AgentRunStatus::Interrupted;
+                    state.record.edge_status = Some(AgentEdgeStatus::Closed);
+                    state.record.ended_at_ms = Some(now_ms());
+                    state.record.outcome = Some("interrupted".to_string());
+                    state.record.child_session_id.clone()
+                };
+                if let Some(child_session) = child_session.as_deref() {
+                    interrupt_live_descendants_locked(&mut runs, child_session);
+                }
+                Some((previous, child_session))
+            }
         }
-        return Ok(None);
     };
-    if agent_status_is_final(previous.status) {
-        return Ok(Some(previous));
-    }
-    let child_session = {
-        let state = runs.get_mut(&live_id).expect("live record exists");
-        if let Some(control) = &state.control {
-            control.stop();
-            control.abort();
-        }
-        state.record.status = AgentRunStatus::Interrupted;
-        state.record.edge_status = Some(AgentEdgeStatus::Closed);
-        state.record.ended_at_ms = Some(now_ms());
-        state.record.outcome = Some("interrupted".to_string());
-        state.record.child_session_id.clone()
+    let Some((previous, child_session)) = live else {
+        return durable_force_stop_agent_id(id, store).await;
     };
-    if let Some(child_session) = child_session.as_deref() {
-        interrupt_live_descendants_locked(&mut runs, child_session);
-    }
-    drop(runs);
     if let Some(store) = store
         && let Some(child_session) = child_session
     {
-        store.close_agent_edge_subtree(&child_session)?;
+        store.close_agent_edge_subtree(&child_session).await?;
     }
     Ok(Some(previous))
 }
 
-pub(crate) fn collect_agent_edge_tree(
+async fn durable_force_stop_agent_id(
+    id: &str,
+    store: Option<&StateRuntime>,
+) -> Result<Option<AgentRunRecord>> {
+    if let Some(store) = store
+        && let Some(edge) = find_agent_edge_for_target(store, id).await?
+    {
+        let previous = agent_record_from_edge(store, edge.clone()).await;
+        store
+            .close_agent_edge_subtree(&edge.child_session_id)
+            .await?;
+        return Ok(Some(previous));
+    }
+    Ok(None)
+}
+
+pub(crate) async fn collect_agent_edge_tree(
     store: &StateRuntime,
     parent_session_id: &str,
 ) -> Result<Vec<AgentEdgeRecord>> {
@@ -65,7 +80,7 @@ pub(crate) fn collect_agent_edge_tree(
     let mut queue = vec![parent_session_id.to_string()];
     let mut seen = BTreeSet::new();
     while let Some(parent) = queue.pop() {
-        for edge in store.list_agent_edges_for_parent(&parent)? {
+        for edge in store.list_agent_edges_for_parent(&parent).await? {
             if seen.insert(edge.child_session_id.clone()) {
                 queue.push(edge.child_session_id.clone());
             }
@@ -151,31 +166,34 @@ pub(crate) fn interrupt_live_descendants_locked(
     }
 }
 
-pub fn send_agent_message(
+pub async fn send_agent_message(
     id: &str,
     message: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
-    let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? {
-        if !agent_status_is_final(record.status) {
-            if let Some(state) = runs.get(&live_id)
-                && let Some(control) = &state.control
-            {
-                let _ = control.inject_user_message(user_text_message(message.to_string()));
+    {
+        let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? {
+            if !agent_status_is_final(record.status) {
+                if let Some(state) = runs.get(&live_id)
+                    && let Some(control) = &state.control
+                {
+                    let _ = control.inject_user_message(user_text_message(message.to_string()));
+                }
+                return Ok(Some(record));
             }
-            return Ok(Some(record));
-        }
-        if store.is_none() {
-            return Ok(Some(record));
+            if store.is_none() {
+                return Ok(Some(record));
+            }
         }
     }
-    drop(runs);
     if let Some(store) = store
-        && let Some(edge) = find_agent_edge_for_target(store, id)?
+        && let Some(edge) = find_agent_edge_for_target(store, id).await?
     {
-        store.set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
-        let mut record = agent_record_from_edge(store, edge);
+        store
+            .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)
+            .await?;
+        let mut record = agent_record_from_edge(store, edge).await;
         record.status = AgentRunStatus::PendingInit;
         record.edge_status = Some(AgentEdgeStatus::Open);
         return Ok(Some(record));
@@ -210,10 +228,10 @@ pub(crate) async fn send_agent_message_with_context(
         }
     }
 
-    let Some(edge) = find_agent_edge_for_target(&context.state, target)? else {
+    let Some(edge) = find_agent_edge_for_target(&context.state, target).await? else {
         return Ok(None);
     };
-    let base = agent_record_from_edge(&context.state, edge.clone());
+    let base = agent_record_from_edge(&context.state, edge.clone()).await;
     let agent_name = edge_agent_name(&edge).unwrap_or(base.agent_name.as_str());
     let agent = context
         .catalog
@@ -229,7 +247,8 @@ pub(crate) async fn send_agent_message_with_context(
         .unwrap_or_else(|| default_task_name(&agent.name, &id));
     let model_override = context
         .state
-        .session_summary(&edge.child_session_id)?
+        .session_summary(&edge.child_session_id)
+        .await?
         .map(|summary| summary.model);
     let spawn_depth_remaining = edge_spawn_depth_remaining(&edge);
     let record = AgentRunRecord {
@@ -268,7 +287,8 @@ pub(crate) async fn send_agent_message_with_context(
     }
     context
         .state
-        .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
+        .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)
+        .await?;
     let mut child_context = context;
     child_context.parent_session_id = edge.parent_session_id.clone();
     let child = ChildRun {
@@ -297,7 +317,10 @@ pub(crate) async fn send_agent_message_with_context(
     Ok(Some(record))
 }
 
-pub fn resume_agent_id(id: &str, store: Option<&StateRuntime>) -> Result<Option<AgentRunRecord>> {
+pub async fn resume_agent_id(
+    id: &str,
+    store: Option<&StateRuntime>,
+) -> Result<Option<AgentRunRecord>> {
     if let Some(record) = {
         let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
         resolve_live_record_locked(&runs, id)?
@@ -305,10 +328,12 @@ pub fn resume_agent_id(id: &str, store: Option<&StateRuntime>) -> Result<Option<
         return Ok(Some(record));
     }
     if let Some(store) = store
-        && let Some(edge) = find_agent_edge_for_target(store, id)?
+        && let Some(edge) = find_agent_edge_for_target(store, id).await?
     {
-        store.set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)?;
-        let mut record = agent_record_from_edge(store, edge);
+        store
+            .set_agent_edge_status(&edge.child_session_id, AgentEdgeStatus::Open)
+            .await?;
+        let mut record = agent_record_from_edge(store, edge).await;
         record.edge_status = Some(AgentEdgeStatus::Open);
         return Ok(Some(record));
     }
@@ -399,7 +424,7 @@ pub(crate) fn generated_task_name_matches(record: &AgentRunRecord, target: &str)
     record.task_name.as_deref() == Some(target) && explicit_record_task_name(record).is_none()
 }
 
-pub(crate) fn find_agent_edge_for_target(
+pub(crate) async fn find_agent_edge_for_target(
     store: &StateRuntime,
     target: &str,
 ) -> Result<Option<AgentEdgeRecord>> {
@@ -407,7 +432,7 @@ pub(crate) fn find_agent_edge_for_target(
     if target.is_empty() {
         return Ok(None);
     }
-    let edges = store.list_agent_edges()?;
+    let edges = store.list_agent_edges().await?;
     if let Some(edge) = edges
         .iter()
         .find(|edge| agent_edge_exact_target_matches(edge, target))
@@ -415,10 +440,12 @@ pub(crate) fn find_agent_edge_for_target(
         return Ok(Some(edge.clone()));
     }
 
-    let matches = edges
-        .into_iter()
-        .filter(|edge| record_task_label(&agent_record_from_edge(store, edge.clone())) == target)
-        .collect::<Vec<_>>();
+    let mut matches = Vec::new();
+    for edge in edges {
+        if record_task_label(&agent_record_from_edge(store, edge.clone()).await) == target {
+            matches.push(edge);
+        }
+    }
     match matches.len() {
         0 => Ok(None),
         1 => Ok(matches.into_iter().next()),
@@ -496,7 +523,7 @@ pub(crate) fn ambiguous_agent_task_error(target: &str) -> Error {
     ))
 }
 
-pub(crate) fn agent_record_from_edge(
+pub(crate) async fn agent_record_from_edge(
     store: &StateRuntime,
     edge: AgentEdgeRecord,
 ) -> AgentRunRecord {
@@ -511,7 +538,11 @@ pub(crate) fn agent_record_from_edge(
         .as_ref()
         .and_then(|metadata| metadata.get("agent"))
         .and_then(Value::as_object);
-    let summary = store.session_summary(&edge.child_session_id).ok().flatten();
+    let summary = store
+        .session_summary(&edge.child_session_id)
+        .await
+        .ok()
+        .flatten();
     let id = agent
         .and_then(|agent| agent.get("id"))
         .and_then(Value::as_str)
@@ -580,11 +611,11 @@ pub(crate) fn agent_record_from_edge(
     }
 }
 
-pub(crate) fn agent_child_session_summary_value(
+pub(crate) async fn agent_child_session_summary_value(
     store: &StateRuntime,
     summary: &SessionSummary,
 ) -> Value {
-    let latest_usage = latest_session_assistant_usage(store, &summary.id);
+    let latest_usage = latest_session_assistant_usage(store, &summary.id).await;
     let latest_total_tokens = latest_usage.as_ref().and_then(usage_total_tokens);
     let mut value = json!({
         "id": summary.id,
@@ -602,7 +633,7 @@ pub(crate) fn agent_child_session_summary_value(
     value
 }
 
-pub(crate) fn subagent_summary_value(
+pub(crate) async fn subagent_summary_value(
     store: Option<&StateRuntime>,
     record: &AgentRunRecord,
     include_agent_id: bool,
@@ -637,14 +668,14 @@ pub(crate) fn subagent_summary_value(
     if let Some(store) = store
         && let Some(child_session_id) = record.child_session_id.as_deref()
     {
-        if let Ok(Some(summary)) = store.session_summary(child_session_id) {
+        if let Ok(Some(summary)) = store.session_summary(child_session_id).await {
             object.insert(
                 "tool_call_count".to_string(),
                 Value::from(summary.tool_call_count),
             );
             object.insert("model".to_string(), Value::from(summary.model));
         }
-        if let Some(tokens) = child_session_tokens_value(store, child_session_id) {
+        if let Some(tokens) = child_session_tokens_value(store, child_session_id).await {
             object.insert("tokens".to_string(), tokens);
         }
     }
@@ -716,8 +747,11 @@ pub(crate) fn record_duration_ms(record: &AgentRunRecord) -> Option<u64> {
     Some(ended_at_ms.saturating_sub(record.started_at_ms).max(0) as u64)
 }
 
-pub(crate) fn child_session_tokens_value(store: &StateRuntime, session_id: &str) -> Option<Value> {
-    let messages = store.load_tui_message_summaries(session_id).ok()?;
+pub(crate) async fn child_session_tokens_value(
+    store: &StateRuntime,
+    session_id: &str,
+) -> Option<Value> {
+    let messages = store.load_tui_message_summaries(session_id).await.ok()?;
     let mut input = 0u64;
     let mut output = 0u64;
     let mut reasoning = 0u64;
@@ -785,12 +819,13 @@ pub(crate) fn usage_counter(usage: &Value, keys: &[&str]) -> Option<u64> {
         .find_map(|key| usage.get(*key).and_then(Value::as_u64))
 }
 
-pub(crate) fn latest_session_assistant_usage(
+pub(crate) async fn latest_session_assistant_usage(
     store: &StateRuntime,
     session_id: &str,
 ) -> Option<Value> {
     store
         .load_tui_message_summaries(session_id)
+        .await
         .ok()?
         .into_iter()
         .rev()

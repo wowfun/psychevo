@@ -1,11 +1,9 @@
 use psychevo_agent_core::now_ms;
-use rusqlite::{OptionalExtension, params};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
 
-use super::store_undo_helpers::session_tool_call_count;
 use super::{NativeSessionForkInput, StateRuntime};
 
 impl StateRuntime {
@@ -15,83 +13,88 @@ impl StateRuntime {
     /// projections, deliveries, outbox rows, revert state, agent lineage, and
     /// automation ownership. The child remains in the current workspace and
     /// receives a fresh Native runtime identity on its next turn.
-    pub fn fork_native_session_history(&self, input: NativeSessionForkInput<'_>) -> Result<String> {
+    pub async fn fork_native_session_history(
+        &self,
+        input: NativeSessionForkInput<'_>,
+    ) -> Result<String> {
         let child_session_id = Uuid::now_v7().to_string();
         let now = now_ms();
         let metadata_json = serde_json::to_string(&json!({
             "forkedFromThreadId": input.source_session_id,
         }))?;
-        let requested_boundary = input.before_session_seq;
+        let boundary = input.before_session_seq.unwrap_or(i64::MAX);
         let source_session_id = input.source_session_id;
-        self.write_retry(|conn| {
-            let eligible = conn
-                .query_row(
-                    r#"
-                    SELECT 1
-                    FROM sessions s
-                    WHERE s.id = ?1
-                      AND s.source IN ('web', 'tui')
-                      AND s.parent_session_id IS NULL
-                      AND COALESCE(json_extract(s.metadata_json, '$.side_conversation'), 0) = 0
-                      AND json_type(s.metadata_json, '$.revert') IS NULL
-                      AND NOT EXISTS (
-                          SELECT 1 FROM agent_edges e WHERE e.child_session_id = s.id
-                      )
-                    "#,
-                    params![source_session_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?
-                .is_some();
+
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let eligible = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT 1
+                FROM sessions s
+                WHERE s.id = ?1
+                  AND s.source IN ('web', 'tui')
+                  AND s.parent_session_id IS NULL
+                  AND COALESCE(json_extract(s.metadata_json, '$.side_conversation'), 0) = 0
+                  AND json_type(s.metadata_json, '$.revert') IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM agent_edges e WHERE e.child_session_id = s.id
+                  )
+                "#,
+            )
+            .bind(source_session_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some();
             if !eligible {
-                return Err(rusqlite::Error::InvalidParameterName(format!(
+                return Err(Error::Message(format!(
                     "session is not an eligible root interactive Thread: {source_session_id}"
                 )));
             }
-            let native_binding = conn
-                .query_row(
-                    "SELECT 1 FROM gateway_runtime_bindings WHERE thread_id = ?1 AND resolution_status = 'resolved' AND backend_kind = 'native'",
-                    params![source_session_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?
-                .is_some();
+
+            let native_binding = sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM gateway_runtime_bindings WHERE thread_id = ?1 AND resolution_status = 'resolved' AND backend_kind = 'native'",
+            )
+            .bind(source_session_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some();
             if !native_binding {
-                return Err(rusqlite::Error::InvalidParameterName(format!(
+                return Err(Error::Message(format!(
                     "history fork requires a resolved Native binding: {source_session_id}"
                 )));
             }
-            let active = conn
-                .query_row(
-                    "SELECT 1 FROM gateway_activities WHERE thread_id = ?1 AND status IN ('running', 'queued') AND lease_expires_at_ms >= ?2 LIMIT 1",
-                    params![source_session_id, now],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?
-                .is_some();
+
+            let active = sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM gateway_activities WHERE thread_id = ?1 AND status IN ('running', 'queued') AND lease_expires_at_ms >= ?2 LIMIT 1",
+            )
+            .bind(source_session_id)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some();
             if active {
-                return Err(rusqlite::Error::InvalidParameterName(format!(
+                return Err(Error::Message(format!(
                     "running Thread cannot be forked: {source_session_id}"
                 )));
             }
-            let boundary = requested_boundary.unwrap_or(i64::MAX);
-            if let Some(boundary) = requested_boundary {
-                let valid_boundary = conn
-                    .query_row(
-                        "SELECT 1 FROM messages WHERE session_id = ?1 AND session_seq = ?2 AND role = 'user'",
-                        params![source_session_id, boundary],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()?
-                    .is_some();
+
+            if let Some(requested_boundary) = input.before_session_seq {
+                let valid_boundary = sqlx::query_scalar::<_, i64>(
+                    "SELECT 1 FROM messages WHERE session_id = ?1 AND session_seq = ?2 AND role = 'user'",
+                )
+                .bind(source_session_id)
+                .bind(requested_boundary)
+                .fetch_optional(&mut *tx)
+                .await?
+                .is_some();
                 if !valid_boundary {
-                    return Err(rusqlite::Error::InvalidParameterName(format!(
-                        "fork boundary is not a durable user message: {boundary}"
+                    return Err(Error::Message(format!(
+                        "fork boundary is not a durable user message: {requested_boundary}"
                     )));
                 }
             }
 
-            let inserted = conn.execute(
+            let inserted = sqlx::query(
                 r#"
                 INSERT INTO sessions (
                     id, source, parent_session_id, cwd, model, provider,
@@ -103,13 +106,21 @@ impl StateRuntime {
                 FROM sessions
                 WHERE id = ?4
                 "#,
-                params![child_session_id, now, metadata_json, source_session_id],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(now)
+            .bind(&metadata_json)
+            .bind(source_session_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
             if inserted != 1 {
-                return Err(rusqlite::Error::ExecuteReturnedResults);
+                return Err(Error::Message(format!(
+                    "failed to create forked session from {source_session_id}"
+                )));
             }
 
-            conn.execute(
+            sqlx::query(
                 r#"
                 INSERT INTO messages (
                     session_id, session_seq, role, timestamp_ms, message_json,
@@ -133,10 +144,14 @@ impl StateRuntime {
                 WHERE session_id = ?2 AND session_seq < ?3
                 ORDER BY session_seq ASC
                 "#,
-                params![child_session_id, source_session_id, boundary],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(source_session_id)
+            .bind(boundary)
+            .execute(&mut *tx)
+            .await?;
 
-            conn.execute(
+            sqlx::query(
                 r#"
                 INSERT INTO context_evidence (
                     session_id, prompt_session_seq, context_seq, role, source_kind,
@@ -149,10 +164,14 @@ impl StateRuntime {
                 FROM context_evidence
                 WHERE session_id = ?2 AND prompt_session_seq < ?3
                 "#,
-                params![child_session_id, source_session_id, boundary],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(source_session_id)
+            .bind(boundary)
+            .execute(&mut *tx)
+            .await?;
 
-            conn.execute(
+            sqlx::query(
                 r#"
                 INSERT INTO session_prompt_prefixes (
                     session_id, version, created_at_ms, provider, model, prefix_hash,
@@ -170,10 +189,14 @@ impl StateRuntime {
                         AND CAST(json_extract(m.metadata_json, '$.prompt_prefix.version') AS INTEGER) = p.version
                   )
                 "#,
-                params![child_session_id, source_session_id, boundary],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(source_session_id)
+            .bind(boundary)
+            .execute(&mut *tx)
+            .await?;
 
-            conn.execute(
+            sqlx::query(
                 r#"
                 INSERT INTO session_compactions (
                     session_id, created_at_ms, reason, summary_text,
@@ -190,10 +213,14 @@ impl StateRuntime {
                   AND created_after_session_seq < ?3
                   AND first_kept_session_seq < ?3
                 "#,
-                params![child_session_id, source_session_id, boundary],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(source_session_id)
+            .bind(boundary)
+            .execute(&mut *tx)
+            .await?;
 
-            conn.execute(
+            sqlx::query(
                 r#"
                 INSERT INTO gateway_runtime_bindings (
                     thread_id, resolution_status, agent_ref, agent_fingerprint,
@@ -213,10 +240,14 @@ impl StateRuntime {
                 FROM gateway_runtime_bindings
                 WHERE thread_id = ?3 AND backend_kind = 'native'
                 "#,
-                params![child_session_id, now, source_session_id],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(now)
+            .bind(source_session_id)
+            .execute(&mut *tx)
+            .await?;
 
-            conn.execute(
+            sqlx::query(
                 r#"
                 INSERT INTO gateway_turn_terminals (
                     turn_id, thread_id, status, outcome, error_message,
@@ -234,27 +265,46 @@ impl StateRuntime {
                     ) < ?3
                   )
                 "#,
-                params![child_session_id, source_session_id, boundary],
-            )?;
+            )
+            .bind(&child_session_id)
+            .bind(source_session_id)
+            .bind(boundary)
+            .execute(&mut *tx)
+            .await?;
 
-            let message_count: i64 = conn.query_row(
+            let message_count = sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
-                params![child_session_id],
-                |row| row.get(0),
-            )?;
-            let tool_call_count = session_tool_call_count(conn, &child_session_id)?;
-            conn.execute(
+            )
+            .bind(&child_session_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let tool_call_count = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COALESCE(SUM(
+                    CASE WHEN json_valid(tool_calls_json)
+                         THEN json_array_length(tool_calls_json)
+                         ELSE 0 END
+                ), 0)
+                FROM messages
+                WHERE session_id = ?1 AND tool_calls_json IS NOT NULL
+                "#,
+            )
+            .bind(&child_session_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            sqlx::query(
                 "UPDATE sessions SET message_count = ?1, tool_call_count = ?2 WHERE id = ?3",
-                params![message_count, tool_call_count, child_session_id],
-            )?;
-            Ok(())
+            )
+            .bind(message_count)
+            .bind(tool_call_count)
+            .bind(&child_session_id)
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(child_session_id)
         })
-        .map_err(|error| match error {
-            Error::Sqlite(rusqlite::Error::InvalidParameterName(message)) => {
-                Error::Message(message)
-            }
-            other => other,
-        })?;
-        Ok(child_session_id)
+        .await
     }
 }

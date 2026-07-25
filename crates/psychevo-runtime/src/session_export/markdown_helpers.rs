@@ -88,8 +88,8 @@ pub(crate) mod tests {
 
     use crate::store::{AgentMailboxEventInput, PromptPrefixSlotRecord};
 
-    #[test]
-    fn default_export_filename_distinguishes_sibling_uuidv7_sessions() {
+    #[tokio::test]
+    async fn default_export_filename_distinguishes_sibling_uuidv7_sessions() {
         let parent = default_session_export_filename(
             "019e3716-eeb0-7102-9e7b-7a66ac5dc0a1",
             SessionExportFormat::Json,
@@ -105,16 +105,18 @@ pub(crate) mod tests {
         assert_eq!(child, "psychevo-session-019e3716-fa89.json");
     }
 
-    #[test]
-    fn export_last_provider_response_uses_persisted_assistant_projection() {
+    #[tokio::test]
+    async fn export_last_provider_response_uses_persisted_assistant_projection() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = StateRuntime::open(&db).expect("store");
+        let store = StateRuntime::open(&db).await.expect("store");
         let session = store
             .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .await
             .expect("session");
         store
             .append_message(&session, &user_text_message("first prompt"))
+            .await
             .expect("append user");
         store
             .append_message_with_metrics(
@@ -132,6 +134,7 @@ pub(crate) mod tests {
                 Some(serde_json::json!({"input_tokens": 1})),
                 Some(serde_json::json!({"provider_response_id": "resp_old"})),
             )
+            .await
             .expect("append first assistant");
         store
             .append_message_with_metrics(
@@ -149,6 +152,7 @@ pub(crate) mod tests {
                 Some(serde_json::json!({"input_tokens": 2, "output_tokens": 3})),
                 Some(serde_json::json!({"provider_response_id": "resp_latest"})),
             )
+            .await
             .expect("append latest assistant");
 
         let artifact = render_session_export(
@@ -162,6 +166,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export");
         let value: Value = serde_json::from_str(&artifact.content).expect("json");
         assert!(value.get("messages").is_none());
@@ -181,13 +186,14 @@ pub(crate) mod tests {
         assert_eq!(response["metadata"]["provider_response_id"], "resp_latest");
     }
 
-    #[test]
-    fn export_last_provider_response_respects_reasoning_include_policy() {
+    #[tokio::test]
+    async fn export_last_provider_response_respects_reasoning_include_policy() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = StateRuntime::open(&db).expect("store");
+        let store = StateRuntime::open(&db).await.expect("store");
         let session = store
             .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+            .await
             .expect("session");
         store
             .append_message_with_metrics(
@@ -211,6 +217,7 @@ pub(crate) mod tests {
                 None,
                 None,
             )
+            .await
             .expect("append assistant");
 
         let without_reasoning = render_session_export(
@@ -224,6 +231,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export without reasoning");
         let value: Value = serde_json::from_str(&without_reasoning.content).expect("json");
         let content = value["last_provider_response"]["message"]["content"]
@@ -248,6 +256,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export with reasoning");
         let value: Value = serde_json::from_str(&with_reasoning.content).expect("json");
         let content = value["last_provider_response"]["message"]["content"]
@@ -259,11 +268,11 @@ pub(crate) mod tests {
         assert!(content[0].get("provider_evidence").is_none());
     }
 
-    #[test]
-    fn export_last_provider_request_omits_tools_for_empty_effective_policy() {
+    #[tokio::test]
+    async fn export_last_provider_request_omits_tools_for_empty_effective_policy() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = StateRuntime::open(&db).expect("store");
+        let store = StateRuntime::open(&db).await.expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -280,6 +289,7 @@ pub(crate) mod tests {
                     }
                 })),
             )
+            .await
             .expect("session");
         let prefix_hash = "empty-tools-prefix";
         let prompt_prefix_metadata = serde_json::json!({
@@ -307,6 +317,7 @@ pub(crate) mod tests {
                 None,
                 &[],
             )
+            .await
             .expect("append user");
         store
             .append_message(
@@ -322,6 +333,7 @@ pub(crate) mod tests {
                     provider: Some("provider".to_string()),
                 },
             )
+            .await
             .expect("append assistant");
         store
             .upsert_session_prompt_prefix(PromptPrefixRecord {
@@ -357,6 +369,7 @@ pub(crate) mod tests {
                     "project_instructions_role": null
                 })),
             })
+            .await
             .expect("prefix");
 
         let artifact = render_session_export(
@@ -371,6 +384,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export");
         let value: Value = serde_json::from_str(&artifact.content).expect("json");
         assert_eq!(
@@ -386,11 +400,11 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn export_last_provider_request_uses_message_prompt_prefix_version() {
+    #[tokio::test]
+    async fn export_last_provider_request_uses_message_prompt_prefix_version() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = StateRuntime::open(&db).expect("store");
+        let store = StateRuntime::open(&db).await.expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -407,6 +421,7 @@ pub(crate) mod tests {
                     }
                 })),
             )
+            .await
             .expect("session");
         store
             .upsert_session_prompt_prefix(PromptPrefixRecord {
@@ -435,6 +450,7 @@ pub(crate) mod tests {
                     "effective_tools": []
                 })),
             })
+            .await
             .expect("old prefix");
         store
             .upsert_session_prompt_prefix(PromptPrefixRecord {
@@ -463,6 +479,7 @@ pub(crate) mod tests {
                     "effective_tools": []
                 })),
             })
+            .await
             .expect("new prefix");
         store
             .append_message_with_undo_snapshot_metadata_and_context_evidence(
@@ -482,6 +499,7 @@ pub(crate) mod tests {
                 None,
                 &[],
             )
+            .await
             .expect("append user");
         store
             .append_message(
@@ -497,6 +515,7 @@ pub(crate) mod tests {
                     provider: Some("provider".to_string()),
                 },
             )
+            .await
             .expect("append assistant");
 
         let artifact = render_session_export(
@@ -511,6 +530,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export");
         let value: Value = serde_json::from_str(&artifact.content).expect("json");
         assert_eq!(
@@ -523,11 +543,11 @@ pub(crate) mod tests {
         assert!(!body_text.contains("new prefix content"));
     }
 
-    #[test]
-    fn export_last_provider_request_reconstructs_clarify_declaration() {
+    #[tokio::test]
+    async fn export_last_provider_request_reconstructs_clarify_declaration() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = StateRuntime::open(&db).expect("store");
+        let store = StateRuntime::open(&db).await.expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -544,6 +564,7 @@ pub(crate) mod tests {
                     }
                 })),
             )
+            .await
             .expect("session");
         let prefix_hash = "clarify-tools-prefix";
         let prompt_prefix_metadata = serde_json::json!({
@@ -571,6 +592,7 @@ pub(crate) mod tests {
                 None,
                 &[],
             )
+            .await
             .expect("append user");
         store
             .append_message(
@@ -586,6 +608,7 @@ pub(crate) mod tests {
                     provider: Some("provider".to_string()),
                 },
             )
+            .await
             .expect("append assistant");
         store
             .upsert_session_prompt_prefix(PromptPrefixRecord {
@@ -621,6 +644,7 @@ pub(crate) mod tests {
                     "project_instructions_role": null
                 })),
             })
+            .await
             .expect("prefix");
 
         let artifact = render_session_export(
@@ -635,6 +659,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export");
         let value: Value = serde_json::from_str(&artifact.content).expect("json");
         assert_eq!(
@@ -668,11 +693,11 @@ pub(crate) mod tests {
         assert!(!question_properties.contains_key("header"));
     }
 
-    #[test]
-    fn export_last_provider_request_includes_mailbox_result_once_after_wait() {
+    #[tokio::test]
+    async fn export_last_provider_request_includes_mailbox_result_once_after_wait() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");
-        let store = StateRuntime::open(&db).expect("store");
+        let store = StateRuntime::open(&db).await.expect("store");
         let session = store
             .create_session_with_metadata(
                 tmp.path(),
@@ -689,6 +714,7 @@ pub(crate) mod tests {
                     }
                 })),
             )
+            .await
             .expect("session");
         let prefix_hash = "mailbox-prefix";
         let prompt_prefix_metadata = serde_json::json!({
@@ -716,6 +742,7 @@ pub(crate) mod tests {
                 None,
                 &[],
             )
+            .await
             .expect("append user");
         store
             .append_message(
@@ -737,6 +764,7 @@ pub(crate) mod tests {
                     provider: Some("provider".to_string()),
                 },
             )
+            .await
             .expect("append assistant tool call");
         store
             .append_message(
@@ -749,6 +777,7 @@ pub(crate) mod tests {
                     timestamp_ms: 3,
                 },
             )
+            .await
             .expect("append wait result");
         let final_answer = "unique mailbox final answer";
         let payload = serde_json::json!({
@@ -778,9 +807,11 @@ pub(crate) mod tests {
                 payload,
                 metadata: None,
             })
+            .await
             .expect("mailbox event");
         store
             .deliver_pending_agent_mailbox_events_for_tool(&session, "call-wait", 3)
+            .await
             .expect("deliver");
         store
             .append_message(
@@ -796,6 +827,7 @@ pub(crate) mod tests {
                     provider: Some("provider".to_string()),
                 },
             )
+            .await
             .expect("append final assistant");
         store
             .upsert_session_prompt_prefix(PromptPrefixRecord {
@@ -831,6 +863,7 @@ pub(crate) mod tests {
                     "project_instructions_role": null
                 })),
             })
+            .await
             .expect("prefix");
 
         let artifact = render_session_export(
@@ -845,6 +878,7 @@ pub(crate) mod tests {
                 artifact_kind: SessionArtifactKind::Export,
             },
         )
+        .await
         .expect("export");
         let value: Value = serde_json::from_str(&artifact.content).expect("json");
         let body = &value["last_provider_request"]["body"];

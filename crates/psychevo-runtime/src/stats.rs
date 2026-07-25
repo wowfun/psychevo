@@ -1,6 +1,6 @@
 use psychevo_agent_core::{Message, now_ms};
-use rusqlite::{Connection, params, params_from_iter, types::Value as SqlValue};
 use serde_json::{Value, json};
+use sqlx::Row;
 
 use crate::accounting::{UsageTotalStatus, effective_usage_total_from_parts};
 use crate::error::Result;
@@ -10,7 +10,7 @@ use crate::types::{
     UsageReadOptions, UsageReadResult, UsageWindowSummary,
 };
 
-pub fn usage_stats(options: StatsOptions) -> Result<Value> {
+pub async fn usage_stats(options: StatsOptions) -> Result<Value> {
     let cwd = canonical_cwd(&options.cwd)?;
     let cutoff_ms = options
         .days
@@ -20,31 +20,38 @@ pub fn usage_stats(options: StatsOptions) -> Result<Value> {
         cutoff_ms,
         limit: options.limit.max(1),
     };
-    options.state.with_conn(|conn| {
-        let totals = totals(conn, &scope)?;
-        let provider_models = provider_models(conn, &scope)?;
-        let top_tools = top_tools(conn, &scope)?;
-        let top_sessions = top_sessions(conn, &scope)?;
-        Ok(json!({
-            "scope": {
-                "all": options.all,
-                "cwd": scope.cwd,
-                "days": options.days,
-            },
-            "totals": totals,
-            "provider_models": provider_models,
-            "top_tools": top_tools,
-            "top_sessions": top_sessions,
-        }))
-    })
+    let state = options.state;
+    state
+        .observe_sqlx(async {
+            let mut conn = state.acquire_sqlx().await?;
+            let totals = totals(&mut conn, &scope).await?;
+            let provider_models = provider_models(&mut conn, &scope).await?;
+            let top_tools = top_tools(&mut conn, &scope).await?;
+            let top_sessions = top_sessions(&mut conn, &scope).await?;
+            Ok(json!({
+                "scope": {
+                    "all": options.all,
+                    "cwd": scope.cwd,
+                    "days": options.days,
+                },
+                "totals": totals,
+                "provider_models": provider_models,
+                "top_tools": top_tools,
+                "top_sessions": top_sessions,
+            }))
+        })
+        .await
 }
 
-pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsageSummary> {
+pub async fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsageSummary> {
     let store = options.state;
-    let summary = store.session_summary(&options.session_id)?.ok_or_else(|| {
-        crate::Error::Message(format!("session not found: {}", options.session_id))
-    })?;
-    let messages = store.load_tui_message_summaries(&summary.id)?;
+    let summary = store
+        .session_summary(&options.session_id)
+        .await?
+        .ok_or_else(|| {
+            crate::Error::Message(format!("session not found: {}", options.session_id))
+        })?;
+    let messages = store.load_tui_message_summaries(&summary.id).await?;
     let mut totals = SessionUsageTotals::default();
     let mut provider = summary.provider;
     let mut model = summary.model;
@@ -182,7 +189,7 @@ pub fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsag
     })
 }
 
-pub fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {
+pub async fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {
     let generated_at_ms = now_ms();
     let activity_days = options.activity_days.clamp(1, 366);
     let window_specs = [
@@ -198,18 +205,22 @@ pub fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {
             Some(generated_at_ms.saturating_sub(7 * 86_400_000)),
         ),
     ];
-    options.state.with_conn(|conn| {
-        let mut windows = Vec::new();
-        for (id, label, since_ms) in window_specs {
-            windows.push(usage_window_summary(conn, id, label, since_ms)?);
-        }
-        let activity = usage_activity(conn, generated_at_ms, activity_days)?;
-        Ok(UsageReadResult {
-            generated_at_ms,
-            windows,
-            activity,
+    let state = options.state;
+    state
+        .observe_sqlx(async {
+            let mut conn = state.acquire_sqlx().await?;
+            let mut windows = Vec::new();
+            for (id, label, since_ms) in window_specs {
+                windows.push(usage_window_summary(&mut conn, id, label, since_ms).await?);
+            }
+            let activity = usage_activity(&mut conn, generated_at_ms, activity_days).await?;
+            Ok(UsageReadResult {
+                generated_at_ms,
+                windows,
+                activity,
+            })
         })
-    })
+        .await
 }
 
 #[derive(Default)]
@@ -381,8 +392,8 @@ fn usage_output_sql() -> &'static str {
     "COALESCE(json_extract(m.usage_json, '$.output_tokens'), json_extract(m.usage_json, '$.completion_tokens'), json_extract(m.usage_json, '$.outputTokens'), CASE WHEN m.billable_output_tokens IS NOT NULL THEN m.billable_output_tokens + COALESCE(m.reasoning_tokens, 0) END)"
 }
 
-fn usage_window_summary(
-    conn: &Connection,
+async fn usage_window_summary(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
     id: &str,
     label: &str,
     since_ms: Option<i64>,
@@ -404,7 +415,7 @@ fn usage_window_summary(
     let effective_sql = format!(
         "CASE WHEN ({reported_sql}) IS NOT NULL THEN ({reported_sql}) WHEN ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL THEN COALESCE(({input_sql}), 0) + COALESCE(({output_sql}), 0) ELSE NULL END"
     );
-    let mut stmt = conn.prepare(&format!(
+    let sql = format!(
         r#"
         SELECT
             COUNT(DISTINCT m.session_id),
@@ -445,65 +456,64 @@ fn usage_window_summary(
         complete_sql = complete_sql,
         known_sql = known_sql,
         reported_sql = reported_sql,
-    ))?;
-    let params = since_ms
-        .map(|value| vec![SqlValue::Integer(value)])
-        .unwrap_or_default();
-    stmt.query_row(params_from_iter(params.iter()), |row| {
-        let cache_read_tokens = row_u64(row, 7)?;
-        let billable_input_tokens = row_u64(row, 4)?;
-        let effective_total_tokens = row_u64(row, 10)?;
-        let accounted_provider_call_count = row_u64(row, 11)?;
-        let unaccounted_provider_call_count = row_u64(row, 12)?;
-        let derived_provider_call_count = row_u64(row, 13)?;
-        let partial_provider_call_count = row_u64(row, 14)?;
-        let estimated_pricing_count = row_u64(row, 16)?;
-        let free_pricing_count = row_u64(row, 17)?;
-        let included_pricing_count = row_u64(row, 18)?;
-        let unknown_pricing_count = row_u64(row, 19)?;
-        Ok(UsageWindowSummary {
-            id: id.to_string(),
-            label: label.to_string(),
-            since_ms,
-            session_count: row_u64(row, 0)?,
-            message_count: row_u64(row, 1)?,
-            assistant_message_count: row_u64(row, 2)?,
-            context_input_tokens: row_u64(row, 3)?,
-            billable_input_tokens,
-            billable_output_tokens: row_u64(row, 5)?,
-            reasoning_tokens: row_u64(row, 6)?,
-            cache_read_tokens,
-            cache_write_tokens: row_u64(row, 8)?,
-            effective_total_tokens,
-            reported_total_tokens: row_u64(row, 9)?,
-            total_status: aggregate_usage_total_status(
-                accounted_provider_call_count,
-                unaccounted_provider_call_count,
-                derived_provider_call_count,
-                partial_provider_call_count,
-            )
-            .to_string(),
+    );
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
+    if let Some(since_ms) = since_ms {
+        query = query.bind(since_ms);
+    }
+    let row = query.fetch_one(&mut **conn).await?;
+    let cache_read_tokens = row_u64(&row, 7)?;
+    let billable_input_tokens = row_u64(&row, 4)?;
+    let effective_total_tokens = row_u64(&row, 10)?;
+    let accounted_provider_call_count = row_u64(&row, 11)?;
+    let unaccounted_provider_call_count = row_u64(&row, 12)?;
+    let derived_provider_call_count = row_u64(&row, 13)?;
+    let partial_provider_call_count = row_u64(&row, 14)?;
+    let estimated_pricing_count = row_u64(&row, 16)?;
+    let free_pricing_count = row_u64(&row, 17)?;
+    let included_pricing_count = row_u64(&row, 18)?;
+    let unknown_pricing_count = row_u64(&row, 19)?;
+    Ok(UsageWindowSummary {
+        id: id.to_string(),
+        label: label.to_string(),
+        since_ms,
+        session_count: row_u64(&row, 0)?,
+        message_count: row_u64(&row, 1)?,
+        assistant_message_count: row_u64(&row, 2)?,
+        context_input_tokens: row_u64(&row, 3)?,
+        billable_input_tokens,
+        billable_output_tokens: row_u64(&row, 5)?,
+        reasoning_tokens: row_u64(&row, 6)?,
+        cache_read_tokens,
+        cache_write_tokens: row_u64(&row, 8)?,
+        effective_total_tokens,
+        reported_total_tokens: row_u64(&row, 9)?,
+        total_status: aggregate_usage_total_status(
             accounted_provider_call_count,
             unaccounted_provider_call_count,
-            estimated_cost_nanodollars: row.get(15)?,
-            cost_status: aggregate_cost_status(
-                estimated_pricing_count,
-                free_pricing_count,
-                included_pricing_count,
-                unknown_pricing_count,
-            ),
+            derived_provider_call_count,
+            partial_provider_call_count,
+        )
+        .to_string(),
+        accounted_provider_call_count,
+        unaccounted_provider_call_count,
+        estimated_cost_nanodollars: row.try_get(15)?,
+        cost_status: aggregate_cost_status(
             estimated_pricing_count,
             free_pricing_count,
             included_pricing_count,
             unknown_pricing_count,
-            cache_read_percent: cache_read_percent(cache_read_tokens, row_u64(row, 3)?),
-        })
+        ),
+        estimated_pricing_count,
+        free_pricing_count,
+        included_pricing_count,
+        unknown_pricing_count,
+        cache_read_percent: cache_read_percent(cache_read_tokens, row_u64(&row, 3)?),
     })
-    .map_err(Into::into)
 }
 
-fn usage_activity(
-    conn: &Connection,
+async fn usage_activity(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
     generated_at_ms: i64,
     activity_days: usize,
 ) -> Result<UsageActivity> {
@@ -520,7 +530,7 @@ fn usage_activity(
     let effective_sql = format!(
         "CASE WHEN ({reported_sql}) IS NOT NULL THEN ({reported_sql}) WHEN ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL THEN COALESCE(({input_sql}), 0) + COALESCE(({output_sql}), 0) ELSE NULL END"
     );
-    let mut stmt = conn.prepare(&format!(
+    let sql = format!(
         r#"
         WITH RECURSIVE days(day) AS (
             SELECT date(?1 / 1000, 'unixepoch', 'localtime', ?2)
@@ -599,22 +609,28 @@ fn usage_activity(
         complete_sql = complete_sql,
         known_sql = known_sql,
         reported_sql = reported_sql,
-    ))?;
-    let rows = stmt.query_map(params![generated_at_ms, start_modifier], |row| {
-        let accounted_provider_call_count = row_u64(row, 5)?;
-        let unaccounted_provider_call_count = row_u64(row, 6)?;
-        let derived_provider_call_count = row_u64(row, 7)?;
-        let partial_provider_call_count = row_u64(row, 8)?;
-        let estimated_pricing_count = row_u64(row, 13)?;
-        let free_pricing_count = row_u64(row, 14)?;
-        let included_pricing_count = row_u64(row, 15)?;
-        let unknown_pricing_count = row_u64(row, 16)?;
-        Ok(UsageActivityDay {
-            date: row.get(0)?,
-            session_count: row_u64(row, 1)?,
-            message_count: row_u64(row, 2)?,
-            effective_total_tokens: row_u64(row, 4)?,
-            reported_total_tokens: row_u64(row, 3)?,
+    );
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(generated_at_ms)
+        .bind(start_modifier)
+        .fetch_all(&mut **conn)
+        .await?;
+    let mut days = Vec::new();
+    for row in rows {
+        let accounted_provider_call_count = row_u64(&row, 5)?;
+        let unaccounted_provider_call_count = row_u64(&row, 6)?;
+        let derived_provider_call_count = row_u64(&row, 7)?;
+        let partial_provider_call_count = row_u64(&row, 8)?;
+        let estimated_pricing_count = row_u64(&row, 13)?;
+        let free_pricing_count = row_u64(&row, 14)?;
+        let included_pricing_count = row_u64(&row, 15)?;
+        let unknown_pricing_count = row_u64(&row, 16)?;
+        days.push(UsageActivityDay {
+            date: row.try_get(0)?,
+            session_count: row_u64(&row, 1)?,
+            message_count: row_u64(&row, 2)?,
+            effective_total_tokens: row_u64(&row, 4)?,
+            reported_total_tokens: row_u64(&row, 3)?,
             total_status: aggregate_usage_total_status(
                 accounted_provider_call_count,
                 unaccounted_provider_call_count,
@@ -624,10 +640,10 @@ fn usage_activity(
             .to_string(),
             accounted_provider_call_count,
             unaccounted_provider_call_count,
-            context_input_tokens: row_u64(row, 9)?,
-            cache_read_tokens: row_u64(row, 10)?,
-            cache_write_tokens: row_u64(row, 11)?,
-            estimated_cost_nanodollars: row.get(12)?,
+            context_input_tokens: row_u64(&row, 9)?,
+            cache_read_tokens: row_u64(&row, 10)?,
+            cache_write_tokens: row_u64(&row, 11)?,
+            estimated_cost_nanodollars: row.try_get(12)?,
             cost_status: aggregate_cost_status(
                 estimated_pricing_count,
                 free_pricing_count,
@@ -638,11 +654,7 @@ fn usage_activity(
             free_pricing_count,
             included_pricing_count,
             unknown_pricing_count,
-        })
-    })?;
-    let mut days = Vec::new();
-    for row in rows {
-        days.push(row?);
+        });
     }
     let start_date = days.first().map(|day| day.date.clone()).unwrap_or_default();
     let end_date = days.last().map(|day| day.date.clone()).unwrap_or_default();
@@ -666,8 +678,10 @@ fn cost_status_sql() -> &'static str {
     "#
 }
 
-fn row_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
-    row.get::<_, i64>(index).map(|value| value.max(0) as u64)
+fn row_u64(row: &sqlx::sqlite::SqliteRow, index: usize) -> Result<u64> {
+    row.try_get::<i64, _>(index)
+        .map(|value| value.max(0) as u64)
+        .map_err(Into::into)
 }
 
 fn usage_u64(
@@ -698,8 +712,11 @@ pub(crate) struct StatsScope {
     pub(crate) limit: usize,
 }
 
-pub(crate) fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
-    let mut stmt = conn.prepare(&format!(
+pub(crate) async fn totals(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    scope: &StatsScope,
+) -> Result<Value> {
+    let sql = format!(
         r#"
         SELECT
             COUNT(DISTINCT s.id),
@@ -730,31 +747,33 @@ pub(crate) fn totals(conn: &Connection, scope: &StatsScope) -> Result<Value> {
         "#,
         scope_where_clause(scope),
         cost_status_sql = cost_status_sql(),
-    ))?;
-    let params = scope_params(scope);
-    let values = stmt.query_row(params_from_iter(params.iter()), |row| {
-        Ok(json!({
-            "sessions": row.get::<_, i64>(0)?,
-            "messages": row.get::<_, i64>(1)?,
-            "context_input_tokens": row.get::<_, i64>(2)?,
-            "billable_input_tokens": row.get::<_, i64>(3)?,
-            "billable_output_tokens": row.get::<_, i64>(4)?,
-            "reasoning_tokens": row.get::<_, i64>(5)?,
-            "cache_read_tokens": row.get::<_, i64>(6)?,
-            "cache_write_tokens": row.get::<_, i64>(7)?,
-            "reported_total_tokens": row.get::<_, i64>(8)?,
-            "estimated_cost_nanodollars": row.get::<_, i64>(9)?,
-            "estimated_priced_messages": row.get::<_, i64>(10)?,
-            "free_priced_messages": row.get::<_, i64>(11)?,
-            "included_priced_messages": row.get::<_, i64>(12)?,
-            "unknown_priced_messages": row.get::<_, i64>(13)?,
-        }))
-    })?;
-    Ok(values)
+    );
+    let row = bind_scope_query(sqlx::query(sqlx::AssertSqlSafe(sql)), scope)
+        .fetch_one(&mut **conn)
+        .await?;
+    Ok(json!({
+        "sessions": row.try_get::<i64, _>(0)?,
+        "messages": row.try_get::<i64, _>(1)?,
+        "context_input_tokens": row.try_get::<i64, _>(2)?,
+        "billable_input_tokens": row.try_get::<i64, _>(3)?,
+        "billable_output_tokens": row.try_get::<i64, _>(4)?,
+        "reasoning_tokens": row.try_get::<i64, _>(5)?,
+        "cache_read_tokens": row.try_get::<i64, _>(6)?,
+        "cache_write_tokens": row.try_get::<i64, _>(7)?,
+        "reported_total_tokens": row.try_get::<i64, _>(8)?,
+        "estimated_cost_nanodollars": row.try_get::<i64, _>(9)?,
+        "estimated_priced_messages": row.try_get::<i64, _>(10)?,
+        "free_priced_messages": row.try_get::<i64, _>(11)?,
+        "included_priced_messages": row.try_get::<i64, _>(12)?,
+        "unknown_priced_messages": row.try_get::<i64, _>(13)?,
+    }))
 }
 
-pub(crate) fn provider_models(conn: &Connection, scope: &StatsScope) -> Result<Value> {
-    let mut stmt = conn.prepare(&format!(
+pub(crate) async fn provider_models(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    scope: &StatsScope,
+) -> Result<Value> {
+    let sql = format!(
         r#"
         SELECT
             COALESCE(m.provider, s.provider),
@@ -772,24 +791,32 @@ pub(crate) fn provider_models(conn: &Connection, scope: &StatsScope) -> Result<V
         LIMIT ?{}
         "#,
         scope_where_clause(scope),
-        scope_params(scope).len() + 1
-    ))?;
-    let mut params = scope_params(scope);
-    params.push(SqlValue::Integer(scope.limit as i64));
-    let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
-        Ok(json!({
-            "provider": row.get::<_, String>(0)?,
-            "model": row.get::<_, String>(1)?,
-            "messages": row.get::<_, i64>(2)?,
-            "reported_total_tokens": row.get::<_, i64>(3)?,
-            "estimated_cost_nanodollars": row.get::<_, i64>(4)?,
-        }))
-    })?;
-    collect_json_rows(rows)
+        scope_parameter_count(scope) + 1
+    );
+    let rows = bind_scope_query(sqlx::query(sqlx::AssertSqlSafe(sql)), scope)
+        .bind(scope.limit as i64)
+        .fetch_all(&mut **conn)
+        .await?;
+    Ok(Value::Array(
+        rows.into_iter()
+            .map(|row| {
+                Ok(json!({
+                    "provider": row.try_get::<String, _>(0)?,
+                    "model": row.try_get::<String, _>(1)?,
+                    "messages": row.try_get::<i64, _>(2)?,
+                    "reported_total_tokens": row.try_get::<i64, _>(3)?,
+                    "estimated_cost_nanodollars": row.try_get::<i64, _>(4)?,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?,
+    ))
 }
 
-pub(crate) fn top_tools(conn: &Connection, scope: &StatsScope) -> Result<Value> {
-    let mut stmt = conn.prepare(&format!(
+pub(crate) async fn top_tools(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    scope: &StatsScope,
+) -> Result<Value> {
+    let sql = format!(
         r#"
         SELECT m.tool_name, COUNT(*)
         FROM messages m
@@ -802,21 +829,29 @@ pub(crate) fn top_tools(conn: &Connection, scope: &StatsScope) -> Result<Value> 
         LIMIT ?{}
         "#,
         scope_where_clause(scope),
-        scope_params(scope).len() + 1
-    ))?;
-    let mut params = scope_params(scope);
-    params.push(SqlValue::Integer(scope.limit as i64));
-    let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
-        Ok(json!({
-            "tool": row.get::<_, String>(0)?,
-            "calls": row.get::<_, i64>(1)?,
-        }))
-    })?;
-    collect_json_rows(rows)
+        scope_parameter_count(scope) + 1
+    );
+    let rows = bind_scope_query(sqlx::query(sqlx::AssertSqlSafe(sql)), scope)
+        .bind(scope.limit as i64)
+        .fetch_all(&mut **conn)
+        .await?;
+    Ok(Value::Array(
+        rows.into_iter()
+            .map(|row| {
+                Ok(json!({
+                    "tool": row.try_get::<String, _>(0)?,
+                    "calls": row.try_get::<i64, _>(1)?,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?,
+    ))
 }
 
-pub(crate) fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Value> {
-    let mut stmt = conn.prepare(&format!(
+pub(crate) async fn top_sessions(
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Sqlite>,
+    scope: &StatsScope,
+) -> Result<Value> {
+    let sql = format!(
         r#"
         SELECT
             s.id,
@@ -837,23 +872,28 @@ pub(crate) fn top_sessions(conn: &Connection, scope: &StatsScope) -> Result<Valu
         LIMIT ?{}
         "#,
         scope_where_clause(scope),
-        scope_params(scope).len() + 1
-    ))?;
-    let mut params = scope_params(scope);
-    params.push(SqlValue::Integer(scope.limit as i64));
-    let rows = stmt.query_map(params_from_iter(params.iter()), |row| {
-        Ok(json!({
-            "session": row.get::<_, String>(0)?,
-            "title": row.get::<_, Option<String>>(1)?,
-            "cwd": row.get::<_, String>(2)?,
-            "provider": row.get::<_, String>(3)?,
-            "model": row.get::<_, String>(4)?,
-            "reported_total_tokens": row.get::<_, i64>(5)?,
-            "estimated_cost_nanodollars": row.get::<_, i64>(6)?,
-            "updated_at_ms": row.get::<_, i64>(7)?,
-        }))
-    })?;
-    collect_json_rows(rows)
+        scope_parameter_count(scope) + 1
+    );
+    let rows = bind_scope_query(sqlx::query(sqlx::AssertSqlSafe(sql)), scope)
+        .bind(scope.limit as i64)
+        .fetch_all(&mut **conn)
+        .await?;
+    Ok(Value::Array(
+        rows.into_iter()
+            .map(|row| {
+                Ok(json!({
+                    "session": row.try_get::<String, _>(0)?,
+                    "title": row.try_get::<Option<String>, _>(1)?,
+                    "cwd": row.try_get::<String, _>(2)?,
+                    "provider": row.try_get::<String, _>(3)?,
+                    "model": row.try_get::<String, _>(4)?,
+                    "reported_total_tokens": row.try_get::<i64, _>(5)?,
+                    "estimated_cost_nanodollars": row.try_get::<i64, _>(6)?,
+                    "updated_at_ms": row.try_get::<i64, _>(7)?,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?,
+    ))
 }
 
 pub(crate) fn scope_where_clause(scope: &StatsScope) -> &'static str {
@@ -865,24 +905,19 @@ pub(crate) fn scope_where_clause(scope: &StatsScope) -> &'static str {
     }
 }
 
-pub(crate) fn scope_params(scope: &StatsScope) -> Vec<SqlValue> {
-    let mut values = Vec::new();
-    if let Some(cwd) = &scope.cwd {
-        values.push(SqlValue::Text(cwd.clone()));
-    }
-    if let Some(cutoff_ms) = &scope.cutoff_ms {
-        values.push(SqlValue::Integer(*cutoff_ms));
-    }
-    values
+fn scope_parameter_count(scope: &StatsScope) -> usize {
+    usize::from(scope.cwd.is_some()) + usize::from(scope.cutoff_ms.is_some())
 }
 
-pub(crate) fn collect_json_rows<F>(rows: rusqlite::MappedRows<'_, F>) -> Result<Value>
-where
-    F: FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<Value>,
-{
-    let mut values = Vec::new();
-    for row in rows {
-        values.push(row?);
+fn bind_scope_query<'q>(
+    mut query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
+    scope: &'q StatsScope,
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments> {
+    if let Some(cwd) = &scope.cwd {
+        query = query.bind(cwd);
     }
-    Ok(Value::Array(values))
+    if let Some(cutoff_ms) = scope.cutoff_ms {
+        query = query.bind(cutoff_ms);
+    }
+    query
 }

@@ -32,11 +32,10 @@ pub async fn run_user_shell_command_streaming_controlled(
     if command.trim().is_empty() {
         return Err(Error::Message("shell command is empty".to_string()));
     }
-    let prepared_context = options
-        .context
-        .as_ref()
-        .map(|context| prepare_user_shell_context(context, &cwd, &command))
-        .transpose()?;
+    let prepared_context = match options.context.as_ref() {
+        Some(context) => Some(prepare_user_shell_context(context, &cwd, &command).await?),
+        None => None,
+    };
     let stream_session_id = prepared_context
         .as_ref()
         .map(|context| context.session_id.clone());
@@ -113,7 +112,8 @@ pub async fn run_user_shell_command_streaming_controlled(
                 )),
                 Some(format!("!{command}")),
                 &[],
-            )?;
+            )
+            .await?;
         if let Some(handle) = options.inject_into {
             let _ = handle.inject_user_message(message);
         }
@@ -133,7 +133,7 @@ pub async fn run_user_shell_command_streaming_controlled(
     })
 }
 
-pub(crate) fn prepare_user_shell_context(
+pub(crate) async fn prepare_user_shell_context(
     context: &UserShellContextOptions,
     cwd: &Path,
     command: &str,
@@ -189,17 +189,41 @@ pub(crate) fn prepare_user_shell_context(
         .map(String::as_str)
         .collect::<Vec<_>>();
     let (session_id, created_session) = if let Some(session_id) = context.session.clone() {
-        store.resume_session(&session_id)?;
+        store.resume_session(&session_id).await?;
         (session_id, false)
     } else if context.continue_latest {
-        if let Some(session_id) =
-            store.latest_session_for_cwd_with_sources(cwd, &continue_sources)?
+        if let Some(session_id) = store
+            .latest_session_for_cwd_with_sources(cwd, &continue_sources)
+            .await?
         {
-            store.resume_session(&session_id)?;
+            store.resume_session(&session_id).await?;
             (session_id, false)
         } else {
             (
-                store.create_session_with_metadata(
+                store
+                    .create_session_with_metadata(
+                        cwd,
+                        &context.source,
+                        &resolved.model,
+                        &resolved.provider,
+                        Some(json!({
+                            "provider_label": resolved.display_label.clone(),
+                            "base_url": resolved.base_url.clone(),
+                            "api_key_env": resolved.api_key_env.clone(),
+                            "reasoning_effort": resolved.reasoning_effort.clone(),
+                            "context_limit": resolved.context_limit,
+                            "model_metadata": resolved.metadata.public_json(),
+                            "mode": context.mode.as_str(),
+                        })),
+                    )
+                    .await?,
+                true,
+            )
+        }
+    } else {
+        (
+            store
+                .create_session_with_metadata(
                     cwd,
                     &context.source,
                     &resolved.model,
@@ -213,33 +237,14 @@ pub(crate) fn prepare_user_shell_context(
                         "model_metadata": resolved.metadata.public_json(),
                         "mode": context.mode.as_str(),
                     })),
-                )?,
-                true,
-            )
-        }
-    } else {
-        (
-            store.create_session_with_metadata(
-                cwd,
-                &context.source,
-                &resolved.model,
-                &resolved.provider,
-                Some(json!({
-                    "provider_label": resolved.display_label.clone(),
-                    "base_url": resolved.base_url.clone(),
-                    "api_key_env": resolved.api_key_env.clone(),
-                    "reasoning_effort": resolved.reasoning_effort.clone(),
-                    "context_limit": resolved.context_limit,
-                    "model_metadata": resolved.metadata.public_json(),
-                    "mode": context.mode.as_str(),
-                })),
-            )?,
+                )
+                .await?,
             true,
         )
     };
     if created_session {
         let title = deterministic_shell_session_title(command);
-        store.set_session_title(&session_id, &title)?;
+        store.set_session_title(&session_id, &title).await?;
     }
     Ok(PreparedUserShellContext {
         store,

@@ -1,28 +1,33 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn latest_run_session_filters_source_and_cwd() {
+#[tokio::test]
+pub(crate) async fn latest_run_session_filters_source_and_cwd() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
     let other_cwd = canonical_cwd(&temp.path().join("other")).expect("other");
-    let store = StateRuntime::open(&db).expect("store");
-    let smoke = store.create_session(&cwd).expect("smoke");
+    let store = StateRuntime::open(&db).await.expect("store");
+    let smoke = store.create_session(&cwd).await.expect("smoke");
     let other = store
         .create_session_with_metadata(&other_cwd, "run", "model", "provider", None)
+        .await
         .expect("other");
     let first = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
         .expect("second");
     store
         .append_message(&first, &user_message("real activity", 1))
+        .await
         .expect("activity");
 
     let state = store.clone();
     let latest = latest_run_session_for_cwd(&state, &cwd)
+        .await
         .expect("latest")
         .expect("session");
     assert_eq!(latest, first);
@@ -31,27 +36,30 @@ pub(crate) fn latest_run_session_filters_source_and_cwd() {
     assert_ne!(latest, other);
 }
 
-#[test]
-pub(crate) fn session_title_setter_normalizes_and_bounds_title() {
+#[tokio::test]
+pub(crate) async fn session_title_setter_normalizes_and_bounds_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
 
     let title = store
         .set_session_title(&session_id, &format!("  hello\n\t{}  ", "x".repeat(120)))
+        .await
         .expect("title");
     assert_eq!(title.chars().count(), SESSION_TITLE_MAX_CHARS);
     assert!(title.starts_with("hello x"));
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.title.as_deref(), Some(title.as_str()));
-    assert!(store.set_session_title(&session_id, "   ").is_err());
+    assert!(store.set_session_title(&session_id, "   ").await.is_err());
 }
 
 #[tokio::test]
@@ -59,9 +67,10 @@ pub(crate) async fn new_visible_session_title_uses_model_generated_title_without
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let provider = Arc::new(FakeProvider::new(vec![vec![
         RawStreamEvent::Text("  \"Investigate TUI Copy\"  \nextra".to_string()),
@@ -83,6 +92,7 @@ pub(crate) async fn new_visible_session_title_uses_model_generated_title_without
 
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.title.as_deref(), Some("Investigate TUI Copy"));
@@ -95,9 +105,10 @@ pub(crate) async fn new_visible_session_title_falls_back_when_model_title_fails(
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let provider = Arc::new(FakeProvider::new(Vec::new()));
     let resolved = resolved_title_provider();
@@ -116,6 +127,7 @@ pub(crate) async fn new_visible_session_title_falls_back_when_model_title_fails(
 
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(
@@ -129,9 +141,10 @@ pub(crate) async fn new_visible_session_title_fallback_uses_selected_skill_for_m
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let provider = Arc::new(FakeProvider::new(Vec::new()));
     let resolved = resolved_title_provider();
@@ -151,13 +164,14 @@ pub(crate) async fn new_visible_session_title_fallback_uses_selected_skill_for_m
 
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.title.as_deref(), Some("x-daily"));
 }
 
-#[test]
-pub(crate) fn session_title_request_includes_selected_skill_context() {
+#[tokio::test]
+pub(crate) async fn session_title_request_includes_selected_skill_context() {
     let temp = tempdir().expect("temp");
     let (catalog, selected) = title_skill_catalog(temp.path());
 
@@ -173,12 +187,13 @@ pub(crate) async fn new_visible_session_title_fallback_covers_visible_sources() 
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let resolved = resolved_title_provider();
 
     for source in ["web", "run", "automation", "channel/wechat"] {
         let session_id = store
             .create_session_with_metadata(&cwd, source, "model", "provider", None)
+            .await
             .expect("session");
         ensure_new_visible_session_title(
             &store,
@@ -194,6 +209,7 @@ pub(crate) async fn new_visible_session_title_fallback_covers_visible_sources() 
 
         let summary = store
             .session_summary(&session_id)
+            .await
             .expect("summary")
             .expect("session");
         assert_eq!(summary.title.as_deref(), Some("summarize visible source"));
@@ -205,7 +221,7 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let resolved = resolved_title_provider();
     let internal = store
         .create_session_with_metadata(
@@ -215,12 +231,15 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
             "provider",
             None,
         )
+        .await
         .expect("internal session");
     let parent = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
         .expect("parent");
     let child = store
         .create_child_session_with_metadata(&parent, &cwd, "web", "model", "provider", None)
+        .await
         .expect("child");
 
     for session_id in [&internal, &child] {
@@ -240,6 +259,7 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
         .expect("skip title");
         let summary = store
             .session_summary(session_id)
+            .await
             .expect("summary")
             .expect("session");
         assert_eq!(summary.title, None);
@@ -251,12 +271,14 @@ pub(crate) async fn new_visible_session_title_preserves_existing_title() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "web", "model", "provider", None)
+        .await
         .expect("session");
     store
         .set_session_title(&session_id, "Manual Title")
+        .await
         .expect("manual title");
     let resolved = resolved_title_provider();
 
@@ -277,6 +299,7 @@ pub(crate) async fn new_visible_session_title_preserves_existing_title() {
 
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.title.as_deref(), Some("Manual Title"));
@@ -324,7 +347,7 @@ model = "main"
     )
     .expect("config");
 
-    let mut options = base_options(&temp);
+    let mut options = base_options(&temp).await;
     options.cwd = cwd;
     options.model = Some("custom/main".to_string());
     options.no_agents = true;
@@ -352,6 +375,7 @@ model = "main"
             let result = joined.expect("run task").expect("streaming run");
             state
                 .set_session_title(&result.session_id, "Manual title")
+                .await
                 .expect("manual title");
             release_title_tx.send(()).expect("release title");
             result
@@ -377,6 +401,7 @@ model = "main"
     assert_eq!(
         state
             .session_summary(&result.session_id)
+            .await
             .expect("summary")
             .and_then(|summary| summary.title)
             .as_deref(),
@@ -398,8 +423,8 @@ fn write_test_sse(stream: &mut std::net::TcpStream, content: &str) {
         .expect("write response");
 }
 
-#[test]
-pub(crate) fn visible_session_source_title_rules_match_history_sources() {
+#[tokio::test]
+pub(crate) async fn visible_session_source_title_rules_match_history_sources() {
     for source in [
         "web",
         "run",
@@ -422,14 +447,15 @@ pub(crate) fn visible_session_source_title_rules_match_history_sources() {
     }
 }
 
-#[test]
-pub(crate) fn first_use_empty_visible_session_materializes_model_and_metadata() {
+#[tokio::test]
+pub(crate) async fn first_use_empty_visible_session_materializes_model_and_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "web", "pending", "pending", None)
+        .await
         .expect("session");
     let metadata = json!({
         "provider_label": "Local Test",
@@ -443,27 +469,30 @@ pub(crate) fn first_use_empty_visible_session_materializes_model_and_metadata() 
         "test-model",
         metadata.clone(),
     )
+    .await
     .expect("first use");
 
     assert!(materialized);
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.provider, "local");
     assert_eq!(summary.model, "test-model");
     assert_eq!(
-        store.session_metadata(&session_id).expect("metadata"),
+        store.session_metadata(&session_id).await.expect("metadata"),
         Some(metadata)
     );
 }
 
-#[test]
-pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_internal_sessions() {
+#[tokio::test]
+pub(crate) async fn first_use_empty_visible_session_does_not_rewrite_existing_or_internal_sessions()
+{
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let non_empty = store
         .create_session_with_metadata(
             &cwd,
@@ -472,9 +501,11 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
             "existing-provider",
             Some(json!({ "existing": true })),
         )
+        .await
         .expect("non empty");
     store
         .append_message(&non_empty, &user_message("hello", 1))
+        .await
         .expect("message");
     let internal = store
         .create_session_with_metadata(
@@ -484,9 +515,11 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
             "internal-provider",
             None,
         )
+        .await
         .expect("internal");
     let parent = store
         .create_session_with_metadata(&cwd, "web", "parent-model", "parent-provider", None)
+        .await
         .expect("parent");
     let child = store
         .create_child_session_with_metadata(
@@ -497,6 +530,7 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
             "child-provider",
             None,
         )
+        .await
         .expect("child");
 
     for session_id in [&non_empty, &internal, &child] {
@@ -507,24 +541,26 @@ pub(crate) fn first_use_empty_visible_session_does_not_rewrite_existing_or_inter
             "replacement-model",
             json!({ "replacement": true }),
         )
+        .await
         .expect("skip");
         assert!(!materialized, "{session_id}");
     }
 
     let non_empty_summary = store
         .session_summary(&non_empty)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(non_empty_summary.provider, "existing-provider");
     assert_eq!(non_empty_summary.model, "existing-model");
     assert_eq!(
-        store.session_metadata(&non_empty).expect("metadata"),
+        store.session_metadata(&non_empty).await.expect("metadata"),
         Some(json!({ "existing": true }))
     );
 }
 
-#[test]
-pub(crate) fn first_use_empty_visible_session_extends_new_session_title_gate() {
+#[tokio::test]
+pub(crate) async fn first_use_empty_visible_session_extends_new_session_title_gate() {
     assert!(crate::run::should_title_completed_session(
         false,
         true,
@@ -547,8 +583,8 @@ pub(crate) fn first_use_empty_visible_session_extends_new_session_title_gate() {
     ));
 }
 
-#[test]
-pub(crate) fn session_title_fallback_removes_selected_skill_markers() {
+#[tokio::test]
+pub(crate) async fn session_title_fallback_removes_selected_skill_markers() {
     let selected = vec![crate::skills::SelectedSkill {
         name: "reviewer".to_string(),
         path: PathBuf::from("/tmp/reviewer/SKILL.md"),

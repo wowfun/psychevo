@@ -97,7 +97,8 @@ pub(crate) async fn spawn_subagent(
             spawn_depth_remaining,
             team_member_id: team_member.as_ref().map(|member| member.id.as_str()),
             parent_tool_call_id: Some(&tool_call_id),
-        })?)
+        })
+        .await?)
     } else {
         None
     };
@@ -211,7 +212,8 @@ pub(crate) async fn spawn_subagent(
             "child_session_id": response_record.child_session_id.clone(),
             "effective_max_spawn_depth": spawn_depth_remaining
         });
-        let model_value = subagent_summary_value(Some(&response_store), &response_record, true);
+        let model_value =
+            subagent_summary_value(Some(&response_store), &response_record, true).await;
         Ok(ToolOutput::ok_with_model_content(
             system_value,
             model_content_string(&model_value),
@@ -222,13 +224,22 @@ pub(crate) async fn spawn_subagent(
             handle.abort();
         }
         let record = record?;
-        let model_value = subagent_summary_value(Some(&response_store), &record, false);
+        let model_value = subagent_summary_value(Some(&response_store), &record, false).await;
         let response_child_session_id = record.child_session_id.clone();
-        let child_summary = record
-            .child_session_id
-            .as_deref()
-            .and_then(|session_id| response_store.session_summary(session_id).ok().flatten())
-            .map(|summary| agent_child_session_summary_value(&response_store, &summary));
+        let child_summary = match record.child_session_id.as_deref() {
+            Some(session_id) => match response_store
+                .session_summary(session_id)
+                .await
+                .ok()
+                .flatten()
+            {
+                Some(summary) => {
+                    Some(agent_child_session_summary_value(&response_store, &summary).await)
+                }
+                None => None,
+            },
+            None => None,
+        };
         let system_value = json!({
             "id": record.id,
             "agent_name": record.agent_name.clone(),
@@ -272,7 +283,7 @@ struct InternalChildSessionInput<'a> {
     parent_tool_call_id: Option<&'a str>,
 }
 
-fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result<String> {
+async fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result<String> {
     let context = input.context;
     let agent = input.agent;
     let child_model = child_model_from(context, agent, input.model_override);
@@ -297,14 +308,16 @@ fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result
         &child_model,
         &context.model_provider,
         Some(metadata.clone()),
-    )?;
+    )
+    .await?;
     attach_child_thread_metadata(&mut metadata, &child_session);
     context.state.upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
         AgentEdgeStatus::Open,
         Some(metadata),
-    )?;
+    )
+    .await?;
     Ok(child_session)
 }
 
@@ -442,14 +455,16 @@ async fn spawn_external_subagent(
         model.as_deref().unwrap_or(&agent.name),
         &child_provider,
         Some(metadata.clone()),
-    )?;
+    )
+    .await?;
     attach_child_thread_metadata(&mut metadata, &child_session);
     context.state.upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
         AgentEdgeStatus::Open,
         Some(metadata),
-    )?;
+    )
+    .await?;
 
     let record = AgentRunRecord {
         id: id.clone(),
@@ -532,7 +547,8 @@ async fn spawn_external_subagent(
             let _ = context
                 .state
 
-                .set_agent_edge_status(&result.child_session_id, AgentEdgeStatus::Closed);
+                .set_agent_edge_status(&result.child_session_id, AgentEdgeStatus::Closed)
+                .await;
             record
         }
         Err(err) => {
@@ -540,7 +556,8 @@ async fn spawn_external_subagent(
             let _ = context
                 .state
 
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed);
+                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
+                .await;
             let record = {
                 let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
                 runs.get(&id)
@@ -578,23 +595,27 @@ async fn spawn_external_subagent(
                         agent_path: Some(agent_path(&task_name)),
                     })
             };
-            let model_value = subagent_summary_value(Some(&context.state), &record, false);
+            let model_value =
+                subagent_summary_value(Some(&context.state), &record, false).await;
             return Ok(ToolOutput::error(model_content_string(&model_value)));
         }
     };
-    let model_value = subagent_summary_value(Some(&context.state), &record, false);
-    let child_summary = record
-        .child_session_id
-        .as_deref()
-        .and_then(|session_id| {
-            context
-                .state
-
-                .session_summary(session_id)
-                .ok()
-                .flatten()
-        })
-        .map(|summary| agent_child_session_summary_value(&context.state, &summary));
+    let model_value = subagent_summary_value(Some(&context.state), &record, false).await;
+    let child_summary = match record.child_session_id.as_deref() {
+        Some(session_id) => match context
+            .state
+            .session_summary(session_id)
+            .await
+            .ok()
+            .flatten()
+        {
+            Some(summary) => {
+                Some(agent_child_session_summary_value(&context.state, &summary).await)
+            }
+            None => None,
+        },
+        None => None,
+    };
     let response_child_session_id = record.child_session_id.clone();
     let system_value = json!({
         "id": record.id,
@@ -760,7 +781,7 @@ pub(crate) fn resolved_child_spawn_depth_remaining(
     }
 }
 
-pub(crate) fn spawn_child_agent_background(
+pub(crate) async fn spawn_child_agent_background(
     context: AgentToolContext,
     agent: AgentDefinition,
     prompt: String,
@@ -795,13 +816,15 @@ pub(crate) fn spawn_child_agent_background(
         &child_model,
         &context.model_provider,
         Some(metadata.clone()),
-    )?;
+    )
+    .await?;
     context.state.upsert_agent_edge(
         &context.parent_session_id,
         &child_session,
         AgentEdgeStatus::Open,
         Some(metadata),
-    )?;
+    )
+    .await?;
     let record = AgentRunRecord {
         id: id.clone(),
         task_name: Some(task_name.clone()),
@@ -849,7 +872,8 @@ pub(crate) fn spawn_child_agent_background(
         &context.state,
         &context.parent_session_id,
         &record,
-    )?;
+    )
+    .await?;
     let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
     let child = ChildRun {
         id,

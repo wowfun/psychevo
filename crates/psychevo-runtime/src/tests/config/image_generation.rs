@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-fn image_generation_config_parses_documented_block() {
+#[tokio::test]
+async fn image_generation_config_parses_documented_block() {
     let config = crate::config::config_parse::parse_run_config(json!({
         "image_generation": {
             "provider": "fake",
@@ -22,8 +22,8 @@ fn image_generation_config_parses_documented_block() {
     );
 }
 
-#[test]
-fn image_generation_config_rejects_raw_keys_and_invalid_fields() {
+#[tokio::test]
+async fn image_generation_config_rejects_raw_keys_and_invalid_fields() {
     let raw_key = crate::config::config_parse::parse_run_config(json!({
         "image_generation": {
             "api_key": "secret"
@@ -57,8 +57,8 @@ fn image_generation_config_rejects_raw_keys_and_invalid_fields() {
     );
 }
 
-#[test]
-fn fake_image_generation_provider_resolves_without_credentials() {
+#[tokio::test]
+async fn fake_image_generation_provider_resolves_without_credentials() {
     let temp = tempdir().expect("temp");
     fs::create_dir_all(home_dir(&temp)).expect("home");
     fs::write(
@@ -72,7 +72,7 @@ format = "png"
 "#,
     )
     .expect("config");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
 
     let resolved = crate::config::resolve_image_generation_config(&options, None, None, None, None)
         .expect("image generation");

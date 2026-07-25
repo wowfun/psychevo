@@ -41,7 +41,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         provider.to_string(),
     );
     let result = run_live(RunOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         cwd: cwd.clone(),
         snapshot_root: Some(temp.path().join("snapshots")),
         session: None,
@@ -95,7 +95,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
     );
 }
 
-fn live_provider_options_with_temp_home(
+async fn live_provider_options_with_temp_home(
     temp: &tempfile::TempDir,
 ) -> (RunOptions, PathBuf, PathBuf) {
     let home = temp.path().join("home");
@@ -136,7 +136,9 @@ fn live_provider_options_with_temp_home(
     );
     (
         RunOptions {
-            state: StateRuntime::open(temp.path().join("state.db")).expect("state runtime"),
+            state: StateRuntime::open(temp.path().join("state.db"))
+                .await
+                .expect("state runtime"),
             cwd: cwd.clone(),
             snapshot_root: Some(temp.path().join("snapshots")),
             session: None,
@@ -210,7 +212,7 @@ pub(crate) async fn live_xiaomi_token_plan_read_tool() {
 #[ignore = "live provider opt-in"]
 pub(crate) async fn live_xiaomi_token_plan_model_fetch() {
     let temp = tempdir().expect("temp");
-    let (options, home, _cwd) = live_provider_options_with_temp_home(&temp);
+    let (options, home, _cwd) = live_provider_options_with_temp_home(&temp).await;
     if skip_if_xiaomi_catalog_unavailable(&options) {
         return;
     }

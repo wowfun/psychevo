@@ -1,6 +1,6 @@
 use psychevo_agent_core::now_ms;
-use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
+use sqlx::Row;
 
 use crate::error::{Error, Result};
 
@@ -10,13 +10,14 @@ use super::{
 };
 
 impl StateRuntime {
-    pub fn insert_gateway_turn_delivery(
+    pub async fn insert_gateway_turn_delivery(
         &self,
         input: GatewayTurnDeliveryInput<'_>,
     ) -> Result<GatewayTurnDeliveryRecord> {
         let now = now_ms();
-        self.write_retry(|conn| {
-            conn.execute(
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            sqlx::query(
                 r#"
                 INSERT INTO gateway_turn_deliveries (
                     turn_id, thread_id, runtime_ref, status, input_json,
@@ -24,44 +25,51 @@ impl StateRuntime {
                     delivery_confirmed_at_ms, terminal_at_ms
                 ) VALUES (?1, ?2, ?3, 'not_delivered', ?4, ?5, ?6, ?6, NULL, NULL)
                 "#,
-                params![
-                    input.turn_id,
-                    input.thread_id,
-                    input.runtime_ref,
-                    input.input_json,
-                    input.input_hash,
-                    now,
-                ],
-            )?;
+            )
+            .bind(input.turn_id)
+            .bind(input.thread_id)
+            .bind(input.runtime_ref)
+            .bind(input.input_json)
+            .bind(input.input_hash)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
             Ok(())
-        })?;
-        self.gateway_turn_delivery(input.turn_id)?.ok_or_else(|| {
-            Error::Message(format!(
-                "turn delivery not found after insert: {}",
-                input.turn_id
-            ))
         })
+        .await?;
+        self.gateway_turn_delivery(input.turn_id)
+            .await?
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "turn delivery not found after insert: {}",
+                    input.turn_id
+                ))
+            })
     }
 
-    pub fn mark_gateway_turn_delivery_unknown(&self, turn_id: &str) -> Result<bool> {
+    pub async fn mark_gateway_turn_delivery_unknown(&self, turn_id: &str) -> Result<bool> {
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
+        self.delivery_update(
+            sqlx::query(
                 r#"
                 UPDATE gateway_turn_deliveries
                 SET status = 'unknown', updated_at_ms = ?2
                 WHERE turn_id = ?1 AND status = 'not_delivered'
                 "#,
-                params![turn_id, now],
             )
-        })?;
-        Ok(changed > 0)
+            .bind(turn_id)
+            .bind(now),
+        )
+        .await
     }
 
-    pub fn confirm_gateway_turn_delivery(&self, turn_id: &str) -> Result<bool> {
+    pub async fn confirm_gateway_turn_delivery(&self, turn_id: &str) -> Result<bool> {
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            let changed = conn.execute(
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let changed = sqlx::query(
                 r#"
                 UPDATE gateway_turn_deliveries
                 SET status = 'delivered', input_json = NULL,
@@ -69,20 +77,27 @@ impl StateRuntime {
                     updated_at_ms = ?2
                 WHERE turn_id = ?1 AND status IN ('not_delivered', 'unknown', 'delivered')
                 "#,
-                params![turn_id, now],
-            )?;
+            )
+            .bind(turn_id)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
             if changed > 0 {
-                scrub_gateway_activity_turn_input(conn, turn_id, now)?;
+                scrub_gateway_activity_turn_input(&mut tx, turn_id, now).await?;
             }
-            Ok(changed)
-        })?;
-        Ok(changed > 0)
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(changed > 0)
+        })
+        .await
     }
 
-    pub fn finish_gateway_turn_delivery(&self, turn_id: &str) -> Result<bool> {
+    pub async fn finish_gateway_turn_delivery(&self, turn_id: &str) -> Result<bool> {
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            let changed = conn.execute(
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let changed = sqlx::query(
                 r#"
                 UPDATE gateway_turn_deliveries
                 SET status = 'terminal', input_json = NULL,
@@ -90,24 +105,31 @@ impl StateRuntime {
                     updated_at_ms = ?2
                 WHERE turn_id = ?1 AND status != 'unknown'
                 "#,
-                params![turn_id, now],
-            )?;
+            )
+            .bind(turn_id)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
             if changed > 0 {
-                scrub_gateway_activity_turn_input(conn, turn_id, now)?;
+                scrub_gateway_activity_turn_input(&mut tx, turn_id, now).await?;
             }
-            Ok(changed)
-        })?;
-        Ok(changed > 0)
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(changed > 0)
+        })
+        .await
     }
 
-    pub fn unknown_gateway_turn_deliveries_for_thread(
+    pub async fn unknown_gateway_turn_deliveries_for_thread(
         &self,
         thread_id: &str,
         exclude_turn_id: &str,
     ) -> Result<Vec<GatewayTurnDeliveryRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut statement = conn.prepare(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
             SELECT turn_id, thread_id, runtime_ref, status, input_json,
                    input_hash, created_at_ms, updated_at_ms,
                    delivery_confirmed_at_ms, terminal_at_ms
@@ -116,16 +138,16 @@ impl StateRuntime {
             ORDER BY created_at_ms ASC, turn_id ASC
             LIMIT 2
             "#,
-        )?;
-        let rows = statement.query_map(
-            params![thread_id, exclude_turn_id],
-            gateway_turn_delivery_from_row,
-        )?;
-        let mut deliveries = Vec::new();
-        for row in rows {
-            deliveries.push(row?);
-        }
-        Ok(deliveries)
+            )
+            .bind(thread_id)
+            .bind(exclude_turn_id)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| gateway_turn_delivery_from_row(&row))
+                .collect()
+        })
+        .await
     }
 
     /// Atomically resolves delivery ambiguity after Agent-owned history proves
@@ -133,7 +155,7 @@ impl StateRuntime {
     /// distinct transition from `confirm_gateway_turn_delivery`: only replay
     /// reconciliation may move `unknown` directly to `terminal` and scrub the
     /// retained recovery input.
-    pub fn reconcile_unknown_gateway_turn_delivery(
+    pub async fn reconcile_unknown_gateway_turn_delivery(
         &self,
         turn_id: &str,
         thread_id: &str,
@@ -141,8 +163,9 @@ impl StateRuntime {
     ) -> Result<bool> {
         let now = now_ms();
         let metadata_json = metadata.map(serde_json::to_string).transpose()?;
-        self.write_retry(|conn| {
-            let changed = conn.execute(
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let changed = sqlx::query(
                 r#"
                 UPDATE gateway_turn_deliveries
                 SET status = 'terminal', input_json = NULL,
@@ -151,13 +174,18 @@ impl StateRuntime {
                     updated_at_ms = ?3
                 WHERE turn_id = ?1 AND thread_id = ?2 AND status = 'unknown'
                 "#,
-                params![turn_id, thread_id, now],
-            )?;
+            )
+            .bind(turn_id)
+            .bind(thread_id)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
             if changed == 0 {
                 return Ok(false);
             }
-            scrub_gateway_activity_turn_input(conn, turn_id, now)?;
-            conn.execute(
+            scrub_gateway_activity_turn_input(&mut tx, turn_id, now).await?;
+            sqlx::query(
                 r#"
                 INSERT INTO gateway_turn_terminals (
                     turn_id, thread_id, status, outcome, error_message,
@@ -171,39 +199,52 @@ impl StateRuntime {
                     completed_at_ms = excluded.completed_at_ms,
                     metadata_json = excluded.metadata_json
                 "#,
-                params![turn_id, thread_id, now, metadata_json],
-            )?;
+            )
+            .bind(turn_id)
+            .bind(thread_id)
+            .bind(now)
+            .bind(metadata_json)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
             Ok(true)
         })
+        .await
     }
 
-    pub fn gateway_turn_delivery(
+    pub async fn gateway_turn_delivery(
         &self,
         turn_id: &str,
     ) -> Result<Option<GatewayTurnDeliveryRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        conn.query_row(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
             SELECT turn_id, thread_id, runtime_ref, status, input_json,
                    input_hash, created_at_ms, updated_at_ms,
                    delivery_confirmed_at_ms, terminal_at_ms
             FROM gateway_turn_deliveries
             WHERE turn_id = ?1
             "#,
-            params![turn_id],
-            gateway_turn_delivery_from_row,
-        )
-        .optional()
-        .map_err(Into::into)
+            )
+            .bind(turn_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| gateway_turn_delivery_from_row(&row))
+            .transpose()
+        })
+        .await
     }
 
-    pub fn upsert_gateway_channel_outbox(
+    pub async fn upsert_gateway_channel_outbox(
         &self,
         input: GatewayChannelOutboxInput<'_>,
     ) -> Result<GatewayChannelOutboxRecord> {
         let now = now_ms();
-        self.write_retry(|conn| {
-            conn.execute(
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            sqlx::query(
                 r#"
                 INSERT INTO gateway_channel_outbox (
                     delivery_id, thread_id, turn_id, connection_id, source_key,
@@ -218,20 +259,24 @@ impl StateRuntime {
                     payload_hash = excluded.payload_hash,
                     updated_at_ms = excluded.updated_at_ms
                 "#,
-                params![
-                    input.delivery_id,
-                    input.thread_id,
-                    input.turn_id,
-                    input.connection_id,
-                    input.source_key,
-                    input.payload_text,
-                    input.payload_hash,
-                    now,
-                ],
-            )?;
+            )
+            .bind(input.delivery_id)
+            .bind(input.thread_id)
+            .bind(input.turn_id)
+            .bind(input.connection_id)
+            .bind(input.source_key)
+            .bind(input.payload_text)
+            .bind(input.payload_hash)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
             Ok(())
-        })?;
-        self.gateway_channel_outbox(input.delivery_id)?
+        })
+        .await?;
+        self.gateway_channel_outbox(input.delivery_id)
+            .await?
             .ok_or_else(|| {
                 Error::Message(format!(
                     "channel outbox row not found after upsert: {}",
@@ -240,10 +285,10 @@ impl StateRuntime {
             })
     }
 
-    pub fn acknowledge_gateway_channel_outbox(&self, delivery_id: &str) -> Result<bool> {
+    pub async fn acknowledge_gateway_channel_outbox(&self, delivery_id: &str) -> Result<bool> {
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
+        self.delivery_update(
+            sqlx::query(
                 r#"
                 UPDATE gateway_channel_outbox
                 SET status = 'acknowledged', payload_text = NULL,
@@ -251,54 +296,61 @@ impl StateRuntime {
                     updated_at_ms = ?2
                 WHERE delivery_id = ?1 AND status != 'acknowledged'
                 "#,
-                params![delivery_id, now],
             )
-        })?;
-        Ok(changed > 0)
+            .bind(delivery_id)
+            .bind(now),
+        )
+        .await
     }
 
-    pub fn fail_gateway_channel_outbox(&self, delivery_id: &str) -> Result<bool> {
+    pub async fn fail_gateway_channel_outbox(&self, delivery_id: &str) -> Result<bool> {
         let now = now_ms();
-        let changed = self.write_retry(|conn| {
-            conn.execute(
+        self.delivery_update(
+            sqlx::query(
                 r#"
                 UPDATE gateway_channel_outbox
                 SET status = 'failed', updated_at_ms = ?2
                 WHERE delivery_id = ?1 AND status = 'pending'
                 "#,
-                params![delivery_id, now],
             )
-        })?;
-        Ok(changed > 0)
+            .bind(delivery_id)
+            .bind(now),
+        )
+        .await
     }
 
-    pub fn gateway_channel_outbox(
+    pub async fn gateway_channel_outbox(
         &self,
         delivery_id: &str,
     ) -> Result<Option<GatewayChannelOutboxRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        conn.query_row(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            sqlx::query(
+                r#"
             SELECT delivery_id, thread_id, turn_id, connection_id, source_key,
                    status, payload_text, payload_hash, created_at_ms,
                    updated_at_ms, acknowledged_at_ms
             FROM gateway_channel_outbox
             WHERE delivery_id = ?1
             "#,
-            params![delivery_id],
-            gateway_channel_outbox_record,
-        )
-        .optional()
-        .map_err(Into::into)
+            )
+            .bind(delivery_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .map(|row| gateway_channel_outbox_record(&row))
+            .transpose()
+        })
+        .await
     }
 
-    pub fn retryable_gateway_channel_outbox(
+    pub async fn retryable_gateway_channel_outbox(
         &self,
         connection_id: &str,
     ) -> Result<Vec<GatewayChannelOutboxRecord>> {
-        let conn = self.inner.conn.lock().expect("sqlite lock poisoned");
-        let mut statement = conn.prepare(
-            r#"
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
             SELECT delivery_id, thread_id, turn_id, connection_id, source_key,
                    status, payload_text, payload_hash, created_at_ms,
                    updated_at_ms, acknowledged_at_ms
@@ -309,55 +361,73 @@ impl StateRuntime {
             ORDER BY created_at_ms ASC, delivery_id ASC
             LIMIT 32
             "#,
-        )?;
-        statement
-            .query_map(params![connection_id], gateway_channel_outbox_record)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+            )
+            .bind(connection_id)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| gateway_channel_outbox_record(&row))
+                .collect()
+        })
+        .await
+    }
+
+    async fn delivery_update<'q>(
+        &self,
+        query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,
+    ) -> Result<bool> {
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let changed = query.execute(&mut *tx).await?.rows_affected();
+            tx.commit().await?;
+            self.finish_sqlx_write().await;
+            Ok(changed > 0)
+        })
+        .await
     }
 }
 
 fn gateway_turn_delivery_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<GatewayTurnDeliveryRecord> {
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<GatewayTurnDeliveryRecord> {
     Ok(GatewayTurnDeliveryRecord {
-        turn_id: row.get(0)?,
-        thread_id: row.get(1)?,
-        runtime_ref: row.get(2)?,
-        status: row.get(3)?,
-        input_json: row.get(4)?,
-        input_hash: row.get(5)?,
-        created_at_ms: row.get(6)?,
-        updated_at_ms: row.get(7)?,
-        delivery_confirmed_at_ms: row.get(8)?,
-        terminal_at_ms: row.get(9)?,
+        turn_id: row.try_get(0)?,
+        thread_id: row.try_get(1)?,
+        runtime_ref: row.try_get(2)?,
+        status: row.try_get(3)?,
+        input_json: row.try_get(4)?,
+        input_hash: row.try_get(5)?,
+        created_at_ms: row.try_get(6)?,
+        updated_at_ms: row.try_get(7)?,
+        delivery_confirmed_at_ms: row.try_get(8)?,
+        terminal_at_ms: row.try_get(9)?,
     })
 }
 
 fn gateway_channel_outbox_record(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<GatewayChannelOutboxRecord> {
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<GatewayChannelOutboxRecord> {
     Ok(GatewayChannelOutboxRecord {
-        delivery_id: row.get(0)?,
-        thread_id: row.get(1)?,
-        turn_id: row.get(2)?,
-        connection_id: row.get(3)?,
-        source_key: row.get(4)?,
-        status: row.get(5)?,
-        payload_text: row.get(6)?,
-        payload_hash: row.get(7)?,
-        created_at_ms: row.get(8)?,
-        updated_at_ms: row.get(9)?,
-        acknowledged_at_ms: row.get(10)?,
+        delivery_id: row.try_get(0)?,
+        thread_id: row.try_get(1)?,
+        turn_id: row.try_get(2)?,
+        connection_id: row.try_get(3)?,
+        source_key: row.try_get(4)?,
+        status: row.try_get(5)?,
+        payload_text: row.try_get(6)?,
+        payload_hash: row.try_get(7)?,
+        created_at_ms: row.try_get(8)?,
+        updated_at_ms: row.try_get(9)?,
+        acknowledged_at_ms: row.try_get(10)?,
     })
 }
 
-fn scrub_gateway_activity_turn_input(
-    conn: &Connection,
+async fn scrub_gateway_activity_turn_input(
+    tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
     turn_id: &str,
     updated_at_ms: i64,
-) -> rusqlite::Result<usize> {
-    conn.execute(
+) -> Result<u64> {
+    Ok(sqlx::query(
         r#"
         UPDATE gateway_activities
         SET intent_json = CASE
@@ -367,6 +437,10 @@ fn scrub_gateway_activity_turn_input(
             updated_at_ms = ?2
         WHERE turn_id = ?1
         "#,
-        params![turn_id, updated_at_ms],
     )
+    .bind(turn_id)
+    .bind(updated_at_ms)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected())
 }

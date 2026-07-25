@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-fn voice_config_parses_documented_blocks() {
+#[tokio::test]
+async fn voice_config_parses_documented_blocks() {
     let config = crate::config::config_parse::parse_run_config(json!({
         "voice": {
             "asr": {
@@ -38,8 +38,8 @@ fn voice_config_parses_documented_blocks() {
     );
 }
 
-#[test]
-fn voice_config_rejects_raw_keys_and_invalid_formats() {
+#[tokio::test]
+async fn voice_config_rejects_raw_keys_and_invalid_formats() {
     let raw_key = crate::config::config_parse::parse_run_config(json!({
         "voice": {
             "asr": {
@@ -81,8 +81,8 @@ fn voice_config_rejects_raw_keys_and_invalid_formats() {
     );
 }
 
-#[test]
-fn fake_voice_provider_resolves_without_credentials() {
+#[tokio::test]
+async fn fake_voice_provider_resolves_without_credentials() {
     let temp = tempdir().expect("temp");
     fs::create_dir_all(home_dir(&temp)).expect("home");
     fs::write(
@@ -105,7 +105,7 @@ transport = "websocket"
 "#,
     )
     .expect("config");
-    let options = base_options(&temp);
+    let options = base_options(&temp).await;
 
     let asr = crate::config::resolve_voice_asr_config(&options, None, None, None).expect("asr");
     assert_eq!(asr.provider, "fake");

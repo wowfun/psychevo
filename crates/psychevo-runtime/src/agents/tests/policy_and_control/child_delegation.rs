@@ -72,20 +72,20 @@ impl GenerationProvider for ChildRequestCaptureProvider {
 #[tokio::test]
 pub(crate) async fn background_completion_records_mailbox_event_without_parent_user_message() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let child = store
         .create_child_session_with_metadata(&parent, tmp.path(), "agent", "model", "provider", None)
-        .expect("child");
+        .await.expect("child");
     let record = test_agent_run_record(parent.clone(), Some(child));
 
     append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
-        .expect("mailbox event");
+        .await.expect("mailbox event");
 
-    assert!(store.load_messages(&parent).expect("messages").is_empty());
-    let events = store.load_agent_mailbox_events(&parent).expect("events");
+    assert!(store.load_messages(&parent).await.expect("messages").is_empty());
+    let events = store.load_agent_mailbox_events(&parent).await.expect("events");
     assert_eq!(events.len(), 1);
     assert!(events[0].content_text.contains("mailbox final"));
     assert!(!events[0].content_text.contains("agent_id"));
@@ -111,13 +111,13 @@ pub(crate) async fn background_completion_records_mailbox_event_without_parent_u
 #[tokio::test]
 pub(crate) async fn wait_agent_mailbox_returns_status_without_final_answer() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let record = test_agent_run_record(parent.clone(), None);
     append_parent_agent_mailbox_event(&store, &parent, &record, "normal", "mailbox final")
-        .expect("mailbox event");
+        .await.expect("mailbox event");
 
     let value = wait_agent_mailbox(&parent, Duration::from_millis(0), &store)
         .await
@@ -129,20 +129,20 @@ pub(crate) async fn wait_agent_mailbox_returns_status_without_final_answer() {
 
     let empty_parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("empty parent");
+        .await.expect("empty parent");
     let value = wait_agent_mailbox(&empty_parent, Duration::from_millis(0), &store)
         .await
         .expect("timeout");
     assert_eq!(value["timed_out"], true);
 }
 
-#[test]
-pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
+#[tokio::test]
+pub(crate) async fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite")).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "parent-model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let child = store
         .create_child_session_with_metadata(
             &parent,
@@ -152,7 +152,7 @@ pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
             "provider",
             None,
         )
-        .expect("child");
+        .await.expect("child");
     store
         .append_message_with_metrics(
             &child,
@@ -179,7 +179,7 @@ pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
             })),
             None,
         )
-        .expect("assistant tool call");
+        .await.expect("assistant tool call");
     store
         .append_message_with_metrics(
             &child,
@@ -200,14 +200,14 @@ pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
             })),
             None,
         )
-        .expect("assistant final");
+        .await.expect("assistant final");
 
     let id = "agent-summary-1".to_string();
     let mut record = test_agent_run_record(parent, Some(child));
     record.id = id.clone();
     record.task_name = Some(default_task_name("worker", &id));
     record.task = "  First line   with spacing  \nsecond line".to_string();
-    let value = subagent_summary_value(Some(&store), &record, false);
+    let value = subagent_summary_value(Some(&store), &record, false).await;
 
     assert!(value.get("agent_id").is_none());
     assert_eq!(value["agent_name"], "worker");
@@ -229,10 +229,10 @@ pub(crate) fn subagent_summary_uses_prompt_task_and_direct_child_tokens() {
 pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -288,10 +288,10 @@ pub(crate) async fn foreground_agent_tool_result_uses_compact_model_summary() {
 pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
     fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
@@ -385,7 +385,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
     let child_session = output.json["child_session_id"]
         .as_str()
         .expect("child session");
-    let messages = store.load_messages(child_session).expect("messages");
+    let messages = store.load_messages(child_session).await.expect("messages");
     let tool_result = messages
         .iter()
         .find_map(|message| match message {
@@ -405,10 +405,10 @@ pub(crate) async fn child_agent_tool_calls_run_project_hooks() {
 pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
     fs::create_dir_all(cwd.join(".psychevo")).expect("project config dir");
@@ -493,7 +493,7 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
     let child_session = output.json["child_session_id"]
         .as_str()
         .expect("child session");
-    let messages = store.load_messages(child_session).expect("messages");
+    let messages = store.load_messages(child_session).await.expect("messages");
     let tool_result = messages
         .iter()
         .find_map(|message| match message {
@@ -511,10 +511,10 @@ pub(crate) async fn child_agent_tool_calls_run_project_permission_hooks() {
 pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
     let plugin_source_root = tmp.path().join("plugin-source");
@@ -660,10 +660,10 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
 pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extension_tools() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -722,10 +722,10 @@ pub(crate) async fn child_agent_inherits_default_tool_search_for_deferred_extens
 pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -796,10 +796,10 @@ pub(crate) async fn child_agent_projects_runtime_time_before_the_current_prompt(
 pub(crate) async fn background_agent_tool_result_includes_child_session_identity() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -846,7 +846,7 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
     assert_eq!(output.json["session_id"].as_str(), Some(child_session));
     let edge = store
         .find_agent_edge(child_session)
-        .expect("edge")
+        .await.expect("edge")
         .expect("edge");
     assert_eq!(edge.parent_session_id, parent);
     assert_eq!(edge.child_session_id, child_session);
@@ -868,10 +868,10 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
 pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -914,7 +914,7 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
         .expect("child session");
     let edge = store
         .find_agent_edge(child_session)
-        .expect("edge")
+        .await.expect("edge")
         .expect("edge");
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
@@ -923,10 +923,10 @@ pub(crate) async fn foreground_child_agent_closes_edge_after_completion() {
 pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
         shadowed_agents: Vec::new(),
@@ -969,13 +969,13 @@ pub(crate) async fn parent_abort_interrupts_foreground_child_agent() {
         .expect("child session");
     let edge = store
         .find_agent_edge(child_session)
-        .expect("edge")
+        .await.expect("edge")
         .expect("edge");
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
 
-#[test]
-pub(crate) fn generated_backend_agents_share_the_config_owned_profile_mapping() {
+#[tokio::test]
+pub(crate) async fn generated_backend_agents_share_the_config_owned_profile_mapping() {
     assert_eq!(
         crate::config::generated_runtime_profile_id_for_backend("opencode"),
         "opencode"
@@ -994,10 +994,10 @@ pub(crate) fn generated_backend_agents_share_the_config_owned_profile_mapping() 
 pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
@@ -1044,12 +1044,12 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
         .expect("child session");
     let summary = store
         .session_summary(child_session)
-        .expect("summary")
+        .await.expect("summary")
         .expect("child summary");
     assert_eq!(summary.provider, "acp:opencode");
     let edge = store
         .find_agent_edge(child_session)
-        .expect("edge")
+        .await.expect("edge")
         .expect("edge");
     assert_eq!(edge.parent_session_id, parent);
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
@@ -1066,10 +1066,10 @@ pub(crate) async fn backend_backed_agent_tool_uses_external_delegate() {
 pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_provenance() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let mut agent = backend_backed_agent("opencode", "opencode");
     agent.skills = vec!["review-checklist".to_string()];
     agent
@@ -1135,26 +1135,28 @@ pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_prov
     .expect("delegate spawn");
 
     assert!(!output.is_error);
-    let calls = delegate.calls.lock().expect("delegate calls");
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].runtime_ref, "acp:opencode");
-    assert_eq!(calls[0].expected_runtime_profile_revision, Some(17));
-    assert_eq!(calls[0].backend_ref.as_deref(), Some("opencode"));
-    assert_eq!(calls[0].instructions.as_deref(), Some("Delegates."));
-    assert_eq!(calls[0].model.as_deref(), Some("test-model"));
-    assert_eq!(
-        calls[0].runtime_options,
-        BTreeMap::from([
-            ("mode".to_string(), "plan".to_string()),
-            ("model".to_string(), "test-model".to_string()),
-        ])
-    );
+    {
+        let calls = delegate.calls.lock().expect("delegate calls");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].runtime_ref, "acp:opencode");
+        assert_eq!(calls[0].expected_runtime_profile_revision, Some(17));
+        assert_eq!(calls[0].backend_ref.as_deref(), Some("opencode"));
+        assert_eq!(calls[0].instructions.as_deref(), Some("Delegates."));
+        assert_eq!(calls[0].model.as_deref(), Some("test-model"));
+        assert_eq!(
+            calls[0].runtime_options,
+            BTreeMap::from([
+                ("mode".to_string(), "plan".to_string()),
+                ("model".to_string(), "test-model".to_string()),
+            ])
+        );
+    }
     let child_session = output.json["child_session_id"]
         .as_str()
         .expect("child session");
     let metadata = store
         .find_agent_edge(child_session)
-        .expect("edge")
+        .await.expect("edge")
         .expect("edge")
         .metadata
         .expect("metadata");
@@ -1174,10 +1176,10 @@ pub(crate) async fn team_generated_acp_profile_forwards_runtime_options_and_prov
 pub(crate) async fn external_pairing_rejects_uninjectable_definition_contributions() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let mut agent = backend_backed_agent("opencode", "opencode");
     agent.skills = vec!["review-checklist".to_string()];
     let catalog = AgentCatalog {
@@ -1219,17 +1221,17 @@ pub(crate) async fn external_pairing_rejects_uninjectable_definition_contributio
     assert!(output.is_error);
     assert!(format!("{}", output.json).contains("skills contribution"));
     assert!(delegate.calls.lock().expect("delegate calls").is_empty());
-    assert!(store.list_agent_edges().expect("edges").is_empty());
+    assert!(store.list_agent_edges().await.expect("edges").is_empty());
 }
 
 #[tokio::test]
 pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
@@ -1282,7 +1284,7 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
         .expect("child session");
     let edge = store
         .find_agent_edge(child_session)
-        .expect("edge")
+        .await.expect("edge")
         .expect("edge");
     assert_eq!(edge.status, AgentEdgeStatus::Closed);
 }
@@ -1291,10 +1293,10 @@ pub(crate) async fn parent_abort_reaches_backend_backed_agent_delegate() {
 pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailable_error() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
-        .expect("parent");
+        .await.expect("parent");
     let catalog = AgentCatalog {
         agents: vec![backend_backed_agent("opencode", "opencode")],
         shadowed_agents: Vec::new(),
@@ -1337,5 +1339,5 @@ pub(crate) async fn backend_backed_agent_tool_without_delegate_returns_unavailab
             "error": "agent `opencode` is paired with an external Runtime Profile, but this execution context cannot delegate runtime-backed members"
         })
     );
-    assert!(store.list_agent_edges().expect("edges").is_empty());
+    assert!(store.list_agent_edges().await.expect("edges").is_empty());
 }

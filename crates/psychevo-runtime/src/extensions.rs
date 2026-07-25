@@ -702,10 +702,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mcp_handoff_resolves_named_secret_without_debug_leak_and_rejects_duplicates() {
+    #[tokio::test]
+    async fn mcp_handoff_resolves_named_secret_without_debug_leak_and_rejects_duplicates() {
         let temp = tempfile::tempdir().expect("temp");
-        let mut options = crate::tests::base_options(&temp);
+        let mut options = crate::tests::base_options(&temp).await;
         fs::create_dir_all(&options.cwd).expect("workspace");
         fs::write(
             crate::tests::home_dir(&temp).join("config.toml"),

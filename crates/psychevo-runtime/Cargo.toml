@@ -23,12 +23,12 @@ psychevo-ai = { path = "../psychevo-ai" }
 quick_html2md.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
-rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 similar.workspace = true
+sqlx.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tiktoken.workspace = true
@@ -40,6 +40,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+rusqlite.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock.workspace = true

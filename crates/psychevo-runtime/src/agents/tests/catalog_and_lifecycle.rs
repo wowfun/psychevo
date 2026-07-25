@@ -39,9 +39,10 @@ Coordinate.
     assert_eq!(visible, vec!["worker", "researcher"]);
 
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
+        .await
         .expect("parent");
     let (_tx, rx) = watch::channel(false);
     let err = spawn_subagent(
@@ -110,8 +111,8 @@ Coordinate.
     assert!(err.to_string().contains("not allowed"));
 }
 
-#[test]
-pub(crate) fn agent_team_project_discovery_resolves_members_and_limits_parallelism() {
+#[tokio::test]
+pub(crate) async fn agent_team_project_discovery_resolves_members_and_limits_parallelism() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("work");
@@ -185,8 +186,8 @@ Coordinate the delivery.
     );
 }
 
-#[test]
-pub(crate) fn agent_team_runtime_options_require_a_runtime_profile() {
+#[tokio::test]
+pub(crate) async fn agent_team_runtime_options_require_a_runtime_profile() {
     let agents = AgentCatalog {
         agents: vec![built_in_agent("general", "General agent", "Help.", None)],
         ..AgentCatalog::default()
@@ -218,8 +219,8 @@ Coordinate.
     );
 }
 
-#[test]
-pub(crate) fn skill_alias_controls_read_only_skill_surface() {
+#[tokio::test]
+pub(crate) async fn skill_alias_controls_read_only_skill_surface() {
     let tmp = TempDir::new().expect("tmp");
     let allow_path = tmp.path().join("skill-reader.md");
     fs::write(
@@ -259,8 +260,8 @@ pub(crate) fn skill_alias_controls_read_only_skill_surface() {
     assert!(!agent_policy_allows_skill_catalog(&deny));
 }
 
-#[test]
-pub(crate) fn unknown_tool_names_are_preserved_with_diagnostics() {
+#[tokio::test]
+pub(crate) async fn unknown_tool_names_are_preserved_with_diagnostics() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("external.md");
     fs::write(
@@ -287,8 +288,8 @@ pub(crate) fn unknown_tool_names_are_preserved_with_diagnostics() {
     );
 }
 
-#[test]
-pub(crate) fn recursively_discovers_agent_markdown_files() {
+#[tokio::test]
+pub(crate) async fn recursively_discovers_agent_markdown_files() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -310,8 +311,8 @@ pub(crate) fn recursively_discovers_agent_markdown_files() {
     assert!(catalog.agents.iter().any(|agent| agent.name == "reviewer"));
 }
 
-#[test]
-pub(crate) fn disabled_agent_is_listed_but_not_active_and_allows_fallback() {
+#[tokio::test]
+pub(crate) async fn disabled_agent_is_listed_but_not_active_and_allows_fallback() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -363,8 +364,8 @@ pub(crate) fn disabled_agent_is_listed_but_not_active_and_allows_fallback() {
     assert_eq!(value["agents"][0]["description"], "Profile review");
 }
 
-#[test]
-pub(crate) fn invalid_enabled_value_defaults_to_enabled_with_diagnostic() {
+#[tokio::test]
+pub(crate) async fn invalid_enabled_value_defaults_to_enabled_with_diagnostic() {
     let tmp = TempDir::new().expect("tmp");
     let path = tmp.path().join("review.md");
     fs::write(
@@ -384,8 +385,8 @@ pub(crate) fn invalid_enabled_value_defaults_to_enabled_with_diagnostic() {
     );
 }
 
-#[test]
-pub(crate) fn project_agent_wins_over_built_in() {
+#[tokio::test]
+pub(crate) async fn project_agent_wins_over_built_in() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -411,8 +412,8 @@ pub(crate) fn project_agent_wins_over_built_in() {
     assert_eq!(general.source, AgentSource::Project);
 }
 
-#[test]
-pub(crate) fn agent_source_display_label_groups_raw_sources() {
+#[tokio::test]
+pub(crate) async fn agent_source_display_label_groups_raw_sources() {
     for source in ["project", "agents_project", "claude_project"] {
         assert_eq!(agent_source_display_label(Some(source)), Some("Project"));
     }
@@ -433,8 +434,8 @@ pub(crate) fn agent_source_display_label_groups_raw_sources() {
     assert_eq!(agent_source_display_label(None), None);
 }
 
-#[test]
-pub(crate) fn agents_compatible_directories_follow_proximity_and_source_precedence() {
+#[tokio::test]
+pub(crate) async fn agents_compatible_directories_follow_proximity_and_source_precedence() {
     let tmp = TempDir::new().expect("tmp");
     let profile_home = tmp.path().join("profile");
     let user_home = tmp.path().join("user");
@@ -541,8 +542,8 @@ pub(crate) fn agents_compatible_directories_follow_proximity_and_source_preceden
     assert_eq!(user["source_label"], "User");
 }
 
-#[test]
-pub(crate) fn backend_config_generates_peer_agent_definition() {
+#[tokio::test]
+pub(crate) async fn backend_config_generates_peer_agent_definition() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -602,8 +603,8 @@ command = "minimal-agent"
     assert_eq!(value["agents"][0]["source_label"], "User");
 }
 
-#[test]
-pub(crate) fn markdown_agent_shadows_generated_backend_agent() {
+#[tokio::test]
+pub(crate) async fn markdown_agent_shadows_generated_backend_agent() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -655,8 +656,8 @@ Use project-specific review instructions.
     assert_eq!(shadowed.source, AgentSource::Generated);
 }
 
-#[test]
-pub(crate) fn command_bearing_markdown_agent_surfaces_catalog_diagnostic() {
+#[tokio::test]
+pub(crate) async fn command_bearing_markdown_agent_surfaces_catalog_diagnostic() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -689,8 +690,8 @@ Invalid.
     );
 }
 
-#[test]
-pub(crate) fn selected_agent_instruction_includes_description_and_body() {
+#[tokio::test]
+pub(crate) async fn selected_agent_instruction_includes_description_and_body() {
     let agent = built_in_agent(
         "translate",
         "Detect the source language automatically.",
@@ -708,8 +709,8 @@ pub(crate) fn selected_agent_instruction_includes_description_and_body() {
     assert!(child.contains("Purpose:\nDetect the source language automatically."));
 }
 
-#[test]
-pub(crate) fn duplicate_agents_are_available_as_shadowed_definitions() {
+#[tokio::test]
+pub(crate) async fn duplicate_agents_are_available_as_shadowed_definitions() {
     let tmp = TempDir::new().expect("tmp");
     let home = tmp.path().join("home");
     let cwd = tmp.path().join("repo");
@@ -755,8 +756,8 @@ pub(crate) fn duplicate_agents_are_available_as_shadowed_definitions() {
     );
 }
 
-#[test]
-pub(crate) fn spawn_agent_task_name_validation_is_strict() {
+#[tokio::test]
+pub(crate) async fn spawn_agent_task_name_validation_is_strict() {
     for invalid in ["", "root", ".", "..", "zh-to-en", "中译英", "two words"] {
         let err = validate_task_name(invalid).expect_err("invalid task name");
         assert!(
@@ -767,13 +768,14 @@ pub(crate) fn spawn_agent_task_name_validation_is_strict() {
     validate_task_name("translate_zh_to_en").expect("valid task name");
 }
 
-#[test]
-pub(crate) fn agent_tool_schema_omits_name_argument() {
+#[tokio::test]
+pub(crate) async fn agent_tool_schema_omits_name_argument() {
     let tmp = TempDir::new().expect("tmp");
     let db_path = tmp.path().join("state.sqlite");
-    let store = StateRuntime::open(&db_path).expect("store");
+    let store = StateRuntime::open(&db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(tmp.path(), "test", "model", "provider", None)
+        .await
         .expect("parent");
     let context = test_agent_tool_context(
         &tmp,
@@ -794,8 +796,8 @@ pub(crate) fn agent_tool_schema_omits_name_argument() {
     assert!(schema.pointer("/properties/task_name").is_some());
 }
 
-#[test]
-pub(crate) fn required_agent_mention_supplies_omitted_agent_type() {
+#[tokio::test]
+pub(crate) async fn required_agent_mention_supplies_omitted_agent_type() {
     let args = SpawnAgentArgs {
         agent_type: None,
         message: "translate this".to_string(),
@@ -826,8 +828,8 @@ pub(crate) fn required_agent_mention_supplies_omitted_agent_type() {
     assert!(err.to_string().contains("multiple agents"));
 }
 
-#[test]
-pub(crate) fn max_spawn_depth_defaults_to_leaf_and_decrements() {
+#[tokio::test]
+pub(crate) async fn max_spawn_depth_defaults_to_leaf_and_decrements() {
     assert_eq!(resolved_child_spawn_depth_remaining(None, 0, None), 0);
     assert_eq!(resolved_child_spawn_depth_remaining(None, 1, None), 1);
     assert_eq!(resolved_child_spawn_depth_remaining(None, 0, Some(1)), 1);
@@ -843,8 +845,8 @@ pub(crate) fn max_spawn_depth_defaults_to_leaf_and_decrements() {
     );
 }
 
-#[test]
-pub(crate) fn pause_new_spawns_state_is_explicit() {
+#[tokio::test]
+pub(crate) async fn pause_new_spawns_state_is_explicit() {
     set_agent_spawn_paused(false);
     assert!(!agent_spawn_paused());
     let previous = set_agent_spawn_paused(true);
@@ -853,12 +855,15 @@ pub(crate) fn pause_new_spawns_state_is_explicit() {
     set_agent_spawn_paused(false);
 }
 
-#[test]
-pub(crate) fn child_session_summary_uses_latest_assistant_usage_tokens() {
+#[tokio::test]
+pub(crate) async fn child_session_summary_uses_latest_assistant_usage_tokens() {
     let tmp = TempDir::new().expect("tmp");
-    let store = StateRuntime::open(tmp.path().join("state.sqlite")).expect("store");
+    let store = StateRuntime::open(tmp.path().join("state.sqlite"))
+        .await
+        .expect("store");
     let session = store
         .create_session_with_metadata(tmp.path(), "agent", "mock-model", "mock", None)
+        .await
         .expect("session");
     for (text, total) in [("first", 10), ("latest", 25)] {
         store
@@ -877,20 +882,22 @@ pub(crate) fn child_session_summary_uses_latest_assistant_usage_tokens() {
                 Some(json!({"total_tokens": total})),
                 None,
             )
+            .await
             .expect("assistant message");
     }
     let summary = store
         .session_summary(&session)
+        .await
         .expect("summary")
         .expect("session summary");
-    let value = agent_child_session_summary_value(&store, &summary);
+    let value = agent_child_session_summary_value(&store, &summary).await;
 
     assert_eq!(value["latest_total_tokens"], 25);
     assert_eq!(value["latest_usage"]["total_tokens"], 25);
 }
 
-#[test]
-pub(crate) fn stop_agent_with_grace_marks_live_run_interrupted() {
+#[tokio::test]
+pub(crate) async fn stop_agent_with_grace_marks_live_run_interrupted() {
     let id = format!("test-stop-{}-{:?}", now_ms(), std::thread::current().id());
     let (control, _receivers) = ControlHandle::new();
     {
@@ -927,6 +934,7 @@ pub(crate) fn stop_agent_with_grace_marks_live_run_interrupted() {
     }
 
     let previous = stop_agent_id_with_grace(&id, None, Duration::ZERO)
+        .await
         .expect("stop")
         .expect("previous record");
     assert_eq!(previous.status, AgentRunStatus::Running);
@@ -941,8 +949,8 @@ pub(crate) fn stop_agent_with_grace_marks_live_run_interrupted() {
     assert!(record.ended_at_ms.is_some());
 }
 
-#[test]
-pub(crate) fn pre_tool_hook_exit_two_blocks_with_stderr() {
+#[tokio::test]
+pub(crate) async fn pre_tool_hook_exit_two_blocks_with_stderr() {
     let tmp = TempDir::new().expect("tmp");
     let hooks = json!({
         "PreToolUse": ["cat >/dev/null; echo blocked >&2; exit 2"]
@@ -956,8 +964,8 @@ pub(crate) fn pre_tool_hook_exit_two_blocks_with_stderr() {
     assert_eq!(blocked.as_deref(), Some("blocked"));
 }
 
-#[test]
-pub(crate) fn mcp_server_scope_filters_canonical_mcp_tools() {
+#[tokio::test]
+pub(crate) async fn mcp_server_scope_filters_canonical_mcp_tools() {
     let agent = built_in_agent("mcp-test", "MCP test", "Test", None);
     let mut agent = agent;
     agent.tool_policy.mcp_servers = ["repo".to_string()].into_iter().collect();

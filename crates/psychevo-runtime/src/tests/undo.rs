@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
+#[tokio::test]
+pub(crate) async fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
@@ -19,9 +19,10 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     let file = cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
 
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let snapshots = SnapshotStore::new(temp.path().join("snapshots"), cwd.clone());
     let before_first = snapshots
@@ -36,10 +37,12 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
             &user_message("first prompt", 1),
             Some(before_first),
         )
+        .await
         .expect("user first");
     fs::write(&file, "after first\n").expect("after first");
     store
         .append_message(&session_id, &assistant_message("first answer", 2))
+        .await
         .expect("assistant first");
     let before_second = snapshots
         .track()
@@ -51,57 +54,63 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
             &user_message("second prompt", 3),
             Some(before_second),
         )
+        .await
         .expect("user second");
     fs::write(&file, "after second\n").expect("after second");
     store
         .append_message(&session_id, &assistant_message("second answer", 4))
+        .await
         .expect("assistant second");
 
     let options = SessionUndoOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         cwd: cwd.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     };
-    let undo = undo_session(options.clone()).expect("undo latest");
+    let undo = undo_session(options.clone()).await.expect("undo latest");
     assert_eq!(undo.prompt, "second prompt");
     assert_eq!(fs::read_to_string(&file).expect("file"), "after first\n");
     assert_eq!(
         store
             .load_tui_message_summaries(&session_id)
+            .await
             .expect("visible")
             .len(),
         2
     );
 
-    let undo = undo_session(options.clone()).expect("undo previous");
+    let undo = undo_session(options.clone()).await.expect("undo previous");
     assert_eq!(undo.prompt, "first prompt");
     assert_eq!(fs::read_to_string(&file).expect("file"), "base\n");
     assert_eq!(
         store
             .load_tui_message_summaries(&session_id)
+            .await
             .expect("visible")
             .len(),
         0
     );
 
-    let redo = redo_session(options.clone()).expect("redo first");
+    let redo = redo_session(options.clone()).await.expect("redo first");
     assert!(!redo.complete);
     assert_eq!(fs::read_to_string(&file).expect("file"), "after first\n");
     assert_eq!(
         store
             .load_tui_message_summaries(&session_id)
+            .await
             .expect("visible")
             .len(),
         2
     );
 
-    let redo = redo_session(options).expect("redo complete");
+    let redo = redo_session(options).await.expect("redo complete");
     assert!(redo.complete);
     assert_eq!(fs::read_to_string(&file).expect("file"), "after second\n");
     assert_eq!(
         store
             .load_tui_message_summaries(&session_id)
+            .await
             .expect("visible")
             .len(),
         4
@@ -109,13 +118,14 @@ pub(crate) fn undo_redo_restore_git_snapshots_and_visible_message_ranges() {
     assert!(
         store
             .session_revert_state(&session_id)
+            .await
             .expect("revert state")
             .is_none()
     );
 }
 
-#[test]
-pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
+#[tokio::test]
+pub(crate) async fn cleanup_reverted_messages_deletes_hidden_range() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
@@ -132,9 +142,10 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
     );
     let file = cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let snapshots = SnapshotStore::new(temp.path().join("snapshots"), cwd.clone());
     let before_first = snapshots
@@ -147,10 +158,12 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
             &user_message("first prompt", 1),
             Some(before_first),
         )
+        .await
         .expect("user first");
     fs::write(&file, "after first\n").expect("after first");
     store
         .append_message(&session_id, &assistant_message("first answer", 2))
+        .await
         .expect("assistant first");
     let before_second = snapshots
         .track()
@@ -162,85 +175,113 @@ pub(crate) fn cleanup_reverted_messages_deletes_hidden_range() {
             &user_message("second prompt", 3),
             Some(before_second),
         )
+        .await
         .expect("user second");
     fs::write(&file, "after second\n").expect("after second");
     store
         .append_message(&session_id, &assistant_message("second answer", 4))
+        .await
         .expect("assistant second");
 
     undo_session(SessionUndoOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         cwd,
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     })
+    .await
     .expect("undo");
 
     let removed = store
         .cleanup_reverted_messages(&session_id)
+        .await
         .expect("cleanup");
     assert_eq!(removed, 2);
-    assert_eq!(store.load_messages(&session_id).expect("messages").len(), 2);
+    assert_eq!(
+        store
+            .load_messages(&session_id)
+            .await
+            .expect("messages")
+            .len(),
+        2
+    );
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.message_count, 2);
     assert!(
         store
             .session_revert_state(&session_id)
+            .await
             .expect("revert state")
             .is_none()
     );
 }
 
-#[test]
-pub(crate) fn undo_redo_error_paths_do_not_mutate_revert_state() {
+#[tokio::test]
+pub(crate) async fn undo_redo_error_paths_do_not_mutate_revert_state() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
     fs::create_dir_all(&cwd).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let options = SessionUndoOptions {
-        state: StateRuntime::open(&db).expect("state runtime"),
+        state: StateRuntime::open(&db).await.expect("state runtime"),
         cwd: cwd.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     };
 
-    let err = undo_session(options.clone()).expect_err("nothing to undo");
+    let err = undo_session(options.clone())
+        .await
+        .expect_err("nothing to undo");
     assert!(err.to_string().contains("nothing to undo"));
-    let err = redo_session(options.clone()).expect_err("nothing to redo");
+    let err = redo_session(options.clone())
+        .await
+        .expect_err("nothing to redo");
     assert!(err.to_string().contains("nothing to redo"));
 
     store
         .append_message(&session_id, &user_message("no snapshot", 1))
+        .await
         .expect("user");
-    let err = undo_session(options).expect_err("missing snapshot");
+    let err = undo_session(options).await.expect_err("missing snapshot");
     assert!(err.to_string().contains("undo snapshot is unavailable"));
     assert!(
         store
             .session_revert_state(&session_id)
+            .await
             .expect("revert state")
             .is_none()
     );
-    assert_eq!(store.load_messages(&session_id).expect("messages").len(), 1);
+    assert_eq!(
+        store
+            .load_messages(&session_id)
+            .await
+            .expect("messages")
+            .len(),
+        1
+    );
 }
 
-#[test]
-pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_snapshots() {
+#[tokio::test]
+pub(crate) async fn conversation_edit_is_restart_safe_and_never_restores_workspace_snapshots() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
     fs::create_dir_all(&cwd).expect("cwd");
     let file = cwd.join("tracked.txt");
     fs::write(&file, "workspace stays current\n").expect("workspace");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     store
         .append_message_with_undo_snapshot(
@@ -248,6 +289,7 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
             &user_message("first prompt", 1),
             Some("unused-snapshot-one".to_string()),
         )
+        .await
         .expect("first");
     let boundary = 2;
     store
@@ -256,6 +298,7 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
             &user_message("second prompt", 2),
             Some("unused-snapshot-two".to_string()),
         )
+        .await
         .expect("second");
     let staged = SessionRevertState::conversation_edit(
         boundary,
@@ -266,6 +309,7 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
     );
     store
         .set_session_revert_state(&session_id, staged.clone())
+        .await
         .expect("stage conversation edit");
 
     assert_eq!(
@@ -275,31 +319,37 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
     assert_eq!(
         store
             .load_tui_message_summaries(&session_id)
+            .await
             .expect("visible")
             .len(),
         1
     );
     drop(store);
-    let restarted = StateRuntime::open(&db).expect("restart");
+    let restarted = StateRuntime::open(&db).await.expect("restart");
     assert_eq!(
-        restarted.session_revert_state(&session_id).expect("revert"),
+        restarted
+            .session_revert_state(&session_id)
+            .await
+            .expect("revert"),
         Some(staged)
     );
 
     let options = SessionUndoOptions {
-        state: StateRuntime::open(&db).expect("runtime"),
+        state: StateRuntime::open(&db).await.expect("runtime"),
         cwd: cwd.clone(),
         snapshot_root: temp.path().join("snapshots"),
         session_id: session_id.clone(),
     };
     assert!(
         undo_session(options.clone())
+            .await
             .expect_err("conversation edit blocks undo")
             .to_string()
             .contains("staged conversation edit")
     );
     assert!(
         redo_session(options)
+            .await
             .expect_err("conversation edit blocks redo")
             .to_string()
             .contains("staged conversation edit")
@@ -311,24 +361,29 @@ pub(crate) fn conversation_edit_is_restart_safe_and_never_restores_workspace_sna
     assert_eq!(
         restarted
             .cleanup_reverted_messages(&session_id)
+            .await
             .expect("accepted replacement cleanup"),
         1
     );
     assert_eq!(
         restarted
             .load_messages(&session_id)
+            .await
             .expect("messages")
             .len(),
         1
     );
 }
 
-#[test]
-pub(crate) fn legacy_revert_metadata_parses_as_workspace_undo() {
+#[tokio::test]
+pub(crate) async fn legacy_revert_metadata_parses_as_workspace_undo() {
     let temp = tempdir().expect("temp");
-    let store = StateRuntime::open(temp.path().join("state.db")).expect("store");
+    let store = StateRuntime::open(temp.path().join("state.db"))
+        .await
+        .expect("store");
     let session_id = store
         .create_session_with_metadata(temp.path(), "tui", "model", "provider", None)
+        .await
         .expect("session");
     store
         .set_session_metadata_field(
@@ -336,10 +391,12 @@ pub(crate) fn legacy_revert_metadata_parses_as_workspace_undo() {
             crate::store::SESSION_REVERT_METADATA_KEY,
             Some(json!({"start_seq": 7, "original_snapshot": "legacy-snapshot"})),
         )
+        .await
         .expect("legacy metadata");
     assert_eq!(
         store
             .session_revert_state(&session_id)
+            .await
             .expect("revert")
             .and_then(|revert| revert.original_snapshot().map(str::to_string)),
         Some("legacy-snapshot".to_string())

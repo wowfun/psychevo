@@ -3,17 +3,18 @@ use crate::snapshot::SnapshotStore;
 use crate::store::{SessionRevertKind, SessionRevertState};
 use crate::types::{SessionRedoResult, SessionUndoOptions, SessionUndoResult};
 
-pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
+pub async fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
     let store = options.state.clone();
     let target = store
-        .latest_undo_target(&options.session_id)?
+        .latest_undo_target(&options.session_id)
+        .await?
         .ok_or_else(|| Error::Message("nothing to undo".to_string()))?;
     let snapshot = target
         .snapshot
         .clone()
         .ok_or_else(|| Error::Message("undo snapshot is unavailable".to_string()))?;
     let snapshots = SnapshotStore::new(options.snapshot_root, options.cwd);
-    let original_snapshot = match store.session_revert_state(&options.session_id)? {
+    let original_snapshot = match store.session_revert_state(&options.session_id).await? {
         Some(SessionRevertState {
             kind: SessionRevertKind::WorkspaceUndo { original_snapshot },
             ..
@@ -31,11 +32,15 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
             .ok_or_else(|| Error::Message("Git snapshot is unavailable".to_string()))?,
     };
     snapshots.restore(&snapshot)?;
-    let reverted_messages = store.messages_from_count(&options.session_id, target.seq)?;
-    store.set_session_revert_state(
-        &options.session_id,
-        SessionRevertState::workspace_undo(target.seq, original_snapshot),
-    )?;
+    let reverted_messages = store
+        .messages_from_count(&options.session_id, target.seq)
+        .await?;
+    store
+        .set_session_revert_state(
+            &options.session_id,
+            SessionRevertState::workspace_undo(target.seq, original_snapshot),
+        )
+        .await?;
     Ok(SessionUndoResult {
         session_id: options.session_id,
         prompt: target.prompt,
@@ -43,27 +48,34 @@ pub fn undo_session(options: SessionUndoOptions) -> Result<SessionUndoResult> {
     })
 }
 
-pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
+pub async fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
     let store = options.state.clone();
     let revert = store
-        .session_revert_state(&options.session_id)?
+        .session_revert_state(&options.session_id)
+        .await?
         .ok_or_else(|| Error::Message("nothing to redo".to_string()))?;
     let original_snapshot = revert.original_snapshot().ok_or_else(|| {
         Error::Message("restore or run the staged conversation edit before using /redo".to_string())
     })?;
     let snapshots = SnapshotStore::new(options.snapshot_root, options.cwd);
-    if let Some(target) = store.next_redo_target(&options.session_id)? {
+    if let Some(target) = store.next_redo_target(&options.session_id).await? {
         let snapshot = target
             .snapshot
             .clone()
             .ok_or_else(|| Error::Message("redo snapshot is unavailable".to_string()))?;
         snapshots.restore(&snapshot)?;
-        let before = store.messages_from_count(&options.session_id, revert.start_seq)?;
-        let after = store.messages_from_count(&options.session_id, target.seq)?;
-        store.set_session_revert_state(
-            &options.session_id,
-            SessionRevertState::workspace_undo(target.seq, original_snapshot.to_string()),
-        )?;
+        let before = store
+            .messages_from_count(&options.session_id, revert.start_seq)
+            .await?;
+        let after = store
+            .messages_from_count(&options.session_id, target.seq)
+            .await?;
+        store
+            .set_session_revert_state(
+                &options.session_id,
+                SessionRevertState::workspace_undo(target.seq, original_snapshot.to_string()),
+            )
+            .await?;
         return Ok(SessionRedoResult {
             session_id: options.session_id,
             restored_messages: before.saturating_sub(after),
@@ -72,8 +84,12 @@ pub fn redo_session(options: SessionUndoOptions) -> Result<SessionRedoResult> {
     }
 
     snapshots.restore(original_snapshot)?;
-    let restored_messages = store.messages_from_count(&options.session_id, revert.start_seq)?;
-    store.clear_session_revert_state(&options.session_id)?;
+    let restored_messages = store
+        .messages_from_count(&options.session_id, revert.start_seq)
+        .await?;
+    store
+        .clear_session_revert_state(&options.session_id)
+        .await?;
     Ok(SessionRedoResult {
         session_id: options.session_id,
         restored_messages,

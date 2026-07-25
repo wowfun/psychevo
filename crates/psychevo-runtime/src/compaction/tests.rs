@@ -60,13 +60,13 @@ pub(crate) mod tests {
         }
     }
 
-    fn auto_check_options(
+    async fn auto_check_options(
         db_path: PathBuf,
         cwd: PathBuf,
         psychevo_home: PathBuf,
     ) -> AutoCompactionCheckOptions {
         AutoCompactionCheckOptions {
-            state: StateRuntime::open(&db_path).expect("state runtime"),
+            state: StateRuntime::open(&db_path).await.expect("state runtime"),
             cwd,
             session: "session".to_string(),
             config_path: None,
@@ -79,8 +79,8 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn auto_compaction_check_uses_configured_usage_threshold() {
+    #[tokio::test]
+    async fn auto_compaction_check_uses_configured_usage_threshold() {
         let temp = tempfile::tempdir().expect("temp");
         let home = temp.path().join("home");
         let cwd = temp.path().join("work");
@@ -94,7 +94,7 @@ reserve_tokens = 5000
 "#,
         )
         .expect("config");
-        let options = auto_check_options(home.join("state.db"), cwd, home);
+        let options = auto_check_options(home.join("state.db"), cwd, home).await;
 
         assert!(
             !auto_compaction_due_for_snapshot(&options, &snapshot(69_000, Some(100_000)))
@@ -110,8 +110,8 @@ reserve_tokens = 5000
         );
     }
 
-    #[test]
-    fn cutpoint_preserves_latest_user() {
+    #[tokio::test]
+    async fn cutpoint_preserves_latest_user() {
         let records = vec![
             record(1, user_text_message("old user")),
             record(2, user_text_message("old assistant context")),
@@ -121,8 +121,8 @@ reserve_tokens = 5000
         assert_eq!(prep.first_kept_session_seq, Some(3));
     }
 
-    #[test]
-    fn cutpoint_keeps_tool_call_parent_for_retained_tool_result() {
+    #[tokio::test]
+    async fn cutpoint_keeps_tool_call_parent_for_retained_tool_result() {
         let call = ToolCallBlock {
             id: "call-1".to_string(),
             name: "read".to_string(),
@@ -161,8 +161,8 @@ reserve_tokens = 5000
         assert_eq!(records[first].session_seq, 2);
     }
 
-    #[test]
-    fn repeated_compaction_summarizes_from_previous_kept_boundary() {
+    #[tokio::test]
+    async fn repeated_compaction_summarizes_from_previous_kept_boundary() {
         let records = vec![
             record(1, user_text_message("already summarized one")),
             record(2, user_text_message("already summarized two")),
@@ -183,21 +183,21 @@ reserve_tokens = 5000
         );
     }
 
-    #[test]
-    fn compacted_context_projection_uses_checkpoint_without_deleting_transcript() {
-        let store = StateRuntime::open(std::path::Path::new(":memory:")).expect("store");
+    #[tokio::test]
+    async fn compacted_context_projection_uses_checkpoint_without_deleting_transcript() {
+        let store = StateRuntime::open(std::path::Path::new(":memory:")).await.expect("store");
         let session = store
             .create_session(std::path::Path::new("."))
-            .expect("session");
+            .await.expect("session");
         store
             .append_message(&session, &user_text_message("old one"))
-            .expect("append");
+            .await.expect("append");
         store
             .append_message(&session, &user_text_message("old two"))
-            .expect("append");
+            .await.expect("append");
         store
             .append_message(&session, &user_text_message("latest task"))
-            .expect("append");
+            .await.expect("append");
         store
             .append_session_compaction(SessionCompactionInput {
                 session_id: session.clone(),
@@ -212,9 +212,9 @@ reserve_tokens = 5000
                 instructions: None,
                 metadata: None,
             })
-            .expect("checkpoint");
+            .await.expect("checkpoint");
 
-        let projected = load_projected_messages(&store, &session, None).expect("projected");
+        let projected = load_projected_messages(&store, &session, None).await.expect("projected");
         assert_eq!(projected.len(), 2);
         assert!(
             serde_json::to_string(&projected[0])
@@ -227,7 +227,7 @@ reserve_tokens = 5000
                 .contains("latest task")
         );
         assert_eq!(
-            store.load_message_records(&session).expect("records").len(),
+            store.load_message_records(&session).await.expect("records").len(),
             3
         );
     }

@@ -385,7 +385,7 @@ pub(crate) async fn write_stdin_rejects_session_owned_by_another_task() {
     );
 }
 
-pub(crate) fn configured_user_shell_context(
+pub(crate) async fn configured_user_shell_context(
     temp: &tempfile::TempDir,
     _cwd: &std::path::Path,
 ) -> UserShellContextOptions {
@@ -401,7 +401,9 @@ model = "lmstudio/test-model"
     )
     .expect("config");
     UserShellContextOptions {
-        state: StateRuntime::open(temp.path().join("state.db")).expect("state runtime"),
+        state: StateRuntime::open(temp.path().join("state.db"))
+            .await
+            .expect("state runtime"),
         session: None,
         continue_latest: true,
         source: "tui".to_string(),

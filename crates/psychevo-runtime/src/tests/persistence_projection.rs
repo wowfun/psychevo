@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-fn editable_input_envelope_is_versioned_and_separate_from_display_metadata() {
+#[tokio::test]
+async fn editable_input_envelope_is_versioned_and_separate_from_display_metadata() {
     let display = PromptDisplayMetadata {
         content_text: "describe image".to_string(),
         attachments: Vec::new(),
@@ -49,9 +49,10 @@ pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_mess
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -114,6 +115,7 @@ pub(crate) async fn persistence_sink_streams_elapsed_metadata_for_assistant_mess
     assert!(elapsed >= 1200);
     let summaries = store
         .load_tui_message_summaries(&session_id)
+        .await
         .expect("summaries");
     assert_eq!(
         summaries[0].metadata.as_ref().unwrap()["provider_response_id"],
@@ -136,9 +138,10 @@ pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_messag
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let sink = PersistenceSink {
         store: store.clone(),
@@ -187,6 +190,7 @@ pub(crate) async fn persistence_sink_persists_selected_agent_on_assistant_messag
 
     let summaries = store
         .load_tui_message_summaries(&session_id)
+        .await
         .expect("summaries");
     let metadata = summaries[0].metadata.as_ref().expect("metadata");
     assert_eq!(metadata["selected_agent"]["name"], "translate");
@@ -198,7 +202,7 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &cwd,
@@ -207,6 +211,7 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
             "provider",
             Some(json!({"provider_label": "Mock"})),
         )
+        .await
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -267,6 +272,7 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
 
     let metadata = store
         .session_metadata(&session_id)
+        .await
         .expect("metadata")
         .expect("metadata");
     assert_eq!(metadata["provider_label"], "Mock");
@@ -274,6 +280,7 @@ pub(crate) async fn persistence_sink_projects_and_persists_terminal_reason() {
     assert_eq!(metadata["terminal_reason"]["max_turns"], 128);
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("summary");
     assert_eq!(summary.end_reason.as_deref(), Some("failed"));
@@ -284,9 +291,10 @@ pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadat
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -346,6 +354,7 @@ pub(crate) async fn persistence_sink_persists_assistant_reasoning_effort_metadat
     }
     let summaries = store
         .load_tui_message_summaries(&session_id)
+        .await
         .expect("summaries");
     assert_eq!(
         summaries[0].metadata.as_ref().unwrap()["reasoning_effort"],
@@ -358,9 +367,10 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_for_stream = Arc::clone(&captured);
@@ -418,33 +428,35 @@ pub(crate) async fn persistence_sink_persists_tool_elapsed_metadata() {
     .await
     .expect("tool result");
 
-    let stream_events = captured.lock().expect("captured stream lock");
-    assert!(
-        stream_events.iter().any(|event| {
-            matches!(
-                event,
-                RunStreamEvent::Event(value)
-                    if value["type"] == "tool_execution_end"
-                        && value["elapsed_ms"] == 321
-            )
-        }),
-        "tool_execution_end should expose elapsed_ms"
-    );
-    assert!(
-        stream_events.iter().any(|event| {
-            matches!(
-                event,
-                RunStreamEvent::Event(value)
-                    if value["type"] == "message_end"
-                        && value["metadata"]["elapsed_ms"] == 321
-            )
-        }),
-        "tool_result message_end should expose elapsed metadata"
-    );
-    drop(stream_events);
+    {
+        let stream_events = captured.lock().expect("captured stream lock");
+        assert!(
+            stream_events.iter().any(|event| {
+                matches!(
+                    event,
+                    RunStreamEvent::Event(value)
+                        if value["type"] == "tool_execution_end"
+                            && value["elapsed_ms"] == 321
+                )
+            }),
+            "tool_execution_end should expose elapsed_ms"
+        );
+        assert!(
+            stream_events.iter().any(|event| {
+                matches!(
+                    event,
+                    RunStreamEvent::Event(value)
+                        if value["type"] == "message_end"
+                            && value["metadata"]["elapsed_ms"] == 321
+                )
+            }),
+            "tool_result message_end should expose elapsed metadata"
+        );
+    }
 
     let summaries = store
         .load_tui_message_summaries(&session_id)
+        .await
         .expect("summaries");
     assert_eq!(
         summaries[0].metadata.as_ref().unwrap()["elapsed_ms"]
@@ -459,9 +471,10 @@ pub(crate) async fn messages_preserve_assistant_content_order() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let sink = test_persistence_sink(store.clone(), session_id.clone());
 
@@ -497,7 +510,7 @@ pub(crate) async fn messages_preserve_assistant_content_order() {
     .await
     .expect("message end");
 
-    let messages = store.load_messages(&session_id).expect("messages");
+    let messages = store.load_messages(&session_id).await.expect("messages");
     let [
         Message::Assistant {
             content,
@@ -537,9 +550,10 @@ pub(crate) async fn messages_preserve_tool_call_and_tool_result_facts() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let sink = test_persistence_sink(store.clone(), session_id.clone());
 
@@ -581,7 +595,7 @@ pub(crate) async fn messages_preserve_tool_call_and_tool_result_facts() {
     .await
     .expect("tool result");
 
-    let messages = store.load_messages(&session_id).expect("messages");
+    let messages = store.load_messages(&session_id).await.expect("messages");
     let [
         Message::Assistant { content, .. },
         Message::ToolResult {
@@ -616,9 +630,10 @@ pub(crate) async fn messages_preserve_selected_skill_prompt_metadata() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let mut sink = test_persistence_sink(store.clone(), session_id.clone());
     sink.prompt_prefix_metadata = Some(json!({
@@ -637,6 +652,7 @@ pub(crate) async fn messages_preserve_selected_skill_prompt_metadata() {
 
     let summaries = store
         .load_tui_message_summaries(&session_id)
+        .await
         .expect("summaries");
     assert_eq!(summaries.len(), 1);
     assert_eq!(
@@ -654,9 +670,10 @@ pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
-    let store = StateRuntime::open(&db).expect("store");
+    let store = StateRuntime::open(&db).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     let sink = PersistenceSink {
         store: store.clone(),
@@ -707,9 +724,17 @@ pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     .await
     .expect("second prompt");
 
-    assert_eq!(store.load_messages(&session_id).expect("messages").len(), 2);
+    assert_eq!(
+        store
+            .load_messages(&session_id)
+            .await
+            .expect("messages")
+            .len(),
+        2
+    );
     let first = store
         .load_context_evidence(&session_id, 1)
+        .await
         .expect("first evidence");
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].source_name.as_deref(), Some("mode"));
@@ -723,13 +748,14 @@ pub(crate) async fn persistence_sink_persists_prompt_context_evidence_once() {
     assert!(
         store
             .load_context_evidence(&session_id, 2)
+            .await
             .expect("second evidence")
             .is_empty()
     );
 }
 
-#[test]
-pub(crate) fn json_projection_hides_reasoning_unless_included() {
+#[tokio::test]
+pub(crate) async fn json_projection_hides_reasoning_unless_included() {
     let message = Message::Assistant {
         content: vec![
             AssistantBlock::Reasoning {
