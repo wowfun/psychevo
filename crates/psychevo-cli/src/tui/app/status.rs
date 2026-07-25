@@ -1,7 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 impl TuiApp {
-    pub(crate) fn thread_turn_request(&self, prompt: String) -> ThreadTurnRequest {
+    pub(crate) fn thread_turn_request(
+        &self,
+        prompt: String,
+    ) -> (ThreadCallerContext, ThreadTurnIntent) {
         self.thread_turn_request_with_images(prompt, Vec::new())
     }
 
@@ -9,7 +12,7 @@ impl TuiApp {
         &self,
         prompt: String,
         image_inputs: Vec<ImageInput>,
-    ) -> ThreadTurnRequest {
+    ) -> (ThreadCallerContext, ThreadTurnIntent) {
         let mut input = Vec::with_capacity(1 + image_inputs.len());
         if !prompt.is_empty() {
             input.push(GatewayInputPart::Text { text: prompt });
@@ -26,22 +29,28 @@ impl TuiApp {
                     },
                 }),
         );
-        let mut request = ThreadTurnRequest::new(self.cwd.clone(), input);
-        request.thread_id = self.current_session.clone();
-        request.policy.snapshot_root = Some(self.home.join("snapshots"));
-        request.policy.continue_latest = self.current_session.is_none() && !self.force_new_once;
-        request.policy.config_path = self.config_path.clone();
-        request.policy.model = self.current_model.clone();
-        request.policy.reasoning_effort = self.current_variant.clone();
-        request.policy.mode = self.current_mode;
-        request.policy.permission_mode = Some(self.current_permission_mode);
-        request.policy.clarify_enabled = true;
-        request.policy.inherited_env = Some(self.env_map.clone());
-        request.policy.agent_ref = self.current_agent.clone();
-        request.policy.no_agents = self.no_agents;
-        request.policy.no_skills = self.no_skills;
-        request.policy.skill_inputs = self.skill_inputs.clone();
-        request
+        let mut caller = ThreadCallerContext::new(ThreadSurface::Tui, self.cwd.clone());
+        caller.runtime_source = "tui".to_string();
+        caller.continue_sources = TUI_CONTINUE_SESSION_SOURCES
+            .iter()
+            .map(|source| (*source).to_string())
+            .collect();
+        let mut intent = ThreadTurnIntent::new(input);
+        intent.thread_id = self.current_session.clone();
+        intent.policy.snapshot_root = Some(self.home.join("snapshots"));
+        intent.policy.continue_latest = self.current_session.is_none() && !self.force_new_once;
+        intent.policy.config_path = self.config_path.clone();
+        intent.policy.model = self.current_model.clone();
+        intent.policy.reasoning_effort = self.current_variant.clone();
+        intent.policy.mode = self.current_mode;
+        intent.policy.permission_mode = Some(self.current_permission_mode);
+        intent.policy.clarify_enabled = true;
+        intent.policy.inherited_env = Some(self.env_map.clone());
+        intent.policy.agent_ref = self.current_agent.clone();
+        intent.policy.no_agents = self.no_agents;
+        intent.policy.no_skills = self.no_skills;
+        intent.policy.skill_inputs = self.skill_inputs.clone();
+        (caller, intent)
     }
 
     pub(crate) fn run_options(&self, prompt: String) -> RunOptions {
@@ -114,8 +123,8 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn show_session_list(&self) -> Result<()> {
-        for line in self.session_list_lines()? {
+    pub(crate) async fn show_session_list(&self) -> Result<()> {
+        for line in self.session_list_lines().await? {
             println!("{line}");
         }
         Ok(())
@@ -153,8 +162,8 @@ impl TuiApp {
         Ok(lines.join("\n"))
     }
 
-    pub(crate) fn set_variant(&mut self, variant: String) -> Result<()> {
-        self.set_variant_no_print(variant.clone())?;
+    pub(crate) async fn set_variant(&mut self, variant: String) -> Result<()> {
+        self.set_variant_no_print(variant.clone()).await?;
         println!("{}", self.renderer.status(&format!("variant: {variant}")));
         Ok(())
     }
@@ -205,8 +214,8 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn rename_session(&mut self, title: String) -> Result<()> {
-        let title = self.rename_session_no_print(title)?;
+    pub(crate) async fn rename_session(&mut self, title: String) -> Result<()> {
+        let title = self.rename_session_no_print(title).await?;
         println!(
             "{}",
             self.renderer.status(&format!("session renamed: {title}"))
@@ -214,8 +223,8 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn undo_session_print(&mut self) -> Result<()> {
-        let result = undo_session(self.undo_options()?)?;
+    pub(crate) async fn undo_session_print(&mut self) -> Result<()> {
+        let result = undo_session(self.undo_options()?).await?;
         println!(
             "{}",
             self.renderer.status(&format!(
@@ -226,8 +235,8 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn redo_session_print(&mut self) -> Result<()> {
-        let result = redo_session(self.undo_options()?)?;
+    pub(crate) async fn redo_session_print(&mut self) -> Result<()> {
+        let result = redo_session(self.undo_options()?).await?;
         let suffix = if result.complete {
             "complete"
         } else {
@@ -269,8 +278,8 @@ impl TuiApp {
         self.status_lines().join("\n")
     }
 
-    pub(crate) fn session_list_lines(&self) -> Result<Vec<String>> {
-        let sessions = self.tui_sessions(SessionListView::Active)?;
+    pub(crate) async fn session_list_lines(&self) -> Result<Vec<String>> {
+        let sessions = self.tui_sessions(SessionListView::Active).await?;
         if sessions.is_empty() {
             return Ok(vec!["no sessions".to_string()]);
         }

@@ -64,11 +64,11 @@ impl TuiApp {
             }
             SlashCommand::Sessions => {
                 ui.bottom_panel = Some(BottomPanel::Sessions(
-                    self.session_selection_panel(SessionListView::Active)?,
+                    self.session_selection_panel(SessionListView::Active).await?,
                 ));
             }
             SlashCommand::Usage => {
-                ui.bottom_panel = Some(BottomPanel::Stats(self.stats_panel()?));
+                ui.bottom_panel = Some(BottomPanel::Stats(self.stats_panel().await?));
             }
             SlashCommand::Context => {
                 let format_options = ContextFormatOptions {
@@ -76,7 +76,7 @@ impl TuiApp {
                     bar_width: Some(fullscreen_context_bar_width(ui)),
                 };
                 let live = ui.last_context_snapshot.clone();
-                match self.context_status_snapshot(live.as_ref()) {
+                match self.context_status_snapshot(live.as_ref()).await {
                     Ok(snapshot) => {
                         self.last_context_snapshot = Some(snapshot.clone());
                         ui.last_context_snapshot = Some(snapshot.clone());
@@ -104,7 +104,7 @@ impl TuiApp {
                     );
                     return Ok(false);
                 }
-                match self.reload_context_for_current_session(ui) {
+                match self.reload_context_for_current_session(ui).await {
                     Ok(result) => {
                         let scheduled = self.start_side_cleanup_task();
                         let cleanup = if scheduled {
@@ -132,10 +132,11 @@ impl TuiApp {
                 ui.push_command_result(command_echo, None, RELOAD_CONTEXT_DEPRECATED_MESSAGE, true);
             }
             SlashCommand::Btw(prompt) => {
-                self.start_side_conversation(ui, prompt)?;
+                self.start_side_conversation(ui, prompt).await?;
             }
             SlashCommand::Steer(message) => {
-                self.submit_explicit_fullscreen_steer(ui, message, command_echo)?;
+                self.submit_explicit_fullscreen_steer(ui, message, command_echo)
+                    .await?;
             }
             SlashCommand::Queue(message) => {
                 self.submit_fullscreen_queue(ui, message)?;
@@ -149,7 +150,8 @@ impl TuiApp {
                     global,
                 )));
             }
-            SlashCommand::VariantSet(variant) => match self.set_variant_no_print(variant.clone()) {
+            SlashCommand::VariantSet(variant) => {
+                match self.set_variant_no_print(variant.clone()).await {
                 Ok(()) => {
                     ui.push_command_result(
                         command_echo,
@@ -162,7 +164,8 @@ impl TuiApp {
                 Err(err) => {
                     ui.push_command_result(command_echo, None, format!("error: {err:#}"), true);
                 }
-            },
+                }
+            }
             SlashCommand::ModeSet(mode) => {
                 self.set_mode_no_print(&mode)?;
                 ui.refresh_sidebar(self);
@@ -198,7 +201,7 @@ impl TuiApp {
             SlashCommand::Copy => {
                 self.copy_latest_answer_markdown(ui);
             }
-            SlashCommand::Export(options) => match self.write_tui_export(&options) {
+            SlashCommand::Export(options) => match self.write_tui_export(&options).await {
                 Ok(result) => ui.push_command_result(
                     command_echo,
                     None,
@@ -209,7 +212,7 @@ impl TuiApp {
                     ui.push_command_result(command_echo, None, format!("error: {err:#}"), true)
                 }
             },
-            SlashCommand::Share(options) => match self.write_tui_share(&options) {
+            SlashCommand::Share(options) => match self.write_tui_share(&options).await {
                 Ok(result) => ui.push_command_result(
                     command_echo,
                     None,
@@ -241,7 +244,7 @@ impl TuiApp {
                     }
                 }
             }
-            SlashCommand::Rename(title) => match self.rename_session_no_print(title) {
+            SlashCommand::Rename(title) => match self.rename_session_no_print(title).await {
                 Ok(title) => {
                     ui.push_command_result(
                         command_echo,
@@ -256,7 +259,7 @@ impl TuiApp {
                 }
             },
             SlashCommand::Undo => {
-                if self.request_current_session_interrupt(ui) {
+                if self.request_current_session_interrupt(ui).await {
                     ui.push_command_result(
                         command_echo,
                         None,
@@ -264,7 +267,7 @@ impl TuiApp {
                         true,
                     );
                 } else {
-                    match self.undo_session_no_print(ui) {
+                    match self.undo_session_no_print(ui).await {
                         Ok(message) => ui.push_command_result(command_echo, None, message, false),
                         Err(err) => ui.push_command_result(
                             command_echo,
@@ -276,7 +279,7 @@ impl TuiApp {
                 }
             }
             SlashCommand::Redo => {
-                if self.request_current_session_interrupt(ui) {
+                if self.request_current_session_interrupt(ui).await {
                     ui.push_command_result(
                         command_echo,
                         None,
@@ -284,7 +287,7 @@ impl TuiApp {
                         true,
                     );
                 } else {
-                    match self.redo_session_no_print(ui) {
+                    match self.redo_session_no_print(ui).await {
                         Ok(message) => ui.push_command_result(command_echo, None, message, false),
                         Err(err) => ui.push_command_result(
                             command_echo,
@@ -323,24 +326,26 @@ impl TuiApp {
                 );
             }
             SlashCommand::Agents => {
-                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
+                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel().await));
             }
             SlashCommand::Fork(prompt) => {
                 let text = fork_prompt_marker(&prompt);
-                self.submit_fullscreen_prompt(ui, text, Vec::new())?;
+                self.submit_fullscreen_prompt(ui, text, Vec::new()).await?;
             }
             SlashCommand::Mission { team, goal } => {
-                self.record_mission_metadata(team.as_deref(), &goal)?;
+                self.record_mission_metadata(team.as_deref(), &goal).await?;
                 let args = mission_command_args(team.as_deref(), &goal);
                 let text = mission_prompt_marker(&args).map_err(|message| anyhow!(message))?;
-                self.submit_fullscreen_prompt_with_display(ui, text, command_echo, Vec::new())?;
+                self.submit_fullscreen_prompt_with_display(ui, text, command_echo, Vec::new())
+                    .await?;
             }
             SlashCommand::Compact(instructions) => {
                 self.submit_fullscreen_compaction(ui, instructions, command_echo)?;
             }
             SlashCommand::SkillInvoke { name, args } => {
                 if let Some(text) = self.skill_or_bundle_marker(&name, &args) {
-                    self.submit_fullscreen_prompt_with_display(ui, text, command_echo, Vec::new())?;
+                    self.submit_fullscreen_prompt_with_display(ui, text, command_echo, Vec::new())
+                        .await?;
                 } else {
                     ui.push_command_result(
                         command_echo,

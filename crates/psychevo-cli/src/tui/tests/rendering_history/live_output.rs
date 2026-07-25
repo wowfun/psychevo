@@ -3,10 +3,10 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn transcript_auto_follow_tracks_wrapped_streaming_content() {
+#[tokio::test]
+pub(crate) async fn transcript_auto_follow_tracks_wrapped_streaming_content() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.last_transcript_width = 32;
     ui.last_transcript_height = 4;
@@ -64,10 +64,10 @@ pub(crate) fn transcript_auto_follow_tracks_wrapped_streaming_content() {
     assert_eq!(ui.scroll, ui.max_transcript_scroll());
 }
 
-#[test]
-pub(crate) fn yielded_exec_session_stays_active_and_merges_live_poll_output() {
+#[tokio::test]
+pub(crate) async fn yielded_exec_session_stays_active_and_merges_live_poll_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_stream_event(
@@ -190,10 +190,10 @@ pub(crate) fn yielded_exec_session_stays_active_and_merges_live_poll_output() {
     );
 }
 
-#[test]
-pub(crate) fn streaming_empty_write_stdin_poll_placeholder_is_hidden() {
+#[tokio::test]
+pub(crate) async fn streaming_empty_write_stdin_poll_placeholder_is_hidden() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "exec_command long fetch", "");
     row.tool_name = Some("exec_command".to_string());

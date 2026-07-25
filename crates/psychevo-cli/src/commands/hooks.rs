@@ -9,7 +9,7 @@ use crate::args::{HookKeyArgs, HooksArgs, HooksCommand, HooksListArgs};
 use crate::commands::common::base_run_options;
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
-pub(crate) fn run_hooks_command(args: HooksArgs) -> Result<ExitCode> {
+pub(crate) async fn run_hooks_command(args: HooksArgs) -> Result<ExitCode> {
     let Some(command) = args.command else {
         HooksArgs::command().print_help()?;
         println!();
@@ -21,7 +21,7 @@ pub(crate) fn run_hooks_command(args: HooksArgs) -> Result<ExitCode> {
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
-    let options = base_run_options(&env_map, &home, &cwd)?;
+    let options = base_run_options(&env_map, &home, &cwd).await?;
 
     match command {
         HooksCommand::List(args) => list_hooks(args, &options, &cwd)?,

@@ -40,7 +40,7 @@ impl TuiApp {
                     ui.clear_ephemeral_status();
                 }
                 if self.current_session.as_deref() == Some(session_id.as_str()) {
-                    self.refresh_current_session_title()?;
+                    self.refresh_current_session_title().await?;
                 }
             }
             Ok(Err(err)) => {
@@ -171,7 +171,7 @@ impl TuiApp {
                     }
                     ui.session_live_event_backlog.remove(&result.session_id);
                 }
-                self.refresh_current_session_title()?;
+                self.refresh_current_session_title().await?;
                 ui.refresh_sidebar(self);
                 changed = true;
             } else {
@@ -232,7 +232,7 @@ impl TuiApp {
                         if let Some(session_id) = result.session_id {
                             ui.session_live_event_backlog.remove(&session_id);
                             if self.current_session.as_deref() == Some(session_id.as_str()) {
-                                self.refresh_current_session_title()?;
+                                self.refresh_current_session_title().await?;
                                 self.clear_new_session_draft();
                             }
                         }

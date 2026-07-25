@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_messages() {
+#[tokio::test]
+pub(crate) async fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_messages() {
     let server = MockSseServer::start(vec![sse_text("combined final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -81,8 +81,8 @@ pub(crate) fn cli_run_keeps_agents_skill_and_prompt_as_separate_provider_message
     );
 }
 
-#[test]
-pub(crate) fn cli_run_warns_for_claude_memory_without_loading_it() {
+#[tokio::test]
+pub(crate) async fn cli_run_warns_for_claude_memory_without_loading_it() {
     let server = MockSseServer::start(vec![sse_text("claude final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -133,8 +133,8 @@ pub(crate) fn cli_run_warns_for_claude_memory_without_loading_it() {
     assert!(!user_contents(&server.request_json(0))[0].contains("Do not load this Claude memory."));
 }
 
-#[test]
-pub(crate) fn cli_run_default_writes_claude_warning_to_stderr_only() {
+#[tokio::test]
+pub(crate) async fn cli_run_default_writes_claude_warning_to_stderr_only() {
     let server = MockSseServer::start(vec![sse_text("default final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -161,8 +161,8 @@ pub(crate) fn cli_run_default_writes_claude_warning_to_stderr_only() {
     assert!(stderr.contains("suggestion: ln -s CLAUDE.local.md AGENTS.local.md"));
 }
 
-#[test]
-pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() {
+#[tokio::test]
+pub(crate) async fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() {
     let server = MockSseServer::start(vec![
         sse_reasoning_then_text("private chain", "visible final"),
         sse_text("Hidden run title"),
@@ -228,8 +228,8 @@ pub(crate) fn cli_run_json_hides_reasoning_by_default_and_debug_flag_emits_it() 
     assert!(shown_stdout.contains("debug final"));
 }
 
-#[test]
-pub(crate) fn cli_run_include_reasoning_requires_json_format() {
+#[tokio::test]
+pub(crate) async fn cli_run_include_reasoning_requires_json_format() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
@@ -248,8 +248,8 @@ pub(crate) fn cli_run_include_reasoning_requires_json_format() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--format json"));
 }
 
-#[test]
-pub(crate) fn cli_run_json_omits_metadata_only_message_updates() {
+#[tokio::test]
+pub(crate) async fn cli_run_json_omits_metadata_only_message_updates() {
     let server = MockSseServer::start(vec![sse_metadata_usage_then_text("metadata final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -289,8 +289,8 @@ pub(crate) fn cli_run_json_omits_metadata_only_message_updates() {
     assert_eq!(empty_updates, 0);
 }
 
-#[test]
-pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
+#[tokio::test]
+pub(crate) async fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
     let server = MockSseServer::start(vec![
         sse_text("stdin final"),
         sse_text("Stdin title"),
@@ -349,8 +349,8 @@ pub(crate) fn cli_run_reads_stdin_and_appends_to_positional_prompt() {
     );
 }
 
-#[test]
-pub(crate) fn cli_run_empty_prompt_rejects_before_session_creation() {
+#[tokio::test]
+pub(crate) async fn cli_run_empty_prompt_rejects_before_session_creation() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
@@ -374,8 +374,8 @@ pub(crate) fn cli_run_empty_prompt_rejects_before_session_creation() {
     assert!(!db.exists());
 }
 
-#[test]
-pub(crate) fn cli_run_errors_use_selected_output_format() {
+#[tokio::test]
+pub(crate) async fn cli_run_errors_use_selected_output_format() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
     let cwd = temp.path().join("work");
@@ -426,8 +426,8 @@ api = "https://example.invalid/v1"
     );
 }
 
-#[test]
-pub(crate) fn cli_run_requires_initialized_home_without_config_db_bypass() {
+#[tokio::test]
+pub(crate) async fn cli_run_requires_initialized_home_without_config_db_bypass() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .args(["run", "hello"])
@@ -438,8 +438,8 @@ pub(crate) fn cli_run_requires_initialized_home_without_config_db_bypass() {
     assert!(!temp.path().join(".psychevo").exists());
 }
 
-#[test]
-pub(crate) fn cli_run_rejects_removed_flags() {
+#[tokio::test]
+pub(crate) async fn cli_run_rejects_removed_flags() {
     let temp = tempdir().expect("temp");
     let cases: &[&[&str]] = &[
         &["run", "--prompt", "hello"],
@@ -467,8 +467,8 @@ pub(crate) fn cli_run_rejects_removed_flags() {
     }
 }
 
-#[test]
-pub(crate) fn cli_run_model_override_requires_provider_qualified_model() {
+#[tokio::test]
+pub(crate) async fn cli_run_model_override_requires_provider_qualified_model() {
     let server = MockSseServer::start(vec![sse_text("model final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -508,8 +508,8 @@ pub(crate) fn cli_run_model_override_requires_provider_qualified_model() {
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("provider/model"));
 }
 
-#[test]
-pub(crate) fn cli_run_variant_overrides_reasoning_effort_and_none_suppresses_it() {
+#[tokio::test]
+pub(crate) async fn cli_run_variant_overrides_reasoning_effort_and_none_suppresses_it() {
     let high_server = MockSseServer::start(vec![sse_text("high")]);
     let temp = tempdir().expect("temp");
     let high_db = temp.path().join("high.db");
@@ -556,8 +556,8 @@ pub(crate) fn cli_run_variant_overrides_reasoning_effort_and_none_suppresses_it(
     );
 }
 
-#[test]
-pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
+#[tokio::test]
+pub(crate) async fn cli_run_continue_reuses_latest_matching_run_session() {
     let server = MockSseServer::start(vec![
         sse_text("first"),
         sse_text("First run title"),
@@ -623,8 +623,8 @@ pub(crate) fn cli_run_continue_reuses_latest_matching_run_session() {
     assert!(String::from_utf8_lossy(&conflict.stderr).contains("--continue"));
 }
 
-#[test]
-pub(crate) fn cli_stats_reports_current_cwd_and_json() {
+#[tokio::test]
+pub(crate) async fn cli_stats_reports_current_cwd_and_json() {
     let server = MockSseServer::start(vec![sse_text("stats")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");

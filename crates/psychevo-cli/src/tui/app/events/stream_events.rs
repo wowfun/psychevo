@@ -24,8 +24,8 @@ impl TuiApp {
         changed |= self.drain_model_catalog_fetches(ui).await?;
         changed |= ui.drain_file_search_results();
         changed |= ui.drain_permission_approval_requests();
-        changed |= self.maybe_reload_live_agent_session(ui)?;
-        changed |= self.drain_foreign_gateway_live_events(ui)?;
+        changed |= self.maybe_reload_live_agent_session(ui).await?;
+        changed |= self.drain_foreign_gateway_live_events(ui).await?;
 
         let (had_pending, active_tool_frame_requested) =
             self.drain_available_fullscreen_stream_events(ui);
@@ -94,7 +94,7 @@ impl TuiApp {
                         ui.last_context_snapshot = result.context_snapshot.clone();
                         ui.session_live_event_backlog.remove(&result.session_id);
                         if self.current_session.as_deref() == Some(result.session_id.as_str()) {
-                            self.refresh_current_session_title()?;
+                            self.refresh_current_session_title().await?;
                             self.clear_new_session_draft();
                         }
                         if result.outcome != Outcome::Normal && !interrupted {
@@ -125,7 +125,7 @@ impl TuiApp {
                         if let Some(session_id) = result.session_id {
                             ui.session_live_event_backlog.remove(&session_id);
                             if self.current_session.as_deref() == Some(session_id.as_str()) {
-                                self.refresh_current_session_title()?;
+                                self.refresh_current_session_title().await?;
                                 self.clear_new_session_draft();
                             }
                         }
@@ -160,7 +160,7 @@ impl TuiApp {
         Ok(changed)
     }
 
-    pub(crate) fn replay_foreign_gateway_live_events_for_session(
+    pub(crate) async fn replay_foreign_gateway_live_events_for_session(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
@@ -171,7 +171,8 @@ impl TuiApp {
             let records = self
                 .state_runtime
 
-                .list_gateway_live_events_after(after_seq, 500)?;
+                .list_gateway_live_events_after(after_seq, 500)
+                .await?;
             if records.is_empty() {
                 break;
             }
@@ -179,35 +180,38 @@ impl TuiApp {
                 after_seq = after_seq.max(record.seq);
             }
             for record in records {
-                changed |= self.apply_foreign_gateway_live_event_record(
-                    ui,
-                    record,
-                    Some(session_id),
-                )?;
+                changed |= self
+                    .apply_foreign_gateway_live_event_record(ui, record, Some(session_id))
+                    .await?;
             }
         }
-        changed |= self.replay_foreign_gateway_live_snapshots_for_session(ui, session_id)?;
+        changed |= self
+            .replay_foreign_gateway_live_snapshots_for_session(ui, session_id)
+            .await?;
         Ok(changed)
     }
 
-    pub(crate) fn drain_foreign_gateway_live_events(
+    pub(crate) async fn drain_foreign_gateway_live_events(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
         let records = self
             .state_runtime
 
-            .list_gateway_live_events_after(self.last_gateway_live_event_seq, 100)?;
+            .list_gateway_live_events_after(self.last_gateway_live_event_seq, 100)
+            .await?;
         let mut changed = false;
         for record in records {
             self.last_gateway_live_event_seq = self.last_gateway_live_event_seq.max(record.seq);
-            changed |= self.apply_foreign_gateway_live_event_record(ui, record, None)?;
+            changed |= self
+                .apply_foreign_gateway_live_event_record(ui, record, None)
+                .await?;
         }
-        changed |= self.drain_foreign_gateway_live_snapshots(ui)?;
+        changed |= self.drain_foreign_gateway_live_snapshots(ui).await?;
         Ok(changed)
     }
 
-    fn replay_foreign_gateway_live_snapshots_for_session(
+    async fn replay_foreign_gateway_live_snapshots_for_session(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
@@ -215,34 +219,36 @@ impl TuiApp {
         let snapshots = self
             .state_runtime
 
-            .list_gateway_live_snapshots_for_thread(session_id, None, 1000)?;
+            .list_gateway_live_snapshots_for_thread(session_id, None, 1000)
+            .await?;
         let mut changed = false;
         for snapshot in snapshots {
-            changed |= self.apply_foreign_gateway_live_snapshot_record(
-                ui,
-                snapshot,
-                Some(session_id),
-            )?;
+            changed |= self
+                .apply_foreign_gateway_live_snapshot_record(ui, snapshot, Some(session_id))
+                .await?;
         }
         Ok(changed)
     }
 
-    fn drain_foreign_gateway_live_snapshots(
+    async fn drain_foreign_gateway_live_snapshots(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
         let snapshots = self
             .state_runtime
 
-            .list_gateway_live_snapshots(1000)?;
+            .list_gateway_live_snapshots(1000)
+            .await?;
         let mut changed = false;
         for snapshot in snapshots {
-            changed |= self.apply_foreign_gateway_live_snapshot_record(ui, snapshot, None)?;
+            changed |= self
+                .apply_foreign_gateway_live_snapshot_record(ui, snapshot, None)
+                .await?;
         }
         Ok(changed)
     }
 
-    fn apply_foreign_gateway_live_snapshot_record(
+    async fn apply_foreign_gateway_live_snapshot_record(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         snapshot: GatewayLiveSnapshotRecord,
@@ -259,7 +265,7 @@ impl TuiApp {
             return Ok(false);
         }
         if let Some(activity_id) = snapshot.activity_id.as_deref() {
-            let Some(activity) = self.state_runtime.gateway_activity(activity_id)? else {
+            let Some(activity) = self.state_runtime.gateway_activity(activity_id).await? else {
                 return Ok(false);
             };
             if !matches!(activity.status.as_str(), "running" | "queued")
@@ -272,7 +278,10 @@ impl TuiApp {
             Ok(event) => event,
             Err(_) => return Ok(false),
         };
-        let Some(session_id) = self.gateway_live_snapshot_session_id(&snapshot, &event)? else {
+        let Some(session_id) = self
+            .gateway_live_snapshot_session_id(&snapshot, &event)
+            .await?
+        else {
             return Ok(false);
         };
         if expected_session.is_some_and(|expected| expected != session_id) {
@@ -285,9 +294,10 @@ impl TuiApp {
         self.gateway_live_snapshot_revisions
             .insert(snapshot.snapshot_key, snapshot.revision);
         self.apply_foreign_gateway_live_event(ui, &session_id, event)
+            .await
     }
 
-    fn apply_foreign_gateway_live_event_record(
+    async fn apply_foreign_gateway_live_event_record(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         record: GatewayLiveEventRecord,
@@ -300,7 +310,10 @@ impl TuiApp {
             Ok(event) => event,
             Err(_) => return Ok(false),
         };
-        let Some(session_id) = self.gateway_live_event_session_id(&record, &event)? else {
+        let Some(session_id) = self
+            .gateway_live_event_session_id(&record, &event)
+            .await?
+        else {
             return Ok(false);
         };
         if expected_session.is_some_and(|expected| expected != session_id) {
@@ -314,9 +327,10 @@ impl TuiApp {
             return Ok(false);
         }
         self.apply_foreign_gateway_live_event(ui, &session_id, event)
+            .await
     }
 
-    fn gateway_live_event_session_id(
+    async fn gateway_live_event_session_id(
         &self,
         record: &GatewayLiveEventRecord,
         event: &GatewayEvent,
@@ -333,11 +347,12 @@ impl TuiApp {
         Ok(self
             .state_runtime
 
-            .gateway_activity(activity_id)?
+            .gateway_activity(activity_id)
+            .await?
             .and_then(|activity| activity.thread_id))
     }
 
-    fn gateway_live_snapshot_session_id(
+    async fn gateway_live_snapshot_session_id(
         &self,
         record: &GatewayLiveSnapshotRecord,
         event: &GatewayEvent,
@@ -354,11 +369,12 @@ impl TuiApp {
         Ok(self
             .state_runtime
 
-            .gateway_activity(activity_id)?
+            .gateway_activity(activity_id)
+            .await?
             .and_then(|activity| activity.thread_id))
     }
 
-    fn apply_foreign_gateway_live_event(
+    async fn apply_foreign_gateway_live_event(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
@@ -396,7 +412,7 @@ impl TuiApp {
                     ui.turn_session_id = None;
                 }
                 if self.current_session.as_deref() == Some(session_id) {
-                    self.refresh_current_session_title()?;
+                    self.refresh_current_session_title().await?;
                 }
                 Ok(true)
             }

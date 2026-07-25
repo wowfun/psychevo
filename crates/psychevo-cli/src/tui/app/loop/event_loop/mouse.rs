@@ -34,7 +34,7 @@ impl TuiApp {
                 } else if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
                     if let Some(index) = ui.bottom_panel_hit(mouse.column, mouse.row) {
                         ui.clear_selection();
-                        self.handle_clarify_panel_click(ui, index)?;
+                        self.handle_clarify_panel_click(ui, index).await?;
                     } else {
                         ui.clear_selection();
                     }
@@ -47,7 +47,7 @@ impl TuiApp {
                         .bottom_panel
                         .as_ref()
                         .and_then(BottomPanel::selected_value);
-                    self.apply_bottom_panel_selection(ui, selected)?;
+                    self.apply_bottom_panel_selection(ui, selected).await?;
                 } else if let Some(target) = ui.completion_popup_hit(mouse.column, mouse.row) {
                     ui.clear_selection();
                     ui.set_completion_popup_target_selection(target);
@@ -161,8 +161,8 @@ impl TuiApp {
                 if !self.start_copy_selected_text(ui) {
                     if let Some(target) = click_target {
                         if let Some(agent_target) = ui.agent_target_for_target(target) {
-                            self.open_agent_target_session(ui, &agent_target)?;
-                        } else if self.open_history_message_actions(ui, target)? {
+                            self.open_agent_target_session(ui, &agent_target).await?;
+                        } else if self.open_history_message_actions(ui, target).await? {
                         } else {
                             ui.toggle_target(target);
                         }

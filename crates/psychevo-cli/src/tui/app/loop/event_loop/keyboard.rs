@@ -16,7 +16,7 @@ impl TuiApp {
         }
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.handle_side_conversation_ctrl_c(ui)?
+            && self.handle_side_conversation_ctrl_c(ui).await?
         {
             return Ok(false);
         }
@@ -27,19 +27,19 @@ impl TuiApp {
         if key.modifiers.contains(KeyModifiers::ALT) {
             match key.code {
                 KeyCode::Left => {
-                    self.open_agent_parent_session(ui)?;
+                    self.open_agent_parent_session(ui).await?;
                     return Ok(false);
                 }
                 KeyCode::Char('p') | KeyCode::Char('P') => {
-                    self.open_agent_parent_session(ui)?;
+                    self.open_agent_parent_session(ui).await?;
                     return Ok(false);
                 }
                 KeyCode::Up => {
-                    self.open_agent_sibling_session(ui, -1)?;
+                    self.open_agent_sibling_session(ui, -1).await?;
                     return Ok(false);
                 }
                 KeyCode::Right => {
-                    self.open_agent_sibling_session(ui, 1)?;
+                    self.open_agent_sibling_session(ui, 1).await?;
                     return Ok(false);
                 }
                 _ => {}
@@ -53,7 +53,7 @@ impl TuiApp {
             return self.handle_agent_run_prompt_key(ui, key).await;
         }
         if ui.bottom_panel.is_some() {
-            return self.handle_bottom_panel_key(ui, key);
+            return self.handle_bottom_panel_key(ui, key).await;
         }
         if ui.history_search {
             return self.handle_history_search_key(ui, key);
@@ -61,7 +61,7 @@ impl TuiApp {
         if ui.focus == FocusMode::Transcript {
             match key.code {
                 KeyCode::Esc => {
-                    if !self.request_current_session_interrupt(ui) {
+                    if !self.request_current_session_interrupt(ui).await {
                         ui.focus = FocusMode::Composer;
                     }
                 }
@@ -83,10 +83,12 @@ impl TuiApp {
                             .or_else(|| ui.visible_agent_target())
                     };
                     if let Some(target) = agent_target {
-                        self.open_agent_target_session(ui, &target)?;
+                        self.open_agent_target_session(ui, &target).await?;
                     } else {
                         let history_opened = match ui.selected_target {
-                            Some(target) => self.open_history_message_actions(ui, target)?,
+                            Some(target) => {
+                                self.open_history_message_actions(ui, target).await?
+                            }
                             None => false,
                         };
                         if !history_opened {
@@ -115,7 +117,7 @@ impl TuiApp {
                         .selected_agent_target()
                         .or_else(|| ui.visible_agent_target())
                     {
-                        self.open_agent_target_session(ui, &target)?;
+                        self.open_agent_target_session(ui, &target).await?;
                     }
                 }
                 KeyCode::PageUp => ui.scroll_transcript(-6),
@@ -161,7 +163,7 @@ impl TuiApp {
             }
         }
         if ui.pending_input_edit.is_some() {
-            return self.handle_pending_input_edit_key(ui, key);
+            return self.handle_pending_input_edit_key(ui, key).await;
         }
         if let Some(should_quit) = self.handle_slash_shortcut_key(ui, key).await? {
             return Ok(should_quit);
@@ -259,7 +261,7 @@ impl TuiApp {
                 ui.textarea.insert_newline();
             }
             KeyCode::Enter => {
-                if self.submit_history_message_edit(ui)? {
+                if self.submit_history_message_edit(ui).await? {
                     return Ok(false);
                 }
                 ui.sync_pending_images_with_textarea();
@@ -332,10 +334,10 @@ impl TuiApp {
                 ui.clear_slash_menu_dismissal();
             }
             KeyCode::Esc => {
-                if self.cancel_history_message_edit(ui)? {
+                if self.cancel_history_message_edit(ui).await? {
                     return Ok(false);
                 }
-                if self.restore_staged_conversation_edit(ui)? {
+                if self.restore_staged_conversation_edit(ui).await? {
                     return Ok(false);
                 }
                 if ui.shell_mode && textarea_text(&ui.textarea).trim().is_empty() {
@@ -355,7 +357,7 @@ impl TuiApp {
                     ui.close_skill_popup();
                     return Ok(false);
                 }
-                if self.request_current_session_interrupt(ui) {
+                if self.request_current_session_interrupt(ui).await {
                     return Ok(false);
                 }
             }
@@ -414,7 +416,7 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn handle_pending_input_edit_key(
+    pub(crate) async fn handle_pending_input_edit_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
@@ -431,7 +433,7 @@ impl TuiApp {
                 }
             }
             KeyCode::Enter => {
-                self.confirm_pending_input_edit(ui)?;
+                self.confirm_pending_input_edit(ui).await?;
             }
             KeyCode::Esc => {
                 ui.cancel_pending_input_edit();

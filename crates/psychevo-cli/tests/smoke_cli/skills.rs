@@ -29,8 +29,8 @@ pub(crate) fn write_cli_skill(root: &Path, name: &str, description: &str, body: 
     .expect("skill");
 }
 
-#[test]
-pub(crate) fn cli_skill_list_view_config_and_json() {
+#[tokio::test]
+pub(crate) async fn cli_skill_list_view_config_and_json() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -164,8 +164,8 @@ pub(crate) fn cli_skill_list_view_config_and_json() {
     assert!(global_config.contains("global_mode = \"shared\""));
 }
 
-#[test]
-pub(crate) fn cli_skill_install_local_scope_and_scan_dangerous() {
+#[tokio::test]
+pub(crate) async fn cli_skill_install_local_scope_and_scan_dangerous() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -261,8 +261,8 @@ pub(crate) fn cli_skill_install_local_scope_and_scan_dangerous() {
     );
 }
 
-#[test]
-pub(crate) fn cli_skill_install_git_from_local_repo() {
+#[tokio::test]
+pub(crate) async fn cli_skill_install_git_from_local_repo() {
     if Command::new("git").arg("--version").output().is_err() {
         return;
     }

@@ -161,7 +161,9 @@ impl TuiApp {
                     let decision = rx
                         .await
                         .unwrap_or_else(|_| PermissionApprovalDecision::deny());
-                    gateway.submit_permission(selector, &action_id, decision);
+                    gateway
+                        .submit_permission(selector, &action_id, decision)
+                        .await;
                 });
                 ui.open_next_permission_approval()
             }
@@ -249,7 +251,7 @@ impl TuiApp {
         {
             running.session_id = Some(session_id.to_string());
         }
-        if let Err(err) = self.persist_main_agent_selection_for_session(session_id) {
+        if let Err(err) = self.schedule_main_agent_selection_persistence(session_id) {
             self.had_error = true;
             ui.push_error(format!(
                 "error: failed to persist main agent selection: {err:#}"

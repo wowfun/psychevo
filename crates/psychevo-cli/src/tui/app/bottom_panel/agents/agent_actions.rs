@@ -1,5 +1,5 @@
 impl TuiApp {
-    pub(crate) fn handle_agent_panel_key(
+    pub(crate) async fn handle_agent_panel_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
@@ -21,7 +21,7 @@ impl TuiApp {
                     .bottom_panel
                     .as_ref()
                     .and_then(BottomPanel::selected_value);
-                self.apply_bottom_panel_selection(ui, selected)?;
+                self.apply_bottom_panel_selection(ui, selected).await?;
             }
             KeyCode::Char('s') | KeyCode::Char('S') => {
                 if let Some(BottomSelectionValue::AgentRunning { id, .. }) = ui
@@ -29,11 +29,11 @@ impl TuiApp {
                     .as_ref()
                     .and_then(BottomPanel::selected_value)
                 {
-                    self.stop_agent_from_panel(ui, &id)?;
+                    self.stop_agent_from_panel(ui, &id).await?;
                 }
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
-                self.toggle_agent_spawning(ui);
+                self.toggle_agent_spawning(ui).await;
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 if let Some(BottomSelectionValue::AgentAvailable {
@@ -63,7 +63,8 @@ impl TuiApp {
                     .as_ref()
                     .and_then(BottomPanel::selected_value)
                 {
-                    self.apply_agent_action(ui, name, source, path, shadowed, AgentAction::View)?;
+                    self.apply_agent_action(ui, name, source, path, shadowed, AgentAction::View)
+                        .await?;
                 }
             }
             KeyCode::Up => {
@@ -121,7 +122,7 @@ impl TuiApp {
     ) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
-                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
+                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel().await));
                 if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
                     panel.tab = AgentTab::Available;
                 }
@@ -161,14 +162,14 @@ impl TuiApp {
         Ok(false)
     }
 
-    pub(crate) fn handle_agent_editor_key(
+    pub(crate) async fn handle_agent_editor_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
     ) -> Result<bool> {
         match key.code {
             KeyCode::Esc => {
-                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel()));
+                ui.bottom_panel = Some(BottomPanel::Agents(self.agent_panel().await));
                 if let Some(BottomPanel::Agents(panel)) = &mut ui.bottom_panel {
                     panel.tab = AgentTab::Available;
                 }
@@ -188,7 +189,7 @@ impl TuiApp {
                     })
                     .unwrap_or(false);
                 if save {
-                    self.save_agent_editor(ui)?;
+                self.save_agent_editor(ui).await?;
                 } else if let Some(BottomPanel::AgentEditor(panel)) = &mut ui.bottom_panel {
                     panel.move_field(1);
                 }
@@ -236,7 +237,7 @@ impl TuiApp {
         Ok(false)
     }
 
-    pub(crate) fn apply_agent_action(
+    pub(crate) async fn apply_agent_action(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         name: String,
@@ -247,7 +248,8 @@ impl TuiApp {
     ) -> Result<()> {
         match action {
             AgentAction::UseAsMain => {
-                self.use_agent_as_main(ui, name, source, path, shadowed)?;
+                self.use_agent_as_main(ui, name, source, path, shadowed)
+                    .await?;
             }
             AgentAction::Run => {
                 ui.bottom_panel = Some(BottomPanel::AgentRunPrompt(AgentRunPromptPanel::new(name)));
@@ -282,7 +284,7 @@ impl TuiApp {
                     return Ok(());
                 };
                 fs::remove_file(&path)?;
-                let mut panel = self.agent_panel();
+                let mut panel = self.agent_panel().await;
                 panel.tab = AgentTab::Available;
                 panel.available.notice = Some(format!("deleted {}", path.display()));
                 ui.bottom_panel = Some(BottomPanel::Agents(panel));
@@ -291,25 +293,31 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn use_default_main_agent(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn use_default_main_agent(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
         if ui.running.is_some() {
             ui.set_bottom_panel_notice("finish the current turn before switching main agent");
             return Ok(());
         }
         let next_agent = if let Some(session_id) = self.current_session.as_deref() {
             let store = &self.state_runtime;
-            let metadata = match store.session_metadata(session_id) {
+            let metadata = match store.session_metadata(session_id).await {
                 Ok(metadata) => metadata,
                 Err(err) => {
                     ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
                     return Ok(());
                 }
             };
-            if let Err(err) = store.set_session_metadata_field(
-                session_id,
-                SESSION_MAIN_AGENT_METADATA_KEY,
-                Some(main_agent_default_metadata()),
-            ) {
+            if let Err(err) = store
+                .set_session_metadata_field(
+                    session_id,
+                    SESSION_MAIN_AGENT_METADATA_KEY,
+                    Some(main_agent_default_metadata()),
+                )
+                .await
+            {
                 ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
                 return Ok(());
             }
@@ -323,7 +331,9 @@ impl TuiApp {
         self.current_agent_explicit_default = true;
         self.refresh_selected_model();
         if let Some(session_id) = self.current_session.as_deref()
-            && let Err(err) = self.reload_context_after_main_agent_switch(session_id)
+            && let Err(err) = self
+                .reload_context_after_main_agent_switch(session_id)
+                .await
         {
             ui.set_bottom_panel_notice(format!("failed to reload context: {err:#}"));
             return Ok(());
@@ -333,7 +343,7 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn use_agent_as_main(
+    pub(crate) async fn use_agent_as_main(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         name: String,
@@ -358,11 +368,14 @@ impl TuiApp {
         };
         let metadata = main_agent_metadata(&input, &name, source, path.as_ref());
         if let Some(session_id) = self.current_session.as_deref()
-            && let Err(err) = self.state_runtime.set_session_metadata_field(
-                session_id,
-                SESSION_MAIN_AGENT_METADATA_KEY,
-                Some(metadata.clone()),
-            )
+            && let Err(err) = self
+                .state_runtime
+                .set_session_metadata_field(
+                    session_id,
+                    SESSION_MAIN_AGENT_METADATA_KEY,
+                    Some(metadata.clone()),
+                )
+                .await
         {
             ui.set_bottom_panel_notice(format!("failed to save main agent: {err:#}"));
             return Ok(());
@@ -371,7 +384,9 @@ impl TuiApp {
         self.current_agent_explicit_default = false;
         self.refresh_selected_model();
         if let Some(session_id) = self.current_session.as_deref()
-            && let Err(err) = self.reload_context_after_main_agent_switch(session_id)
+            && let Err(err) = self
+                .reload_context_after_main_agent_switch(session_id)
+                .await
         {
             ui.set_bottom_panel_notice(format!("failed to reload context: {err:#}"));
             return Ok(());
@@ -381,7 +396,10 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn reload_context_after_main_agent_switch(&self, session_id: &str) -> Result<()> {
+    pub(crate) async fn reload_context_after_main_agent_switch(
+        &self,
+        session_id: &str,
+    ) -> Result<()> {
         reload_session_context(ReloadContextOptions {
             state: self.state_runtime.clone(),
             session: session_id.to_string(),
@@ -393,28 +411,29 @@ impl TuiApp {
             no_skills: self.no_skills,
             invalidation_reason: "main_agent_changed".to_string(),
             notice: Some("The selected main agent changed; the session prompt prefix was rebuilt before this turn.".to_string()),
-        })?;
+        })
+        .await?;
         Ok(())
     }
 
-    pub(crate) fn stop_agent_from_panel(
+    pub(crate) async fn stop_agent_from_panel(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         id: &str,
     ) -> Result<()> {
         let store = &self.state_runtime;
-        let _ = stop_agent_id_with_grace(id, Some(store), Duration::from_millis(1200))?;
-        let mut panel = self.agent_panel();
+        let _ = stop_agent_id_with_grace(id, Some(store), Duration::from_millis(1200)).await?;
+        let mut panel = self.agent_panel().await;
         panel.tab = AgentTab::Running;
         panel.running.notice = Some("agent subtree stopped".to_string());
         ui.bottom_panel = Some(BottomPanel::Agents(panel));
         Ok(())
     }
 
-    pub(crate) fn toggle_agent_spawning(&mut self, ui: &mut FullscreenUi<'_>) {
+    pub(crate) async fn toggle_agent_spawning(&mut self, ui: &mut FullscreenUi<'_>) {
         let paused = !agent_spawn_paused();
         set_agent_spawn_paused(paused);
-        let mut panel = self.agent_panel();
+        let mut panel = self.agent_panel().await;
         panel.tab = AgentTab::Running;
         panel.running.notice = Some(if paused {
             "new agent spawns paused".to_string()

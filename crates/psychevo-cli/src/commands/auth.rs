@@ -14,8 +14,8 @@ use crate::commands::common::{
 };
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
-pub(crate) fn run_auth_command(args: AuthArgs) -> Result<ExitCode> {
-    match run_auth_command_inner(&args) {
+pub(crate) async fn run_auth_command(args: AuthArgs) -> Result<ExitCode> {
+    match run_auth_command_inner(&args).await {
         Ok(code) => Ok(code),
         Err(err) if auth_json(&args) => {
             print_json_error(&err)?;
@@ -25,12 +25,12 @@ pub(crate) fn run_auth_command(args: AuthArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> {
+pub(crate) async fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let options = base_run_options(&env_map, &home, &cwd)?;
+    let options = base_run_options(&env_map, &home, &cwd).await?;
     match &args.command {
         AuthCommand::Status(args) => auth_status(args, &options),
         AuthCommand::Setup(args) => auth_setup(args, &home, &cwd),

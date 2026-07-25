@@ -31,7 +31,7 @@ pub(crate) async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
-    let options = base_run_options(&env_map, &home, &cwd)?;
+    let options = base_run_options(&env_map, &home, &cwd).await?;
     match &args.command {
         ModelCommand::List(args) => list_models(args, &options)?,
         ModelCommand::Current(args) => current_model(args, &options)?,

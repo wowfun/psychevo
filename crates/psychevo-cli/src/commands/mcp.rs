@@ -6,7 +6,9 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
-use psychevo_gateway::{Gateway, GatewayInputPart, GatewaySource, ThreadTurnRequest};
+use psychevo_gateway::{
+    Gateway, GatewayInputPart, GatewaySource, ThreadCallerContext, ThreadSurface, ThreadTurnIntent,
+};
 use psychevo_runtime::state::StateRuntime;
 use psychevo_runtime::{
     types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
@@ -223,7 +225,7 @@ async fn run_cli_mcp_turn(
         args.project_context.map(|mode| mode.mode())
     };
 
-    let state = StateRuntime::open(&db_path)?;
+    let state = StateRuntime::open(&db_path).await?;
     let gateway = Gateway::new(state.clone());
     let source = GatewaySource::new("mcp", format!("mcp:{}", std::process::id()))
         .invocation()
@@ -232,26 +234,27 @@ async fn run_cli_mcp_turn(
             "entrypoint": "mcp serve",
             "cwd": cwd.display().to_string(),
         }));
-    let mut turn = ThreadTurnRequest::new(cwd, vec![GatewayInputPart::Text { text: prompt }]);
-    turn.thread_id = request.session_id;
-    turn.source = Some(source);
-    turn.policy.snapshot_root = Some(home.join("snapshots"));
-    turn.policy.extract_prompt_image_sources = true;
-    turn.policy.config_path = config_path;
-    turn.policy.project_context_override = project_context_override;
-    turn.policy.model = args.model;
-    turn.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-    turn.policy.mode = run_mode;
-    turn.policy.permission_mode = permission_mode;
-    turn.policy.approval_handler = interactive_approval_handler();
-    turn.policy.inherited_env = Some(env_map);
-    turn.policy.agent_ref = args.agent;
-    turn.policy.no_agents = args.no_agents;
-    turn.policy.no_skills = args.no_skills;
-    turn.policy.skill_inputs = args.skill;
-    turn.runtime_source = Some("mcp".to_string());
-    turn.continue_sources = vec!["mcp".to_string()];
-    let turn_result = gateway.run_turn(turn).await?;
+    let mut caller = ThreadCallerContext::new(ThreadSurface::Other("mcp".to_string()), cwd);
+    caller.runtime_source = "mcp".to_string();
+    caller.continue_sources = vec!["mcp".to_string()];
+    let mut intent = ThreadTurnIntent::new(vec![GatewayInputPart::Text { text: prompt }]);
+    intent.thread_id = request.session_id;
+    intent.source = Some(source);
+    intent.policy.snapshot_root = Some(home.join("snapshots"));
+    intent.policy.extract_prompt_image_sources = true;
+    intent.policy.config_path = config_path;
+    intent.policy.project_context_override = project_context_override;
+    intent.policy.model = args.model;
+    intent.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+    intent.policy.mode = run_mode;
+    intent.policy.permission_mode = permission_mode;
+    intent.policy.approval_handler = interactive_approval_handler();
+    intent.policy.inherited_env = Some(env_map);
+    intent.policy.agent_ref = args.agent;
+    intent.policy.no_agents = args.no_agents;
+    intent.policy.no_skills = args.no_skills;
+    intent.policy.skill_inputs = args.skill;
+    let turn_result = gateway.start_turn(caller, intent).await?.wait().await?;
     let result = turn_result.result;
     Ok(PsychevoMcpTurnResult {
         session_id: result.session_id,

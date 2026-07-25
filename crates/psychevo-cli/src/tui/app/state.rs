@@ -17,6 +17,8 @@ pub(crate) struct TuiApp {
     pub(crate) cwd_key: String,
     pub(crate) current_session: Option<String>,
     pub(crate) current_session_title: Option<String>,
+    pub(crate) current_session_forked_from: Option<String>,
+    pub(crate) current_agent_breadcrumb: Option<String>,
     pub(crate) force_new_once: bool,
     pub(crate) draft_source_raw_id: Option<String>,
     pub(crate) current_model: Option<String>,
@@ -85,6 +87,8 @@ impl TuiApp {
         self.current_session = None;
         self.reset_live_agent_reload_poll();
         self.current_session_title = None;
+        self.current_session_forked_from = None;
+        self.current_agent_breadcrumb = None;
         self.force_new_once = true;
         self.draft_source_raw_id = Some(new_tui_draft_source_raw_id(&self.cwd_key));
     }

@@ -45,8 +45,8 @@ fn install_preflight_command(bin_dir: &Path, home: &Path) -> Command {
     command
 }
 
-#[test]
-pub(crate) fn install_rejects_removed_options() {
+#[tokio::test]
+pub(crate) async fn install_rejects_removed_options() {
     for flag in [
         "--repo-url",
         "--ref",
@@ -72,8 +72,8 @@ pub(crate) fn install_rejects_removed_options() {
     }
 }
 
-#[test]
-pub(crate) fn install_requires_checkout_cwd() {
+#[tokio::test]
+pub(crate) async fn install_requires_checkout_cwd() {
     let temp = tempdir().expect("temp");
     let output = Command::new("sh")
         .arg(install_script_path())
@@ -95,8 +95,8 @@ pub(crate) fn install_requires_checkout_cwd() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_check_reports_missing_tools_without_mutation() {
+#[tokio::test]
+pub(crate) async fn install_check_reports_missing_tools_without_mutation() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     std::fs::create_dir_all(&bin).expect("bin");
@@ -144,8 +144,8 @@ pub(crate) fn install_check_reports_missing_tools_without_mutation() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
+#[tokio::test]
+pub(crate) async fn install_check_reports_mismatched_pnpm_as_warning() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "printf 'cargo 1.97.0\\n'");
@@ -180,8 +180,8 @@ pub(crate) fn install_check_reports_mismatched_pnpm_as_warning() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_check_enforces_rust_1_97_0_boundary() {
+#[tokio::test]
+pub(crate) async fn install_check_enforces_rust_1_97_0_boundary() {
     for (version, accepted) in [
         ("1.96.0", false),
         ("1.96.1", false),
@@ -224,8 +224,8 @@ pub(crate) fn install_check_enforces_rust_1_97_0_boundary() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_reports_missing_native_compiler() {
+#[tokio::test]
+pub(crate) async fn install_preflight_reports_missing_native_compiler() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
@@ -251,8 +251,8 @@ pub(crate) fn install_preflight_reports_missing_native_compiler() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_reports_missing_node_for_full_install() {
+#[tokio::test]
+pub(crate) async fn install_preflight_reports_missing_node_for_full_install() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
@@ -276,8 +276,8 @@ pub(crate) fn install_preflight_reports_missing_node_for_full_install() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_reports_missing_pnpm_for_full_install() {
+#[tokio::test]
+pub(crate) async fn install_preflight_reports_missing_pnpm_for_full_install() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "exit 0");
@@ -302,8 +302,8 @@ pub(crate) fn install_preflight_reports_missing_pnpm_for_full_install() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_prints_progress_breadcrumbs() {
+#[tokio::test]
+pub(crate) async fn install_preflight_prints_progress_breadcrumbs() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(
@@ -360,8 +360,8 @@ pub(crate) fn install_preflight_prints_progress_breadcrumbs() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
+#[tokio::test]
+pub(crate) async fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     let home = temp.path().join("home");
@@ -393,8 +393,8 @@ pub(crate) fn install_preflight_warns_for_mismatched_pnpm_and_continues() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
+#[tokio::test]
+pub(crate) async fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     let home = temp.path().join("home");
@@ -435,8 +435,8 @@ pub(crate) fn install_preflight_bypasses_corepack_project_spec_for_pnpm() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
+#[tokio::test]
+pub(crate) async fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(
@@ -469,8 +469,8 @@ pub(crate) fn install_preflight_rejects_unusable_pnpm_before_cargo_install() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_check_reports_unusable_pnpm_as_failure() {
+#[tokio::test]
+pub(crate) async fn install_check_reports_unusable_pnpm_as_failure() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "cargo", "printf 'cargo 1.97.0\\n'");
@@ -503,8 +503,8 @@ pub(crate) fn install_check_reports_unusable_pnpm_as_failure() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_windows_preflight_reports_missing_build_tools_before_cargo() {
+#[tokio::test]
+pub(crate) async fn install_windows_preflight_reports_missing_build_tools_before_cargo() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
@@ -524,8 +524,8 @@ pub(crate) fn install_windows_preflight_reports_missing_build_tools_before_cargo
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_windows_cargo_install_defaults_revocation_check_off() {
+#[tokio::test]
+pub(crate) async fn install_windows_cargo_install_defaults_revocation_check_off() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
@@ -561,8 +561,8 @@ pub(crate) fn install_windows_cargo_install_defaults_revocation_check_off() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_windows_cargo_install_preserves_explicit_revocation_setting() {
+#[tokio::test]
+pub(crate) async fn install_windows_cargo_install_preserves_explicit_revocation_setting() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
@@ -590,8 +590,8 @@ pub(crate) fn install_windows_cargo_install_preserves_explicit_revocation_settin
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_windows_locked_pevo_exe_failure_gets_targeted_guidance() {
+#[tokio::test]
+pub(crate) async fn install_windows_locked_pevo_exe_failure_gets_targeted_guidance() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(&bin, "uname", "printf 'MINGW64_NT-10.0\\n'");
@@ -636,8 +636,8 @@ pub(crate) fn install_windows_locked_pevo_exe_failure_gets_targeted_guidance() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_windows_preflight_stops_existing_managed_gateway() {
+#[tokio::test]
+pub(crate) async fn install_windows_preflight_stops_existing_managed_gateway() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     let home = temp.path().join("home");
@@ -680,8 +680,8 @@ pub(crate) fn install_windows_preflight_stops_existing_managed_gateway() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_unix_cargo_install_does_not_force_revocation_setting() {
+#[tokio::test]
+pub(crate) async fn install_unix_cargo_install_does_not_force_revocation_setting() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(
@@ -707,8 +707,8 @@ pub(crate) fn install_unix_cargo_install_does_not_force_revocation_setting() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_cargo_install_defaults_timeout_and_retry() {
+#[tokio::test]
+pub(crate) async fn install_cargo_install_defaults_timeout_and_retry() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(
@@ -734,8 +734,8 @@ pub(crate) fn install_cargo_install_defaults_timeout_and_retry() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_cargo_install_preserves_explicit_timeout_and_retry() {
+#[tokio::test]
+pub(crate) async fn install_cargo_install_preserves_explicit_timeout_and_retry() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(
@@ -763,8 +763,8 @@ pub(crate) fn install_cargo_install_preserves_explicit_timeout_and_retry() {
 }
 
 #[cfg(unix)]
-#[test]
-pub(crate) fn install_cargo_failure_prints_enterprise_diagnostics() {
+#[tokio::test]
+pub(crate) async fn install_cargo_failure_prints_enterprise_diagnostics() {
     let temp = tempdir().expect("temp");
     let bin = temp.path().join("bin");
     write_fake_command(

@@ -27,9 +27,9 @@ pub(crate) use psychevo_agent_core::{
 pub(crate) use psychevo_ai::Outcome;
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayActionKind, GatewayActionOutcome, GatewayActivity, GatewayEvent,
-    GatewayEventSink, GatewayImageInput, GatewayInputPart, GatewaySource, GatewayThreadSelector,
-    GatewayTurnStatus, ThreadEditableDraft, ThreadEditableDraftFidelity, ThreadEditableInputPart,
-    ThreadTurnRequest, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+    GatewayImageInput, GatewayInputPart, GatewaySource, GatewayThreadSelector, GatewayTurnStatus,
+    ThreadCallerContext, ThreadEditableDraft, ThreadEditableDraftFidelity, ThreadEditableInputPart,
+    ThreadSurface, ThreadTurnIntent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
     TranscriptEntry, TranscriptEntryRole,
 };
 pub(crate) use psychevo_runtime::state::*;
@@ -150,7 +150,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     ensure_home_initialized(&home)?;
     let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let state_runtime = StateRuntime::open(&db_path)?;
+    let state_runtime = StateRuntime::open(&db_path).await?;
     let cwd = match &args.cd {
         Some(cd) => resolve_explicit_path(cd, &env_map, &cwd)?,
         None => cwd,
@@ -200,7 +200,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     } else if args.new_session {
         None
     } else {
-        latest_human_visible_session_id(&state_runtime)?
+        latest_human_visible_session_id(&state_runtime).await?
     };
 
     let color = io::stdout().is_terminal() && env_value("NO_COLOR", &env_map).is_none();
@@ -208,6 +208,7 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let gateway = Gateway::new(state_runtime.clone());
     let last_gateway_live_event_seq = state_runtime
         .latest_gateway_live_event_seq()
+        .await
         .unwrap_or_default();
     let mut app = TuiApp {
         env_map,
@@ -224,6 +225,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         cwd_key,
         current_session,
         current_session_title: None,
+        current_session_forked_from: None,
+        current_agent_breadcrumb: None,
         force_new_once: args.new_session,
         draft_source_raw_id: None,
         current_model,
@@ -264,8 +267,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     }
     app.start_missing_model_metadata_cache_warmup();
     app.refresh_selected_model();
-    app.refresh_current_session_title()?;
-    app.refresh_current_session_agent()?;
+    app.refresh_current_session_title().await?;
+    app.refresh_current_session_agent().await?;
     let run_result = app.run(args.message.join(" ")).await;
     let profile_result = app.journey_profile.finish();
     match (run_result, profile_result) {

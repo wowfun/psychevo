@@ -37,7 +37,7 @@ pub(super) async fn gateway_setup(args: GatewaySetupArgs) -> Result<ExitCode> {
 async fn gateway_setup_inner(mut args: GatewaySetupArgs) -> Result<ExitCode> {
     let ctx = GatewayContext::load_for_setup()?;
     if args.channel.is_none() {
-        args = gateway_setup_wizard(&ctx)?;
+        args = gateway_setup_wizard(&ctx).await?;
     }
     let channel = args
         .channel
@@ -115,7 +115,7 @@ async fn gateway_setup_inner(mut args: GatewaySetupArgs) -> Result<ExitCode> {
     } else {
         None
     };
-    let options = ctx.run_options(ctx.cwd.clone())?;
+    let options = ctx.run_options(ctx.cwd.clone()).await?;
     let doctor = channel_doctor_value(&options, Some(&id), false)?;
     let summary = channel_summary_value(&options)?;
     let gateway = setup_gateway_action(&ctx, &args).await?;
@@ -137,13 +137,13 @@ async fn gateway_setup_inner(mut args: GatewaySetupArgs) -> Result<ExitCode> {
     }
 }
 
-fn gateway_setup_wizard(ctx: &GatewayContext) -> Result<GatewaySetupArgs> {
+async fn gateway_setup_wizard(ctx: &GatewayContext) -> Result<GatewaySetupArgs> {
     if !io::stdin().is_terminal() {
         return Err(anyhow!(
             "pevo gateway setup requires --channel in non-interactive mode"
         ));
     }
-    let options = ctx.run_options(ctx.cwd.clone())?;
+    let options = ctx.run_options(ctx.cwd.clone()).await?;
     let existing = channel_list_value(&options)?;
     println!("Configured channels:");
     if existing

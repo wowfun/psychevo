@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 use super::*;
 
-#[test]
-pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrupted() {
+#[tokio::test]
+pub(crate) async fn late_agent_pending_after_background_handoff_does_not_mark_interrupted() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let weak_pending = serde_json::json!({
         "agent_type": "translate"
@@ -122,10 +122,10 @@ pub(crate) fn late_agent_pending_after_background_handoff_does_not_mark_interrup
     );
 }
 
-#[test]
-pub(crate) fn late_preamble_message_end_after_tool_completion_does_not_create_temp_meta() {
+#[tokio::test]
+pub(crate) async fn late_preamble_message_end_after_tool_completion_does_not_create_temp_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -230,10 +230,11 @@ pub(crate) fn late_preamble_message_end_after_tool_completion_does_not_create_te
     }));
 }
 
-#[test]
-pub(crate) fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases() {
+#[tokio::test]
+pub(crate) async fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_tool_phases()
+{
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let cases = vec![
         (
             "read",
@@ -318,10 +319,10 @@ pub(crate) fn completed_live_tool_elapsed_keeps_visible_active_duration_for_all_
     }
 }
 
-#[test]
-pub(crate) fn stale_running_exec_after_completion_does_not_retake_elapsed_ownership() {
+#[tokio::test]
+pub(crate) async fn stale_running_exec_after_completion_does_not_retake_elapsed_ownership() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(

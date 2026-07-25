@@ -1,5 +1,8 @@
 impl PsychevoAcpAgent {
-    pub(crate) fn refresh_command_text(&self, session: &AcpSession) -> Result<String, Error> {
+    pub(crate) async fn refresh_command_text(
+        &self,
+        session: &AcpSession,
+    ) -> Result<String, Error> {
         let Some(runtime_session_id) = session.runtime_session_id.clone() else {
             return Ok("no runtime session yet".to_string());
         };
@@ -16,6 +19,7 @@ impl PsychevoAcpAgent {
                 invalidation_reason: "manual_reload".to_string(),
                 notice: None,
             })
+            .await
             .map_err(acp_internal_error)?;
         Ok(format!(
             "reloaded context: {} v{}",
@@ -23,12 +27,12 @@ impl PsychevoAcpAgent {
         ))
     }
 
-    pub(crate) fn sessions_list_text(
+    pub(crate) async fn sessions_list_text(
         &self,
         session_id: &SessionId,
         session: &AcpSession,
     ) -> Result<String, Error> {
-        let summaries = self.session_summaries_for(session)?;
+        let summaries = self.session_summaries_for(session).await?;
         let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
         if let Some(current) = sessions.get_mut(&session_id.to_string()) {
             current.last_session_list = summaries.clone();
@@ -52,7 +56,7 @@ impl PsychevoAcpAgent {
         Ok(lines.join("\n"))
     }
 
-    pub(crate) fn resume_session_text(
+    pub(crate) async fn resume_session_text(
         &self,
         session_id: &SessionId,
         session: &AcpSession,
@@ -60,7 +64,7 @@ impl PsychevoAcpAgent {
     ) -> Result<String, Error> {
         let reference = reference.unwrap_or("latest").trim();
         let summaries = if session.last_session_list.is_empty() {
-            self.session_summaries_for(session)?
+            self.session_summaries_for(session).await?
         } else {
             session.last_session_list.clone()
         };
@@ -84,6 +88,7 @@ impl PsychevoAcpAgent {
         let store = self.state.clone();
         store
             .resume_session(&target.id)
+            .await
             .map_err(|_| Error::resource_not_found(Some(target.id.clone())))?;
         let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
         let Some(current) = sessions.get_mut(&session_id.to_string()) else {
@@ -99,13 +104,14 @@ impl PsychevoAcpAgent {
         ))
     }
 
-    pub(crate) fn session_summaries_for(
+    pub(crate) async fn session_summaries_for(
         &self,
         session: &AcpSession,
     ) -> Result<Vec<SessionSummary>, Error> {
         let store = self.state.clone();
         store
             .list_sessions_for_cwd_with_sources(&session.cwd, &[])
+            .await
             .map_err(acp_internal_error)
     }
 

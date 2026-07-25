@@ -6,8 +6,8 @@ include!("session_bridge/session_controls.rs");
 mod mission_tests {
     use super::*;
 
-    #[test]
-    fn acp_mission_records_team_metadata_before_prompt_run() {
+    #[tokio::test]
+    async fn acp_mission_records_team_metadata_before_prompt_run() {
         let root = std::env::temp_dir().join(format!("psychevo-acp-mission-{}", Uuid::now_v7()));
         let cwd = root.join("work");
         let home = root.join("home");
@@ -45,6 +45,7 @@ mod mission_tests {
                 home.display().to_string(),
             )]),
         })
+        .await
         .expect("agent");
         let session_id = SessionId::new("acp-mission");
         let session = AcpSession::new(cwd, None, Vec::new());
@@ -56,6 +57,7 @@ mod mission_tests {
 
         agent
             .record_acp_mission_metadata(&session_id, &session, Some("release"), "Ship it")
+            .await
             .expect("metadata");
 
         let runtime_session_id = agent
@@ -68,11 +70,13 @@ mod mission_tests {
         let team = agent
             .state
             .find_active_agent_team_run(&runtime_session_id)
+            .await
             .expect("team lookup")
             .expect("team run");
         let mission = agent
             .state
             .find_active_agent_mission_run(&runtime_session_id)
+            .await
             .expect("mission lookup")
             .expect("mission run");
         assert_eq!(team.team_name, "release");

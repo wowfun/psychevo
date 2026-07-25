@@ -60,19 +60,19 @@ pub(crate) async fn run() -> Result<ExitCode> {
     match cli.command {
         None => run_default_command(default_tui_cd).await,
         Some(Commands::Init(args)) => run_init_command(args).await,
-        Some(Commands::Profile(args)) => run_profile_command(args),
+        Some(Commands::Profile(args)) => run_profile_command(args).await,
         Some(Commands::Agent(args)) => run_agent_command(args).await,
         Some(Commands::Skill(args)) => run_skills_command(args),
-        Some(Commands::Plugin(args)) => run_plugin_command(args),
-        Some(Commands::Hooks(args)) => run_hooks_command(args),
-        Some(Commands::Tool(args)) => run_tool_command(args),
+        Some(Commands::Plugin(args)) => run_plugin_command(args).await,
+        Some(Commands::Hooks(args)) => run_hooks_command(args).await,
+        Some(Commands::Tool(args)) => run_tool_command(args).await,
         Some(Commands::Run(args)) => run_run_command(args).await,
-        Some(Commands::Stats(args)) => run_stats_command(args),
-        Some(Commands::Context(args)) => run_context_command(args),
-        Some(Commands::Session(args)) => run_session_command(args),
+        Some(Commands::Stats(args)) => run_stats_command(args).await,
+        Some(Commands::Context(args)) => run_context_command(args).await,
+        Some(Commands::Session(args)) => run_session_command(args).await,
         Some(Commands::Model(args)) => run_model_command(args).await,
-        Some(Commands::Config(args)) => run_config_command(args),
-        Some(Commands::Auth(args)) => run_auth_command(args),
+        Some(Commands::Config(args)) => run_config_command(args).await,
+        Some(Commands::Auth(args)) => run_auth_command(args).await,
         Some(Commands::Acp(args)) => {
             if args.setup {
                 println!(

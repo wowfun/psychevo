@@ -55,8 +55,8 @@ impl MockJsonServer {
     }
 }
 
-#[test]
-pub(crate) fn cli_rejects_obsolete_plural_skills_command() {
+#[tokio::test]
+pub(crate) async fn cli_rejects_obsolete_plural_skills_command() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .args(["skills", "list"])
@@ -65,8 +65,8 @@ pub(crate) fn cli_rejects_obsolete_plural_skills_command() {
     assert!(!output.status.success());
 }
 
-#[test]
-pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secret() {
+#[tokio::test]
+pub(crate) async fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secret() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -160,8 +160,8 @@ pub(crate) fn cli_config_provider_and_auth_write_scoped_env_without_leaking_secr
     assert!(!String::from_utf8_lossy(&add_global.stdout).contains("global-secret"));
 }
 
-#[test]
-pub(crate) fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_removed() {
+#[tokio::test]
+pub(crate) async fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_removed() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -234,8 +234,8 @@ pub(crate) fn cli_gateway_setup_channels_are_secret_free_and_old_command_is_remo
     assert!(!String::from_utf8_lossy(&status.stdout).contains("telegram-secret"));
 }
 
-#[test]
-pub(crate) fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaking_secret() {
+#[tokio::test]
+pub(crate) async fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaking_secret() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -301,8 +301,8 @@ pub(crate) fn cli_gateway_setup_wechat_qr_writes_env_backed_config_without_leaki
     assert!(requests[1].starts_with("GET /ilink/bot/get_qrcode_status?qrcode=qr-token HTTP/1.1"));
 }
 
-#[test]
-pub(crate) fn cli_config_permissions_lists_and_removes_project_local_rules() {
+#[tokio::test]
+pub(crate) async fn cli_config_permissions_lists_and_removes_project_local_rules() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -384,8 +384,8 @@ decision = "prompt"
     assert!(config.contains("\"cargo\""));
 }
 
-#[test]
-pub(crate) fn cli_tool_commands_list_and_toggle_profile_toolsets() {
+#[tokio::test]
+pub(crate) async fn cli_tool_commands_list_and_toggle_profile_toolsets() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -522,8 +522,8 @@ pub(crate) fn cli_tool_commands_list_and_toggle_profile_toolsets() {
     );
 }
 
-#[test]
-pub(crate) fn cli_session_commands_manage_active_and_archived_sessions() {
+#[tokio::test]
+pub(crate) async fn cli_session_commands_manage_active_and_archived_sessions() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -580,8 +580,8 @@ pub(crate) fn cli_session_commands_manage_active_and_archived_sessions() {
     assert!(restore.status.success());
 }
 
-#[test]
-pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
+#[tokio::test]
+pub(crate) async fn cli_session_export_and_share_emit_local_artifacts() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -917,8 +917,8 @@ pub(crate) fn cli_session_export_and_share_emit_local_artifacts() {
     assert!(content.contains("visible answer"));
 }
 
-#[test]
-pub(crate) fn cli_model_list_current_and_fetch_use_local_config_and_explicit_fetch_only() {
+#[tokio::test]
+pub(crate) async fn cli_model_list_current_and_fetch_use_local_config_and_explicit_fetch_only() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");

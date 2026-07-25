@@ -6,7 +6,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn model_command_opens_searchable_bottom_picker() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
@@ -34,10 +34,10 @@ pub(crate) async fn model_command_opens_searchable_bottom_picker() {
     );
 }
 
-#[test]
-pub(crate) fn configured_model_name_labels_the_picker_and_composer_status() {
+#[tokio::test]
+pub(crate) async fn configured_model_name_labels_the_picker_and_composer_status() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let config_path = app.config_path.clone().expect("config path");
     for path in [config_path, app.cwd.join(".psychevo/config.toml")] {
         let config = fs::read_to_string(&path).expect("read config");
@@ -78,7 +78,7 @@ pub(crate) fn configured_model_name_labels_the_picker_and_composer_status() {
 #[tokio::test]
 pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
@@ -99,6 +99,7 @@ pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() 
         .selected_key();
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
         .expect("tab");
     {
         let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
@@ -110,8 +111,10 @@ pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() 
     }
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("scroll info");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("enter info");
     {
         let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
@@ -122,6 +125,7 @@ pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() 
     }
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .await
         .expect("right");
     {
         let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
@@ -134,6 +138,7 @@ pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() 
     }
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await
         .expect("left");
     let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
         panic!("expected model panel");
@@ -144,10 +149,10 @@ pub(crate) async fn model_tabs_switch_and_preserve_query_selection_and_scroll() 
     assert_eq!(panel.info_scroll, 1);
 }
 
-#[test]
-pub(crate) fn model_info_tab_renders_selected_model_details() {
+#[tokio::test]
+pub(crate) async fn model_info_tab_renders_selected_model_details() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     let mut panel = ModelPanel::new(app.model_selection_panel().expect("model panel"));
     panel.tab = ModelTab::Info;
@@ -170,8 +175,8 @@ pub(crate) fn model_info_tab_renders_selected_model_details() {
     assert!(text.contains("source: config"));
 }
 
-#[test]
-pub(crate) fn model_info_tab_renders_cached_xiaomi_omni_capabilities() {
+#[tokio::test]
+pub(crate) async fn model_info_tab_renders_cached_xiaomi_omni_capabilities() {
     let temp = tempdir().expect("temp");
     let config_path = temp.path().join("xiaomi-omni-config.toml");
     fs::write(
@@ -185,7 +190,7 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
 "#,
     )
     .expect("config");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -279,7 +284,7 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
 "#,
     )
     .expect("config");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -313,6 +318,7 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
         &mut ui,
         KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("refresh");
     {
         let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
@@ -352,7 +358,7 @@ api = "https://token-plan-cn.xiaomimimo.com/v1"
 pub(crate) async fn startup_warmup_fetches_missing_metadata_cache_silently() {
     let temp = tempdir().expect("temp");
     let server = TuiCatalogServer::new(r#"{"mock":{"models":{"model":{"id":"model"}}}}"#);
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -386,8 +392,8 @@ pub(crate) async fn drain_metadata_refresh_until_idle(app: &mut TuiApp, ui: &mut
     panic!("metadata refresh did not finish");
 }
 
-#[test]
-pub(crate) fn model_info_tab_omits_unknown_and_shows_false_capabilities() {
+#[tokio::test]
+pub(crate) async fn model_info_tab_omits_unknown_and_shows_false_capabilities() {
     let mut model = ConfiguredModel {
         provider: "mock".to_string(),
         provider_label: "Mock".to_string(),
@@ -434,10 +440,10 @@ pub(crate) fn model_info_tab_omits_unknown_and_shows_false_capabilities() {
     assert!(!text.contains("Pricing"));
 }
 
-#[test]
-pub(crate) fn model_info_tab_action_row_shows_empty_state() {
+#[tokio::test]
+pub(crate) async fn model_info_tab_action_row_shows_empty_state() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     let mut panel = ModelPanel::new(app.model_selection_panel().expect("model panel"));
     panel.models.select_value_key("provider:add");
@@ -469,7 +475,7 @@ api = "{}"
         ),
     )
     .expect("config");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map
         .insert("MOCK_API_KEY".to_string(), "test-key".to_string());
     app.config_path = Some(config_path);
@@ -493,6 +499,7 @@ api = "{}"
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("fetch");
     drain_catalog_until_idle(&mut app, &mut ui).await;
 
@@ -527,7 +534,7 @@ api = "{}"
 #[tokio::test]
 pub(crate) async fn model_fetch_missing_credentials_stays_in_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let config_path = temp.path().join("missing-config.toml");
     fs::write(
         &config_path,
@@ -570,7 +577,7 @@ api = "http://api.example/v1"
 #[tokio::test]
 pub(crate) async fn model_add_provider_opens_builtin_preset_picker() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -592,6 +599,7 @@ pub(crate) async fn model_add_provider_opens_builtin_preset_picker() {
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("add provider");
 
     let Some(BottomPanel::ProviderPresets(panel)) = &ui.bottom_panel else {
@@ -616,7 +624,7 @@ pub(crate) async fn model_add_provider_opens_builtin_preset_picker() {
 #[tokio::test]
 pub(crate) async fn model_add_provider_rejects_psychevo_config_override() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let config_path = temp.path().join("config.toml");
     fs::write(&config_path, "\n").expect("config");
     app.config_path = Some(config_path);
@@ -636,6 +644,7 @@ pub(crate) async fn model_add_provider_rejects_psychevo_config_override() {
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("add provider");
 
     let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
@@ -651,7 +660,7 @@ pub(crate) async fn model_add_provider_rejects_psychevo_config_override() {
 pub(crate) async fn model_add_builtin_deepseek_saves_fetches_and_hides_secret() {
     let temp = tempdir().expect("temp");
     let server = TuiCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -675,6 +684,7 @@ pub(crate) async fn model_add_builtin_deepseek_saves_fetches_and_hides_secret() 
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("add provider");
     {
         let Some(BottomPanel::ProviderPresets(panel)) = &mut ui.bottom_panel else {
@@ -687,6 +697,7 @@ pub(crate) async fn model_add_builtin_deepseek_saves_fetches_and_hides_secret() 
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select deepseek");
 
     let Some(BottomPanel::ProviderWizard(panel)) = &mut ui.bottom_panel else {
@@ -737,10 +748,10 @@ pub(crate) async fn model_add_builtin_deepseek_saves_fetches_and_hides_secret() 
     );
 }
 
-#[test]
-pub(crate) fn model_add_builtin_zai_and_xiaomi_offer_base_url_shortcuts() {
+#[tokio::test]
+pub(crate) async fn model_add_builtin_zai_and_xiaomi_offer_base_url_shortcuts() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
 
     let zai_default = app.provider_wizard_panel_for_preset(ProviderSetupPresetId::Zai, Some(0));
     assert_eq!(zai_default.base_url, "https://api.z.ai/api/paas/v4");
@@ -767,10 +778,10 @@ pub(crate) fn model_add_builtin_zai_and_xiaomi_offer_base_url_shortcuts() {
     );
 }
 
-#[test]
-pub(crate) fn model_add_builtin_xiaomi_writes_canonical_provider_options() {
+#[tokio::test]
+pub(crate) async fn model_add_builtin_xiaomi_writes_canonical_provider_options() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -794,10 +805,10 @@ pub(crate) fn model_add_builtin_xiaomi_writes_canonical_provider_options() {
     assert_eq!(env, "XIAOMI_TOKEN_PLAN_API_KEY=test-key\n");
 }
 
-#[test]
-pub(crate) fn model_add_provider_reuses_existing_builtin_env_key() {
+#[tokio::test]
+pub(crate) async fn model_add_provider_reuses_existing_builtin_env_key() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     fs::write(app.home.join(".env"), "DEEPSEEK_API_KEY=existing\n").expect("env");
 
     let panel = app.provider_wizard_panel_for_preset(ProviderSetupPresetId::DeepSeek, Some(0));
@@ -812,7 +823,7 @@ pub(crate) fn model_add_provider_reuses_existing_builtin_env_key() {
 pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_model() {
     let temp = tempdir().expect("temp");
     let server = TuiCatalogServer::new(r#"{"data":[{"id":"remote-model"}]}"#);
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -836,6 +847,7 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("add provider");
 
     {
@@ -849,6 +861,7 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select custom provider");
 
     let Some(BottomPanel::ProviderWizard(panel)) = &mut ui.bottom_panel else {
@@ -900,12 +913,14 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select model");
     let selected = ui
         .bottom_panel
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select variant");
 
     assert_eq!(
@@ -932,7 +947,7 @@ pub(crate) async fn model_add_provider_saves_global_config_fetches_and_selects_m
 #[tokio::test]
 pub(crate) async fn model_add_provider_wizard_generates_id_and_reports_validation_errors() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.env_map.insert(
         "PSYCHEVO_HOME".to_string(),
         app.home.to_string_lossy().to_string(),
@@ -977,7 +992,7 @@ pub(crate) async fn model_add_provider_wizard_generates_id_and_reports_validatio
 #[tokio::test]
 pub(crate) async fn fetched_model_selection_writes_local_default_model() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.sync_model_catalog_providers().expect("providers");
     let state = app
         .model_catalog
@@ -1006,6 +1021,7 @@ pub(crate) async fn fetched_model_selection_writes_local_default_model() {
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select fetched");
     let Some(BottomPanel::Variants { panel, .. }) = &ui.bottom_panel else {
         panic!("expected variant panel");
@@ -1022,6 +1038,7 @@ pub(crate) async fn fetched_model_selection_writes_local_default_model() {
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select variant");
 
     assert_eq!(app.current_model.as_deref(), Some("mock/remote-model"));
@@ -1045,7 +1062,7 @@ pub(crate) async fn fetched_model_selection_writes_local_default_model() {
 #[tokio::test]
 pub(crate) async fn model_global_picker_writes_global_default_model() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     fs::copy(
         app.config_path.as_ref().expect("config"),
         app.home.join("config.toml"),
@@ -1068,12 +1085,14 @@ pub(crate) async fn model_global_picker_writes_global_default_model() {
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select model");
     let selected = ui
         .bottom_panel
         .as_ref()
         .and_then(BottomPanel::selected_value);
     app.apply_bottom_panel_selection(&mut ui, selected)
+        .await
         .expect("select variant");
 
     let global_config = fs::read_to_string(app.home.join("config.toml")).expect("global config");
@@ -1085,10 +1104,10 @@ pub(crate) async fn model_global_picker_writes_global_default_model() {
     assert!(local_config.contains("model = \"mock/mock-model\""));
 }
 
-#[test]
-pub(crate) fn model_picker_initial_focus_prefers_model_rows_before_fetch_rows() {
+#[tokio::test]
+pub(crate) async fn model_picker_initial_focus_prefers_model_rows_before_fetch_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let panel = app.model_selection_panel().expect("panel");
     assert_eq!(
         panel.rows[panel.filtered_indices()[panel.selected]].label,
@@ -1104,7 +1123,7 @@ pub(crate) fn model_picker_initial_focus_prefers_model_rows_before_fetch_rows() 
     );
 
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let config_path = temp.path().join("empty-model-config.toml");
     fs::write(
         &config_path,
@@ -1130,15 +1149,17 @@ no_auth = true
 #[tokio::test]
 pub(crate) async fn model_picker_up_down_wraps_between_first_and_last_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
         .await
         .expect("model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Home, KeyModifiers::NONE))
+        .await
         .expect("first row");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await
         .expect("wrap up");
     let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
         panic!("expected model panel");
@@ -1149,6 +1170,7 @@ pub(crate) async fn model_picker_up_down_wraps_between_first_and_last_rows() {
     );
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("wrap down");
     let Some(BottomPanel::Models(panel)) = &ui.bottom_panel else {
         panic!("expected model panel");

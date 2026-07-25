@@ -3,10 +3,10 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn transcript_selection_toggles_expandable_output() {
+#[tokio::test]
+pub(crate) async fn transcript_selection_toggles_expandable_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
     row.full_text = Some("a\nb\nc".to_string());
@@ -19,10 +19,10 @@ pub(crate) fn transcript_selection_toggles_expandable_output() {
     assert!(!ui.transcript[0].expanded);
 }
 
-#[test]
-pub(crate) fn transcript_render_blocks_keep_consecutive_tools_flat() {
+#[tokio::test]
+pub(crate) async fn transcript_render_blocks_keep_consecutive_tools_flat() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     for index in 0..4 {
         ui.transcript.push(TranscriptRow::with_title(
@@ -43,10 +43,10 @@ pub(crate) fn transcript_render_blocks_keep_consecutive_tools_flat() {
     }
 }
 
-#[test]
-pub(crate) fn transcript_render_blocks_keep_thinking_and_tools_flat() {
+#[tokio::test]
+pub(crate) async fn transcript_render_blocks_keep_thinking_and_tools_flat() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Thinking,
@@ -74,10 +74,10 @@ pub(crate) fn transcript_render_blocks_keep_thinking_and_tools_flat() {
     assert_eq!(blocks[3].index, 3);
 }
 
-#[test]
-pub(crate) fn bash_timeout_failure_shows_timeout_before_partial_output() {
+#[tokio::test]
+pub(crate) async fn bash_timeout_failure_shows_timeout_before_partial_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -111,10 +111,10 @@ pub(crate) fn bash_timeout_failure_shows_timeout_before_partial_output() {
     assert!(row.text.contains("[fetch] 29 rows done"));
 }
 
-#[test]
-pub(crate) fn bash_timeout_without_output_omits_no_output_placeholder() {
+#[tokio::test]
+pub(crate) async fn bash_timeout_without_output_omits_no_output_placeholder() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -143,8 +143,8 @@ pub(crate) fn bash_timeout_without_output_omits_no_output_placeholder() {
     assert!(!row.text.contains("(no output)"));
 }
 
-#[test]
-pub(crate) fn command_row_renders_claude_style_prefixes_and_colored_context_bar() {
+#[tokio::test]
+pub(crate) async fn command_row_renders_claude_style_prefixes_and_colored_context_bar() {
     let row = TranscriptRow::with_title(
         TranscriptKind::Command,
         "/context",
@@ -171,8 +171,8 @@ pub(crate) fn command_row_renders_claude_style_prefixes_and_colored_context_bar(
     assert_eq!(lines[3].spans[11].content.as_ref(), " history");
 }
 
-#[test]
-pub(crate) fn command_row_defaults_open_and_toggles_details() {
+#[tokio::test]
+pub(crate) async fn command_row_defaults_open_and_toggles_details() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Command,
         "/status",
@@ -208,8 +208,8 @@ pub(crate) fn command_row_defaults_open_and_toggles_details() {
     );
 }
 
-#[test]
-pub(crate) fn command_rows_do_not_count_as_visible_messages() {
+#[tokio::test]
+pub(crate) async fn command_rows_do_not_count_as_visible_messages() {
     let rows = vec![
         TranscriptRow::with_title(TranscriptKind::Command, "/status", "cwd: /repo"),
         TranscriptRow::with_title(TranscriptKind::Prompt, "", "hello"),
@@ -219,8 +219,8 @@ pub(crate) fn command_rows_do_not_count_as_visible_messages() {
     assert_eq!(visible_transcript_message_count(&rows), 2);
 }
 
-#[test]
-pub(crate) fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
+#[tokio::test]
+pub(crate) async fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
     let long = (1..=12)
         .map(|index| format!("line {index}"))
         .collect::<Vec<_>>()
@@ -244,8 +244,8 @@ pub(crate) fn long_thinking_defaults_to_row_level_collapse_without_left_rail() {
     assert!(!rendered.contains("Thinking:"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn long_thinking_cycles_preview_full_title_preview() {
+#[tokio::test]
+pub(crate) async fn long_thinking_cycles_preview_full_title_preview() {
     let long = (1..=12)
         .map(|index| format!("line {index}"))
         .collect::<Vec<_>>()
@@ -290,8 +290,8 @@ pub(crate) fn long_thinking_cycles_preview_full_title_preview() {
     assert!(!preview.contains("line 8"), "{preview}");
 }
 
-#[test]
-pub(crate) fn active_thinking_row_uses_activity_marker_and_elapsed() {
+#[tokio::test]
+pub(crate) async fn active_thinking_row_uses_activity_marker_and_elapsed() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "working");
     row.tool_started = Some(
         Instant::now()
@@ -311,8 +311,8 @@ pub(crate) fn active_thinking_row_uses_activity_marker_and_elapsed() {
     assert!(rendered.contains("2s"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn completed_thinking_row_does_not_show_elapsed() {
+#[tokio::test]
+pub(crate) async fn completed_thinking_row_does_not_show_elapsed() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "done");
     row.tool_elapsed = Some(Duration::from_secs(4));
 
@@ -325,8 +325,8 @@ pub(crate) fn completed_thinking_row_does_not_show_elapsed() {
     assert!(!rendered.contains("4s"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn completed_thinking_row_uses_shared_evidence_title_styles() {
+#[tokio::test]
+pub(crate) async fn completed_thinking_row_uses_shared_evidence_title_styles() {
     let thinking = TranscriptRow::with_title(TranscriptKind::Thinking, "Thinking", "");
     let tool = TranscriptRow::with_title(TranscriptKind::Ran, "Ran ls", "");
     let thinking = thinking_lines(&thinking, false, true, 80)
@@ -346,8 +346,8 @@ pub(crate) fn completed_thinking_row_uses_shared_evidence_title_styles() {
     );
 }
 
-#[test]
-pub(crate) fn short_thinking_row_can_collapse_details() {
+#[tokio::test]
+pub(crate) async fn short_thinking_row_can_collapse_details() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Thinking,
         "Thinking",
@@ -374,8 +374,8 @@ pub(crate) fn short_thinking_row_can_collapse_details() {
     assert!(!collapsed.contains("first thought"), "{collapsed}");
 }
 
-#[test]
-pub(crate) fn completed_tool_row_can_collapse_details() {
+#[tokio::test]
+pub(crate) async fn completed_tool_row_can_collapse_details() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran cargo test", "ok\nmore");
     assert!(row.is_expandable());
 
@@ -397,8 +397,8 @@ pub(crate) fn completed_tool_row_can_collapse_details() {
     assert!(!collapsed.contains("ok"), "{collapsed}");
 }
 
-#[test]
-pub(crate) fn long_tool_output_uses_shared_default_collapse() {
+#[tokio::test]
+pub(crate) async fn long_tool_output_uses_shared_default_collapse() {
     let output = (1..=12)
         .map(|line| format!("line {line:02}"))
         .collect::<Vec<_>>()
@@ -425,8 +425,8 @@ pub(crate) fn long_tool_output_uses_shared_default_collapse() {
     assert!(!rendered.contains("line 08"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn long_single_line_tool_output_collapses_by_display_width() {
+#[tokio::test]
+pub(crate) async fn long_single_line_tool_output_collapses_by_display_width() {
     let output = format!("{{\"items\":\"{}\"}}", "x".repeat(1400));
     let row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran sqlite3 export", output.clone());
 
@@ -447,8 +447,8 @@ pub(crate) fn long_single_line_tool_output_collapses_by_display_width() {
     );
 }
 
-#[test]
-pub(crate) fn long_tool_output_collapses_by_display_tokens() {
+#[tokio::test]
+pub(crate) async fn long_tool_output_collapses_by_display_tokens() {
     let output = (0..LEDGER_BODY_COLLAPSE_TOKENS + 12)
         .map(|_| "x")
         .collect::<Vec<_>>()
@@ -473,8 +473,8 @@ pub(crate) fn long_tool_output_collapses_by_display_tokens() {
     assert!(rendered.contains("▸ more output"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn line_count_collapse_preview_is_bounded_by_display_tokens() {
+#[tokio::test]
+pub(crate) async fn line_count_collapse_preview_is_bounded_by_display_tokens() {
     let line = (0..40).map(|_| "field").collect::<Vec<_>>().join(" ");
     let output = (1..=12)
         .map(|index| format!("{index}|{line}"))
@@ -505,8 +505,8 @@ pub(crate) fn line_count_collapse_preview_is_bounded_by_display_tokens() {
     assert!(!rendered.contains("▸ 6 more lines"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn unbroken_table_output_collapses_by_display_tokens() {
+#[tokio::test]
+pub(crate) async fn unbroken_table_output_collapses_by_display_tokens() {
     let output = "-".repeat(900);
     assert!(
         output.lines().count() <= LEDGER_BODY_COLLAPSE_HEAD_LINES + LEDGER_BODY_COLLAPSE_TAIL_LINES,
@@ -532,8 +532,8 @@ pub(crate) fn unbroken_table_output_collapses_by_display_tokens() {
     assert!(rendered.contains("▸ more output"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn expanded_tool_output_restores_full_text() {
+#[tokio::test]
+pub(crate) async fn expanded_tool_output_restores_full_text() {
     let output = (1..=12)
         .map(|line| format!("line {line:02}"))
         .collect::<Vec<_>>()
@@ -577,8 +577,8 @@ pub(crate) fn expanded_tool_output_restores_full_text() {
     assert!(!preview.contains("line 08"), "{preview}");
 }
 
-#[test]
-pub(crate) fn long_command_and_long_output_expand_together() {
+#[tokio::test]
+pub(crate) async fn long_command_and_long_output_expand_together() {
     let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\"";
     let output = (1..=12)
         .map(|line| format!("json row {line:02}"))
@@ -612,8 +612,8 @@ pub(crate) fn long_command_and_long_output_expand_together() {
     assert!(expanded.contains("json row 12"), "{expanded}");
 }
 
-#[test]
-pub(crate) fn edit_tool_row_renders_inline_codex_style_diff() {
+#[tokio::test]
+pub(crate) async fn edit_tool_row_renders_inline_codex_style_diff() {
     let diff = "diff --git a/primes.py b/primes.py\n--- a/primes.py\n+++ b/primes.py\n@@ -1,2 +1,2 @@\n def main():\n-    limit = 1000\n+    limit = 2000\n";
     let mut row = TranscriptRow::with_title(TranscriptKind::Updated, "edit primes.py", diff);
     row.tool_name = Some("edit".to_string());
@@ -628,8 +628,8 @@ pub(crate) fn edit_tool_row_renders_inline_codex_style_diff() {
     assert!(!rendered.contains("1     1 |"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn malformed_edit_tool_diff_falls_back_to_plain_body() {
+#[tokio::test]
+pub(crate) async fn malformed_edit_tool_diff_falls_back_to_plain_body() {
     let mut row =
         TranscriptRow::with_title(TranscriptKind::Updated, "edit primes.py", "not a patch");
     row.tool_name = Some("edit".to_string());
@@ -644,8 +644,8 @@ pub(crate) fn malformed_edit_tool_diff_falls_back_to_plain_body() {
     assert!(rendered.contains("not a patch"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn long_running_command_row_expands_full_command() {
+#[tokio::test]
+pub(crate) async fn long_running_command_row_expands_full_command() {
     let command = "cd /home/kevin/Projects/feedgarden && sqlite3 feeds/.cache/hn.db \"SELECT id || '|' || by || '|' || text FROM comments WHERE story_id = 48073680 ORDER BY id\"";
     let mut row =
         TranscriptRow::with_title(TranscriptKind::Ran, format!("Ran {command}"), "running");
@@ -681,7 +681,7 @@ pub(crate) fn long_running_command_row_expands_full_command() {
 #[tokio::test]
 pub(crate) async fn ctrl_t_enters_transcript_focus_without_toggling_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
     row.full_text = Some("a\nb\nc".to_string());
@@ -702,7 +702,7 @@ pub(crate) async fn ctrl_t_enters_transcript_focus_without_toggling_row() {
 #[tokio::test]
 pub(crate) async fn mouse_click_toggles_expandable_transcript_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "a");
     row.full_text = Some("a\nb\nc".to_string());
@@ -718,7 +718,7 @@ pub(crate) async fn mouse_click_toggles_expandable_transcript_row() {
 #[tokio::test]
 pub(crate) async fn mouse_drag_selection_does_not_toggle_transcript_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.clipboard = Arc::new(|_| Ok(()));
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored log", "abcdef");
@@ -753,10 +753,10 @@ pub(crate) async fn mouse_drag_selection_does_not_toggle_transcript_row() {
     assert!(!ui.transcript[0].expanded);
 }
 
-#[test]
-pub(crate) fn selected_answer_uses_single_line_focus_marker() {
+#[tokio::test]
+pub(crate) async fn selected_answer_uses_single_line_focus_marker() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let row = TranscriptRow::simple(
         TranscriptKind::Answer,
         "first line\nsecond line\nthird line",
@@ -781,8 +781,8 @@ pub(crate) fn selected_answer_uses_single_line_focus_marker() {
     );
 }
 
-#[test]
-pub(crate) fn selected_thinking_and_tool_rows_use_single_line_focus_marker() {
+#[tokio::test]
+pub(crate) async fn selected_thinking_and_tool_rows_use_single_line_focus_marker() {
     let thinking = TranscriptRow::with_title(
         TranscriptKind::Thinking,
         "Thinking",
@@ -827,8 +827,8 @@ pub(crate) fn selected_thinking_and_tool_rows_use_single_line_focus_marker() {
     );
 }
 
-#[test]
-pub(crate) fn status_rows_use_quiet_notice_marker_and_hide_default_title() {
+#[tokio::test]
+pub(crate) async fn status_rows_use_quiet_notice_marker_and_hide_default_title() {
     let row = TranscriptRow::simple(TranscriptKind::Status, "mode: plan\nskill loaded: reviewer");
     let lines = status_lines(&row, false, true, 80);
     let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
@@ -855,8 +855,8 @@ pub(crate) fn status_rows_use_quiet_notice_marker_and_hide_default_title() {
     );
 }
 
-#[test]
-pub(crate) fn status_tool_rows_keep_title_hint_and_tree_detail() {
+#[tokio::test]
+pub(crate) async fn status_tool_rows_keep_title_hint_and_tree_detail() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Status,
         "Tool view_skill",
@@ -884,8 +884,8 @@ pub(crate) fn status_tool_rows_keep_title_hint_and_tree_detail() {
     );
 }
 
-#[test]
-pub(crate) fn clarify_status_results_use_shared_status_notice_renderer() {
+#[tokio::test]
+pub(crate) async fn clarify_status_results_use_shared_status_notice_renderer() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Status,
         "Questions 1/1 answered",
@@ -948,8 +948,8 @@ pub(crate) fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseE
     }
 }
 
-#[test]
-pub(crate) fn compact_duration_formatter_uses_whole_seconds_and_minutes() {
+#[tokio::test]
+pub(crate) async fn compact_duration_formatter_uses_whole_seconds_and_minutes() {
     assert_eq!(format_duration_compact(Duration::from_millis(0)), "0s");
     assert_eq!(format_duration_compact(Duration::from_millis(999)), "0s");
     assert_eq!(format_duration_compact(Duration::from_millis(1_000)), "1s");
@@ -971,8 +971,8 @@ pub(crate) fn compact_duration_formatter_uses_whole_seconds_and_minutes() {
     );
 }
 
-#[test]
-pub(crate) fn streaming_tool_calls_parse_id_position_and_complete_arguments() {
+#[tokio::test]
+pub(crate) async fn streaming_tool_calls_parse_id_position_and_complete_arguments() {
     let event = serde_json::json!({
         "type": "message_update",
         "message": {

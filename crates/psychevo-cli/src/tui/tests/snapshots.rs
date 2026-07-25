@@ -1,44 +1,44 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn tui_snapshot_wide_idle_minimal_chrome() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_wide_idle_minimal_chrome() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::Idle);
     assert_tui_snapshot("wide_idle_minimal_chrome", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_wide_optional_sidebar() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_wide_optional_sidebar() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.sidebar_forced = true;
     ui.sidebar_hidden = false;
     assert_tui_snapshot("wide_optional_sidebar", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_narrow_idle_composer_without_sidebar() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_narrow_idle_composer_without_sidebar() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::Idle);
     assert_tui_snapshot("narrow_idle_composer_without_sidebar", 80, 20, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_slash_menu_prefix_filtering() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_slash_menu_prefix_filtering() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.textarea = textarea_with_text("/mo");
     assert_tui_snapshot("slash_menu_prefix_filtering", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_file_completion_popup() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_file_completion_popup() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.textarea = textarea_with_text("review @src");
     ui.file_search.popup = Some(FileSearchPopupState {
@@ -63,10 +63,10 @@ pub(crate) fn tui_snapshot_file_completion_popup() {
     assert_tui_snapshot("file_completion_popup", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_model_bottom_panel() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_model_bottom_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.bottom_panel = Some(BottomPanel::Models(ModelPanel::new(
         app.model_selection_panel().expect("model panel"),
@@ -74,10 +74,10 @@ pub(crate) fn tui_snapshot_model_bottom_panel() {
     assert_tui_snapshot("model_bottom_panel", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_model_info_tab() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_model_info_tab() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     let mut panel = ModelPanel::new(app.model_selection_panel().expect("model panel"));
     panel.tab = ModelTab::Info;
@@ -85,10 +85,10 @@ pub(crate) fn tui_snapshot_model_info_tab() {
     assert_tui_snapshot("model_info_tab", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_variant_bottom_panel() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_variant_bottom_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let models = ModelPanel::new(app.model_selection_panel().expect("model panel"));
     let (other, source) = models
         .models
@@ -106,10 +106,10 @@ pub(crate) fn tui_snapshot_variant_bottom_panel() {
     assert_tui_snapshot("variant_bottom_panel", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_session_bottom_panel() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_session_bottom_panel() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.bottom_panel = Some(BottomPanel::Sessions(stable_session_bottom_panel()));
     assert_tui_snapshot("session_bottom_panel", 120, 24, &app, ui);
@@ -118,7 +118,7 @@ pub(crate) fn tui_snapshot_session_bottom_panel() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_session_bottom_panel_background_running() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.running_elapsed_override = Some(Duration::from_secs(12));
     attach_background_agent_running(&mut ui, "session-b");
@@ -126,10 +126,10 @@ pub(crate) async fn tui_snapshot_session_bottom_panel_background_running() {
     assert_tui_snapshot("session_bottom_panel_background_running", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_archived_session_action_bottom_panel() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_archived_session_action_bottom_panel() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     let mut panel = stable_archived_session_bottom_panel();
     panel.arm_action_mode();
@@ -140,64 +140,64 @@ pub(crate) fn tui_snapshot_archived_session_action_bottom_panel() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_running_turn_with_visible_thinking() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::RunningThinking);
     attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("running_turn_with_visible_thinking", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_completed_ledger_collapsed_tool_output() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_completed_ledger_collapsed_tool_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::CollapsedTool);
     assert_tui_snapshot("completed_ledger_collapsed_tool_output", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_expanded_long_tool_output() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_expanded_long_tool_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::ExpandedTool);
     assert_tui_snapshot("expanded_long_tool_output", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_expanded_long_command() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_expanded_long_command() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::ExpandedLongCommand);
     assert_tui_snapshot("expanded_long_command", 120, 18, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_collapsed_long_json_tool_output() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_collapsed_long_json_tool_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::CollapsedJsonTool);
     assert_tui_snapshot("collapsed_long_json_tool_output", 120, 18, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_long_command_folded_output() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_long_command_folded_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::LongCommandFoldedOutput);
     assert_tui_snapshot("long_command_folded_output", 120, 18, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_consecutive_tool_rows_flat() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_consecutive_tool_rows_flat() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::ConsecutiveToolRows);
     assert_tui_snapshot("consecutive_tool_rows_flat", 120, 20, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_rich_markdown_answer() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_rich_markdown_answer() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::RichMarkdown);
     assert_tui_snapshot("rich_markdown_answer", 120, 24, &app, ui);
 }
@@ -205,7 +205,7 @@ pub(crate) fn tui_snapshot_rich_markdown_answer() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_active_write_after_visible_answer() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::ActiveWriteAfterAnswer);
     attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_write_after_visible_answer", 120, 24, &app, ui);
@@ -214,16 +214,16 @@ pub(crate) async fn tui_snapshot_active_write_after_visible_answer() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_active_visible_write_preamble() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::ActiveVisibleWritePreamble);
     attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_visible_write_preamble", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_history_pending_write_call() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_history_pending_write_call() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_history_message(
         &serde_json::json!({
@@ -274,7 +274,7 @@ pub(crate) fn tui_snapshot_history_pending_write_call() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_active_write_suppresses_failure_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -334,7 +334,7 @@ pub(crate) async fn tui_snapshot_active_write_suppresses_failure_meta() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_reasoning_suppresses_failure_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -371,24 +371,24 @@ pub(crate) async fn tui_snapshot_reasoning_suppresses_failure_meta() {
 #[tokio::test]
 pub(crate) async fn tui_snapshot_active_reasoning_write() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::ActiveReasoningWrite);
     attach_pending_agent_running(&mut ui);
     assert_tui_snapshot("active_reasoning_write", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_long_markdown_meta_bottom_scroll() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_long_markdown_meta_bottom_scroll() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::LongMarkdownBottom);
     assert_tui_snapshot("long_markdown_meta_bottom_scroll", 100, 18, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_long_thinking_markdown_meta_bottom_scroll() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_long_thinking_markdown_meta_bottom_scroll() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::LongThinkingMarkdownBottom);
     assert_tui_snapshot(
         "long_thinking_markdown_meta_bottom_scroll",
@@ -399,10 +399,10 @@ pub(crate) fn tui_snapshot_long_thinking_markdown_meta_bottom_scroll() {
     );
 }
 
-#[test]
-pub(crate) fn tui_snapshot_long_thinking_markdown_expanded_meta_bottom_scroll() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_long_thinking_markdown_expanded_meta_bottom_scroll() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::LongThinkingMarkdownExpandedBottom);
     assert_tui_snapshot(
         "long_thinking_markdown_expanded_meta_bottom_scroll",
@@ -413,19 +413,19 @@ pub(crate) fn tui_snapshot_long_thinking_markdown_expanded_meta_bottom_scroll() 
     );
 }
 
-#[test]
-pub(crate) fn tui_snapshot_debug_meta_with_usage_metadata() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_debug_meta_with_usage_metadata() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.debug = true;
     let ui = fixture_ui(&app, FixtureKind::DebugMeta);
     assert_tui_snapshot("debug_meta_with_usage_metadata", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_failure_tool_error_turn_meta() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_failure_tool_error_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let ui = fixture_ui(&app, FixtureKind::FailureMeta);
     assert_tui_snapshot("failure_tool_error_turn_meta", 120, 24, &app, ui);
 }

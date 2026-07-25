@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn cli_profile_create_use_and_select_home() {
+#[tokio::test]
+pub(crate) async fn cli_profile_create_use_and_select_home() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join(".psychevo");
     let coder_home = root.join("profiles").join("coder");
@@ -92,8 +92,8 @@ pub(crate) fn cli_profile_create_use_and_select_home() {
     }));
 }
 
-#[test]
-pub(crate) fn cli_profile_clone_copies_setup_without_runtime_state() {
+#[tokio::test]
+pub(crate) async fn cli_profile_clone_copies_setup_without_runtime_state() {
     let temp = tempdir().expect("temp");
     let root = temp.path().join(".psychevo");
     let source = root.join("profiles").join("coder");
@@ -150,8 +150,8 @@ pub(crate) fn cli_profile_clone_copies_setup_without_runtime_state() {
     assert!(!target.join("logs/session.log").exists());
 }
 
-#[test]
-pub(crate) fn cli_profile_selection_requires_existing_named_profile() {
+#[tokio::test]
+pub(crate) async fn cli_profile_selection_requires_existing_named_profile() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .args(["-p", "ghost", "config", "path", "--json"])

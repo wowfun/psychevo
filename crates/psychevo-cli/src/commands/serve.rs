@@ -76,7 +76,7 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     };
 
     let profile_home = home.clone();
-    let state = StateRuntime::open(&db_path)?;
+    let state = StateRuntime::open(&db_path).await?;
     let gateway = Gateway::new(state);
     let profile_name = env_value(crate::profiles::PROFILE_ENV, &env_map)
         .unwrap_or_else(|| crate::profiles::DEFAULT_PROFILE.to_string());

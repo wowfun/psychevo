@@ -70,7 +70,7 @@ impl TuiApp {
         )?)
     }
 
-    pub(crate) fn agents_status_text(&self) -> String {
+    pub(crate) async fn agents_status_text(&self) -> String {
         let Some(catalog) = self.current_agent_catalog() else {
             return "Agents disabled.".to_string();
         };
@@ -90,7 +90,7 @@ impl TuiApp {
         }
         if let Some(parent) = self.current_session.as_deref() {
             let store = &self.state_runtime;
-            let value = agent_status_value(Some(store), Some(parent), false);
+            let value = agent_status_value(Some(store), Some(parent), false).await;
             let running = value
                 .get("agents")
                 .and_then(Value::as_array)
@@ -168,14 +168,15 @@ impl TuiApp {
             .map(|catalog| catalog.skills.len())
     }
 
-    pub(crate) fn stats_status_text(&self) -> Result<String> {
+    pub(crate) async fn stats_status_text(&self) -> Result<String> {
         let report = usage_stats(StatsOptions {
             state: self.state_runtime.clone(),
             cwd: self.cwd.clone(),
             all: false,
             days: None,
             limit: 5,
-        })?;
+        })
+        .await?;
         let totals = report.get("totals").unwrap_or(&Value::Null);
         Ok(format!(
             "sessions: {}  messages: {}  tokens: {}  cost: {}",
@@ -186,7 +187,7 @@ impl TuiApp {
         ))
     }
 
-    pub(crate) fn write_tui_export(
+    pub(crate) async fn write_tui_export(
         &self,
         options: &crate::tui::slash::TuiExportOptions,
     ) -> Result<SessionExportWriteResult> {
@@ -210,10 +211,11 @@ impl TuiApp {
                 include: options.include.clone(),
                 artifact_kind: SessionArtifactKind::Export,
             },
-        )?)
+        )
+        .await?)
     }
 
-    pub(crate) fn write_tui_share(
+    pub(crate) async fn write_tui_share(
         &self,
         options: &crate::tui::slash::TuiShareOptions,
     ) -> Result<SessionExportWriteResult> {
@@ -237,7 +239,8 @@ impl TuiApp {
                 include: options.include.clone(),
                 artifact_kind: SessionArtifactKind::Share,
             },
-        )?)
+        )
+        .await?)
     }
 
     pub(crate) fn resolve_tui_export_path(
@@ -261,7 +264,7 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn context_status_snapshot(
+    pub(crate) async fn context_status_snapshot(
         &self,
         live: Option<&ContextSnapshot>,
     ) -> Result<ContextSnapshot> {
@@ -281,10 +284,11 @@ impl TuiApp {
             session,
             config_path: self.config_path.clone(),
             inherited_env: Some(self.env_map.clone()),
-        })?)
+        })
+        .await?)
     }
 
-    pub(crate) fn reload_context_for_current_session(
+    pub(crate) async fn reload_context_for_current_session(
         &self,
         ui: &FullscreenUi<'_>,
     ) -> Result<psychevo_runtime::types::ReloadContextResult> {
@@ -306,7 +310,8 @@ impl TuiApp {
             no_skills: self.no_skills,
             invalidation_reason: "manual_reload".to_string(),
             notice: None,
-        })?)
+        })
+        .await?)
     }
 
     pub(crate) async fn submit_prompt(&mut self, prompt: String) -> Result<()> {
@@ -322,25 +327,26 @@ impl TuiApp {
         }
         let turn_for_sink = Arc::clone(&turn);
         let stdout_for_sink = Arc::clone(&stdout);
-        let sink: GatewayEventSink = Arc::new(move |event| {
+        let event_observer = move |event| {
             let mut turn = turn_for_sink.lock().expect("turn lock poisoned");
             let mut stdout = stdout_for_sink.lock().expect("stdout lock poisoned");
             let _ = turn.render_gateway_event(&event, &mut *stdout);
-        });
-        let mut request = self.thread_turn_request(prompt);
+        };
+        let (mut caller, mut intent) = self.thread_turn_request(prompt);
         let source = self.gateway_source();
         let bind_source = self.canonical_gateway_source();
         let reset_source_binding = self.force_new_once && self.current_session.is_none();
-        request.source = Some(source);
-        request.bind_source = Some(bind_source);
-        request.reset_source_binding = reset_source_binding;
-        request.runtime_source = Some("tui".to_string());
-        request.continue_sources = TUI_CONTINUE_SESSION_SOURCES
-            .iter()
-            .map(|source| (*source).to_string())
-            .collect();
-        request.event_sink = Some(sink);
-        let result = self.gateway.run_turn(request).await?.result;
+        intent.source = Some(source);
+        intent.bind_source = Some(bind_source);
+        intent.reset_source_binding = reset_source_binding;
+        caller.observe_gateway_events(event_observer);
+        let result = self
+            .gateway
+            .start_turn(caller, intent)
+            .await?
+            .wait()
+            .await?
+            .result;
         self.last_context_snapshot = result.context_snapshot.clone();
         {
             let mut turn = turn.lock().expect("turn lock poisoned");
@@ -349,7 +355,7 @@ impl TuiApp {
         }
         self.current_session = Some(result.session_id);
         self.reset_live_agent_reload_poll();
-        self.refresh_current_session_title()?;
+        self.refresh_current_session_title().await?;
         self.clear_new_session_draft();
         let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
         if !success {

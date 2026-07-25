@@ -38,12 +38,13 @@ impl TuiApp {
             }
             Ok(SubmittedSlashInput::PassThroughPrompt(prompt)) => {
                 let images = ui.take_submitted_images(&text);
-                self.submit_fullscreen_prompt(ui, prompt, images)?;
+                self.submit_fullscreen_prompt(ui, prompt, images).await?;
                 Ok(false)
             }
             Ok(SubmittedSlashInput::NotSlash) => {
                 let images = ui.take_submitted_images(&text);
-                self.submit_fullscreen_prompt(ui, display_text, images)?;
+                self.submit_fullscreen_prompt(ui, display_text, images)
+                    .await?;
                 Ok(false)
             }
             Err(err) => {
@@ -150,7 +151,7 @@ impl TuiApp {
         self.diff_task = Some(DiffTask { task });
     }
 
-    pub(crate) fn submit_fullscreen_prompt(
+    pub(crate) async fn submit_fullscreen_prompt(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         display_prompt: String,
@@ -158,9 +159,10 @@ impl TuiApp {
     ) -> Result<()> {
         let prompt = prompt_without_image_placeholders(&display_prompt, &images);
         self.submit_fullscreen_prompt_with_display(ui, prompt, display_prompt, images)
+            .await
     }
 
-    pub(crate) fn submit_fullscreen_prompt_with_display(
+    pub(crate) async fn submit_fullscreen_prompt_with_display(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         prompt: String,
@@ -173,7 +175,9 @@ impl TuiApp {
         }
         if let Some(running) = ui.running.as_ref() {
             if matches!(running.task, RunningTask::Agent(_)) {
-                return self.steer_fullscreen_prompt(ui, prompt, display_prompt, images);
+                return self
+                    .steer_fullscreen_prompt(ui, prompt, display_prompt, images)
+                    .await;
             }
             self.queue_fullscreen_prompt(ui, prompt, display_prompt, images);
             return Ok(());
@@ -181,7 +185,7 @@ impl TuiApp {
         self.start_fullscreen_turn(ui, prompt, display_prompt, images)
     }
 
-    pub(crate) fn submit_explicit_fullscreen_steer(
+    pub(crate) async fn submit_explicit_fullscreen_steer(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         message: String,
@@ -202,6 +206,7 @@ impl TuiApp {
         }
         let prompt = message.trim().to_string();
         self.steer_fullscreen_prompt(ui, prompt.clone(), prompt, Vec::new())
+            .await
     }
 
     pub(crate) fn submit_fullscreen_queue(
@@ -214,7 +219,7 @@ impl TuiApp {
         self.start_next_queued_input(ui)
     }
 
-    pub(crate) fn steer_fullscreen_prompt(
+    pub(crate) async fn steer_fullscreen_prompt(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         prompt: String,
@@ -264,6 +269,7 @@ impl TuiApp {
         let Some(id) = self
             .gateway
             .steer_turn(selector, expected_turn_id.as_deref(), message)
+            .await
         else {
             ui.set_ephemeral_error("unable to steer current turn");
             return Ok(());
@@ -353,14 +359,18 @@ impl TuiApp {
             selector
         } else {
             let selector = GatewayThreadSelector::source(self.gateway_source().source_key());
-            if !self.gateway.activity_for_selector(selector.clone()).running {
+            if !self
+                .gateway
+                .local_activity_for_selector(&selector)
+                .running
+            {
                 return None;
             }
             selector
         };
         let expected_turn_id = running.turn_id.clone().or_else(|| {
             self.gateway
-                .activity_for_selector(selector.clone())
+                .local_activity_for_selector(&selector)
                 .active_turn_id
         });
         Some((selector, expected_turn_id))

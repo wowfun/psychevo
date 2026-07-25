@@ -222,8 +222,8 @@ reasoning_effort = "high"
     path
 }
 
-pub(crate) fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
-    let mut app = test_app(temp);
+pub(crate) async fn test_app_with_models(temp: &tempfile::TempDir) -> TuiApp {
+    let mut app = test_app(temp).await;
     app.env_map
         .insert("MOCK_API_KEY".to_string(), "test-key".to_string());
     let config_path = write_tui_model_config(temp);

@@ -101,7 +101,10 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn confirm_pending_input_edit(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn confirm_pending_input_edit(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
         let Some(display_prompt) = ui.pending_input_edit_text() else {
             return Ok(());
         };
@@ -123,6 +126,7 @@ impl TuiApp {
                 }
                 ui.pending_steers.retain(|input| input.id != id);
                 self.submit_pending_edit_as_new(ui, display_prompt, images)
+                    .await
             }
             PendingInputRef::Queue(sequence) => {
                 if self.update_queued_prompt_input(ui, sequence, display_prompt.clone(), &images) {
@@ -130,6 +134,7 @@ impl TuiApp {
                     return Ok(());
                 }
                 self.submit_pending_edit_as_new(ui, display_prompt, images)
+                    .await
             }
         }
     }
@@ -210,13 +215,14 @@ impl TuiApp {
         true
     }
 
-    pub(crate) fn submit_pending_edit_as_new(
+    pub(crate) async fn submit_pending_edit_as_new(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         display_prompt: String,
         images: Vec<PendingImageAttachment>,
     ) -> Result<()> {
         self.submit_fullscreen_prompt(ui, display_prompt, images)
+            .await
     }
 
     pub(crate) fn submit_fullscreen_shell(

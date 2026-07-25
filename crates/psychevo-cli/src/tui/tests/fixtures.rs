@@ -49,7 +49,7 @@ pub(crate) async fn drain_fullscreen_until_idle(app: &mut TuiApp, ui: &mut Fulls
     panic!("fullscreen work did not become idle");
 }
 
-pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
+pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&home).expect("home");
@@ -66,7 +66,7 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     );
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let db_path = home.join("state.db");
-    let state_runtime = StateRuntime::open(&db_path).expect("state runtime");
+    let state_runtime = StateRuntime::open(&db_path).await.expect("state runtime");
     let gateway = Gateway::new(state_runtime.clone());
     TuiApp {
         env_map,
@@ -83,6 +83,8 @@ pub(crate) fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         cwd_key: cwd.display().to_string(),
         current_session: Some("1234567890abcdef".to_string()),
         current_session_title: Some("Review sidebar polish".to_string()),
+        current_session_forked_from: None,
+        current_agent_breadcrumb: None,
         force_new_once: false,
         draft_source_raw_id: None,
         current_model: Some("mock/model".to_string()),

@@ -3,8 +3,8 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn cli_run_positional_prompt_outputs_final_answer_and_persists_metadata() {
+#[tokio::test]
+pub(crate) async fn cli_run_positional_prompt_outputs_final_answer_and_persists_metadata() {
     let server = MockSseServer::start(vec![sse_text("mock final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -49,8 +49,8 @@ pub(crate) fn cli_run_positional_prompt_outputs_final_answer_and_persists_metada
     assert!(metadata["elapsed_ms"].as_u64().is_some());
 }
 
-#[test]
-pub(crate) fn cli_run_selected_main_agent_includes_description_and_body() {
+#[tokio::test]
+pub(crate) async fn cli_run_selected_main_agent_includes_description_and_body() {
     let server = MockSseServer::start(vec![sse_text("agent final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -120,8 +120,8 @@ pub(crate) fn cli_run_selected_main_agent_includes_description_and_body() {
     assert_eq!(user_contents(&request), vec!["shell"]);
 }
 
-#[test]
-pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
+#[tokio::test]
+pub(crate) async fn cli_run_child_agent_session_exports_prefix_and_last_request() {
     let server = MockSseServer::start(vec![
         sse_tool_agent_call(
             "call_agent",
@@ -288,8 +288,8 @@ pub(crate) fn cli_run_child_agent_session_exports_prefix_and_last_request() {
     ));
 }
 
-#[test]
-pub(crate) fn cli_run_dir_controls_tool_cwd() {
+#[tokio::test]
+pub(crate) async fn cli_run_dir_controls_tool_cwd() {
     let server = MockSseServer::start(vec![sse_tool_read_then_done(), sse_text("read complete")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -328,8 +328,8 @@ pub(crate) fn cli_run_dir_controls_tool_cwd() {
     assert_eq!(read_results, 1);
 }
 
-#[test]
-pub(crate) fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer() {
+#[tokio::test]
+pub(crate) async fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer() {
     let _guard = long_tool_turn_smoke_guard();
     let mut responses = (0..33)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
@@ -384,8 +384,8 @@ pub(crate) fn cli_run_allows_more_than_thirty_two_tool_turns_before_final_answer
     assert_eq!(server.requests.lock().expect("requests").len(), 34);
 }
 
-#[test]
-pub(crate) fn cli_run_budget_exhaustion_reports_model_turn_limit() {
+#[tokio::test]
+pub(crate) async fn cli_run_budget_exhaustion_reports_model_turn_limit() {
     let _guard = long_tool_turn_smoke_guard();
     let responses = (0..128)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
@@ -423,8 +423,8 @@ pub(crate) fn cli_run_budget_exhaustion_reports_model_turn_limit() {
     assert_eq!(server.requests.lock().expect("requests").len(), 128);
 }
 
-#[test]
-pub(crate) fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
+#[tokio::test]
+pub(crate) async fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
     let _guard = long_tool_turn_smoke_guard();
     let responses = (0..128)
         .map(|index| sse_tool_read_call(&format!("call_read_{index}")))
@@ -473,8 +473,8 @@ pub(crate) fn cli_run_json_budget_exhaustion_includes_terminal_reason() {
     assert_eq!(server.requests.lock().expect("requests").len(), 128);
 }
 
-#[test]
-pub(crate) fn cli_run_json_outputs_ndjson_events() {
+#[tokio::test]
+pub(crate) async fn cli_run_json_outputs_ndjson_events() {
     let server = MockSseServer::start(vec![sse_text("json final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -525,8 +525,8 @@ pub(crate) fn cli_run_json_outputs_ndjson_events() {
     assert!(!stdout.contains("json final\njson final"));
 }
 
-#[test]
-pub(crate) fn cli_context_reports_latest_session_json() {
+#[tokio::test]
+pub(crate) async fn cli_context_reports_latest_session_json() {
     let server = MockSseServer::start(vec![sse_metadata_usage_then_text("context final")]);
     let temp = tempdir().expect("temp");
     let psychevo_home = init_tui_home(temp.path());
@@ -599,8 +599,8 @@ pub(crate) fn cli_context_reports_latest_session_json() {
     assert!(!text.contains("unavailable"));
 }
 
-#[test]
-pub(crate) fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
+#[tokio::test]
+pub(crate) async fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
     let server = MockSseServer::start(vec![sse_text("skill final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -658,8 +658,8 @@ pub(crate) fn cli_run_skill_marker_injects_context_and_preserves_prompt() {
     assert_eq!(user_messages, vec!["$reviewer do it"]);
 }
 
-#[test]
-pub(crate) fn cli_run_skill_flag_injects_without_stdout_pollution() {
+#[tokio::test]
+pub(crate) async fn cli_run_skill_flag_injects_without_stdout_pollution() {
     let server = MockSseServer::start(vec![sse_text("flag final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -699,8 +699,8 @@ pub(crate) fn cli_run_skill_flag_injects_without_stdout_pollution() {
     assert_eq!(contents[1], "do it");
 }
 
-#[test]
-pub(crate) fn cli_run_unknown_skill_marker_remains_plain_text() {
+#[tokio::test]
+pub(crate) async fn cli_run_unknown_skill_marker_remains_plain_text() {
     let server = MockSseServer::start(vec![sse_text("plain final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -735,8 +735,8 @@ pub(crate) fn cli_run_unknown_skill_marker_remains_plain_text() {
     );
 }
 
-#[test]
-pub(crate) fn cli_run_injects_agents_project_instructions_without_persisting_as_messages() {
+#[tokio::test]
+pub(crate) async fn cli_run_injects_agents_project_instructions_without_persisting_as_messages() {
     let server = MockSseServer::start(vec![sse_text("agents final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
@@ -839,8 +839,8 @@ pub(crate) fn cli_run_injects_agents_project_instructions_without_persisting_as_
     );
 }
 
-#[test]
-pub(crate) fn cli_run_project_context_cwd_ignores_repo_root_agents() {
+#[tokio::test]
+pub(crate) async fn cli_run_project_context_cwd_ignores_repo_root_agents() {
     let server = MockSseServer::start(vec![sse_text("cwd final")]);
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");

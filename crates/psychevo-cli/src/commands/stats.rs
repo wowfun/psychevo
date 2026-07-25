@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::args::StatsArgs;
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home, resolve_state_db};
 
-pub(crate) fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
+pub(crate) async fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let cwd = args.dir.clone().unwrap_or_else(|| cwd.clone());
@@ -17,12 +17,13 @@ pub(crate) fn run_stats_command(args: StatsArgs) -> Result<ExitCode> {
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let report = usage_stats(StatsOptions {
-        state: StateRuntime::open(&db_path)?,
+        state: StateRuntime::open(&db_path).await?,
         cwd,
         all: args.all,
         days: args.days,
         limit: args.limit,
-    })?;
+    })
+    .await?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {

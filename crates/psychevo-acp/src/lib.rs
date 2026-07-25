@@ -32,8 +32,8 @@ pub(crate) use futures::future::BoxFuture;
 pub(crate) use psychevo_agent_core::{Message, UserContentBlock};
 pub(crate) use psychevo_gateway::{
     Gateway, GatewayEvent, GatewayImageInput, GatewayInputPart, GatewaySource,
-    GatewayThreadSelector, ThreadTurnRequest, TranscriptBlock, TranscriptBlockKind,
-    TranscriptBlockStatus, TranscriptEntry,
+    GatewayThreadSelector, ThreadCallerContext, ThreadSurface, ThreadTurnIntent, TranscriptBlock,
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
 };
 pub(crate) use psychevo_runtime::state::{AgentMissionRunInput, AgentTeamRunInput, StateRuntime};
 pub(crate) use psychevo_runtime::{

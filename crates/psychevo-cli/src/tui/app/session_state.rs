@@ -9,18 +9,54 @@ impl TuiApp {
             .flatten();
     }
 
-    pub(crate) fn refresh_current_session_title(&mut self) -> Result<()> {
+    pub(crate) async fn refresh_current_session_title(&mut self) -> Result<()> {
         let summary = match self.current_session.as_deref() {
-            Some(session_id) => self.state_runtime.session_summary(session_id)?,
+            Some(session_id) => self.state_runtime.session_summary(session_id).await?,
             None => None,
         };
         self.current_session_title = summary
             .and_then(|summary| summary.title)
             .filter(|title| !title.trim().is_empty());
+        self.refresh_current_session_relationships().await?;
         Ok(())
     }
 
-    pub(crate) fn refresh_current_session_agent(&mut self) -> Result<()> {
+    async fn refresh_current_session_relationships(&mut self) -> Result<()> {
+        let Some(session_id) = self.current_session.as_deref() else {
+            self.current_session_forked_from = None;
+            self.current_agent_breadcrumb = None;
+            return Ok(());
+        };
+        self.current_session_forked_from = self
+            .state_runtime
+            .session_metadata(session_id)
+            .await?
+            .and_then(|metadata| {
+                metadata
+                    .get("forkedFromThreadId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+        self.current_agent_breadcrumb =
+            if let Some(edge) = self.state_runtime.find_agent_edge(session_id).await? {
+                let sibling_count = self
+                    .state_runtime
+                    .list_agent_edges_for_parent(&edge.parent_session_id)
+                    .await?
+                    .len();
+                let mut parts = vec![format!("parent {}", short_session(&edge.parent_session_id))];
+                if sibling_count > 1 {
+                    parts.push("siblings Alt+Up/Right".to_string());
+                }
+                parts.push("Alt+P".to_string());
+                Some(parts.join(" · "))
+            } else {
+                None
+            };
+        Ok(())
+    }
+
+    pub(crate) async fn refresh_current_session_agent(&mut self) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
             if !self.current_agent_explicit_default && self.current_agent.is_none() {
                 self.current_agent = self.startup_agent.clone();
@@ -28,7 +64,7 @@ impl TuiApp {
             return Ok(());
         };
         let store = &self.state_runtime;
-        let metadata = store.session_metadata(session_id)?;
+        let metadata = store.session_metadata(session_id).await?;
         match main_agent_from_session_metadata(metadata.as_ref()) {
             LoadedMainAgent::Default => {
                 self.current_agent = session_base_agent_name_from_metadata(metadata.as_ref());
@@ -80,22 +116,33 @@ impl TuiApp {
         ))
     }
 
-    pub(crate) fn persist_main_agent_selection_for_session(&self, session_id: &str) -> Result<()> {
-        let store = &self.state_runtime;
-        if self.current_agent_explicit_default {
-            store.set_session_metadata_field(
-                session_id,
-                SESSION_MAIN_AGENT_METADATA_KEY,
-                Some(main_agent_default_metadata()),
-            )?;
+    pub(crate) fn schedule_main_agent_selection_persistence(&self, session_id: &str) -> Result<()> {
+        let value = if self.current_agent_explicit_default {
+            Some(main_agent_default_metadata())
         } else if let Some(input) = self.current_agent.as_deref() {
-            let value = self.main_agent_metadata_for_input(input)?;
-            store.set_session_metadata_field(
-                session_id,
-                SESSION_MAIN_AGENT_METADATA_KEY,
-                Some(value),
-            )?;
-        }
+            Some(self.main_agent_metadata_for_input(input)?)
+        } else {
+            None
+        };
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let state = self.state_runtime.clone();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            if let Err(error) = state
+                .set_session_metadata_field(
+                    &session_id,
+                    SESSION_MAIN_AGENT_METADATA_KEY,
+                    Some(value),
+                )
+                .await
+            {
+                eprintln!(
+                    "failed to persist main agent selection for session {session_id}: {error:#}"
+                );
+            }
+        });
         Ok(())
     }
 
@@ -110,39 +157,27 @@ impl TuiApp {
                     .map(str::to_string)
             })
             .unwrap_or_else(|| "New session".to_string());
-        let forked_from = self.current_session.as_deref().and_then(|session_id| {
-            self.state_runtime
-                .session_metadata(session_id)
-                .ok()
-                .flatten()
-                .and_then(|metadata| {
-                    metadata
-                        .get("forkedFromThreadId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-        });
-        match forked_from {
-            Some(source) => format!("{title} · forked from {}", short_session(&source)),
+        match self.current_session_forked_from.as_deref() {
+            Some(source) => format!("{title} · forked from {}", short_session(source)),
             None => title,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
-        let id = self.resolve_session_ref(reference)?;
-        let summary = self.session_summary_required(&id)?;
+    pub(crate) async fn switch_session_no_print(&mut self, reference: &str) -> Result<String> {
+        let id = self.resolve_session_ref(reference).await?;
+        let summary = self.session_summary_required(&id).await?;
         self.adopt_session_cwd(&summary)?;
-        self.state_runtime.resume_session(&id)?;
+        self.state_runtime.resume_session(&id).await?;
         self.current_session = Some(id.clone());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
-        self.refresh_current_session_title()?;
-        self.refresh_current_session_agent()?;
+        self.refresh_current_session_title().await?;
+        self.refresh_current_session_agent().await?;
         Ok(id)
     }
 
-    pub(crate) fn open_agent_target_session(
+    pub(crate) async fn open_agent_target_session(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         target: &str,
@@ -158,29 +193,30 @@ impl TuiApp {
         let child_session_id = {
             let store = &self.state_runtime;
             let edge = store
-                .find_agent_edge(target)?
+                .find_agent_edge(target)
+                .await?
                 .ok_or_else(|| anyhow!("agent not found: {target}"))?;
-            store.resume_session(&edge.child_session_id)?;
+            store.resume_session(&edge.child_session_id).await?;
             edge.child_session_id
         };
-        let summary = self.session_summary_required(&child_session_id)?;
+        let summary = self.session_summary_required(&child_session_id).await?;
         self.adopt_session_cwd(&summary)?;
         self.detach_running_for_session_switch(ui, Some(child_session_id.clone()));
         self.current_session = Some(child_session_id.clone());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
-        self.refresh_current_session_title()?;
-        self.refresh_current_session_agent()?;
+        self.refresh_current_session_title().await?;
+        self.refresh_current_session_agent().await?;
         ui.bottom_panel = None;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         self.replay_session_live_event_backlog(ui, &child_session_id);
         self.replay_agent_child_event_backlog(ui, &child_session_id);
         ui.refresh_sidebar(self);
         Ok(())
     }
 
-    pub(crate) fn maybe_reload_live_agent_session(
+    pub(crate) async fn maybe_reload_live_agent_session(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
@@ -196,18 +232,18 @@ impl TuiApp {
         }
         self.last_live_agent_reload_check = Some(now);
         let store = &self.state_runtime;
-        let Some(edge) = store.find_agent_edge(&session_id)? else {
+        let Some(edge) = store.find_agent_edge(&session_id).await? else {
             return Ok(false);
         };
         if edge.status != psychevo_runtime::state::AgentEdgeStatus::Open {
             return Ok(false);
         }
-        let message_count = store.load_tui_message_summaries(&session_id)?.len();
+        let message_count = store.load_tui_message_summaries(&session_id).await?.len();
         if message_count <= ui.loaded_session_message_count {
             return Ok(false);
         }
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         Ok(true)
     }
 
@@ -215,16 +251,19 @@ impl TuiApp {
         self.last_live_agent_reload_check = None;
     }
 
-    pub(crate) fn request_current_session_interrupt(&mut self, ui: &mut FullscreenUi<'_>) -> bool {
+    pub(crate) async fn request_current_session_interrupt(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> bool {
         let current_session = self.current_session.clone();
         let mut interrupted = false;
         if let Some((selector, _)) = self.active_gateway_turn_selector(ui) {
-            interrupted |= self.gateway.interrupt_turn(selector);
+            interrupted |= self.gateway.interrupt_turn(selector).await;
         }
         interrupted |= ui.request_interrupt(current_session.as_deref());
         if let Some(session_id) = current_session.as_deref() {
             let store = &self.state_runtime;
-            let value = agent_status_value(Some(store), Some(session_id), false);
+            let value = agent_status_value(Some(store), Some(session_id), false).await;
             let targets = value
                 .get("agents")
                 .and_then(Value::as_array)
@@ -246,6 +285,7 @@ impl TuiApp {
                 .collect::<Vec<_>>();
             for target in targets {
                 if stop_agent_id_with_grace(&target, Some(store), Duration::ZERO)
+                    .await
                     .ok()
                     .flatten()
                     .is_some()
@@ -260,19 +300,22 @@ impl TuiApp {
         interrupted
     }
 
-    pub(crate) fn open_agent_parent_session(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn open_agent_parent_session(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
         let Some(current) = self.current_session.clone() else {
             return Ok(());
         };
         let store = &self.state_runtime;
-        let Some(edge) = store.find_agent_edge(&current)? else {
+        let Some(edge) = store.find_agent_edge(&current).await? else {
             ui.push_status("no parent agent session");
             return Ok(());
         };
-        self.open_session_direct(ui, &edge.parent_session_id)
+        self.open_session_direct(ui, &edge.parent_session_id).await
     }
 
-    pub(crate) fn open_agent_sibling_session(
+    pub(crate) async fn open_agent_sibling_session(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         direction: isize,
@@ -281,11 +324,13 @@ impl TuiApp {
             return Ok(());
         };
         let store = &self.state_runtime;
-        let Some(edge) = store.find_agent_edge(&current)? else {
+        let Some(edge) = store.find_agent_edge(&current).await? else {
             ui.push_status("no sibling agent sessions");
             return Ok(());
         };
-        let siblings = store.list_agent_edges_for_parent(&edge.parent_session_id)?;
+        let siblings = store
+            .list_agent_edges_for_parent(&edge.parent_session_id)
+            .await?;
         if siblings.len() <= 1 {
             ui.push_status("no sibling agent sessions");
             return Ok(());
@@ -296,28 +341,29 @@ impl TuiApp {
             .unwrap_or(0) as isize;
         let next = (current_index + direction).rem_euclid(siblings.len() as isize) as usize;
         self.open_session_direct(ui, &siblings[next].child_session_id)
+            .await
     }
 
-    pub(crate) fn open_session_direct(
+    pub(crate) async fn open_session_direct(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
     ) -> Result<()> {
-        let summary = self.session_summary_required(session_id)?;
+        let summary = self.session_summary_required(session_id).await?;
         self.adopt_session_cwd(&summary)?;
         self.detach_running_for_session_switch(ui, None);
-        self.state_runtime.resume_session(session_id)?;
+        self.state_runtime.resume_session(session_id).await?;
         self.current_session = Some(session_id.to_string());
         self.reset_live_agent_reload_poll();
         self.clear_new_session_draft();
-        self.refresh_current_session_title()?;
-        self.refresh_current_session_agent()?;
+        self.refresh_current_session_title().await?;
+        self.refresh_current_session_agent().await?;
         ui.bottom_panel = None;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         self.replay_session_live_event_backlog(ui, session_id);
         self.replay_agent_child_event_backlog(ui, session_id);
-        self.show_staged_history_status(ui, session_id)?;
+        self.show_staged_history_status(ui, session_id).await?;
         ui.refresh_sidebar(self);
         Ok(())
     }
@@ -423,22 +469,10 @@ impl TuiApp {
     }
 
     pub(crate) fn agent_breadcrumb_status(&self) -> Option<String> {
-        let session_id = self.current_session.as_deref()?;
-        let store = &self.state_runtime;
-        let edge = store.find_agent_edge(session_id).ok().flatten()?;
-        let sibling_count = store
-            .list_agent_edges_for_parent(&edge.parent_session_id)
-            .map(|siblings| siblings.len())
-            .unwrap_or(0);
-        let mut parts = vec![format!("parent {}", short_session(&edge.parent_session_id))];
-        if sibling_count > 1 {
-            parts.push("siblings Alt+Up/Right".to_string());
-        }
-        parts.push("Alt+P".to_string());
-        Some(parts.join(" · "))
+        self.current_agent_breadcrumb.clone()
     }
 
-    pub(crate) fn set_model_default_from_picker(
+    pub(crate) async fn set_model_default_from_picker(
         &mut self,
         model: String,
         reasoning_effort: Option<String>,
@@ -451,7 +485,7 @@ impl TuiApp {
             self.model_state
                 .set_model(&self.cwd_key, model.clone(), reasoning_effort);
             self.model_state.save(&self.model_state_path)?;
-            self.persist_current_session_model_selection()?;
+            self.persist_current_session_model_selection().await?;
             self.refresh_selected_model();
             let reasoning = self
                 .current_variant
@@ -505,19 +539,19 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn set_variant_no_print(&mut self, variant: String) -> Result<()> {
+    pub(crate) async fn set_variant_no_print(&mut self, variant: String) -> Result<()> {
         validate_variant(&variant)?;
         let reasoning_effort = normalize_reasoning_effort(Some(variant));
         self.current_variant = reasoning_effort.clone();
         self.model_state
             .set_reasoning_effort(&self.cwd_key, reasoning_effort);
         self.model_state.save(&self.model_state_path)?;
-        self.persist_current_session_model_selection()?;
+        self.persist_current_session_model_selection().await?;
         self.refresh_selected_model();
         Ok(())
     }
 
-    fn persist_current_session_model_selection(&self) -> Result<()> {
+    async fn persist_current_session_model_selection(&self) -> Result<()> {
         let Some(session_id) = self.current_session.as_deref() else {
             return Ok(());
         };
@@ -528,10 +562,12 @@ impl TuiApp {
             return Ok(());
         };
         let store = &self.state_runtime;
-        if store.session_summary(session_id)?.is_none() {
+        if store.session_summary(session_id).await?.is_none() {
             return Ok(());
         }
-        store.set_session_model(session_id, provider, model_id)?;
+        store
+            .set_session_model(session_id, provider, model_id)
+            .await?;
         let mut metadata = serde_json::Map::new();
         metadata.insert("model".to_string(), Value::String(model.to_string()));
         if let Some(reasoning_effort) = self.current_variant.as_deref() {
@@ -540,11 +576,13 @@ impl TuiApp {
                 Value::String(reasoning_effort.to_string()),
             );
         }
-        store.set_session_metadata_field(
-            session_id,
-            SESSION_COMPOSER_MODEL_METADATA_KEY,
-            Some(Value::Object(metadata)),
-        )?;
+        store
+            .set_session_metadata_field(
+                session_id,
+                SESSION_COMPOSER_MODEL_METADATA_KEY,
+                Some(Value::Object(metadata)),
+            )
+            .await?;
         Ok(())
     }
 
@@ -578,11 +616,14 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn rename_session_no_print(&mut self, title: String) -> Result<String> {
+    pub(crate) async fn rename_session_no_print(&mut self, title: String) -> Result<String> {
         let Some(session_id) = self.current_session.as_deref() else {
             return Err(anyhow!("no current session to rename"));
         };
-        let title = self.state_runtime.set_session_title(session_id, &title)?;
+        let title = self
+            .state_runtime
+            .set_session_title(session_id, &title)
+            .await?;
         self.current_session_title = Some(title.clone());
         Ok(title)
     }
@@ -599,10 +640,13 @@ impl TuiApp {
         })
     }
 
-    pub(crate) fn undo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
-        let result = undo_session(self.undo_options()?)?;
+    pub(crate) async fn undo_session_no_print(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<String> {
+        let result = undo_session(self.undo_options()?).await?;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         ui.set_composer_text(&result.prompt);
         ui.refresh_sidebar(self);
         Ok(format!(
@@ -611,10 +655,13 @@ impl TuiApp {
         ))
     }
 
-    pub(crate) fn redo_session_no_print(&mut self, ui: &mut FullscreenUi<'_>) -> Result<String> {
-        let result = redo_session(self.undo_options()?)?;
+    pub(crate) async fn redo_session_no_print(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<String> {
+        let result = redo_session(self.undo_options()?).await?;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         ui.clear_composer();
         ui.refresh_sidebar(self);
         let suffix = if result.complete {
@@ -645,31 +692,36 @@ impl TuiApp {
     }
 
     #[cfg(test)]
-    pub(crate) fn resolve_session_ref(&self, reference: &str) -> Result<String> {
-        let sessions = self.sessions()?;
+    pub(crate) async fn resolve_session_ref(&self, reference: &str) -> Result<String> {
+        let sessions = self.sessions().await?;
         resolve_session_ref_from_summaries(&sessions, reference)
     }
 
     #[cfg(test)]
-    pub(crate) fn sessions(&self) -> Result<Vec<SessionSummary>> {
+    pub(crate) async fn sessions(&self) -> Result<Vec<SessionSummary>> {
         Ok(self
             .state_runtime
-            .list_sessions_with_sources(&[])?
+            .list_sessions_with_sources(&[])
+            .await?
             .into_iter()
             .filter(human_visible_tui_session_summary)
             .collect())
     }
 
-    pub(crate) fn tui_sessions(
+    pub(crate) async fn tui_sessions(
         &self,
         view: SessionListView,
     ) -> Result<Vec<TuiSessionDisplaySummary>> {
-        tui_sessions_for_store(&self.state_runtime, view)
+        tui_sessions_for_store(&self.state_runtime, view).await
     }
 
-    pub(crate) fn session_summary_required(&self, session_id: &str) -> Result<SessionSummary> {
+    pub(crate) async fn session_summary_required(
+        &self,
+        session_id: &str,
+    ) -> Result<SessionSummary> {
         self.state_runtime
-            .session_summary(session_id)?
+            .session_summary(session_id)
+            .await?
             .ok_or_else(|| anyhow!("session not found: {session_id}"))
     }
 
@@ -690,7 +742,10 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn load_current_session_history(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn load_current_session_history(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
         let Some(session_id) = self.current_session.clone() else {
             ui.loaded_session_message_count = 0;
             ui.visible_turn_started = None;
@@ -699,20 +754,29 @@ impl TuiApp {
             ui.refresh_sidebar(self);
             return Ok(());
         };
-        let metadata = self.state_runtime.session_metadata(&session_id)?;
+        let metadata = self.state_runtime.session_metadata(&session_id).await?;
         ui.sidebar_context_limit = session_context_limit_with_parent_fallback(
             &self.state_runtime,
             &session_id,
             metadata.as_ref(),
-        )?;
-        let summaries = self.state_runtime.load_tui_message_summaries(&session_id)?;
-        ui.session_usage_summary = Some(session_usage_summary(SessionUsageOptions {
-            state: self.state_runtime.clone(),
-            session_id: session_id.clone(),
-        })?);
+        )
+        .await?;
+        let summaries = self
+            .state_runtime
+            .load_tui_message_summaries(&session_id)
+            .await?;
+        ui.session_usage_summary = Some(
+            session_usage_summary(SessionUsageOptions {
+                state: self.state_runtime.clone(),
+                session_id: session_id.clone(),
+            })
+            .await?,
+        );
         ui.loaded_session_message_count = summaries.len();
         let summary_count = summaries.len();
-        let activity = self.sync_gateway_activity_for_session(ui, &session_id);
+        let activity = self
+            .sync_gateway_activity_for_session(ui, &session_id)
+            .await;
         let live_owner = ui.local_status_has_running(Some(&session_id)) || activity.running;
         let suppress_latest_terminal_meta = live_owner;
         let active_tool_call_ids = history_active_tool_call_ids_for_reload(&summaries, live_owner)?;
@@ -746,7 +810,8 @@ impl TuiApp {
         let agent_catalog = self.current_agent_catalog();
         let agent_edges = self
             .state_runtime
-            .list_agent_edges_for_parent(&session_id)?;
+            .list_agent_edges_for_parent(&session_id)
+            .await?;
         ui.reconcile_history_agent_rows(&agent_edges, agent_catalog.as_ref());
         ui.visible_turn_started = ui
             .foreign_gateway_activity_started(&session_id)
@@ -759,21 +824,23 @@ impl TuiApp {
         }
         ui.replace_session_history_prompts(history_prompts);
         if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id()) {
-            self.replay_foreign_gateway_live_events_for_session(ui, &session_id)?;
+            self.replay_foreign_gateway_live_events_for_session(ui, &session_id)
+                .await?;
         }
         ui.scroll_to_bottom();
         ui.refresh_sidebar(self);
         Ok(())
     }
 
-    pub(crate) fn sync_gateway_activity_for_session(
+    pub(crate) async fn sync_gateway_activity_for_session(
         &self,
         ui: &mut FullscreenUi<'_>,
         session_id: &str,
     ) -> GatewayActivity {
         let activity = self
             .gateway
-            .activity_for_selector(GatewayThreadSelector::thread_id(session_id));
+            .activity_for_selector(GatewayThreadSelector::thread_id(session_id))
+            .await;
         if activity.running && activity.owner_id.as_deref() != Some(self.gateway.owner_id()) {
             ui.observe_foreign_gateway_activity(session_id, &activity);
         } else {
@@ -783,34 +850,41 @@ impl TuiApp {
     }
 }
 
-pub(crate) fn latest_human_visible_session_id(store: &StateRuntime) -> Result<Option<String>> {
-    Ok(tui_sessions_for_store(store, SessionListView::Active)?
+pub(crate) async fn latest_human_visible_session_id(
+    store: &StateRuntime,
+) -> Result<Option<String>> {
+    Ok(tui_sessions_for_store(store, SessionListView::Active)
+        .await?
         .into_iter()
         .next()
         .map(|session| session.summary.id))
 }
 
-pub(crate) fn tui_sessions_for_store(
+pub(crate) async fn tui_sessions_for_store(
     store: &StateRuntime,
     view: SessionListView,
 ) -> Result<Vec<TuiSessionDisplaySummary>> {
     let sessions = match view {
-        SessionListView::Active => store.list_sessions_with_sources(&[])?,
-        SessionListView::Archived => store.list_archived_sessions_with_sources(&[])?,
+        SessionListView::Active => store.list_sessions_with_sources(&[]).await?,
+        SessionListView::Archived => store.list_archived_sessions_with_sources(&[]).await?,
     };
     let mut visible = Vec::new();
     for summary in sessions {
         if !human_visible_tui_session_summary(&summary) {
             continue;
         }
-        let messages = store.load_tui_message_summaries(&summary.id)?;
+        let messages = store.load_tui_message_summaries(&summary.id).await?;
         let visible_message_count = visible_tui_message_count(&messages)?;
-        let forked_from_thread_id = store.session_metadata(&summary.id)?.and_then(|metadata| {
-            metadata
-                .get("forkedFromThreadId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
+        let forked_from_thread_id =
+            store
+                .session_metadata(&summary.id)
+                .await?
+                .and_then(|metadata| {
+                    metadata
+                        .get("forkedFromThreadId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                });
         visible.push(TuiSessionDisplaySummary {
             project_label: session_project_label(&summary.cwd),
             project_display_path: session_project_display_path(&summary.cwd),
@@ -840,7 +914,7 @@ pub(crate) fn session_project_display_path(cwd: &str) -> String {
     Path::new(cwd).display().to_string()
 }
 
-pub(crate) fn session_context_limit_with_parent_fallback(
+pub(crate) async fn session_context_limit_with_parent_fallback(
     store: &StateRuntime,
     session_id: &str,
     metadata: Option<&Value>,
@@ -848,10 +922,10 @@ pub(crate) fn session_context_limit_with_parent_fallback(
     if let Some(limit) = metadata.and_then(session_context_limit) {
         return Ok(Some(limit));
     }
-    let Some(edge) = store.find_agent_edge(session_id)? else {
+    let Some(edge) = store.find_agent_edge(session_id).await? else {
         return Ok(None);
     };
-    let parent_metadata = store.session_metadata(&edge.parent_session_id)?;
+    let parent_metadata = store.session_metadata(&edge.parent_session_id).await?;
     Ok(parent_metadata.as_ref().and_then(session_context_limit))
 }
 

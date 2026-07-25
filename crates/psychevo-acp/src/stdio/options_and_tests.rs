@@ -50,7 +50,7 @@ mod tests {
         }
     }
 
-    fn test_agent() -> (Arc<PsychevoAcpAgent>, PathBuf) {
+    async fn test_agent() -> (Arc<PsychevoAcpAgent>, PathBuf) {
         let root = std::env::temp_dir().join(format!("psychevo-acp-v2-{}", Uuid::now_v7()));
         std::fs::create_dir_all(&root).expect("create acp test root");
         let home = root.join("home");
@@ -65,14 +65,14 @@ mod tests {
                 config_path: None,
                 inherited_env,
             })
-            .expect("test acp agent"),
+            .await.expect("test acp agent"),
         );
         (agent, root)
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn v2_client_negotiates_v2_and_receives_session_config_options() -> Result<(), Error> {
-        let (agent, root) = test_agent();
+        let (agent, root) = test_agent().await;
         std::fs::create_dir_all(root.join("home")).expect("home");
         std::fs::write(
             root.join("home/config.toml"),
@@ -195,6 +195,7 @@ pub async fn run_stdio(options: AcpOptions) -> std::io::Result<()> {
     let _ = std::fs::create_dir_all(&options.home);
     let agent = Arc::new(
         PsychevoAcpAgent::new(options)
+            .await
             .map_err(|err| std::io::Error::other(format!("state DB error: {err}")))?,
     );
     let stdin = tokio::io::stdin().compat();

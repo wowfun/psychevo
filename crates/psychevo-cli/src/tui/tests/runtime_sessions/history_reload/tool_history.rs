@@ -1,11 +1,11 @@
-#[test]
-pub(crate) fn load_history_omits_bottom_context_usage_without_context_limit() {
+#[tokio::test]
+pub(crate) async fn load_history_omits_bottom_context_usage_without_context_limit() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -33,7 +33,7 @@ pub(crate) fn load_history_omits_bottom_context_usage_without_context_limit() {
     .expect("insert assistant");
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     assert_eq!(ui.sidebar_tokens, Some(9));
     assert_eq!(ui.sidebar_context_limit, None);
@@ -44,7 +44,7 @@ pub(crate) fn load_history_omits_bottom_context_usage_without_context_limit() {
 #[tokio::test]
 pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_tokens = Some(9);
     ui.sidebar_context_limit = Some(64_000);
@@ -87,11 +87,11 @@ pub(crate) async fn fullscreen_new_command_clears_context_usage_state() {
     assert_eq!(status, "~/work");
 }
 
-#[test]
-pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result() {
+#[tokio::test]
+pub(crate) async fn load_history_marks_orphan_tool_call_interrupted_but_merges_result() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -100,7 +100,7 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
 
@@ -140,7 +140,7 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
     let row = ui
         .transcript
         .iter()
@@ -174,7 +174,7 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
         }),
     );
     ui.clear_transcript();
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
     let rows = ui
         .transcript
         .iter()
@@ -191,8 +191,8 @@ pub(crate) fn load_history_marks_orphan_tool_call_interrupted_but_merges_result(
 #[tokio::test]
 pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_owner() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -201,7 +201,7 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -248,7 +248,7 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
         task: RunningTask::Agent(task),
     });
 
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
     let row = ui
         .transcript
         .iter()
@@ -267,11 +267,11 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
     }
 }
 
-#[test]
-pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gateway_activity() {
+#[tokio::test]
+pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_foreign_gateway_activity() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -280,14 +280,14 @@ pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gatewa
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let row = ui
         .transcript
@@ -306,11 +306,11 @@ pub(crate) fn load_history_keeps_unfinished_tool_call_active_with_foreign_gatewa
     );
 }
 
-#[test]
-pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
+#[tokio::test]
+pub(crate) async fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -319,14 +319,14 @@ pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() - 1, 91_000);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() - 1, 91_000).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let row = ui
         .transcript
@@ -341,11 +341,11 @@ pub(crate) fn load_history_keeps_stale_foreign_gateway_activity_interrupted() {
     assert!(!ui.status_has_running(Some(&session_id)));
 }
 
-#[test]
-pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command() {
+#[tokio::test]
+pub(crate) async fn current_foreign_gateway_activity_interrupt_routes_control_command() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -354,20 +354,20 @@ pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command(
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 1_000);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 1_000).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
-    assert!(app.request_current_session_interrupt(&mut ui));
+    assert!(app.request_current_session_interrupt(&mut ui).await);
     assert!(ui.interrupt_requested);
     let commands = store
         .pending_gateway_control_commands("gateway:web:test", 10)
-        .expect("pending commands");
+        .await.expect("pending commands");
     assert!(
         commands
             .iter()
@@ -376,11 +376,11 @@ pub(crate) fn current_foreign_gateway_activity_interrupt_routes_control_command(
     );
 }
 
-#[test]
-pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_row() {
+#[tokio::test]
+pub(crate) async fn load_history_replays_foreign_gateway_live_events_into_active_tool_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -389,14 +389,14 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     let unrelated_session = store
         .create_session_with_metadata(&app.cwd, "web", "mock-model", "mock", None)
-        .expect("unrelated session");
+        .await.expect("unrelated session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
     append_foreign_gateway_event(
         &store,
         &session_id,
@@ -410,7 +410,7 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
                 "writing report",
             ),
         },
-    );
+    ).await;
     append_foreign_gateway_event(
         &store,
         &unrelated_session,
@@ -424,10 +424,10 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
                 "unrelated update",
             ),
         },
-    );
+    ).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let rows = ui
         .transcript
@@ -462,10 +462,10 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
             },
             committed_entries: vec![gateway_answer_entry(&session_id, "turn-web", 2, "done")],
         },
-    );
+    ).await;
     assert!(
         app.drain_foreign_gateway_live_events(&mut ui)
-            .expect("drain foreign events")
+            .await.expect("drain foreign events")
     );
     assert!(!ui.status_has_running(Some(&session_id)));
     assert!(
@@ -486,11 +486,11 @@ pub(crate) fn load_history_replays_foreign_gateway_live_events_into_active_tool_
     );
 }
 
-#[test]
-pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_tool() {
+#[tokio::test]
+pub(crate) async fn load_history_drops_stale_foreign_gateway_pending_for_completed_tool() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -499,7 +499,7 @@ pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_too
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_unfinished_write_call(&conn, &session_id);
@@ -518,7 +518,7 @@ pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_too
             "timestamp_ms": 2
         }),
     );
-    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000);
+    claim_foreign_gateway_activity(&store, &conn, &session_id, wall_now_ms() + 60_000, 91_000).await;
     append_foreign_gateway_event(
         &store,
         &session_id,
@@ -532,10 +532,10 @@ pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_too
                 "",
             ),
         },
-    );
+    ).await;
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let rows = ui
         .transcript
@@ -547,11 +547,11 @@ pub(crate) fn load_history_drops_stale_foreign_gateway_pending_for_completed_too
     assert!(!ui.tool_rows.contains_key(&tool_id_key("call_write_report")));
 }
 
-#[test]
-pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
+#[tokio::test]
+pub(crate) async fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -560,7 +560,7 @@ pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
 
@@ -597,7 +597,7 @@ pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
     let row = ui
         .transcript
         .iter()
@@ -615,14 +615,14 @@ pub(crate) fn load_history_does_not_rehydrate_aborted_tool_calls_as_running() {
     assert!(ui.tool_rows.is_empty());
 }
 
-#[test]
-pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
+#[tokio::test]
+pub(crate) async fn message_history_orders_reasoning_before_assistant_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -645,7 +645,7 @@ pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
         }),
     );
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let thinking = ui
         .transcript
@@ -660,14 +660,14 @@ pub(crate) fn message_history_orders_reasoning_before_assistant_text() {
     assert!(thinking < answer);
 }
 
-#[test]
-pub(crate) fn message_history_orders_assistant_preamble_before_tool_after_reload() {
+#[tokio::test]
+pub(crate) async fn message_history_orders_assistant_preamble_before_tool_after_reload() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -730,7 +730,7 @@ pub(crate) fn message_history_orders_assistant_preamble_before_tool_after_reload
         }),
     );
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let preamble = ui
         .transcript
@@ -797,7 +797,7 @@ fn insert_unfinished_write_call(conn: &rusqlite::Connection, session_id: &str) {
     );
 }
 
-fn claim_foreign_gateway_activity(
+async fn claim_foreign_gateway_activity(
     store: &StateRuntime,
     conn: &rusqlite::Connection,
     session_id: &str,
@@ -818,7 +818,7 @@ fn claim_foreign_gateway_activity(
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim foreign activity");
+        .await.expect("claim foreign activity");
     conn.execute(
         "UPDATE gateway_activities SET started_at_ms = ?2 WHERE activity_id = ?1",
         rusqlite::params![
@@ -829,7 +829,11 @@ fn claim_foreign_gateway_activity(
     .expect("set activity start");
 }
 
-fn append_foreign_gateway_event(store: &StateRuntime, session_id: &str, event: GatewayEvent) {
+async fn append_foreign_gateway_event(
+    store: &StateRuntime,
+    session_id: &str,
+    event: GatewayEvent,
+) {
     match &event {
         GatewayEvent::EntryStarted { turn_id, entry }
         | GatewayEvent::EntryUpdated { turn_id, entry }
@@ -850,7 +854,7 @@ fn append_foreign_gateway_event(store: &StateRuntime, session_id: &str, event: G
                     event_kind,
                     event: serde_json::to_value(&event).expect("gateway event value"),
                 })
-                .expect("upsert gateway live snapshot");
+                .await.expect("upsert gateway live snapshot");
         }
         _ => {
             let event = serde_json::to_value(event).expect("gateway event value");
@@ -862,7 +866,7 @@ fn append_foreign_gateway_event(store: &StateRuntime, session_id: &str, event: G
                     Some("turn-web"),
                     &event,
                 )
-                .expect("append gateway live event");
+                .await.expect("append gateway live event");
         }
     }
 }

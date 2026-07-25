@@ -1,5 +1,5 @@
 impl TuiApp {
-    pub(crate) fn handle_bottom_panel_key(
+    pub(crate) async fn handle_bottom_panel_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
@@ -17,16 +17,16 @@ impl TuiApp {
             return self.handle_permission_approval_panel_key(ui, key);
         }
         if matches!(ui.bottom_panel, Some(BottomPanel::Clarify(_))) {
-            return self.handle_clarify_panel_key(ui, key);
+            return self.handle_clarify_panel_key(ui, key).await;
         }
         if matches!(ui.bottom_panel, Some(BottomPanel::AgentEditor(_))) {
-            return self.handle_agent_editor_key(ui, key);
+            return self.handle_agent_editor_key(ui, key).await;
         }
         if matches!(ui.bottom_panel, Some(BottomPanel::Agents(_))) {
-            return self.handle_agent_panel_key(ui, key);
+            return self.handle_agent_panel_key(ui, key).await;
         }
         if matches!(ui.bottom_panel, Some(BottomPanel::Models(_))) {
-            return self.handle_model_panel_key(ui, key);
+            return self.handle_model_panel_key(ui, key).await;
         }
         match key.code {
             KeyCode::Esc => {
@@ -58,10 +58,10 @@ impl TuiApp {
                     .bottom_panel
                     .as_ref()
                     .and_then(BottomPanel::selected_value);
-                self.apply_bottom_panel_selection(ui, selected)?;
+                self.apply_bottom_panel_selection(ui, selected).await?;
             }
             KeyCode::Tab => {
-                self.toggle_session_panel_view(ui)?;
+                self.toggle_session_panel_view(ui).await?;
             }
             KeyCode::Up => {
                 if let Some(panel) = &mut ui.bottom_panel {
@@ -110,7 +110,7 @@ impl TuiApp {
                     .as_ref()
                     .is_some_and(|panel| panel.selection().action_armed) =>
             {
-                self.apply_session_panel_action(ui, c)?;
+                self.apply_session_panel_action(ui, c).await?;
             }
             KeyCode::Char(c)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
@@ -208,7 +208,7 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn handle_clarify_panel_key(
+    pub(crate) async fn handle_clarify_panel_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
@@ -221,11 +221,15 @@ impl TuiApp {
             ClarifyInputMode::Options => match key.code {
                 KeyCode::Esc => {
                     if let Some((selector, _)) = self.active_gateway_turn_selector(ui) {
-                        if self.gateway.submit_clarify(
-                            selector,
-                            &panel.request.call_id,
-                            ClarifyResult::Cancelled,
-                        ) {
+                        if self
+                            .gateway
+                            .submit_clarify(
+                                selector,
+                                &panel.request.call_id,
+                                ClarifyResult::Cancelled,
+                            )
+                            .await
+                        {
                             restore = true;
                         } else {
                             panel.notice = Some("clarify request is no longer active".to_string());
@@ -239,7 +243,7 @@ impl TuiApp {
                         panel.set_mode(ClarifyInputMode::Other);
                         panel.notice = None;
                     } else {
-                        self.answer_clarify_selection(ui, &mut panel)?;
+                        self.answer_clarify_selection(ui, &mut panel).await?;
                     }
                     restore = panel.answers.iter().all(Option::is_some) && panel.notice.is_none();
                 }
@@ -268,7 +272,7 @@ impl TuiApp {
                     panel.notice = None;
                 }
                 KeyCode::Enter => {
-                    self.answer_clarify_selection(ui, &mut panel)?;
+                    self.answer_clarify_selection(ui, &mut panel).await?;
                     restore = panel.answers.iter().all(Option::is_some) && panel.notice.is_none();
                 }
                 KeyCode::Left => panel.move_input_cursor(-1),
@@ -298,7 +302,7 @@ impl TuiApp {
         Ok(false)
     }
 
-    pub(crate) fn handle_clarify_panel_click(
+    pub(crate) async fn handle_clarify_panel_click(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         index: usize,
@@ -314,7 +318,7 @@ impl TuiApp {
         } else {
             panel.set_mode(ClarifyInputMode::Options);
             panel.notice = None;
-            self.answer_clarify_selection(ui, &mut panel)?;
+            self.answer_clarify_selection(ui, &mut panel).await?;
             if panel.answers.iter().all(Option::is_some) && panel.notice.is_none() {
                 ui.bottom_panel = panel.restore_panel();
             } else {
@@ -324,7 +328,7 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn answer_clarify_selection(
+    pub(crate) async fn answer_clarify_selection(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         panel: &mut ClarifyPanel,
@@ -378,11 +382,15 @@ impl TuiApp {
                     })
                     .collect(),
             };
-            if !self.gateway.submit_clarify(
-                selector,
-                &panel.request.call_id,
-                ClarifyResult::Answered(response),
-            ) {
+            if !self
+                .gateway
+                .submit_clarify(
+                    selector,
+                    &panel.request.call_id,
+                    ClarifyResult::Answered(response),
+                )
+                .await
+            {
                 panel.notice = Some("clarify request is no longer active".to_string());
             }
             return Ok(());
@@ -391,14 +399,15 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn apply_bottom_panel_selection(
+    pub(crate) async fn apply_bottom_panel_selection(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         selected: Option<BottomSelectionValue>,
     ) -> Result<()> {
         match selected {
             Some(BottomSelectionValue::HistoryMessageAction { message_id, action }) => {
-                self.begin_history_message_edit(ui, message_id, action)?;
+                self.begin_history_message_edit(ui, message_id, action)
+                    .await?;
             }
             Some(BottomSelectionValue::Session(session_id)) => {
                 let archived = ui
@@ -407,9 +416,9 @@ impl TuiApp {
                     .and_then(BottomPanel::session_view)
                     .is_some_and(|view| view == SessionListView::Archived);
                 if archived {
-                    self.state_runtime.restore_session(&session_id)?;
+                    self.state_runtime.restore_session(&session_id).await?;
                 }
-                self.open_session_direct(ui, &session_id)?;
+                self.open_session_direct(ui, &session_id).await?;
             }
             Some(BottomSelectionValue::LoadOlderSessions(cwd)) => {
                 let view = ui
@@ -430,7 +439,8 @@ impl TuiApp {
                     view,
                     Some(format!("sessions:load-older:{cwd}")),
                     Some("loaded older sessions"),
-                )?;
+                )
+                .await?;
                 if let Some(BottomPanel::Sessions(panel)) = ui.bottom_panel.as_mut() {
                     panel.query.clear();
                 }
@@ -444,7 +454,7 @@ impl TuiApp {
                 } else {
                     child_session_id
                 };
-                self.open_agent_target_session(ui, &target)?;
+                self.open_agent_target_session(ui, &target).await?;
             }
             Some(BottomSelectionValue::AgentAvailable {
                 name,
@@ -467,15 +477,18 @@ impl TuiApp {
                 path,
                 shadowed,
                 action,
-            }) => self.apply_agent_action(ui, name, source, path, shadowed, action)?,
+            }) => {
+                self.apply_agent_action(ui, name, source, path, shadowed, action)
+                    .await?
+            }
             Some(BottomSelectionValue::AgentCreate) => {
                 ui.bottom_panel = Some(BottomPanel::AgentEditor(AgentEditorPanel::create()));
             }
             Some(BottomSelectionValue::AgentMainDefault) => {
-                self.use_default_main_agent(ui)?;
+                self.use_default_main_agent(ui).await?;
             }
             Some(BottomSelectionValue::AgentSpawningToggle) => {
-                self.toggle_agent_spawning(ui);
+                self.toggle_agent_spawning(ui).await;
             }
             Some(BottomSelectionValue::AgentDiagnostic(_)) => {}
             Some(BottomSelectionValue::AddProvider) => {
@@ -578,7 +591,8 @@ impl TuiApp {
                     model.clone(),
                     reasoning_effort.clone(),
                     global,
-                )?;
+                )
+                .await?;
                 ui.bottom_panel = None;
                 ui.push_status(status);
                 ui.refresh_sidebar(self);

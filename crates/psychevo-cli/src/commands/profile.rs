@@ -23,14 +23,14 @@ use crate::profiles::{
     write_sticky_profile,
 };
 
-pub(crate) fn run_profile_command(args: ProfileArgs) -> Result<ExitCode> {
+pub(crate) async fn run_profile_command(args: ProfileArgs) -> Result<ExitCode> {
     let command = args
         .command
         .unwrap_or(ProfileCommand::List(ProfileListArgs { json: false }));
     match command {
         ProfileCommand::List(args) => list(args),
         ProfileCommand::Show(args) => show(args),
-        ProfileCommand::Create(args) => create(args),
+        ProfileCommand::Create(args) => create(args).await,
         ProfileCommand::Use(args) => use_profile(args),
         ProfileCommand::Delete(args) => delete(args),
         ProfileCommand::Rename(args) => rename(args),
@@ -104,7 +104,7 @@ fn show(args: ProfileShowArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn create(args: ProfileCreateArgs) -> Result<ExitCode> {
+async fn create(args: ProfileCreateArgs) -> Result<ExitCode> {
     validate_profile_name(&args.name)?;
     let env_map = raw_env();
     let cwd = env::current_dir()?;
@@ -119,7 +119,7 @@ fn create(args: ProfileCreateArgs) -> Result<ExitCode> {
     }
     let clone_source = clone_source(&args, &cwd, &root)?;
     fs::create_dir_all(&home)?;
-    create_profile_home(&home, args.description.as_deref())?;
+    create_profile_home(&home, args.description.as_deref()).await?;
     if let Some(source) = clone_source {
         copy_profile_setup(&source, &home)?;
     }
@@ -241,7 +241,7 @@ fn clone_source(args: &ProfileCreateArgs, cwd: &Path, root: &Path) -> Result<Opt
     Ok(Some(source.home))
 }
 
-fn create_profile_home(home: &Path, description: Option<&str>) -> Result<()> {
+async fn create_profile_home(home: &Path, description: Option<&str>) -> Result<()> {
     fs::create_dir_all(home)?;
     fs::create_dir_all(home.join("sessions"))?;
     fs::create_dir_all(home.join("logs"))?;
@@ -251,7 +251,8 @@ fn create_profile_home(home: &Path, description: Option<&str>) -> Result<()> {
     write_if_absent(&home.join("config.toml"), STARTER_CONFIG)?;
     write_if_absent(&home.join(".env"), STARTER_ENV)?;
     crate::profiles::protect_env_file(&home.join(".env"))?;
-    StateRuntime::open(home.join("state.db"))?;
+    let state_runtime = StateRuntime::open(home.join("state.db")).await?;
+    state_runtime.close().await;
     write_metadata(
         home,
         &ProfileMetadata {

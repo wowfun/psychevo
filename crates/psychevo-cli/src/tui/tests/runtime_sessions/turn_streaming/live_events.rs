@@ -6,7 +6,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn fullscreen_thinking_toggle_hides_existing_blocks_without_status() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Thinking,
@@ -44,7 +44,7 @@ pub(crate) async fn fullscreen_thinking_toggle_hides_existing_blocks_without_sta
 #[tokio::test]
 pub(crate) async fn tab_completes_slash_command_without_switching_mode() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/ren");
 
@@ -59,7 +59,7 @@ pub(crate) async fn tab_completes_slash_command_without_switching_mode() {
 #[tokio::test]
 pub(crate) async fn shift_tab_cycles_mode_without_status_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_key(
@@ -105,7 +105,7 @@ pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo_runtime::types::RunR
 #[tokio::test]
 pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::value(serde_json::json!({
@@ -191,7 +191,7 @@ pub(crate) async fn fullscreen_drain_keeps_queued_events_after_task_completion()
 #[tokio::test]
 pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_running() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::value(serde_json::json!({
@@ -301,7 +301,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
 #[tokio::test]
 pub(crate) async fn fast_reasoning_only_write_renders_updating_before_completion() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::ReasoningDelta {

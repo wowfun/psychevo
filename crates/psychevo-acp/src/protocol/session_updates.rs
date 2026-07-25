@@ -30,8 +30,8 @@ impl<T> Pipe for T {}
 pub(crate) mod tests {
     pub(crate) use super::*;
 
-    #[test]
-    fn converts_acp_mcp_servers_to_runtime_inputs() {
+    #[tokio::test]
+    async fn converts_acp_mcp_servers_to_runtime_inputs() {
         let servers = vec![McpServer::Stdio(
             McpServerStdio::new("repo tools", "server")
                 .args(vec!["--stdio".to_string()])
@@ -49,8 +49,8 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn converts_prompt_text_and_http_images() {
+    #[tokio::test]
+    async fn converts_prompt_text_and_http_images() {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let (text, images) = prompt_parts(
             vec![
@@ -71,8 +71,8 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn synthesizes_usage_from_runtime_accounting() {
+    #[tokio::test]
+    async fn synthesizes_usage_from_runtime_accounting() {
         let mut usage = AcpUsageAccumulator::default();
         usage.record_stream_event(&RunStreamEvent::value(json!({
             "type": "message_end",
@@ -94,8 +94,8 @@ pub(crate) mod tests {
         assert_eq!(metrics.total_tokens, 16);
     }
 
-    #[test]
-    fn tool_call_pending_raw_input_preserves_partial_arguments() {
+    #[tokio::test]
+    async fn tool_call_pending_raw_input_preserves_partial_arguments() {
         assert_eq!(
             tool_call_pending_raw_input(&json!({
                 "arguments_json": "{\"path\":\"add.py\"",
@@ -113,8 +113,8 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn runtime_tool_execution_start_includes_timing_meta() {
+    #[tokio::test]
+    async fn runtime_tool_execution_start_includes_timing_meta() {
         let update = runtime_event_session_update(&json!({
             "type": "tool_execution_start",
             "tool_call_id": "call-1",
@@ -136,8 +136,8 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn runtime_tool_execution_end_includes_timing_meta() {
+    #[tokio::test]
+    async fn runtime_tool_execution_end_includes_timing_meta() {
         let update = runtime_event_session_update(&json!({
             "type": "tool_execution_end",
             "tool_call_id": "call-1",
@@ -160,8 +160,8 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn advertises_tools_slash_command() {
+    #[tokio::test]
+    async fn advertises_tools_slash_command() {
         let commands = available_command_lines_from(available_commands_from(
             psychevo_runtime::command_registry::available_slash_commands_for_surface(
                 acp_command_capabilities(),
@@ -177,8 +177,8 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn parses_slash_prompt_command_and_args() {
+    #[tokio::test]
+    async fn parses_slash_prompt_command_and_args() {
         use psychevo_runtime::command_registry::{
             SlashCommandAction, SlashCommandParse, parse_slash_command_line,
         };
@@ -201,22 +201,22 @@ pub(crate) mod tests {
         ));
     }
 
-    #[test]
-    fn handles_status_slash_command_locally() {
+    #[tokio::test]
+    async fn handles_status_slash_command_locally() {
         let agent = PsychevoAcpAgent::new(AcpOptions {
             home: std::env::temp_dir().join("psychevo-acp-test-home"),
             db_path: PathBuf::from(":memory:"),
             config_path: None,
             inherited_env: BTreeMap::new(),
         })
-        .expect("agent");
+        .await.expect("agent");
         let session_id = SessionId::new("acp-test");
         let session = AcpSession::new(
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             None,
             Vec::new(),
         );
-        let text = agent.status_command_text(&session_id, &session);
+        let text = agent.status_command_text(&session_id, &session).await;
         assert!(text.contains("ACP session: acp-test"), "{text}");
         assert!(text.contains("commands: "), "{text}");
     }

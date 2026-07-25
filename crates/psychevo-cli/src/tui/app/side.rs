@@ -12,7 +12,7 @@ impl TuiApp {
         self.side_conversation.is_some()
     }
 
-    pub(crate) fn start_side_conversation(
+    pub(crate) async fn start_side_conversation(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         initial_prompt: Option<String>,
@@ -28,8 +28,8 @@ impl TuiApp {
 
         let (provider, model) = self.side_conversation_provider_model()?;
         let store = &self.state_runtime;
-        let side_thread_id =
-            store.create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
+        let side_thread_id = store
+            .create_child_session_from_parent_snapshot(ChildSessionSnapshotInput {
                 parent_session_id: &parent_session,
                 cwd: &self.cwd,
                 source: TUI_SIDE_CONVERSATION_SESSION_SOURCE,
@@ -54,7 +54,8 @@ impl TuiApp {
                     }
                 }),
                 boundary_text: side_conversation_boundary_prompt(),
-            })?;
+            })
+            .await?;
 
         let side_state = SideConversationState {
             parent_session: parent_session.clone(),
@@ -76,7 +77,7 @@ impl TuiApp {
         self.clear_new_session_draft();
         ui.bottom_panel = None;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         ui.set_ephemeral_status("side chat; Ctrl+C returns");
         ui.refresh_sidebar(self);
 
@@ -86,7 +87,10 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn close_side_conversation(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn close_side_conversation(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
         let Some(side) = self.side_conversation.take() else {
             return Ok(());
         };
@@ -102,35 +106,35 @@ impl TuiApp {
         self.current_agent_explicit_default = side.parent_agent_explicit_default;
         self.restore_parent_tui_state()?;
         self.refresh_selected_model();
-        self.refresh_current_session_title()?;
+        self.refresh_current_session_title().await?;
 
         ui.bottom_panel = None;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         self.replay_session_live_event_backlog(ui, &side.parent_session);
         ui.session_live_event_backlog.remove(&side_thread_id);
         ui.agent_child_event_backlog.remove(&side_thread_id);
         ui.set_ephemeral_status(SIDE_CONVERSATION_RETURNED_MESSAGE);
         ui.refresh_sidebar(self);
 
-        match self.state_runtime.delete_session(&side_thread_id) {
+        match self.state_runtime.delete_session(&side_thread_id).await {
             Ok(()) => {}
             Err(err) => ui.set_ephemeral_error(format!("failed to delete /btw side chat: {err}")),
         }
         Ok(())
     }
 
-    pub(crate) fn handle_side_conversation_ctrl_c(
+    pub(crate) async fn handle_side_conversation_ctrl_c(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
         if !self.in_side_conversation() {
             return Ok(false);
         }
-        if self.request_current_session_interrupt(ui) {
+        if self.request_current_session_interrupt(ui).await {
             return Ok(true);
         }
-        self.close_side_conversation(ui)?;
+        self.close_side_conversation(ui).await?;
         Ok(true)
     }
 
@@ -185,6 +189,7 @@ impl TuiApp {
         let task = tokio::spawn(async move {
             state
                 .delete_sessions_for_cwd_with_source(&cwd, TUI_SIDE_CONVERSATION_SESSION_SOURCE)
+                .await
                 .map_err(|err| err.to_string())
         });
         self.side_cleanup_task = Some(SideCleanupTask { task });

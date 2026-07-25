@@ -4,7 +4,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -35,10 +35,10 @@ pub(crate) async fn deleted_image_placeholder_unbinds_pending_attachment() {
     }
 }
 
-#[test]
-pub(crate) fn adding_image_after_deleted_placeholder_keeps_placeholder_unique() {
+#[tokio::test]
+pub(crate) async fn adding_image_after_deleted_placeholder_keeps_placeholder_unique() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -64,7 +64,7 @@ pub(crate) fn adding_image_after_deleted_placeholder_keeps_placeholder_unique() 
 #[tokio::test]
 pub(crate) async fn new_command_clears_pending_images_and_ephemeral_status() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -83,7 +83,7 @@ pub(crate) async fn new_command_clears_pending_images_and_ephemeral_status() {
 #[tokio::test]
 pub(crate) async fn unknown_dynamic_skill_submits_as_prompt() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -119,8 +119,8 @@ pub(crate) fn tiny_png_bytes() -> &'static [u8] {
     ]
 }
 
-#[test]
-pub(crate) fn fullscreen_terminal_commands_toggle_bracketed_paste() {
+#[tokio::test]
+pub(crate) async fn fullscreen_terminal_commands_toggle_bracketed_paste() {
     let mut out = Vec::new();
     write_fullscreen_enter_commands(&mut out).expect("enter commands");
     assert!(String::from_utf8_lossy(&out).contains("\x1b[?2004h"));
@@ -133,7 +133,7 @@ pub(crate) fn fullscreen_terminal_commands_toggle_bracketed_paste() {
 #[tokio::test]
 pub(crate) async fn slash_menu_selection_can_choose_mode_over_model() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/mo");
 
@@ -156,7 +156,7 @@ pub(crate) async fn slash_menu_selection_can_choose_mode_over_model() {
 #[tokio::test]
 pub(crate) async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/mo");
 
@@ -194,7 +194,7 @@ pub(crate) async fn slash_menu_up_down_wrap_between_first_and_last_rows() {
 #[tokio::test]
 pub(crate) async fn file_popup_keyboard_navigation_wraps_and_inserts_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("read @sr");
     ui.file_search.popup = Some(FileSearchPopupState {
@@ -235,7 +235,7 @@ pub(crate) async fn file_popup_keyboard_navigation_wraps_and_inserts_selection()
 #[tokio::test]
 pub(crate) async fn shell_mode_reuses_at_file_popup_for_path_completion() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("cat @sr");
@@ -261,7 +261,7 @@ pub(crate) async fn shell_mode_reuses_at_file_popup_for_path_completion() {
 #[tokio::test]
 pub(crate) async fn shell_mode_does_not_perform_naked_shell_completion() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("cat xx");
@@ -277,7 +277,7 @@ pub(crate) async fn shell_mode_does_not_perform_naked_shell_completion() {
 #[tokio::test]
 pub(crate) async fn shell_mode_file_completion_preserves_space_path_quoting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("cat @doc");
@@ -305,7 +305,7 @@ pub(crate) async fn shell_mode_file_completion_preserves_space_path_quoting() {
 #[tokio::test]
 pub(crate) async fn file_popup_esc_dismisses_until_token_changes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("read @sr");
     ui.file_search.popup = Some(FileSearchPopupState {
@@ -330,10 +330,10 @@ pub(crate) async fn file_popup_esc_dismisses_until_token_changes() {
     assert!(ui.file_search.popup.is_some());
 }
 
-#[test]
-pub(crate) fn file_popup_is_hidden_while_bottom_panel_is_open() {
+#[tokio::test]
+pub(crate) async fn file_popup_is_hidden_while_bottom_panel_is_open() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("read @src");
     ui.file_search.popup = Some(FileSearchPopupState {
@@ -359,7 +359,7 @@ pub(crate) fn file_popup_is_hidden_while_bottom_panel_is_open() {
 #[tokio::test]
 pub(crate) async fn mouse_click_inserts_file_popup_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("open @fi");
     ui.file_search.popup = Some(FileSearchPopupState {
@@ -400,7 +400,7 @@ pub(crate) async fn mouse_click_inserts_file_popup_row() {
 #[tokio::test]
 pub(crate) async fn skill_popup_keyboard_selection_inserts_marker_without_submitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_skill(&app, "helper", "Helps with focused edits");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use $he");
@@ -425,7 +425,7 @@ pub(crate) async fn skill_popup_keyboard_selection_inserts_marker_without_submit
 #[tokio::test]
 pub(crate) async fn agent_popup_keyboard_selection_inserts_marker_without_submitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_agent(&app, "helper", "Helps with delegated code work");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use @he");
@@ -452,7 +452,7 @@ pub(crate) async fn agent_popup_keyboard_selection_inserts_marker_without_submit
 #[tokio::test]
 pub(crate) async fn at_popup_keyboard_reaches_file_rows_after_agent_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use @he");
     ui.agent_search.popup = Some(AgentSearchPopupState {
@@ -488,10 +488,10 @@ pub(crate) async fn at_popup_keyboard_reaches_file_rows_after_agent_rows() {
     assert!(ui.running.is_none());
 }
 
-#[test]
-pub(crate) fn at_popup_renders_agents_directories_and_files_grouped() {
+#[tokio::test]
+pub(crate) async fn at_popup_renders_agents_directories_and_files_grouped() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use @he");
     ui.agent_search.popup = Some(AgentSearchPopupState {
@@ -537,10 +537,10 @@ pub(crate) fn at_popup_renders_agents_directories_and_files_grouped() {
     );
 }
 
-#[test]
-pub(crate) fn skill_popup_renders_group_header_and_scope() {
+#[tokio::test]
+pub(crate) async fn skill_popup_renders_group_header_and_scope() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     write_tui_skill(&app, "helper", "Helps with focused edits");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use $he");
@@ -557,7 +557,7 @@ pub(crate) fn skill_popup_renders_group_header_and_scope() {
 #[tokio::test]
 pub(crate) async fn skill_popup_esc_dismisses_until_token_changes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_skill(&app, "helper", "Helps with focused edits");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use $he");
@@ -579,7 +579,7 @@ pub(crate) async fn skill_popup_esc_dismisses_until_token_changes() {
 #[tokio::test]
 pub(crate) async fn slash_skill_selection_submits_without_marker_rewrite() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_skill(&app, "helper", "Helps with focused edits");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/helper");
@@ -607,7 +607,7 @@ pub(crate) async fn slash_skill_selection_submits_without_marker_rewrite() {
 #[tokio::test]
 pub(crate) async fn marker_only_prompt_sends_on_next_enter_after_skill_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_skill(&app, "helper", "Helps with focused edits");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("$he");
@@ -639,7 +639,7 @@ pub(crate) async fn marker_only_prompt_sends_on_next_enter_after_skill_selection
 #[tokio::test]
 pub(crate) async fn mouse_click_inserts_skill_popup_row_without_submitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use $he");
     ui.skill_search.popup = Some(SkillSearchPopupState {
@@ -682,7 +682,7 @@ pub(crate) async fn mouse_click_inserts_skill_popup_row_without_submitting() {
 #[tokio::test]
 pub(crate) async fn mouse_click_inserts_agent_popup_row_without_submitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("use @he");
     ui.agent_search.popup = Some(AgentSearchPopupState {
@@ -722,10 +722,10 @@ pub(crate) async fn mouse_click_inserts_agent_popup_row_without_submitting() {
     assert!(ui.running.is_none());
 }
 
-#[test]
-pub(crate) fn run_start_selected_skills_adds_transcript_status() {
+#[tokio::test]
+pub(crate) async fn run_start_selected_skills_adds_transcript_status() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -744,10 +744,10 @@ pub(crate) fn run_start_selected_skills_adds_transcript_status() {
     ));
 }
 
-#[test]
-pub(crate) fn typed_turn_started_selected_skills_adds_transcript_status() {
+#[tokio::test]
+pub(crate) async fn typed_turn_started_selected_skills_adds_transcript_status() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 

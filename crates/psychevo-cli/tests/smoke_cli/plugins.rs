@@ -80,8 +80,8 @@ fn sse_tool_call(call_id: &str, tool_name: &str, arguments: &str) -> String {
     )
 }
 
-#[test]
-pub(crate) fn cli_plugin_view_human_output_includes_interface_summary() {
+#[tokio::test]
+pub(crate) async fn cli_plugin_view_human_output_includes_interface_summary() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -117,8 +117,8 @@ pub(crate) fn cli_plugin_view_human_output_includes_interface_summary() {
     assert!(stdout.contains("Adds display metadata."));
 }
 
-#[test]
-pub(crate) fn cli_plugin_install_enable_list_and_doctor_json() {
+#[tokio::test]
+pub(crate) async fn cli_plugin_install_enable_list_and_doctor_json() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -196,8 +196,8 @@ pub(crate) fn cli_plugin_install_enable_list_and_doctor_json() {
     );
 }
 
-#[test]
-pub(crate) fn cli_plugin_local_enable_targets_profile_installed_plugin() {
+#[tokio::test]
+pub(crate) async fn cli_plugin_local_enable_targets_profile_installed_plugin() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -268,8 +268,8 @@ pub(crate) fn cli_plugin_local_enable_targets_profile_installed_plugin() {
     assert_eq!(disk_cleanup["psychevo_extensions"][0], "runtime");
 }
 
-#[test]
-pub(crate) fn cli_run_can_search_and_execute_enabled_plugin_worker_tool_by_default() {
+#[tokio::test]
+pub(crate) async fn cli_run_can_search_and_execute_enabled_plugin_worker_tool_by_default() {
     let server = MockSseServer::start(vec![
         sse_tool_call(
             "call_search",

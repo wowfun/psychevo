@@ -2,7 +2,7 @@
 pub(crate) use super::*;
 
 impl TuiApp {
-    pub(crate) fn handle_model_panel_key(
+    pub(crate) async fn handle_model_panel_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
@@ -35,7 +35,7 @@ impl TuiApp {
                     })
                     .unwrap_or(ModelTab::Models);
                 match tab {
-                    ModelTab::Models => self.handle_model_list_key(ui, key)?,
+                    ModelTab::Models => self.handle_model_list_key(ui, key).await?,
                     ModelTab::Info => self.handle_model_info_key(ui, key),
                 }
             }
@@ -43,7 +43,7 @@ impl TuiApp {
         Ok(false)
     }
 
-    pub(crate) fn handle_model_list_key(
+    pub(crate) async fn handle_model_list_key(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         key: KeyEvent,
@@ -54,7 +54,7 @@ impl TuiApp {
                     .bottom_panel
                     .as_ref()
                     .and_then(BottomPanel::selected_value);
-                self.apply_bottom_panel_selection(ui, selected)?;
+                self.apply_bottom_panel_selection(ui, selected).await?;
             }
             KeyCode::Up => {
                 if let Some(BottomPanel::Models(panel)) = &mut ui.bottom_panel {

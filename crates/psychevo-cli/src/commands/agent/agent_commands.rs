@@ -27,14 +27,14 @@ pub(crate) async fn run_agent_command(args: AgentArgs) -> Result<ExitCode> {
         AgentCommand::View(args) => view_agent(args),
         AgentCommand::Validate(args) => validate_agent(args),
         AgentCommand::Run(args) => run_agent(args).await,
-        AgentCommand::Status(args) => agent_status(args),
-        AgentCommand::Inspect(args) => inspect_agent(args),
+        AgentCommand::Status(args) => agent_status(args).await,
+        AgentCommand::Inspect(args) => inspect_agent(args).await,
         AgentCommand::Wait(args) => wait_agent(args).await,
-        AgentCommand::Close(args) => close_agent(args),
-        AgentCommand::Resume(args) => resume_agent(args),
-        AgentCommand::Send(args) => send_agent(args),
+        AgentCommand::Close(args) => close_agent(args).await,
+        AgentCommand::Resume(args) => resume_agent(args).await,
+        AgentCommand::Send(args) => send_agent(args).await,
         AgentCommand::Attach(args) => attach_agent(args).await,
-        AgentCommand::Logs(args) => agent_logs(args),
+        AgentCommand::Logs(args) => agent_logs(args).await,
         AgentCommand::Backend(args) => agent_backend(args),
     }
 }
@@ -281,7 +281,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     }
 
     let result = psychevo_runtime::run::run_live(RunOptions {
-        state: StateRuntime::open(&db_path)?,
+        state: StateRuntime::open(&db_path).await?,
         cwd,
         snapshot_root: Some(home.join("snapshots")),
         session: None,
@@ -340,19 +340,21 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     })
 }
 
-pub(crate) fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
+pub(crate) async fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = StateRuntime::open(&db_path)?;
+    let store = StateRuntime::open(&db_path).await?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
     let parent = if args.all {
         None
     } else {
-        store.latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])?
+        store
+            .latest_session_for_cwd_with_sources(&cwd, &["run", "tui"])
+            .await?
     };
-    let value = agent_status_value(Some(&store), parent.as_deref(), args.all);
+    let value = agent_status_value(Some(&store), parent.as_deref(), args.all).await;
     if args.json {
         println!("{}", serde_json::to_string(&value)?);
     } else {
@@ -361,15 +363,18 @@ pub(crate) fn agent_status(args: AgentStatusArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
-    let store = command_store()?;
+pub(crate) async fn inspect_agent(args: AgentInspectArgs) -> Result<ExitCode> {
+    let store = command_store().await?;
     let edge = store
-        .find_agent_edge(&args.id)?
+        .find_agent_edge(&args.id)
+        .await?
         .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
-    let mut record = agent_status_record_value(&store, &args.id, &edge)?;
-    let parent_session = store.session_summary(&edge.parent_session_id)?;
-    let child_session = store.session_summary(&edge.child_session_id)?;
-    let mut messages = store.load_tui_message_summaries(&edge.child_session_id)?;
+    let mut record = agent_status_record_value(&store, &args.id, &edge).await?;
+    let parent_session = store.session_summary(&edge.parent_session_id).await?;
+    let child_session = store.session_summary(&edge.child_session_id).await?;
+    let mut messages = store
+        .load_tui_message_summaries(&edge.child_session_id)
+        .await?;
     let latest_usage = latest_usage_from_summaries(&messages);
     let latest_total_tokens = latest_usage.as_ref().and_then(usage_total_tokens);
     if let Some(object) = record.as_object_mut() {
@@ -415,10 +420,11 @@ pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = StateRuntime::open(&db_path)?;
+    let store = StateRuntime::open(&db_path).await?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
     let session_id = store
-        .latest_run_session_for_cwd(&cwd)?
+        .latest_run_session_for_cwd(&cwd)
+        .await?
         .ok_or_else(|| anyhow!("no run session found for {}", cwd.display()))?;
     let value =
         wait_agent_mailbox(&session_id, Duration::from_millis(args.timeout_ms), &store).await?;
@@ -430,9 +436,9 @@ pub(crate) async fn wait_agent(args: AgentWaitArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
-    let store = command_store()?;
-    let record = close_agent_id(&args.id, Some(&store))?;
+pub(crate) async fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
+    let store = command_store().await?;
+    let record = close_agent_id(&args.id, Some(&store)).await?;
     if args.json {
         println!(
             "{}",
@@ -446,9 +452,9 @@ pub(crate) fn close_agent(args: AgentIdArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
-    let store = command_store()?;
-    let record = send_agent_message(&args.id, &args.message.join(" "), Some(&store))?;
+pub(crate) async fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
+    let store = command_store().await?;
+    let record = send_agent_message(&args.id, &args.message.join(" "), Some(&store)).await?;
     if args.json {
         println!("{}", serde_json::to_string(&json!({ "agent": record }))?);
     } else if let Some(record) = record {
@@ -459,9 +465,9 @@ pub(crate) fn send_agent(args: AgentSendArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
-    let store = command_store()?;
-    let record = resume_agent_id(&args.id, Some(&store))?;
+pub(crate) async fn resume_agent(args: AgentIdArgs) -> Result<ExitCode> {
+    let store = command_store().await?;
+    let record = resume_agent_id(&args.id, Some(&store)).await?;
     if args.json {
         println!("{}", serde_json::to_string(&json!({ "agent": record }))?);
     } else if let Some(record) = record {
@@ -477,9 +483,10 @@ pub(crate) async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let store = StateRuntime::open(&db_path)?;
+    let store = StateRuntime::open(&db_path).await?;
     let edge = store
-        .find_agent_edge(&args.id)?
+        .find_agent_edge(&args.id)
+        .await?
         .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
     if args.json {
         println!(
@@ -499,12 +506,15 @@ pub(crate) async fn attach_agent(args: AgentIdArgs) -> Result<ExitCode> {
         .unwrap_or(ExitCode::FAILURE))
 }
 
-pub(crate) fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
-    let store = command_store()?;
+pub(crate) async fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
+    let store = command_store().await?;
     let edge = store
-        .find_agent_edge(&args.id)?
+        .find_agent_edge(&args.id)
+        .await?
         .ok_or_else(|| anyhow!("agent not found: {}", args.id))?;
-    let mut messages = store.load_tui_message_summaries(&edge.child_session_id)?;
+    let mut messages = store
+        .load_tui_message_summaries(&edge.child_session_id)
+        .await?;
     let keep_from = messages.len().saturating_sub(args.limit);
     messages.drain(..keep_from);
     if args.json {
@@ -528,12 +538,12 @@ pub(crate) fn agent_logs(args: AgentLogsArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn agent_status_record_value(
+pub(crate) async fn agent_status_record_value(
     store: &StateRuntime,
     target: &str,
     edge: &AgentEdgeRecord,
 ) -> Result<Value> {
-    let value = agent_status_value(Some(store), None, true);
+    let value = agent_status_value(Some(store), None, true).await;
     let agents = value
         .get("agents")
         .and_then(Value::as_array)

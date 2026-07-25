@@ -4,7 +4,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn model_catalog_sync_hydrates_persistent_provider_cache() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.sync_model_catalog_providers().expect("providers");
     let provider = app
         .model_catalog
@@ -24,7 +24,7 @@ pub(crate) async fn model_catalog_sync_hydrates_persistent_provider_cache() {
     )
     .expect("write cache");
 
-    let mut fresh = test_app_with_models(&temp);
+    let mut fresh = test_app_with_models(&temp).await;
     fresh
         .sync_model_catalog_providers()
         .expect("fresh providers");
@@ -41,7 +41,7 @@ pub(crate) async fn model_catalog_sync_hydrates_persistent_provider_cache() {
 #[tokio::test]
 pub(crate) async fn model_catalog_fetch_writes_persistent_provider_cache() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.sync_model_catalog_providers().expect("providers");
     let server = OneShotCatalogServer::new(r#"{"data":[{"id":"remote-live"}]}"#);
     {
@@ -71,7 +71,7 @@ pub(crate) async fn model_catalog_fetch_writes_persistent_provider_cache() {
 #[tokio::test]
 pub(crate) async fn model_fetch_failure_preserves_old_fetched_cache() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.sync_model_catalog_providers().expect("providers");
     let state = app
         .model_catalog
@@ -141,7 +141,7 @@ impl OneShotCatalogServer {
 #[tokio::test]
 pub(crate) async fn model_fetch_cancel_preserves_old_fetched_cache() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.sync_model_catalog_providers().expect("providers");
     let state = app
         .model_catalog
@@ -193,15 +193,17 @@ pub(crate) async fn drain_catalog_until_idle(app: &mut TuiApp, ui: &mut Fullscre
 #[tokio::test]
 pub(crate) async fn model_selection_opens_variant_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
         .await
         .expect("model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select model");
 
     let Some(BottomPanel::Variants { panel, .. }) = &ui.bottom_panel else {
@@ -217,18 +219,21 @@ pub(crate) async fn model_selection_opens_variant_panel() {
 #[tokio::test]
 pub(crate) async fn model_variant_panel_up_down_wraps_between_first_and_last_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
         .await
         .expect("model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down to other model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select model");
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await
         .expect("wrap up");
     let Some(BottomPanel::Variants { panel, .. }) = &ui.bottom_panel else {
         panic!("expected variant panel");
@@ -239,6 +244,7 @@ pub(crate) async fn model_variant_panel_up_down_wraps_between_first_and_last_row
     );
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("wrap down");
     let Some(BottomPanel::Variants { panel, .. }) = &ui.bottom_panel else {
         panic!("expected variant panel");
@@ -252,7 +258,7 @@ pub(crate) async fn model_variant_panel_up_down_wraps_between_first_and_last_row
 #[tokio::test]
 pub(crate) async fn model_config_default_saves_composer_model_state() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.current_variant = Some("xhigh".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -260,10 +266,13 @@ pub(crate) async fn model_config_default_saves_composer_model_state() {
         .await
         .expect("model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select config default");
 
     assert_eq!(app.current_model.as_deref(), Some("mock/other-model"));
@@ -287,24 +296,28 @@ pub(crate) async fn model_config_default_saves_composer_model_state() {
 #[tokio::test]
 pub(crate) async fn model_explicit_variant_saves_composer_reasoning_effort() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
         .await
         .expect("model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select model");
     for ch in "xhigh".chars() {
         app.handle_bottom_panel_key(
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("query");
     }
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select variant");
 
     assert_eq!(app.current_model.as_deref(), Some("mock/other-model"));
@@ -328,21 +341,25 @@ pub(crate) async fn model_explicit_variant_saves_composer_reasoning_effort() {
 #[tokio::test]
 pub(crate) async fn model_variant_escape_returns_to_model_then_closes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ModelShow)
         .await
         .expect("model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select model");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
         .expect("back");
     assert!(matches!(ui.bottom_panel, Some(BottomPanel::Models(_))));
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
         .expect("close");
     assert!(ui.bottom_panel.is_none());
 }

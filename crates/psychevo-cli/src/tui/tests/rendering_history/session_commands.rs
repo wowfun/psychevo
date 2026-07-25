@@ -4,10 +4,11 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model", "provider", None)
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
     app.current_session_title = None;
@@ -32,6 +33,7 @@ pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
     }));
     let summary = store
         .session_summary(&session_id)
+        .await
         .expect("summary")
         .expect("session");
     assert_eq!(summary.title.as_deref(), Some("Better Session Title"));
@@ -40,7 +42,7 @@ pub(crate) async fn fullscreen_rename_updates_session_title_and_sidebar() {
 #[tokio::test]
 pub(crate) async fn obsolete_thinking_command_submits_as_prompt_in_fullscreen() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/thinking");
 

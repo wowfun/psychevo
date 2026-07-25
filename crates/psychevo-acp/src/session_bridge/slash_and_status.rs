@@ -14,11 +14,15 @@ impl PsychevoAcpAgent {
                 let text = match action {
                     Some(SlashCommandAction::Help) => self.help_command_text(session),
                     Some(SlashCommandAction::Status) => {
-                        self.status_command_text(session_id, session)
+                        self.status_command_text(session_id, session).await
                     }
-                    Some(SlashCommandAction::Usage) => self.usage_command_text(session)?,
-                    Some(SlashCommandAction::Context) => self.context_command_text(session)?,
-                    Some(SlashCommandAction::Refresh) => self.refresh_command_text(session)?,
+                    Some(SlashCommandAction::Usage) => self.usage_command_text(session).await?,
+                    Some(SlashCommandAction::Context) => {
+                        self.context_command_text(session).await?
+                    }
+                    Some(SlashCommandAction::Refresh) => {
+                        self.refresh_command_text(session).await?
+                    }
                     _ => "Command completed.".to_string(),
                 };
                 Ok(send_slash_text(cx, session_id, text))
@@ -30,7 +34,8 @@ impl PsychevoAcpAgent {
             SlashCommandEffect::PassThroughPrompt(prompt)
             | SlashCommandEffect::SubmitPrompt(prompt) => Ok(SlashPromptAction::RunPrompt(prompt)),
             SlashCommandEffect::Mission { prompt, team, goal } => {
-                self.record_acp_mission_metadata(session_id, session, team.as_deref(), &goal)?;
+                self.record_acp_mission_metadata(session_id, session, team.as_deref(), &goal)
+                    .await?;
                 Ok(SlashPromptAction::RunPrompt(prompt))
             }
             SlashCommandEffect::Steer(message) => self.apply_steer_effect(session_id, &message, cx),
@@ -67,11 +72,13 @@ impl PsychevoAcpAgent {
                 ))
             }
             SlashCommandEffect::SessionsList => {
-                let text = self.sessions_list_text(session_id, session)?;
+                let text = self.sessions_list_text(session_id, session).await?;
                 Ok(send_slash_text(cx, session_id, text))
             }
             SlashCommandEffect::ResumeSession { reference } => {
-                let text = self.resume_session_text(session_id, session, reference.as_deref())?;
+                let text = self
+                    .resume_session_text(session_id, session, reference.as_deref())
+                    .await?;
                 Ok(send_slash_text(cx, session_id, text))
             }
             SlashCommandEffect::ShowModel => {
@@ -199,6 +206,7 @@ impl PsychevoAcpAgent {
                     .state
 
                     .set_session_title(runtime_session_id, &title)
+                    .await
                     .map_err(acp_internal_error)?;
                 Ok(send_slash_text(
                     cx,
@@ -208,7 +216,9 @@ impl PsychevoAcpAgent {
             }
             SlashCommandEffect::Undo => {
                 let result =
-                    undo_session(self.undo_options(session)?).map_err(acp_internal_error)?;
+                    undo_session(self.undo_options(session)?)
+                        .await
+                        .map_err(acp_internal_error)?;
                 Ok(send_slash_text(
                     cx,
                     session_id,
@@ -220,7 +230,9 @@ impl PsychevoAcpAgent {
             }
             SlashCommandEffect::Redo => {
                 let result =
-                    redo_session(self.undo_options(session)?).map_err(acp_internal_error)?;
+                    redo_session(self.undo_options(session)?)
+                        .await
+                        .map_err(acp_internal_error)?;
                 Ok(send_slash_text(
                     cx,
                     session_id,
@@ -277,7 +289,8 @@ impl PsychevoAcpAgent {
                     session,
                     SessionArtifactKind::Export,
                     args.as_deref(),
-                )?;
+                )
+                .await?;
                 Ok(send_slash_text(cx, session_id, text))
             }
             SlashCommandEffect::Share { args } => {
@@ -292,8 +305,9 @@ impl PsychevoAcpAgent {
                 {
                     return Ok(send_slash_text(cx, session_id, "permission denied"));
                 }
-                let text =
-                    self.write_artifact_text(session, SessionArtifactKind::Share, args.as_deref())?;
+                let text = self
+                    .write_artifact_text(session, SessionArtifactKind::Share, args.as_deref())
+                    .await?;
                 Ok(send_slash_text(cx, session_id, text))
             }
             SlashCommandEffect::Btw { .. } => Ok(send_slash_text(
@@ -315,7 +329,7 @@ impl PsychevoAcpAgent {
         }
     }
 
-    fn record_acp_mission_metadata(
+    async fn record_acp_mission_metadata(
         &self,
         session_id: &SessionId,
         session: &AcpSession,
@@ -330,6 +344,7 @@ impl PsychevoAcpAgent {
                 .state
 
                 .create_session_with_metadata(&session.cwd, "acp", "pending", "pending", None)
+                .await
                 .map_err(acp_internal_error)?;
             let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
             let Some(current) = sessions.get_mut(&session_id.to_string()) else {
@@ -374,6 +389,7 @@ impl PsychevoAcpAgent {
                     status: "running",
                     metadata: metadata.clone(),
                 })
+                .await
                 .map_err(acp_internal_error)?;
             self.state
 
@@ -387,6 +403,7 @@ impl PsychevoAcpAgent {
                     status: "running",
                     metadata,
                 })
+                .await
                 .map_err(acp_internal_error)?;
         } else {
             self.state
@@ -401,12 +418,13 @@ impl PsychevoAcpAgent {
                     status: "running",
                     metadata,
                 })
+                .await
                 .map_err(acp_internal_error)?;
         }
         Ok(())
     }
 
-    pub(crate) fn status_command_text(
+    pub(crate) async fn status_command_text(
         &self,
         session_id: &SessionId,
         session: &AcpSession,
@@ -499,7 +517,7 @@ impl PsychevoAcpAgent {
         lines.join("\n")
     }
 
-    pub(crate) fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
+    pub(crate) async fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
         let value = usage_stats(psychevo_runtime::types::StatsOptions {
             state: self.state.clone(),
             cwd: session.cwd.clone(),
@@ -507,11 +525,15 @@ impl PsychevoAcpAgent {
             days: None,
             limit: 20,
         })
+        .await
         .map_err(acp_internal_error)?;
         serde_json::to_string_pretty(&value).map_err(acp_internal_error)
     }
 
-    pub(crate) fn context_command_text(&self, session: &AcpSession) -> Result<String, Error> {
+    pub(crate) async fn context_command_text(
+        &self,
+        session: &AcpSession,
+    ) -> Result<String, Error> {
         let Some(runtime_session_id) = session.runtime_session_id.clone() else {
             return Ok("no runtime session yet".to_string());
         };
@@ -522,6 +544,7 @@ impl PsychevoAcpAgent {
             config_path: self.options.config_path.clone(),
             inherited_env: Some(self.options.inherited_env.clone()),
         })
+        .await
         .map_err(acp_internal_error)?;
         Ok(format_context_snapshot_text_with_options(
             &snapshot,

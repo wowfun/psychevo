@@ -2,7 +2,7 @@
 pub(crate) use super::*;
 
 impl TuiApp {
-    pub(crate) fn open_history_message_actions(
+    pub(crate) async fn open_history_message_actions(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         target: TranscriptHitTarget,
@@ -31,14 +31,16 @@ impl TuiApp {
                 &self.state_runtime,
                 &thread_id,
                 "tui",
-            )?
+            )
+            .await?
         {
             ui.push_status(reason);
             return Ok(true);
         }
         if self
             .state_runtime
-            .session_revert_state(&thread_id)?
+            .session_revert_state(&thread_id)
+            .await?
             .is_some()
         {
             ui.push_status("restore history or redo workspace files before another edit or fork");
@@ -85,7 +87,7 @@ impl TuiApp {
         Ok(true)
     }
 
-    pub(crate) fn begin_history_message_edit(
+    pub(crate) async fn begin_history_message_edit(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         message_id: String,
@@ -101,7 +103,8 @@ impl TuiApp {
             &thread_id,
             &message_id,
             "tui",
-        )?;
+        )
+        .await?;
         if let Some(reason) = draft.unavailable_reason {
             ui.set_ephemeral_error(reason);
             ui.bottom_panel = None;
@@ -133,7 +136,7 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn cancel_history_message_edit(
+    pub(crate) async fn cancel_history_message_edit(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
@@ -142,16 +145,18 @@ impl TuiApp {
         };
         if matches!(
             self.state_runtime
-                .session_revert_state(&edit.thread_id)?
+                .session_revert_state(&edit.thread_id)
+                .await?
                 .map(|revert| revert.kind),
             Some(psychevo_runtime::state::SessionRevertKind::ConversationEdit { .. })
         ) {
             let draft = psychevo_gateway::history_editing::restore_native_conversation_edit(
                 &self.state_runtime,
                 &edit.thread_id,
-            )?;
+            )
+            .await?;
             ui.clear_transcript();
-            self.load_current_session_history(ui)?;
+            self.load_current_session_history(ui).await?;
             set_history_draft_in_composer(ui, &draft.parts);
             ui.push_status("history restored; edited draft kept in composer");
         } else {
@@ -162,19 +167,25 @@ impl TuiApp {
         Ok(true)
     }
 
-    pub(crate) fn restore_staged_conversation_edit(
+    pub(crate) async fn restore_staged_conversation_edit(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
         let Some(thread_id) = self.current_session.clone() else {
             return Ok(false);
         };
-        if self.state_runtime.session_summary(&thread_id)?.is_none() {
+        if self
+            .state_runtime
+            .session_summary(&thread_id)
+            .await?
+            .is_none()
+        {
             return Ok(false);
         }
         if !matches!(
             self.state_runtime
-                .session_revert_state(&thread_id)?
+                .session_revert_state(&thread_id)
+                .await?
                 .map(|revert| revert.kind),
             Some(psychevo_runtime::state::SessionRevertKind::ConversationEdit { .. })
         ) {
@@ -183,21 +194,22 @@ impl TuiApp {
         let draft = psychevo_gateway::history_editing::restore_native_conversation_edit(
             &self.state_runtime,
             &thread_id,
-        )?;
+        )
+        .await?;
         ui.history_message_edit = None;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         set_history_draft_in_composer(ui, &draft.parts);
         ui.push_status("history restored; edited draft kept in composer");
         Ok(true)
     }
 
-    pub(crate) fn show_staged_history_status(
+    pub(crate) async fn show_staged_history_status(
         &self,
         ui: &mut FullscreenUi<'_>,
         thread_id: &str,
     ) -> Result<()> {
-        let Some(revert) = self.state_runtime.session_revert_state(thread_id)? else {
+        let Some(revert) = self.state_runtime.session_revert_state(thread_id).await? else {
             return Ok(());
         };
         if matches!(
@@ -206,7 +218,8 @@ impl TuiApp {
         ) {
             let hidden = self
                 .state_runtime
-                .messages_from_count(thread_id, revert.start_seq)?;
+                .messages_from_count(thread_id, revert.start_seq)
+                .await?;
             ui.push_status(format!(
                 "history edit staged · {hidden} entries hidden · Esc restore history"
             ));
@@ -214,7 +227,7 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn submit_history_message_edit(
+    pub(crate) async fn submit_history_message_edit(
         &mut self,
         ui: &mut FullscreenUi<'_>,
     ) -> Result<bool> {
@@ -246,7 +259,8 @@ impl TuiApp {
                     &edit.message_id,
                     &draft,
                     "tui",
-                )?;
+                )
+                .await?;
                 if !staged {
                     ui.history_message_edit = None;
                     ui.clear_composer();
@@ -256,7 +270,9 @@ impl TuiApp {
                 }
                 let original_images = ui.pending_images.clone();
                 let images = ui.take_submitted_images(&display_prompt);
-                let submit = self.submit_fullscreen_prompt(ui, display_prompt.clone(), images);
+                let submit = self
+                    .submit_fullscreen_prompt(ui, display_prompt.clone(), images)
+                    .await;
                 if submit.is_ok() {
                     ui.history_message_edit = None;
                     ui.clear_composer();
@@ -269,7 +285,8 @@ impl TuiApp {
             HistoryMessageAction::Fork => {
                 if self
                     .state_runtime
-                    .session_revert_state(&edit.thread_id)?
+                    .session_revert_state(&edit.thread_id)
+                    .await?
                     .is_some()
                 {
                     ui.set_ephemeral_error(
@@ -282,9 +299,10 @@ impl TuiApp {
                     &edit.thread_id,
                     Some(edit.message_seq),
                     "tui",
-                )?;
+                )
+                .await?;
                 let parts = draft.parts;
-                self.open_session_direct(ui, &child_id)?;
+                self.open_session_direct(ui, &child_id).await?;
                 set_history_draft_in_composer(ui, &parts);
                 ui.history_message_edit = None;
                 ui.push_status(format!("forked from {}", short_session(&edit.thread_id)));
@@ -293,7 +311,7 @@ impl TuiApp {
         Ok(true)
     }
 
-    pub(crate) fn fork_session_from_panel(
+    pub(crate) async fn fork_session_from_panel(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: String,
@@ -307,14 +325,16 @@ impl TuiApp {
                 &self.state_runtime,
                 &session_id,
                 "tui",
-            )?
+            )
+            .await?
         {
             ui.set_bottom_panel_notice(reason);
             return Ok(());
         }
         if self
             .state_runtime
-            .session_revert_state(&session_id)?
+            .session_revert_state(&session_id)
+            .await?
             .is_some()
         {
             ui.set_bottom_panel_notice("restore history or redo workspace files before forking");
@@ -325,8 +345,9 @@ impl TuiApp {
             &session_id,
             None,
             "tui",
-        )?;
-        self.open_session_direct(ui, &child_id)?;
+        )
+        .await?;
+        self.open_session_direct(ui, &child_id).await?;
         ui.push_status(format!("forked from {}", short_session(&session_id)));
         Ok(())
     }

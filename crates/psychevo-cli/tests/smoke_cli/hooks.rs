@@ -7,8 +7,8 @@ pub(crate) fn hooks_cmd(test_home: &Path, psychevo_home: &Path, cwd: &Path) -> C
     command
 }
 
-#[test]
-pub(crate) fn cli_hooks_list_trust_disable_and_enable_profile_state() {
+#[tokio::test]
+pub(crate) async fn cli_hooks_list_trust_disable_and_enable_profile_state() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");

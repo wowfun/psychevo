@@ -4,13 +4,15 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
+        .await
         .expect("second");
     app.current_session = Some(first.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -64,9 +66,11 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("query");
     }
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select");
 
     assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
@@ -93,6 +97,7 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     );
 
     app.open_session_direct(&mut ui, &first)
+        .await
         .expect("switch back to first");
 
     assert_eq!(app.current_session.as_deref(), Some(first.as_str()));
@@ -116,7 +121,7 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
 #[tokio::test]
 pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned_late_output() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = None;
     app.force_new_once = true;
 
@@ -203,13 +208,15 @@ pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned
 #[tokio::test]
 pub(crate) async fn background_session_completion_does_not_steal_current_session() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
+        .await
         .expect("second");
     app.current_session = Some(first.clone());
 
@@ -236,6 +243,7 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
     ui.start_assistant();
 
     app.open_session_direct(&mut ui, &second)
+        .await
         .expect("switch to second");
     assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
 
@@ -255,19 +263,20 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
     assert!(ui.auxiliary_agent_tasks.is_empty());
 }
 
-#[test]
-pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
+#[tokio::test]
+pub(crate) async fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let config_path = app.home.join("config.toml");
     fs::write(&config_path, "\n").expect("config");
     app.config_path = Some(config_path);
     let other_cwd = temp.path().join("other-work");
     fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = other_cwd.canonicalize().expect("other canonical");
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&other_cwd, "web", "mock-model", "mock", None)
+        .await
         .expect("session");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -285,6 +294,7 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
 
     let panel = app
         .session_selection_panel(SessionListView::Active)
+        .await
         .expect("session panel");
     let row = panel
         .rows
@@ -301,6 +311,7 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
 
     let mut ui = FullscreenUi::new(&app);
     app.open_session_direct(&mut ui, &session_id)
+        .await
         .expect("open global session");
 
     assert_eq!(app.current_session.as_deref(), Some(session_id.as_str()));
@@ -312,13 +323,14 @@ pub(crate) fn sessions_panel_lists_global_sessions_and_opening_switches_cwd() {
     );
 }
 
-#[test]
-pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
+#[tokio::test]
+pub(crate) async fn tui_sessions_exclude_internal_side_and_child_sessions() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent");
     let side = store
         .create_session_with_metadata(
@@ -328,9 +340,11 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
             "mock",
             None,
         )
+        .await
         .expect("side");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("child");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     for (index, session_id) in [&parent, &side, &child].into_iter().enumerate() {
@@ -348,7 +362,10 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
         );
     }
 
-    let sessions = app.tui_sessions(SessionListView::Active).expect("sessions");
+    let sessions = app
+        .tui_sessions(SessionListView::Active)
+        .await
+        .expect("sessions");
     let ids = sessions
         .iter()
         .map(|session| session.summary.id.as_str())
@@ -362,10 +379,11 @@ pub(crate) fn tui_sessions_exclude_internal_side_and_child_sessions() {
 #[tokio::test]
 pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("first");
     app.current_session = Some(first.clone());
 
@@ -413,13 +431,15 @@ pub(crate) async fn new_session_does_not_receive_previous_running_output() {
 #[tokio::test]
 pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("first");
     let second = store
         .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
+        .await
         .expect("second");
     app.current_session = Some(first.clone());
 
@@ -441,6 +461,7 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     ui.start_assistant();
 
     app.open_session_direct(&mut ui, &second)
+        .await
         .expect("switch to second");
     assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
     assert!(ui.running.is_none());
@@ -481,6 +502,7 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     );
 
     app.open_session_direct(&mut ui, &first)
+        .await
         .expect("switch back to first");
 
     assert_eq!(app.current_session.as_deref(), Some(first.as_str()));
@@ -502,13 +524,15 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
 #[tokio::test]
 pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let older = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("older");
     let newer = store
         .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
+        .await
         .expect("newer");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -540,9 +564,11 @@ pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("load older query");
     }
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("load older");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
@@ -554,9 +580,11 @@ pub(crate) async fn sessions_panel_selection_does_not_reorder_by_view_time() {
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("query");
     }
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("select");
     assert_eq!(app.current_session.as_deref(), Some(older.as_str()));
 
@@ -593,13 +621,15 @@ pub(crate) fn session_panel_ids(panel: &BottomSelectionPanel) -> Vec<String> {
 #[tokio::test]
 pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("first");
     store
         .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
+        .await
         .expect("second");
     app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
@@ -613,6 +643,7 @@ pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
     assert_eq!(panel.selected, 0);
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+        .await
         .expect("wrap up");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
@@ -623,6 +654,7 @@ pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
     );
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("wrap down");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
@@ -633,10 +665,11 @@ pub(crate) async fn sessions_panel_up_down_wraps_between_first_and_last_rows() {
 #[tokio::test]
 pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_from_archived_view() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("session");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -664,11 +697,13 @@ pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_fro
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
     )
+    .await
     .expect("archive");
 
     assert_eq!(app.current_session, None);
@@ -677,24 +712,28 @@ pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_fro
     assert!(ui.history.is_empty());
     assert_eq!(
         app.tui_sessions(SessionListView::Active)
+            .await
             .expect("active")
             .len(),
         0
     );
     assert_eq!(
         app.tui_sessions(SessionListView::Archived)
+            .await
             .expect("archived")
             .len(),
         1
     );
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
         .expect("archived view");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
     };
     assert_eq!(panel.session_view, Some(SessionListView::Archived));
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("restore select");
 
     assert_eq!(app.current_session.as_deref(), Some(session_id.as_str()));
@@ -710,11 +749,12 @@ pub(crate) async fn sessions_panel_action_mode_archives_current_and_restores_fro
 #[tokio::test]
 pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = None;
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("session");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -738,15 +778,18 @@ pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel(
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
     )
+    .await
     .expect("first delete");
     assert!(
         store
             .session_summary(&session_id)
+            .await
             .expect("summary")
             .is_some()
     );
@@ -759,6 +802,7 @@ pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel(
         &mut ui,
         KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
     )
+    .await
     .expect("cancel");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
@@ -769,32 +813,38 @@ pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel(
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm again");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
     )
+    .await
     .expect("first delete again");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm confirm");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
     )
+    .await
     .expect("confirm delete");
 
     assert!(
         store
             .session_summary(&session_id)
+            .await
             .expect("summary")
             .is_none()
     );
     assert!(
         store
             .load_messages(&session_id)
+            .await
             .expect("messages")
             .is_empty()
     );
@@ -808,10 +858,11 @@ pub(crate) async fn sessions_panel_delete_requires_repeat_action_and_can_cancel(
 pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejects_running_current()
 {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -836,11 +887,13 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
     )
+    .await
     .expect("unknown action");
     let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
         panic!("expected sessions panel");
@@ -855,15 +908,18 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm archive");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
     )
+    .await
     .expect("archive");
     assert!(
         store
             .session_summary(&session_id)
+            .await
             .expect("summary")
             .is_some()
     );
@@ -881,13 +937,14 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
     }
 }
 
-#[test]
-pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
+#[tokio::test]
+pub(crate) async fn session_display_messages_count_visible_prompts_and_answers() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -981,7 +1038,9 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     assert_eq!(visible_transcript_message_count(&ui.transcript), 2);
     assert_eq!(
@@ -992,7 +1051,7 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
         1
     );
     assert_eq!(
-        app.session_list_lines().expect("session list"),
+        app.session_list_lines().await.expect("session list"),
         [format!(
             "{} {} mock/mock-model messages=2",
             short_session(&session_id),
@@ -1001,6 +1060,7 @@ pub(crate) fn session_display_messages_count_visible_prompts_and_answers() {
     );
     let panel = app
         .session_selection_panel(SessionListView::Active)
+        .await
         .expect("session panel");
     let row = panel
         .rows

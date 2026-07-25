@@ -4,12 +4,12 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let session_id = StateRuntime::open(&app.db_path)
-        .expect("store")
+        .await.expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("session");
+        .await.expect("session");
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::value(serde_json::json!({
         "type": "run_start",
@@ -32,7 +32,10 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
-        StateRuntime::open(&db_path)?.set_session_title(&task_session_id, "X Daily")?;
+        StateRuntime::open(&db_path)
+            .await?
+            .set_session_title(&task_session_id, "X Daily")
+            .await?;
         Ok(psychevo_runtime::types::RunResult {
             session_id: task_session_id,
             outcome: Outcome::Normal,
@@ -90,7 +93,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
 #[tokio::test]
 pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_autostart() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let result = psychevo_runtime::types::RunResult {
@@ -169,10 +172,10 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
     );
 }
 
-#[test]
-pub(crate) fn normal_turn_with_tool_failure_does_not_add_contradictory_error_row() {
+#[tokio::test]
+pub(crate) async fn normal_turn_with_tool_failure_does_not_add_contradictory_error_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -220,10 +223,10 @@ pub(crate) fn normal_turn_with_tool_failure_does_not_add_contradictory_error_row
     );
 }
 
-#[test]
-pub(crate) fn streamed_budget_exhaustion_renders_specific_error_row() {
+#[tokio::test]
+pub(crate) async fn streamed_budget_exhaustion_renders_specific_error_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -257,7 +260,7 @@ pub(crate) fn streamed_budget_exhaustion_renders_specific_error_row() {
 #[tokio::test]
 pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_error() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let result = psychevo_runtime::types::RunResult {
@@ -306,7 +309,7 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
 #[tokio::test]
 pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let result = psychevo_runtime::types::RunResult {
@@ -359,11 +362,11 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
     );
 }
 
-#[test]
-pub(crate) fn fullscreen_loads_current_session_history() {
+#[tokio::test]
+pub(crate) async fn fullscreen_loads_current_session_history() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -372,7 +375,7 @@ pub(crate) fn fullscreen_loads_current_session_history() {
             "mock",
             Some(serde_json::json!({"context_limit": 64_000})),
         )
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -450,7 +453,7 @@ pub(crate) fn fullscreen_loads_current_session_history() {
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     assert_eq!(ui.transcript[0].kind, TranscriptKind::Prompt);
     assert_eq!(ui.transcript[0].text, "hello");

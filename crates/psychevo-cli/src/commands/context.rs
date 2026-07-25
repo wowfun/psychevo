@@ -14,8 +14,8 @@ use crate::env::{
     resolve_state_db,
 };
 
-pub(crate) fn run_context_command(args: ContextArgs) -> Result<ExitCode> {
-    match run_context_command_inner(&args) {
+pub(crate) async fn run_context_command(args: ContextArgs) -> Result<ExitCode> {
+    match run_context_command_inner(&args).await {
         Ok(code) => Ok(code),
         Err(err) if args.json => {
             println!(
@@ -31,7 +31,7 @@ pub(crate) fn run_context_command(args: ContextArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> {
+pub(crate) async fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> {
     let session = args
         .session
         .clone()
@@ -51,12 +51,13 @@ pub(crate) fn run_context_command_inner(args: &ContextArgs) -> Result<ExitCode> 
         None => cwd,
     };
     let snapshot = context_snapshot(ContextOptions {
-        state: StateRuntime::open(&db_path)?,
+        state: StateRuntime::open(&db_path).await?,
         cwd,
         session,
         config_path,
         inherited_env: Some(env_map),
-    })?;
+    })
+    .await?;
     if args.json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {

@@ -22,8 +22,8 @@ use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home, 
 
 pub(crate) const SESSION_SOURCES: &[&str] = &["run", "tui"];
 
-pub(crate) fn run_session_command(args: SessionArgs) -> Result<ExitCode> {
-    match run_session_command_inner(&args) {
+pub(crate) async fn run_session_command(args: SessionArgs) -> Result<ExitCode> {
+    match run_session_command_inner(&args).await {
         Ok(code) => Ok(code),
         Err(err) if session_json(&args) => {
             print_json_error(&err)?;
@@ -33,46 +33,45 @@ pub(crate) fn run_session_command(args: SessionArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
+pub(crate) async fn run_session_command_inner(args: &SessionArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     ensure_home_initialized(&home)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    let state = StateRuntime::open(&db_path)?;
+    let state = StateRuntime::open(&db_path).await?;
     let store = state.clone();
     let cwd = canonicalize_cwd(&cwd)?;
 
     match &args.command {
-        SessionCommand::List(args) => list_sessions(args, &store, &cwd)?,
+        SessionCommand::List(args) => list_sessions(args, &store, &cwd).await?,
         SessionCommand::Show(args) => {
-            let session_id = resolve_session_id(&store, &cwd, &args.session)?;
+            let session_id = resolve_session_id(&store, &cwd, &args.session).await?;
             let summary = store
-                .session_summary(&session_id)?
+                .session_summary(&session_id)
+                .await?
                 .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
             print_session_result("session", &summary, args.json)?;
         }
-        SessionCommand::Rename(args) => rename_session(args, &store, &cwd)?,
-        SessionCommand::ReloadContext(args) => reload_context(args, &store, &cwd, &state, env_map)?,
-        SessionCommand::Export(args) => export_session(args, &store, &cwd)?,
-        SessionCommand::Share(args) => share_session(args, &store, &cwd)?,
+        SessionCommand::Rename(args) => rename_session(args, &store, &cwd).await?,
+        SessionCommand::ReloadContext(args) => {
+            reload_context(args, &store, &cwd, &state, env_map).await?
+        }
+        SessionCommand::Export(args) => export_session(args, &store, &cwd).await?,
+        SessionCommand::Share(args) => share_session(args, &store, &cwd).await?,
         SessionCommand::Archive(args) => {
-            let summary = mutate_session(args, &store, &cwd, |store, session_id| {
-                store.archive_session(session_id)
-            })?;
+            let summary = mutate_session(args, &store, &cwd, true).await?;
             print_session_result("archived", &summary, args.json)?;
         }
         SessionCommand::Restore(args) => {
-            let summary = mutate_session(args, &store, &cwd, |store, session_id| {
-                store.restore_session(session_id)
-            })?;
+            let summary = mutate_session(args, &store, &cwd, false).await?;
             print_session_result("restored", &summary, args.json)?;
         }
     }
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn list_sessions(
+pub(crate) async fn list_sessions(
     args: &SessionListArgs,
     store: &StateRuntime,
     cwd: &std::path::Path,
@@ -81,9 +80,13 @@ pub(crate) fn list_sessions(
         return Err(anyhow!("--limit must be greater than 0"));
     }
     let mut sessions = if args.archived {
-        store.list_archived_sessions_for_cwd_with_sources(cwd, SESSION_SOURCES)?
+        store
+            .list_archived_sessions_for_cwd_with_sources(cwd, SESSION_SOURCES)
+            .await?
     } else {
-        store.list_sessions_for_cwd_with_sources(cwd, SESSION_SOURCES)?
+        store
+            .list_sessions_for_cwd_with_sources(cwd, SESSION_SOURCES)
+            .await?
     };
     sessions.truncate(args.limit);
     if args.json {
@@ -112,28 +115,29 @@ pub(crate) fn list_sessions(
     Ok(())
 }
 
-pub(crate) fn rename_session(
+pub(crate) async fn rename_session(
     args: &SessionRenameArgs,
     store: &StateRuntime,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, cwd, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session).await?;
     let title = args.title.join(" ");
-    store.set_session_title(&session_id, &title)?;
+    store.set_session_title(&session_id, &title).await?;
     let summary = store
-        .session_summary(&session_id)?
+        .session_summary(&session_id)
+        .await?
         .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
     print_session_result("renamed", &summary, args.json)
 }
 
-pub(crate) fn reload_context(
+pub(crate) async fn reload_context(
     args: &SessionIdArgs,
     store: &StateRuntime,
     cwd: &Path,
     state: &StateRuntime,
     env_map: std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, cwd, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session).await?;
     let result = reload_session_context(ReloadContextOptions {
         state: state.clone(),
         session: session_id,
@@ -145,7 +149,8 @@ pub(crate) fn reload_context(
         no_skills: false,
         invalidation_reason: "manual_reload".to_string(),
         notice: None,
-    })?;
+    })
+    .await?;
     if args.json {
         println!(
             "{}",
@@ -166,12 +171,12 @@ pub(crate) fn reload_context(
     Ok(())
 }
 
-pub(crate) fn export_session(
+pub(crate) async fn export_session(
     args: &SessionExportArgs,
     store: &StateRuntime,
     cwd: &Path,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, cwd, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session).await?;
     let artifact_kind = SessionArtifactKind::Export;
     let options = SessionExportOptions {
         format: args.format.into(),
@@ -179,21 +184,21 @@ pub(crate) fn export_session(
         artifact_kind,
     };
     if let Some(output) = &args.output {
-        let result = write_session_export(store, &session_id, output, options)?;
+        let result = write_session_export(store, &session_id, output, options).await?;
         println!("exported: {}", result.path.display());
     } else {
-        let artifact = render_session_export(store, &session_id, options)?;
+        let artifact = render_session_export(store, &session_id, options).await?;
         print!("{}", artifact.content);
     }
     Ok(())
 }
 
-pub(crate) fn share_session(
+pub(crate) async fn share_session(
     args: &SessionShareArgs,
     store: &StateRuntime,
     cwd: &Path,
 ) -> Result<()> {
-    let session_id = resolve_session_id(store, cwd, &args.session)?;
+    let session_id = resolve_session_id(store, cwd, &args.session).await?;
     let artifact_kind = SessionArtifactKind::Share;
     let output = args.output.clone().unwrap_or_else(|| {
         cwd.join(default_session_export_filename(
@@ -207,7 +212,7 @@ pub(crate) fn share_session(
         include: parse_include(args.include.as_deref(), artifact_kind)?,
         artifact_kind,
     };
-    let result = write_session_export(store, &session_id, &output, options)?;
+    let result = write_session_export(store, &session_id, &output, options).await?;
     print_share_result(&result, args.json)
 }
 
@@ -221,20 +226,25 @@ pub(crate) fn parse_include(
     }
 }
 
-pub(crate) fn mutate_session(
+pub(crate) async fn mutate_session(
     args: &SessionIdArgs,
     store: &StateRuntime,
     cwd: &std::path::Path,
-    mutate: impl Fn(&StateRuntime, &str) -> psychevo_runtime::Result<()>,
+    archive: bool,
 ) -> Result<SessionSummary> {
-    let session_id = resolve_session_id(store, cwd, &args.session)?;
-    mutate(store, &session_id)?;
+    let session_id = resolve_session_id(store, cwd, &args.session).await?;
+    if archive {
+        store.archive_session(&session_id).await?;
+    } else {
+        store.restore_session(&session_id).await?;
+    }
     store
-        .session_summary(&session_id)?
+        .session_summary(&session_id)
+        .await?
         .ok_or_else(|| anyhow!("session not found: {session_id}"))
 }
 
-pub(crate) fn resolve_session_id(
+pub(crate) async fn resolve_session_id(
     store: &StateRuntime,
     cwd: &std::path::Path,
     raw: &str,
@@ -242,7 +252,8 @@ pub(crate) fn resolve_session_id(
     let raw = raw.trim();
     if raw == "latest" {
         return store
-            .latest_session_for_cwd_with_sources(cwd, SESSION_SOURCES)?
+            .latest_session_for_cwd_with_sources(cwd, SESSION_SOURCES)
+            .await?
             .ok_or_else(|| anyhow!("no active session found for {}", cwd.display()));
     }
     if raw.is_empty() {

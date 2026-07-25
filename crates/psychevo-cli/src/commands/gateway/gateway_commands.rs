@@ -64,7 +64,7 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
     let bind_policy = ManagedBindPolicy::new(args.bind);
     let _lock = lock_managed_exclusive(&ctx.paths)?;
     let mut state = ensure_started(&ctx, bind_policy, &static_dir.path).await?;
-    let cwd = resolve_open_cwd(&ctx, &args)?;
+    let cwd = resolve_open_cwd(&ctx, &args).await?;
     let launch = match create_launch(&state, &ctx.paths, &cwd).await {
         Ok(launch) => launch,
         Err(error) if is_recoverable_launch_error(&error) => {
@@ -94,9 +94,9 @@ pub(crate) async fn open(args: GatewayOpenArgs) -> Result<ExitCode> {
     print_json(output)
 }
 
-fn resolve_open_cwd(ctx: &GatewayContext, args: &GatewayOpenArgs) -> Result<PathBuf> {
+async fn resolve_open_cwd(ctx: &GatewayContext, args: &GatewayOpenArgs) -> Result<PathBuf> {
     if args.default_workspace {
-        let options = ctx.run_options(ctx.cwd.clone())?;
+        let options = ctx.run_options(ctx.cwd.clone()).await?;
         return Ok(canonicalize_cwd(&resolve_default_workspace_cwd(
             &options, &ctx.cwd,
         )?)?);
@@ -140,7 +140,7 @@ async fn status() -> Result<ExitCode> {
     let mut status = managed_status(&ctx.paths).await?;
     status["profile"] = Value::String(ctx.profile_name.clone());
     status["profileHome"] = Value::String(ctx.home.display().to_string());
-    let options = ctx.run_options(ctx.cwd.clone())?;
+    let options = ctx.run_options(ctx.cwd.clone()).await?;
     status["channels"] = channel_summary_value(&options).unwrap_or_else(|_| {
         json!({
             "configured": 0,

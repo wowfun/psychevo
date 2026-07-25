@@ -1,8 +1,8 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn streaming_tool_calls_keep_partial_arguments_as_null() {
+#[tokio::test]
+pub(crate) async fn streaming_tool_calls_keep_partial_arguments_as_null() {
     let event = serde_json::json!({
         "type": "message_update",
         "message": {
@@ -28,8 +28,8 @@ pub(crate) fn streaming_tool_calls_keep_partial_arguments_as_null() {
     assert!(calls[0].args.is_null());
 }
 
-#[test]
-pub(crate) fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
+#[tokio::test]
+pub(crate) async fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
     let usage = serde_json::json!({
         "input_tokens": 2,
         "output_tokens": 3,
@@ -68,8 +68,8 @@ pub(crate) fn turn_meta_omits_tokens_and_uses_prefixless_debug_parts() {
     assert!(!debug.contains('='));
 }
 
-#[test]
-pub(crate) fn turn_meta_omits_accounting_cost() {
+#[tokio::test]
+pub(crate) async fn turn_meta_omits_accounting_cost() {
     let accounting = serde_json::json!({
         "estimated_cost_nanodollars": 42_000,
         "pricing_source": "catalog"
@@ -91,8 +91,8 @@ pub(crate) fn turn_meta_omits_accounting_cost() {
     assert!(!meta.contains("cost"));
 }
 
-#[test]
-pub(crate) fn turn_meta_prefers_completed_elapsed_metadata() {
+#[tokio::test]
+pub(crate) async fn turn_meta_prefers_completed_elapsed_metadata() {
     let metadata = serde_json::json!({"elapsed_ms": 120});
     let stale_started = Instant::now()
         .checked_sub(Duration::from_secs(5))
@@ -116,8 +116,8 @@ pub(crate) fn turn_meta_prefers_completed_elapsed_metadata() {
     assert!(!meta.contains("metadata elapsed"));
 }
 
-#[test]
-pub(crate) fn turn_meta_formats_persisted_elapsed_minutes() {
+#[tokio::test]
+pub(crate) async fn turn_meta_formats_persisted_elapsed_minutes() {
     let metadata = serde_json::json!({"elapsed_ms": 65_000});
 
     let meta = turn_meta_text(TurnMetaProjection {
@@ -136,8 +136,8 @@ pub(crate) fn turn_meta_formats_persisted_elapsed_minutes() {
     assert_eq!(meta, "provider/model  1m05s");
 }
 
-#[test]
-pub(crate) fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
+#[tokio::test]
+pub(crate) async fn turn_meta_places_variant_after_model_and_filters_debug_duplicate() {
     let metadata = serde_json::json!({
         "elapsed_ms": 120,
         "reasoning_effort": "high",
@@ -164,8 +164,8 @@ pub(crate) fn turn_meta_places_variant_after_model_and_filters_debug_duplicate()
     );
 }
 
-#[test]
-pub(crate) fn slash_completion_completes_command_prefixes() {
+#[tokio::test]
+pub(crate) async fn slash_completion_completes_command_prefixes() {
     assert_eq!(slash_completion("/he").as_deref(), Some("/help"));
     assert_eq!(slash_completion("/ren").as_deref(), Some("/rename"));
     assert_eq!(slash_completion("/rn"), None);
@@ -175,8 +175,8 @@ pub(crate) fn slash_completion_completes_command_prefixes() {
     assert_eq!(slash_completion("/he\nthere"), None);
 }
 
-#[test]
-pub(crate) fn file_token_detection_covers_boundaries_and_unicode() {
+#[tokio::test]
+pub(crate) async fn file_token_detection_covers_boundaries_and_unicode() {
     let cases = vec![
         ("@", 0, 1, Some("")),
         ("@file.txt", 0, 4, Some("file.txt")),
@@ -218,8 +218,8 @@ pub(crate) fn file_token_detection_covers_boundaries_and_unicode() {
     }
 }
 
-#[test]
-pub(crate) fn file_token_replacement_quotes_paths_with_spaces() {
+#[tokio::test]
+pub(crate) async fn file_token_replacement_quotes_paths_with_spaces() {
     let mut textarea = textarea_with_text("open @src");
     assert!(replace_current_file_token(&mut textarea, "src/main.rs"));
     assert_eq!(textarea_text(&textarea), "open src/main.rs ");
@@ -235,8 +235,8 @@ pub(crate) fn file_token_replacement_quotes_paths_with_spaces() {
     );
 }
 
-#[test]
-pub(crate) fn file_search_returns_cwd_relative_paths_and_respects_gitignore() {
+#[tokio::test]
+pub(crate) async fn file_search_returns_cwd_relative_paths_and_respects_gitignore() {
     let temp = tempdir().expect("temp");
     let root = temp.path();
     fs::create_dir_all(root.join("src")).expect("src dir");
@@ -274,8 +274,8 @@ pub(crate) fn file_search_returns_cwd_relative_paths_and_respects_gitignore() {
     );
 }
 
-#[test]
-pub(crate) fn stale_file_search_results_are_ignored() {
+#[tokio::test]
+pub(crate) async fn stale_file_search_results_are_ignored() {
     let mut state = FileSearchState::new();
     state.generation = 2;
     state.popup = Some(FileSearchPopupState {
@@ -320,8 +320,8 @@ pub(crate) fn stale_file_search_results_are_ignored() {
     assert!(!popup.waiting);
 }
 
-#[test]
-pub(crate) fn bottom_panel_row_right_aligns_detail_with_wide_title() {
+#[tokio::test]
+pub(crate) async fn bottom_panel_row_right_aligns_detail_with_wide_title() {
     let row = BottomSelectionRow {
         label: "当前模式询问".to_string(),
         description: Some("/repo  deepseek/deepseek-v4-pro  messages=2".to_string()),

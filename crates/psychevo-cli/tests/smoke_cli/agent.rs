@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn cli_agent_inspect_unknown_id_reports_not_found() {
+#[tokio::test]
+pub(crate) async fn cli_agent_inspect_unknown_id_reports_not_found() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
 
@@ -19,18 +19,22 @@ pub(crate) fn cli_agent_inspect_unknown_id_reports_not_found() {
     );
 }
 
-#[test]
-pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
+#[tokio::test]
+pub(crate) async fn cli_agent_inspect_json_includes_identity_and_depth() {
     let temp = tempdir().expect("temp");
     let db = temp.path().join("state.db");
-    let store = psychevo_runtime::state::StateRuntime::open(&db).expect("store");
+    let store = psychevo_runtime::state::StateRuntime::open(&db)
+        .await
+        .expect("store");
     let cwd = temp.path().join("repo");
     std::fs::create_dir_all(&cwd).expect("cwd");
     let parent = store
         .create_session_with_metadata(&cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent");
     let child = store
         .create_child_session_with_metadata(&parent, &cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child");
     store
         .upsert_agent_edge(
@@ -47,6 +51,7 @@ pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
                 }
             })),
         )
+        .await
         .expect("edge");
 
     let output = pevo_cmd(temp.path())
@@ -68,8 +73,8 @@ pub(crate) fn cli_agent_inspect_json_includes_identity_and_depth() {
     assert_eq!(body["child_session"]["id"], child);
 }
 
-#[test]
-pub(crate) fn cli_agent_validate_json_reports_effective_empty_tools_policy() {
+#[tokio::test]
+pub(crate) async fn cli_agent_validate_json_reports_effective_empty_tools_policy() {
     let temp = tempdir().expect("temp");
     let psychevo_home = init_tui_home(temp.path());
     let agents_dir = psychevo_home.join("agents");

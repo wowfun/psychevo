@@ -1,21 +1,23 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_running() {
+#[tokio::test]
+pub(crate) async fn loading_parent_history_links_orphan_agent_row_without_marking_running() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_agent(
         &app,
         "general",
         "General-purpose subagent for focused coding tasks.",
     );
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -31,6 +33,7 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
                 }
             })),
         )
+        .await
         .expect("agent edge");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -77,6 +80,7 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
     let mut ui = FullscreenUi::new(&app);
 
     app.load_current_session_history(&mut ui)
+        .await
         .expect("load parent history");
 
     let agent_rows = ui
@@ -96,21 +100,23 @@ pub(crate) fn loading_parent_history_links_orphan_agent_row_without_marking_runn
     assert!(text.contains("Open"), "{text}");
 }
 
-#[test]
-pub(crate) fn agents_status_text_includes_team_mission_member_and_cap_labels() {
+#[tokio::test]
+pub(crate) async fn agents_status_text_includes_team_mission_member_and_cap_labels() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_agent(
         &app,
         "general",
         "General-purpose subagent for focused coding tasks.",
     );
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -130,10 +136,11 @@ pub(crate) fn agents_status_text_includes_team_mission_member_and_cap_labels() {
                 }
             })),
         )
+        .await
         .expect("agent edge");
     app.current_session = Some(parent);
 
-    let text = app.agents_status_text();
+    let text = app.agents_status_text().await;
 
     assert!(
         text.contains("Running/Completed (spawning active, cap 4)"),
@@ -144,10 +151,10 @@ pub(crate) fn agents_status_text_includes_team_mission_member_and_cap_labels() {
     assert!(text.contains("member:reviewer"), "{text}");
 }
 
-#[test]
-pub(crate) fn mission_metadata_creates_pending_tui_session_for_first_turn() {
+#[tokio::test]
+pub(crate) async fn mission_metadata_creates_pending_tui_session_for_first_turn() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     write_tui_agent(
         &app,
         "general",
@@ -174,16 +181,19 @@ pub(crate) fn mission_metadata_creates_pending_tui_session_for_first_turn() {
     .expect("team");
 
     app.record_mission_metadata(Some("release"), "Ship it")
+        .await
         .expect("metadata");
 
     let parent = app.current_session.clone().expect("pending session");
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let team = store
         .find_active_agent_team_run(&parent)
+        .await
         .expect("team lookup")
         .expect("team run");
     let mission = store
         .find_active_agent_mission_run(&parent)
+        .await
         .expect("mission lookup")
         .expect("mission run");
     assert_eq!(team.team_name, "release");
@@ -194,13 +204,15 @@ pub(crate) fn mission_metadata_creates_pending_tui_session_for_first_turn() {
 #[tokio::test]
 pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_turn_finishes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -216,6 +228,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
                 }
             })),
         )
+        .await
         .expect("agent edge");
     let child_prompt_ms = wall_now_ms() - 12_500;
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -291,13 +304,15 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
 #[tokio::test]
 pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -306,6 +321,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
+        .await
         .expect("agent edge");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -360,13 +376,15 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
 #[tokio::test]
 pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_return() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -375,6 +393,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
+        .await
         .expect("agent edge");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     let parent_prompt_ms = wall_now_ms() - 22_500;
@@ -546,13 +565,15 @@ pub(crate) fn compact_duration_seconds(token: &str) -> Option<u64> {
 #[tokio::test]
 pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -561,6 +582,7 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
+        .await
         .expect("agent edge");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -616,13 +638,15 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
 #[tokio::test]
 pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -631,6 +655,7 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
+        .await
         .expect("agent edge");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -665,13 +690,15 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
 #[tokio::test]
 pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -680,6 +707,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
+        .await
         .expect("agent edge");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -739,13 +767,15 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
 #[tokio::test]
 pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
+        .await
         .expect("child session");
     store
         .upsert_agent_edge(
@@ -754,6 +784,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
+        .await
         .expect("agent edge");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -818,7 +849,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
 #[tokio::test]
 pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let parent = "parent-session".to_string();
     let child = "child-session".to_string();
     app.current_session = Some(parent.clone());
@@ -890,10 +921,10 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     assert!(ui.transcript[0].text.contains("Response: translated"));
 }
 
-#[test]
-pub(crate) fn parent_agent_preview_coalesces_streamed_reasoning_chunks() {
+#[tokio::test]
+pub(crate) async fn parent_agent_preview_coalesces_streamed_reasoning_chunks() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let child = "child-session".to_string();
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(

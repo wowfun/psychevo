@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
+#[tokio::test]
+pub(crate) async fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "exec_command long fetch", "");
     row.tool_name = Some("exec_command".to_string());
@@ -65,10 +65,10 @@ pub(crate) fn completed_streaming_write_stdin_poll_placeholder_is_removed() {
     );
 }
 
-#[test]
-pub(crate) fn non_empty_stdin_renders_as_compact_terminal_interaction() {
+#[tokio::test]
+pub(crate) async fn non_empty_stdin_renders_as_compact_terminal_interaction() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "exec_command read", "");
     row.tool_name = Some("exec_command".to_string());
@@ -95,10 +95,10 @@ pub(crate) fn non_empty_stdin_renders_as_compact_terminal_interaction() {
     assert_ne!(ui.transcript[1].title, "write_stdin 7");
 }
 
-#[test]
-pub(crate) fn history_replay_merges_exec_command_and_write_stdin_chunks() {
+#[tokio::test]
+pub(crate) async fn history_replay_merges_exec_command_and_write_stdin_chunks() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     let exec_args = serde_json::json!({"cmd": "long running"});
@@ -182,10 +182,10 @@ pub(crate) fn history_replay_merges_exec_command_and_write_stdin_chunks() {
     );
 }
 
-#[test]
-pub(crate) fn transcript_viewport_excludes_bottom_border_from_scroll_height() {
+#[tokio::test]
+pub(crate) async fn transcript_viewport_excludes_bottom_border_from_scroll_height() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::simple(
         TranscriptKind::Answer,
@@ -197,10 +197,10 @@ pub(crate) fn transcript_viewport_excludes_bottom_border_from_scroll_height() {
     assert_eq!(ui.last_transcript_height, 7);
 }
 
-#[test]
-pub(crate) fn transcript_render_clears_stale_cells_after_shorter_redraw() {
+#[tokio::test]
+pub(crate) async fn transcript_render_clears_stale_cells_after_shorter_redraw() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::simple(
         TranscriptKind::Answer,
@@ -224,10 +224,10 @@ pub(crate) fn transcript_render_clears_stale_cells_after_shorter_redraw() {
     assert!(!text.contains("TAILMARK"), "{text}");
 }
 
-#[test]
-pub(crate) fn history_reload_scrolls_to_end_of_multiline_markdown_answer() {
+#[tokio::test]
+pub(crate) async fn history_reload_scrolls_to_end_of_multiline_markdown_answer() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let answer = "✅ **Hacker News 日报完成！**\n\n\
 📄 **输出文件：** `feeds/2026-05-09/hackernews-hot-2307.md`（13.4 KB）\n\n\
@@ -270,10 +270,10 @@ pub(crate) fn history_reload_scrolls_to_end_of_multiline_markdown_answer() {
     assert!(!text.contains("Hacker News 日报完成"), "{text}");
 }
 
-#[test]
-pub(crate) fn transcript_bottom_scroll_uses_paragraph_word_wrapping() {
+#[tokio::test]
+pub(crate) async fn transcript_bottom_scroll_uses_paragraph_word_wrapping() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::simple(
         TranscriptKind::Answer,
@@ -287,10 +287,10 @@ pub(crate) fn transcript_bottom_scroll_uses_paragraph_word_wrapping() {
     assert!(text.contains("BOTTOM-TARGET"), "{text}");
 }
 
-#[test]
-pub(crate) fn transcript_layout_cache_reuses_row_heights_while_scrolling() {
+#[tokio::test]
+pub(crate) async fn transcript_layout_cache_reuses_row_heights_while_scrolling() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     for index in 0..80 {
         ui.transcript.push(TranscriptRow::simple(
@@ -311,10 +311,10 @@ pub(crate) fn transcript_layout_cache_reuses_row_heights_while_scrolling() {
     assert_eq!(ui.transcript_layout.recomputed_rows, 0);
 }
 
-#[test]
-pub(crate) fn manual_down_scroll_reaches_long_markdown_bottom_with_meta() {
+#[tokio::test]
+pub(crate) async fn manual_down_scroll_reaches_long_markdown_bottom_with_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let table = (1..=36)
         .map(|index| {
@@ -347,10 +347,10 @@ pub(crate) fn manual_down_scroll_reaches_long_markdown_bottom_with_meta() {
     assert_eq!(ui.scroll, ui.max_transcript_scroll());
 }
 
-#[test]
-pub(crate) fn manual_down_scroll_reaches_long_thinking_table_bottom() {
+#[tokio::test]
+pub(crate) async fn manual_down_scroll_reaches_long_thinking_table_bottom() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Ran,
@@ -395,10 +395,10 @@ pub(crate) fn manual_down_scroll_reaches_long_thinking_table_bottom() {
     assert_eq!(ui.scroll, ui.max_transcript_scroll());
 }
 
-#[test]
-pub(crate) fn transcript_focus_down_scrolls_selected_row_into_view() {
+#[tokio::test]
+pub(crate) async fn transcript_focus_down_scrolls_selected_row_into_view() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     for index in 0..36 {
         ui.transcript.push(TranscriptRow::simple(
@@ -421,8 +421,8 @@ pub(crate) fn transcript_focus_down_scrolls_selected_row_into_view() {
     assert!(text.contains("focus row 18"), "{text}");
 }
 
-#[test]
-pub(crate) fn active_tool_layout_key_tracks_elapsed_for_cache() {
+#[tokio::test]
+pub(crate) async fn active_tool_layout_key_tracks_elapsed_for_cache() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Running cargo test", "running");
     row.tool_started = Some(
         Instant::now()
@@ -441,10 +441,10 @@ pub(crate) fn active_tool_layout_key_tracks_elapsed_for_cache() {
     assert_ne!(first, later);
 }
 
-#[test]
-pub(crate) fn long_read_tool_output_collapses_and_preserves_full_text() {
+#[tokio::test]
+pub(crate) async fn long_read_tool_output_collapses_and_preserves_full_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let content = (1..=64)
         .map(|line| format!("{line:02}: fn rendered_fixture() {{}}"))
@@ -475,8 +475,8 @@ pub(crate) fn long_read_tool_output_collapses_and_preserves_full_text() {
     assert!(row.is_expandable());
 }
 
-#[test]
-pub(crate) fn running_tool_title_right_aligns_elapsed_duration() {
+#[tokio::test]
+pub(crate) async fn running_tool_title_right_aligns_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
         "exec_command cargo test --workspace --all-targets",
@@ -496,8 +496,8 @@ pub(crate) fn running_tool_title_right_aligns_elapsed_duration() {
     assert_eq!(UnicodeWidthStr::width(title.as_str()), 35);
 }
 
-#[test]
-pub(crate) fn running_tool_title_hides_subsecond_elapsed_duration() {
+#[tokio::test]
+pub(crate) async fn running_tool_title_hides_subsecond_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
         "exec_command cargo test --workspace --all-targets",
@@ -515,8 +515,8 @@ pub(crate) fn running_tool_title_hides_subsecond_elapsed_duration() {
     assert!(!title.contains("0s"));
 }
 
-#[test]
-pub(crate) fn active_tool_rows_render_present_tense_without_redundant_body() {
+#[tokio::test]
+pub(crate) async fn active_tool_rows_render_present_tense_without_redundant_body() {
     let started = Instant::now()
         .checked_sub(Duration::from_secs(2))
         .expect("instant");
@@ -548,8 +548,8 @@ pub(crate) fn active_tool_rows_render_present_tense_without_redundant_body() {
     }
 }
 
-#[test]
-pub(crate) fn expandable_tool_title_uses_text_hint_without_brackets() {
+#[tokio::test]
+pub(crate) async fn expandable_tool_title_uses_text_hint_without_brackets() {
     let content = (1..=12)
         .map(|line| format!("line {line:02}"))
         .collect::<Vec<_>>()
@@ -576,8 +576,8 @@ pub(crate) fn expandable_tool_title_uses_text_hint_without_brackets() {
     assert!(!expanded.contains("[-]"), "{expanded}");
 }
 
-#[test]
-pub(crate) fn completed_tool_title_uses_fixed_elapsed_duration() {
+#[tokio::test]
+pub(crate) async fn completed_tool_title_uses_fixed_elapsed_duration() {
     let mut row = TranscriptRow::with_title(TranscriptKind::Explored, "Explored src/lib.rs", "");
     row.tool_started = Some(
         Instant::now()
@@ -592,8 +592,8 @@ pub(crate) fn completed_tool_title_uses_fixed_elapsed_duration() {
     assert!(!title.contains("5."));
 }
 
-#[test]
-pub(crate) fn narrow_tool_title_preserves_elapsed_duration() {
+#[tokio::test]
+pub(crate) async fn narrow_tool_title_preserves_elapsed_duration() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
         "exec_command cargo test --workspace --all-targets",
@@ -607,8 +607,8 @@ pub(crate) fn narrow_tool_title_preserves_elapsed_duration() {
     assert!(title.contains('…'));
 }
 
-#[test]
-pub(crate) fn completed_tool_title_formats_elapsed_minutes() {
+#[tokio::test]
+pub(crate) async fn completed_tool_title_formats_elapsed_minutes() {
     let mut row = TranscriptRow::with_title(
         TranscriptKind::Ran,
         "exec_command cargo test --workspace --all-targets",
@@ -622,10 +622,10 @@ pub(crate) fn completed_tool_title_formats_elapsed_minutes() {
     assert!(title.contains('…'));
 }
 
-#[test]
-pub(crate) fn streaming_tool_call_creates_pending_updating_row_before_execution() {
+#[tokio::test]
+pub(crate) async fn streaming_tool_call_creates_pending_updating_row_before_execution() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -664,10 +664,10 @@ pub(crate) fn streaming_tool_call_creates_pending_updating_row_before_execution(
     );
 }
 
-#[test]
-pub(crate) fn streaming_tool_call_after_visible_text_stays_below_preamble() {
+#[tokio::test]
+pub(crate) async fn streaming_tool_call_after_visible_text_stays_below_preamble() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -726,10 +726,10 @@ pub(crate) fn streaming_tool_call_after_visible_text_stays_below_preamble() {
     assert!(!text.contains("Tool calls"), "{text}");
 }
 
-#[test]
-pub(crate) fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta() {
+#[tokio::test]
+pub(crate) async fn message_end_text_plus_write_tool_shows_active_row_without_intermediate_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(

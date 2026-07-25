@@ -22,8 +22,8 @@ use crate::commands::common::{
 };
 use crate::env::{env_path, inherited_env, resolve_psychevo_home, resolve_state_db};
 
-pub(crate) fn run_config_command(args: ConfigArgs) -> Result<ExitCode> {
-    match run_config_command_inner(&args) {
+pub(crate) async fn run_config_command(args: ConfigArgs) -> Result<ExitCode> {
+    match run_config_command_inner(&args).await {
         Ok(code) => Ok(code),
         Err(err) if config_json(&args) => {
             print_json_error(&err)?;
@@ -33,24 +33,26 @@ pub(crate) fn run_config_command(args: ConfigArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
+pub(crate) async fn run_config_command_inner(args: &ConfigArgs) -> Result<ExitCode> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     match &args.command {
         ConfigCommand::Path(args) => print_paths(args, &env_map, &home, &cwd)?,
         ConfigCommand::Show(args) => {
-            let options = base_run_options(&env_map, &home, &cwd)?;
+            let options = base_run_options(&env_map, &home, &cwd).await?;
             let value = config_show_value(&options, config_scope(args))?;
             print_config_document(&value, args.json)?;
         }
         ConfigCommand::Edit(args) => edit_config(args, &home, &cwd)?,
-        ConfigCommand::Set(args) => set_config(args, &env_map, &home, &cwd)?,
-        ConfigCommand::Validate(args) => validate_config(args, &env_map, &home, &cwd)?,
-        ConfigCommand::Doctor(args) => doctor_config(args, &env_map, &home, &cwd)?,
-        ConfigCommand::Status(args) => doctor_config(args, &env_map, &home, &cwd)?,
-        ConfigCommand::Provider(args) => run_provider_command(args, &env_map, &home, &cwd)?,
-        ConfigCommand::Permissions(args) => run_permissions_command(args, &env_map, &home, &cwd)?,
+        ConfigCommand::Set(args) => set_config(args, &env_map, &home, &cwd).await?,
+        ConfigCommand::Validate(args) => validate_config(args, &env_map, &home, &cwd).await?,
+        ConfigCommand::Doctor(args) => doctor_config(args, &env_map, &home, &cwd).await?,
+        ConfigCommand::Status(args) => doctor_config(args, &env_map, &home, &cwd).await?,
+        ConfigCommand::Provider(args) => run_provider_command(args, &env_map, &home, &cwd).await?,
+        ConfigCommand::Permissions(args) => {
+            run_permissions_command(args, &env_map, &home, &cwd).await?
+        }
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -76,14 +78,14 @@ pub(crate) fn edit_config(
     Ok(())
 }
 
-pub(crate) fn set_config(
+pub(crate) async fn set_config(
     args: &ConfigSetArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
     let config_dir = scoped_config_dir(home, cwd, args.global)?;
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     if let Some(provider) = api_key_provider_from_key(&args.key) {
         let api_key = parse_config_set_string_value(&args.value)?;
         let result = set_provider_api_key(&options, config_dir, &provider, &api_key)?;
@@ -153,13 +155,13 @@ pub(crate) fn api_key_provider_from_key(key: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn validate_config(
+pub(crate) async fn validate_config(
     args: &ConfigShowArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     let value = permission_rules_value(&options, config_scope(args))?;
     if args.json {
         println!(
@@ -179,13 +181,13 @@ pub(crate) fn validate_config(
     Ok(())
 }
 
-pub(crate) fn doctor_config(
+pub(crate) async fn doctor_config(
     args: &ConfigShowArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     let config = config_show_value(&options, config_scope(args))?;
     let permissions = permission_rules_value(&options, config_scope(args))?;
     let value = json!({
@@ -258,7 +260,7 @@ pub(crate) fn print_paths(
     Ok(())
 }
 
-pub(crate) fn run_provider_command(
+pub(crate) async fn run_provider_command(
     args: &ConfigProviderArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
@@ -266,7 +268,7 @@ pub(crate) fn run_provider_command(
 ) -> Result<()> {
     match &args.command {
         ConfigProviderCommand::List(args) => {
-            let options = base_run_options(env_map, home, cwd)?;
+            let options = base_run_options(env_map, home, cwd).await?;
             let value = config_provider_list_value(&options, config_scope(args))?;
             print_provider_list(&value, args.json)
         }
@@ -274,7 +276,7 @@ pub(crate) fn run_provider_command(
     }
 }
 
-pub(crate) fn run_permissions_command(
+pub(crate) async fn run_permissions_command(
     args: &ConfigPermissionsArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
@@ -282,7 +284,7 @@ pub(crate) fn run_permissions_command(
 ) -> Result<()> {
     match &args.command {
         ConfigPermissionsCommand::List(args) => {
-            let options = base_run_options(env_map, home, cwd)?;
+            let options = base_run_options(env_map, home, cwd).await?;
             let value = permission_rules_value(&options, ConfigScope::Local)?;
             print_permissions_list(&value, args.json)
         }

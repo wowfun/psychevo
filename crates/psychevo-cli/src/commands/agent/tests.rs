@@ -108,12 +108,12 @@ pub(crate) fn catalog_for(
     .map_err(Into::into)
 }
 
-pub(crate) fn command_store() -> Result<StateRuntime> {
+pub(crate) async fn command_store() -> Result<StateRuntime> {
     let env_map = inherited_env();
     let cwd = env::current_dir()?;
     let home = resolve_psychevo_home(&env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
-    Ok(StateRuntime::open(&db_path)?)
+    Ok(StateRuntime::open(&db_path).await?)
 }
 
 pub(crate) fn print_agent_status(value: &Value) {

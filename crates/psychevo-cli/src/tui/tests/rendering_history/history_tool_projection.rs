@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn extension_tool_records_render_with_generic_tool_style() {
+#[tokio::test]
+pub(crate) async fn extension_tool_records_render_with_generic_tool_style() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
 
     for (tool, args, expected_title) in [
         (
@@ -60,10 +60,10 @@ pub(crate) fn extension_tool_records_render_with_generic_tool_style() {
     }
 }
 
-#[test]
-pub(crate) fn web_fetch_result_defaults_to_summary_with_content_as_detail() {
+#[tokio::test]
+pub(crate) async fn web_fetch_result_defaults_to_summary_with_content_as_detail() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -109,10 +109,10 @@ pub(crate) fn web_fetch_result_defaults_to_summary_with_content_as_detail() {
     );
 }
 
-#[test]
-pub(crate) fn wrapped_web_search_history_restores_existing_foldable_tool_result_row() {
+#[tokio::test]
+pub(crate) async fn wrapped_web_search_history_restores_existing_foldable_tool_result_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let envelope = serde_json::json!({
         "query": "Rust async cancellation",
@@ -183,10 +183,10 @@ pub(crate) fn wrapped_web_search_history_restores_existing_foldable_tool_result_
     assert_ne!(row.text, "web_search normal");
 }
 
-#[test]
-pub(crate) fn tool_display_snapshot_controls_extension_tool_projection() {
+#[tokio::test]
+pub(crate) async fn tool_display_snapshot_controls_extension_tool_projection() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let display = serde_json::json!({
         "category": "update",
@@ -217,10 +217,10 @@ pub(crate) fn tool_display_snapshot_controls_extension_tool_projection() {
     assert_eq!(row.title, "custom_publish draft.md");
 }
 
-#[test]
-pub(crate) fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
+#[tokio::test]
+pub(crate) async fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -254,10 +254,10 @@ pub(crate) fn interrupted_pending_tool_row_stops_timer_as_interrupted() {
     assert!(row.tool_started.is_none());
 }
 
-#[test]
-pub(crate) fn parallel_streaming_tool_calls_create_independent_active_rows() {
+#[tokio::test]
+pub(crate) async fn parallel_streaming_tool_calls_create_independent_active_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -303,10 +303,10 @@ pub(crate) fn parallel_streaming_tool_calls_create_independent_active_rows() {
     );
 }
 
-#[test]
-pub(crate) fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
+#[tokio::test]
+pub(crate) async fn sequential_streaming_tool_calls_reuse_position_without_overwriting_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -385,10 +385,10 @@ pub(crate) fn sequential_streaming_tool_calls_reuse_position_without_overwriting
     assert_eq!(titles, ["exec_command echo one", "write report.md"]);
 }
 
-#[test]
-pub(crate) fn history_tool_result_restores_elapsed_duration() {
+#[tokio::test]
+pub(crate) async fn history_tool_result_restores_elapsed_duration() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -415,10 +415,10 @@ pub(crate) fn history_tool_result_restores_elapsed_duration() {
     assert!(!title.contains("0s"), "{title}");
 }
 
-#[test]
-pub(crate) fn history_meta_uses_persisted_variant_not_current_variant() {
+#[tokio::test]
+pub(crate) async fn history_meta_uses_persisted_variant_not_current_variant() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_variant = Some("xhigh".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -448,10 +448,10 @@ pub(crate) fn history_meta_uses_persisted_variant_not_current_variant() {
     assert!(!row.text.contains("xhigh"));
 }
 
-#[test]
-pub(crate) fn history_reasoning_only_final_message_gets_turn_meta() {
+#[tokio::test]
+pub(crate) async fn history_reasoning_only_final_message_gets_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -481,10 +481,10 @@ pub(crate) fn history_reasoning_only_final_message_gets_turn_meta() {
     assert_eq!(row.text, "xiaomi-token-plan/mimo-v2.5-pro low  7m05s");
 }
 
-#[test]
-pub(crate) fn history_aborted_reasoning_only_message_does_not_get_turn_meta() {
+#[tokio::test]
+pub(crate) async fn history_aborted_reasoning_only_message_does_not_get_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -515,10 +515,10 @@ pub(crate) fn history_aborted_reasoning_only_message_does_not_get_turn_meta() {
     );
 }
 
-#[test]
-pub(crate) fn history_tool_call_reasoning_message_does_not_get_turn_meta() {
+#[tokio::test]
+pub(crate) async fn history_tool_call_reasoning_message_does_not_get_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -559,10 +559,10 @@ pub(crate) fn history_tool_call_reasoning_message_does_not_get_turn_meta() {
     );
 }
 
-#[test]
-pub(crate) fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
+#[tokio::test]
+pub(crate) async fn history_aborted_tool_calls_render_interrupted_without_live_timer() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -620,10 +620,10 @@ pub(crate) fn history_aborted_tool_calls_render_interrupted_without_live_timer()
     );
 }
 
-#[test]
-pub(crate) fn history_text_plus_tool_call_message_shows_active_row_without_turn_meta() {
+#[tokio::test]
+pub(crate) async fn history_text_plus_tool_call_message_shows_active_row_without_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -675,10 +675,10 @@ pub(crate) fn history_text_plus_tool_call_message_shows_active_row_without_turn_
     );
 }
 
-#[test]
-pub(crate) fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
+#[tokio::test]
+pub(crate) async fn history_aborted_tool_result_renders_interrupted_without_failure_style() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -734,10 +734,10 @@ pub(crate) fn history_aborted_tool_result_renders_interrupted_without_failure_st
     assert!(row.tool_started.is_none());
 }
 
-#[test]
-pub(crate) fn history_bash_timeout_renders_timeout_before_partial_output() {
+#[tokio::test]
+pub(crate) async fn history_bash_timeout_renders_timeout_before_partial_output() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -791,10 +791,10 @@ pub(crate) fn history_bash_timeout_renders_timeout_before_partial_output() {
     assert!(row.text.contains("[fetch] 29 rows done"));
 }
 
-#[test]
-pub(crate) fn history_answer_turn_meta_omits_accounting_cost() {
+#[tokio::test]
+pub(crate) async fn history_answer_turn_meta_omits_accounting_cost() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message_with_accounting(
@@ -821,10 +821,10 @@ pub(crate) fn history_answer_turn_meta_omits_accounting_cost() {
     assert!(!meta.text.contains("cost"));
 }
 
-#[test]
-pub(crate) fn history_user_image_display_metadata_renders_prompt_and_attachment_meta() {
+#[tokio::test]
+pub(crate) async fn history_user_image_display_metadata_renders_prompt_and_attachment_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -861,10 +861,10 @@ pub(crate) fn history_user_image_display_metadata_renders_prompt_and_attachment_
     }));
 }
 
-#[test]
-pub(crate) fn legacy_history_image_blocks_render_as_attachment_meta_not_prompt_text() {
+#[tokio::test]
+pub(crate) async fn legacy_history_image_blocks_render_as_attachment_meta_not_prompt_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(

@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 use super::*;
 
-#[test]
-pub(crate) fn failed_tool_end_does_not_create_intermediate_turn_meta() {
+#[tokio::test]
+pub(crate) async fn failed_tool_end_does_not_create_intermediate_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -93,10 +93,10 @@ pub(crate) fn failed_tool_end_does_not_create_intermediate_turn_meta() {
     );
 }
 
-#[test]
-pub(crate) fn pending_write_tool_input_shows_updating_before_complete_arguments() {
+#[tokio::test]
+pub(crate) async fn pending_write_tool_input_shows_updating_before_complete_arguments() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -177,10 +177,10 @@ pub(crate) fn pending_write_tool_input_shows_updating_before_complete_arguments(
     assert!(!text.contains("xiaomi-token-plan/mimo-v2.5-pro"), "{text}");
 }
 
-#[test]
-pub(crate) fn visible_write_preamble_waits_for_typed_tool_call() {
+#[tokio::test]
+pub(crate) async fn visible_write_preamble_waits_for_typed_tool_call() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -234,10 +234,10 @@ pub(crate) fn visible_write_preamble_waits_for_typed_tool_call() {
     );
 }
 
-#[test]
-pub(crate) fn tool_call_message_end_converts_visible_answer_to_preamble_in_place() {
+#[tokio::test]
+pub(crate) async fn tool_call_message_end_converts_visible_answer_to_preamble_in_place() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     let preamble = "The article fetch failed. Let me query comments.";
@@ -317,10 +317,10 @@ pub(crate) fn tool_call_message_end_converts_visible_answer_to_preamble_in_place
     );
 }
 
-#[test]
-pub(crate) fn tool_call_preamble_stays_between_reasoning_and_tool_rows() {
+#[tokio::test]
+pub(crate) async fn tool_call_preamble_stays_between_reasoning_and_tool_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
@@ -375,10 +375,10 @@ pub(crate) fn tool_call_preamble_stays_between_reasoning_and_tool_rows() {
     assert!(preamble < tool, "{:?}", ui.transcript);
 }
 
-#[test]
-pub(crate) fn visible_write_preamble_does_not_create_orphan_for_non_write_tool_message() {
+#[tokio::test]
+pub(crate) async fn visible_write_preamble_does_not_create_orphan_for_non_write_tool_message() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -442,10 +442,11 @@ pub(crate) fn visible_write_preamble_does_not_create_orphan_for_non_write_tool_m
     );
 }
 
-#[test]
-pub(crate) fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_write_signal() {
+#[tokio::test]
+pub(crate) async fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_write_signal()
+{
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     let preamble = "Now let me write the full report:";
@@ -538,10 +539,10 @@ pub(crate) fn repeated_visible_write_preamble_does_not_duplicate_after_concrete_
     );
 }
 
-#[test]
-pub(crate) fn active_write_keeps_failed_tool_meta_suppressed_until_final_answer() {
+#[tokio::test]
+pub(crate) async fn active_write_keeps_failed_tool_meta_suppressed_until_final_answer() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -597,10 +598,10 @@ pub(crate) fn active_write_keeps_failed_tool_meta_suppressed_until_final_answer(
     );
 }
 
-#[test]
-pub(crate) fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn_continues() {
+#[tokio::test]
+pub(crate) async fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn_continues() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -650,10 +651,10 @@ pub(crate) fn reasoning_delta_keeps_failed_tool_meta_suppressed_while_turn_conti
     assert!(ui.transcript.iter().all(|row| row.title != "write"));
 }
 
-#[test]
-pub(crate) fn visible_answer_update_completes_active_thinking_without_reasoning_end() {
+#[tokio::test]
+pub(crate) async fn visible_answer_update_completes_active_thinking_without_reasoning_end() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
@@ -701,10 +702,10 @@ pub(crate) fn visible_answer_update_completes_active_thinking_without_reasoning_
     assert!(!rendered.contains("0s"), "{rendered}");
 }
 
-#[test]
-pub(crate) fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
+#[tokio::test]
+pub(crate) async fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -766,10 +767,10 @@ pub(crate) fn aborted_reasoning_only_message_does_not_recreate_failure_meta() {
     );
 }
 
-#[test]
-pub(crate) fn visible_write_preamble_without_tool_call_never_creates_tool_row() {
+#[tokio::test]
+pub(crate) async fn visible_write_preamble_without_tool_call_never_creates_tool_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -807,10 +808,10 @@ pub(crate) fn visible_write_preamble_without_tool_call_never_creates_tool_row() 
     assert!(ui.transcript.iter().all(|row| row.title != "write"));
 }
 
-#[test]
-pub(crate) fn streaming_tool_call_migrates_position_key_to_tool_id_without_duplicate() {
+#[tokio::test]
+pub(crate) async fn streaming_tool_call_migrates_position_key_to_tool_id_without_duplicate() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(

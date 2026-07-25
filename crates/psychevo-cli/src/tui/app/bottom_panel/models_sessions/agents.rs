@@ -31,11 +31,11 @@ impl TuiApp {
         .await?;
         self.current_session = Some(result.parent_session_id);
         self.reset_live_agent_reload_poll();
-        self.refresh_current_session_title()?;
+        self.refresh_current_session_title().await?;
         self.clear_new_session_draft();
         ui.bottom_panel = None;
         ui.clear_transcript();
-        self.load_current_session_history(ui)?;
+        self.load_current_session_history(ui).await?;
         ui.push_status(format!("agent started: {}", result.agent.id));
         ui.refresh_sidebar(self);
         Ok(())
@@ -112,7 +112,7 @@ impl TuiApp {
         }))
     }
 
-    pub(crate) fn save_agent_editor(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn save_agent_editor(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
         let Some(BottomPanel::AgentEditor(panel)) = ui.bottom_panel.as_ref() else {
             return Ok(());
         };
@@ -149,7 +149,7 @@ impl TuiApp {
             fs::create_dir_all(parent)?;
         }
         fs::write(&path, agent_editor_markdown(&panel))?;
-        let mut agent_panel = self.agent_panel();
+        let mut agent_panel = self.agent_panel().await;
         agent_panel.tab = AgentTab::Available;
         agent_panel.available.notice = Some(format!("saved {}", path.display()));
         ui.bottom_panel = Some(BottomPanel::Agents(agent_panel));

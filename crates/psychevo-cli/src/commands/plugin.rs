@@ -20,7 +20,7 @@ use crate::args::{
 use crate::commands::common::base_run_options;
 use crate::env::{ensure_home_initialized, inherited_env, resolve_psychevo_home};
 
-pub(crate) fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
+pub(crate) async fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
     let Some(command) = args.command else {
         PluginArgs::command().print_help()?;
         println!();
@@ -34,9 +34,9 @@ pub(crate) fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
     let cwd = cwd.canonicalize().unwrap_or(cwd);
 
     match command {
-        PluginCommand::List(args) => list_plugins(args, &env_map, &home, &cwd)?,
-        PluginCommand::View(args) => view_plugin(args, &env_map, &home, &cwd)?,
-        PluginCommand::Doctor(args) => doctor_plugins(args, &env_map, &home, &cwd)?,
+        PluginCommand::List(args) => list_plugins(args, &env_map, &home, &cwd).await?,
+        PluginCommand::View(args) => view_plugin(args, &env_map, &home, &cwd).await?,
+        PluginCommand::Doctor(args) => doctor_plugins(args, &env_map, &home, &cwd).await?,
         PluginCommand::Inspect(args) => inspect_plugin(args, &home, &cwd)?,
         PluginCommand::Install(args) => install_plugin(args, &home, &cwd)?,
         PluginCommand::Uninstall(args) => {
@@ -75,35 +75,35 @@ pub(crate) fn run_plugin_command(args: PluginArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn list_plugins(
+async fn list_plugins(
     args: PluginListArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     let value = plugin_list_value(&options)?;
     print_plugin_value(&value, args.json)
 }
 
-fn view_plugin(
+async fn view_plugin(
     args: PluginViewArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     let value = plugin_view_value(&options, &args.selector)?;
     print_plugin_value(&value, args.json)
 }
 
-fn doctor_plugins(
+async fn doctor_plugins(
     args: PluginDoctorArgs,
     env_map: &std::collections::BTreeMap<String, String>,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     let value = plugin_doctor_value(&options, args.selector.as_deref())?;
     print_plugin_value(&value, args.json)
 }

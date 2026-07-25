@@ -43,14 +43,14 @@ impl TuiApp {
                 self.begin_new_session_draft();
                 Ok(())
             }
-            SlashCommand::Sessions => self.show_session_list(),
+            SlashCommand::Sessions => self.show_session_list().await,
             SlashCommand::Usage => {
-                println!("{}", self.stats_status_text()?);
+                println!("{}", self.stats_status_text().await?);
                 Ok(())
             }
             SlashCommand::Context => {
                 let live = self.last_context_snapshot.clone();
-                let snapshot = self.context_status_snapshot(live.as_ref())?;
+                let snapshot = self.context_status_snapshot(live.as_ref()).await?;
                 self.last_context_snapshot = Some(snapshot.clone());
                 println!(
                     "{}",
@@ -85,7 +85,8 @@ impl TuiApp {
                     no_skills: self.no_skills,
                     invalidation_reason: "manual_reload".to_string(),
                     notice: None,
-                })?;
+                })
+                .await?;
                 println!(
                     "reloaded context: {} v{}; side cleanup deleted {}",
                     result.prefix_hash,
@@ -93,7 +94,8 @@ impl TuiApp {
                     self.state_runtime.delete_sessions_for_cwd_with_source(
                         &self.cwd,
                         TUI_SIDE_CONVERSATION_SESSION_SOURCE,
-                    )?
+                    )
+                    .await?
                 );
                 Ok(())
             }
@@ -114,7 +116,7 @@ impl TuiApp {
                 Ok(())
             }
             SlashCommand::ModelShowScoped { .. } => self.show_model(),
-            SlashCommand::VariantSet(variant) => self.set_variant(variant),
+            SlashCommand::VariantSet(variant) => self.set_variant(variant).await,
             SlashCommand::ModeSet(mode) => self.set_mode(mode),
             SlashCommand::Permissions => {
                 println!("{}", self.permissions_status_text()?);
@@ -131,16 +133,18 @@ impl TuiApp {
             SlashCommand::Copy => self.copy_latest_answer_markdown_scripted(),
             SlashCommand::Export(options) => self
                 .write_tui_export(&options)
+                .await
                 .map(|result| println!("exported: {}", result.path.display())),
             SlashCommand::Share(options) => self
                 .write_tui_share(&options)
+                .await
                 .map(|result| println!("share: {}", result.path.display())),
             SlashCommand::Image { .. } => {
                 Err(anyhow!("/image is only available in fullscreen TUI"))
             }
-            SlashCommand::Rename(title) => self.rename_session(title),
-            SlashCommand::Undo => self.undo_session_print(),
-            SlashCommand::Redo => self.redo_session_print(),
+            SlashCommand::Rename(title) => self.rename_session(title).await,
+            SlashCommand::Undo => self.undo_session_print().await,
+            SlashCommand::Redo => self.redo_session_print().await,
             SlashCommand::Skills(args) => {
                 println!("{}", self.skills_command_text(args.as_deref()));
                 Ok(())
@@ -158,7 +162,7 @@ impl TuiApp {
                 Ok(())
             }
             SlashCommand::Agents => {
-                println!("{}", self.agents_status_text());
+                println!("{}", self.agents_status_text().await);
                 Ok(())
             }
             SlashCommand::Fork(prompt) => {
@@ -166,7 +170,7 @@ impl TuiApp {
                 return self.submit_prompt(prompt).await.map(|_| false);
             }
             SlashCommand::Mission { team, goal } => {
-                self.record_mission_metadata(team.as_deref(), &goal)?;
+                self.record_mission_metadata(team.as_deref(), &goal).await?;
                 let args = mission_command_args(team.as_deref(), &goal);
                 let prompt = mission_prompt_marker(&args).map_err(|message| anyhow!(message))?;
                 return self.submit_prompt(prompt).await.map(|_| false);

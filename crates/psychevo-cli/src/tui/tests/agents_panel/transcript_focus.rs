@@ -4,7 +4,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn ctrl_t_focuses_transcript_and_space_toggles_expandable_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::LongThinkingMarkdownBottom);
     let thinking_index = ui
         .transcript

@@ -1,7 +1,7 @@
-#[test]
-pub(crate) fn gateway_yielded_exec_entry_keeps_original_command_title() {
+#[tokio::test]
+pub(crate) async fn gateway_yielded_exec_entry_keeps_original_command_title() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -29,10 +29,10 @@ pub(crate) fn gateway_yielded_exec_entry_keeps_original_command_title() {
     assert_eq!(row.text, "live\n");
 }
 
-#[test]
-pub(crate) fn committed_turn_entries_replace_live_overlay_and_optimistic_prompt() {
+#[tokio::test]
+pub(crate) async fn committed_turn_entries_replace_live_overlay_and_optimistic_prompt() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     ui.loaded_session_message_count = 2;
@@ -173,7 +173,7 @@ pub(crate) fn committed_turn_entries_replace_live_overlay_and_optimistic_prompt(
 #[tokio::test]
 pub(crate) async fn committed_turn_entries_keep_turn_start_notice_before_answer_footer() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -284,10 +284,10 @@ pub(crate) async fn committed_turn_entries_keep_turn_start_notice_before_answer_
     assert!(answer < status, "{:?}", ui.transcript);
 }
 
-#[test]
-pub(crate) fn committed_turn_entries_remove_live_meta_without_removing_committed_footer() {
+#[tokio::test]
+pub(crate) async fn committed_turn_entries_remove_live_meta_without_removing_committed_footer() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     ui.loaded_session_message_count = 2;
@@ -401,10 +401,10 @@ pub(crate) fn committed_turn_entries_remove_live_meta_without_removing_committed
     );
 }
 
-#[test]
-pub(crate) fn committed_footer_consumes_turn_failures_before_completion_fallback() {
+#[tokio::test]
+pub(crate) async fn committed_footer_consumes_turn_failures_before_completion_fallback() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -477,10 +477,10 @@ pub(crate) fn committed_footer_consumes_turn_failures_before_completion_fallback
     );
 }
 
-#[test]
-pub(crate) fn committed_turn_entries_skip_already_loaded_message_sequences() {
+#[tokio::test]
+pub(crate) async fn committed_turn_entries_skip_already_loaded_message_sequences() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     ui.loaded_session_message_count = 2;
@@ -508,10 +508,10 @@ pub(crate) fn committed_turn_entries_skip_already_loaded_message_sequences() {
     assert_eq!(ui.loaded_session_message_count, 3);
 }
 
-#[test]
-pub(crate) fn committed_reasoning_entry_uses_middle_fold_preview() {
+#[tokio::test]
+pub(crate) async fn committed_reasoning_entry_uses_middle_fold_preview() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     let long = numbered_lines(1, 12);

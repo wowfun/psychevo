@@ -1,12 +1,12 @@
 impl TuiApp {
-    pub(crate) fn session_selection_panel(
+    pub(crate) async fn session_selection_panel(
         &self,
         view: SessionListView,
     ) -> Result<BottomSelectionPanel> {
         let current_session = self.current_session.as_deref();
         let recent_since_ms = wall_now_ms().saturating_sub(7 * 86_400_000);
         let mut groups: BTreeMap<String, Vec<TuiSessionDisplaySummary>> = BTreeMap::new();
-        for session in self.tui_sessions(view)? {
+        for session in self.tui_sessions(view).await? {
             groups
                 .entry(session.summary.cwd.clone())
                 .or_default()
@@ -70,11 +70,14 @@ impl TuiApp {
         Ok(panel)
     }
 
-    pub(crate) fn agent_panel(&self) -> AgentPanel {
-        AgentPanel::new(self.agent_running_panel(), self.agent_available_panel())
+    pub(crate) async fn agent_panel(&self) -> AgentPanel {
+        AgentPanel::new(
+            self.agent_running_panel().await,
+            self.agent_available_panel(),
+        )
     }
 
-    pub(crate) fn agent_running_panel(&self) -> BottomSelectionPanel {
+    pub(crate) async fn agent_running_panel(&self) -> BottomSelectionPanel {
         let paused = agent_spawn_paused();
         let mut rows = vec![BottomSelectionRow {
             label: if paused {
@@ -102,7 +105,7 @@ impl TuiApp {
         let mut live_count = 0usize;
         if let Some(parent) = self.current_session.as_deref() {
             let store = &self.state_runtime;
-            let value = agent_status_value(Some(store), Some(parent), false);
+            let value = agent_status_value(Some(store), Some(parent), false).await;
             if let Some(agents) = value.get("agents").and_then(Value::as_array) {
                 for agent in agents {
                     let status = agent
@@ -310,21 +313,24 @@ impl TuiApp {
         BottomSelectionPanel::new_agent_actions(&name, rows)
     }
 
-    pub(crate) fn stats_panel(&self) -> Result<BottomSelectionPanel> {
+    pub(crate) async fn stats_panel(&self) -> Result<BottomSelectionPanel> {
         let report = usage_stats(StatsOptions {
             state: self.state_runtime.clone(),
             cwd: self.cwd.clone(),
             all: false,
             days: None,
             limit: 8,
-        })?;
+        })
+        .await?;
         let totals = report.get("totals").unwrap_or(&Value::Null);
         let mut rows = Vec::new();
         if let Some(session_id) = self.current_session.as_ref() {
             let summary = match session_usage_summary(SessionUsageOptions {
                 state: self.state_runtime.clone(),
                 session_id: session_id.clone(),
-            }) {
+            })
+            .await
+            {
                 Ok(summary) => Some(summary),
                 Err(error) if is_missing_session_usage_error(&error, session_id) => None,
                 Err(error) => return Err(error.into()),

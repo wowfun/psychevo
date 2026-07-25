@@ -1,9 +1,9 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn clarify_request_opens_bottom_panel_and_renders_options() {
+#[tokio::test]
+pub(crate) async fn clarify_request_opens_bottom_panel_and_renders_options() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_stream_event(clarify_request_event(), true, false);
@@ -31,24 +31,28 @@ pub(crate) fn clarify_request_opens_bottom_panel_and_renders_options() {
     );
 }
 
-#[test]
-pub(crate) fn clarify_panel_supports_other_text_and_optional_note_modes() {
+#[tokio::test]
+pub(crate) async fn clarify_panel_supports_other_text_and_optional_note_modes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_stream_event(clarify_request_event(), true, false);
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down to other");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
         .expect("open other");
     for ch in "custom".chars() {
         app.handle_bottom_panel_key(
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("type other");
     }
 
@@ -67,26 +71,31 @@ pub(crate) fn clarify_panel_supports_other_text_and_optional_note_modes() {
 
     for _ in 0..3 {
         app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .await
             .expect("move other cursor");
     }
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE),
     )
+    .await
     .expect("insert other middle");
     buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
     text = buffer_text(&buffer);
     assert!(text.contains("answer: cus-tom"));
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
         .expect("back to options");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .await
         .expect("next question");
     buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
     text = buffer_text(&buffer);
     assert!(text.contains("Question 2/3 (3 unanswered)"));
     assert!(text.contains("How much detail should the answer include?"));
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        .await
         .expect("previous question");
     buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
     text = buffer_text(&buffer);
@@ -94,6 +103,7 @@ pub(crate) fn clarify_panel_supports_other_text_and_optional_note_modes() {
     assert!(text.contains("answer: cus-tom"));
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("reopen other");
     assert_eq!(
         ui.bottom_panel.as_ref().and_then(|panel| match panel {
@@ -103,31 +113,37 @@ pub(crate) fn clarify_panel_supports_other_text_and_optional_note_modes() {
         Some(ClarifyInputMode::Other)
     );
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::End, KeyModifiers::NONE))
+        .await
         .expect("end other");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
     )
+    .await
     .expect("edit other");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
     )
+    .await
     .expect("edit other");
     buffer = draw_fullscreen_for_test(&app, &mut ui, 100, 24);
     text = buffer_text(&buffer);
     assert!(text.contains("answer: cus-tos"));
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
         .expect("back to options");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
     )
+    .await
     .expect("select first");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
     )
+    .await
     .expect("n is ignored");
     assert_eq!(
         ui.bottom_panel.as_ref().and_then(|panel| match panel {
@@ -137,22 +153,26 @@ pub(crate) fn clarify_panel_supports_other_text_and_optional_note_modes() {
         Some(ClarifyInputMode::Options)
     );
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
         .expect("note");
     for ch in "include tests".chars() {
         app.handle_bottom_panel_key(
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("type note");
     }
     for _ in 0..5 {
         app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .await
             .expect("move note cursor");
     }
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('-'), KeyModifiers::NONE),
     )
+    .await
     .expect("insert note middle");
 
     assert_eq!(
@@ -172,7 +192,7 @@ pub(crate) fn clarify_panel_supports_other_text_and_optional_note_modes() {
 #[tokio::test]
 pub(crate) async fn clarify_panel_mouse_click_selects_options_and_opens_other_input() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_stream_event(clarify_request_event(), true, false);
@@ -238,10 +258,10 @@ pub(crate) async fn clarify_panel_mouse_click_selects_options_and_opens_other_in
     assert_eq!(panel.mode(), ClarifyInputMode::Other);
 }
 
-#[test]
-pub(crate) fn clarify_resolved_restores_previous_bottom_panel() {
+#[tokio::test]
+pub(crate) async fn clarify_resolved_restores_previous_bottom_panel() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.bottom_panel = Some(BottomPanel::Stats(BottomSelectionPanel::new(
         "Stats",
@@ -267,10 +287,10 @@ pub(crate) fn clarify_resolved_restores_previous_bottom_panel() {
     }));
 }
 
-#[test]
-pub(crate) fn clarify_request_from_background_session_is_buffered_without_focus_steal() {
+#[tokio::test]
+pub(crate) async fn clarify_request_from_background_session_is_buffered_without_focus_steal() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.apply_owned_fullscreen_stream_event(
@@ -291,10 +311,10 @@ pub(crate) fn clarify_request_from_background_session_is_buffered_without_focus_
     }));
 }
 
-#[test]
-pub(crate) fn clarify_tool_result_cell_summarizes_questions_and_answers() {
+#[tokio::test]
+pub(crate) async fn clarify_tool_result_cell_summarizes_questions_and_answers() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
@@ -344,10 +364,10 @@ pub(crate) fn clarify_tool_result_cell_summarizes_questions_and_answers() {
     assert!(full_text.contains("note: include tests"));
 }
 
-#[test]
-pub(crate) fn clarify_cancel_result_cell_is_unanswered_without_status_noise() {
+#[tokio::test]
+pub(crate) async fn clarify_cancel_result_cell_is_unanswered_without_status_noise() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_stream_event(clarify_request_event(), true, false);
@@ -377,10 +397,10 @@ pub(crate) fn clarify_cancel_result_cell_is_unanswered_without_status_noise() {
     }));
 }
 
-#[test]
-pub(crate) fn clarify_history_tool_result_reuses_tool_call_questions() {
+#[tokio::test]
+pub(crate) async fn clarify_history_tool_result_reuses_tool_call_questions() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let args = clarify_args();
     let assistant = serde_json::json!({
@@ -433,68 +453,74 @@ pub(crate) fn clarify_history_tool_result_reuses_tool_call_questions() {
     assert!(!row.text.contains("clarify normal"));
 }
 
-#[test]
-pub(crate) fn tui_snapshot_clarify_question_panel() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_clarify_question_panel() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.apply_stream_event(clarify_request_event(), true, false);
     assert_tui_snapshot("clarify_question_panel", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_clarify_other_inline() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_clarify_other_inline() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.apply_stream_event(clarify_request_event(), true, false);
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
         .expect("down to other");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
         .expect("open other");
     for ch in "custom path".chars() {
         app.handle_bottom_panel_key(
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("type other");
     }
     assert_tui_snapshot("clarify_other_inline", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_clarify_note_inline() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_clarify_note_inline() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     ui.apply_stream_event(clarify_request_event(), true, false);
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
         .expect("note");
     for ch in "include tests".chars() {
         app.handle_bottom_panel_key(
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
+        .await
         .expect("type note");
     }
     assert_tui_snapshot("clarify_note_inline", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_clarify_answered_result() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_clarify_answered_result() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     apply_clarify_answered_result(&mut ui);
     assert_tui_snapshot("clarify_answered_result", 120, 24, &app, ui);
 }
 
-#[test]
-pub(crate) fn tui_snapshot_clarify_declined_result() {
+#[tokio::test]
+pub(crate) async fn tui_snapshot_clarify_declined_result() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = fixture_ui(&app, FixtureKind::Idle);
     apply_clarify_declined_result(&mut ui);
     assert_tui_snapshot("clarify_declined_result", 120, 24, &app, ui);
@@ -553,7 +579,7 @@ pub(crate) async fn permission_approval_panel_mouse_click_resolves_each_option()
 #[tokio::test]
 pub(crate) async fn filesystem_approval_expands_before_selecting_a_canonical_scope() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (response, decision) = oneshot::channel();
     ui.active_permission_approval = Some(response);
@@ -637,10 +663,10 @@ pub(crate) async fn filesystem_approval_expands_before_selecting_a_canonical_sco
     );
 }
 
-#[test]
-pub(crate) fn filesystem_scope_keyboard_navigation_keeps_selection_visible() {
+#[tokio::test]
+pub(crate) async fn filesystem_scope_keyboard_navigation_keeps_selection_visible() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut panel = PermissionApprovalPanel::new(
         app.current_session.clone(),
@@ -677,6 +703,7 @@ pub(crate) fn filesystem_scope_keyboard_navigation_keeps_selection_visible() {
 
     for _ in 0..12 {
         app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .await
             .expect("move scope selection");
     }
     let _ = draw_fullscreen_for_test(&app, &mut ui, 80, 18);
@@ -693,10 +720,10 @@ pub(crate) fn filesystem_scope_keyboard_navigation_keeps_selection_visible() {
     );
 }
 
-#[test]
-pub(crate) fn permission_approval_panel_wraps_details_without_hiding_options() {
+#[tokio::test]
+pub(crate) async fn permission_approval_panel_wraps_details_without_hiding_options() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.bottom_panel = Some(BottomPanel::PermissionApproval(
         PermissionApprovalPanel::new(
@@ -727,7 +754,7 @@ pub(crate) fn permission_approval_panel_wraps_details_without_hiding_options() {
 
 async fn assert_permission_click_outcome(index: usize, expected: PermissionApprovalOutcome) {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (response, decision) = oneshot::channel();
     ui.active_permission_approval = Some(response);

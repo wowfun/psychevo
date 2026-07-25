@@ -6,7 +6,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn mode_slash_command_requires_value() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/mode");
 
@@ -27,7 +27,7 @@ pub(crate) async fn mode_slash_command_requires_value() {
 #[tokio::test]
 pub(crate) async fn submitted_slash_command_restores_bottom_follow_after_manual_scroll() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     for index in 0..18 {
         ui.transcript.push(TranscriptRow::simple(
@@ -60,7 +60,7 @@ pub(crate) async fn submitted_slash_command_restores_bottom_follow_after_manual_
 #[tokio::test]
 pub(crate) async fn mode_slash_command_sets_mode_with_direct_value() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/mode plan");
 
@@ -80,7 +80,7 @@ pub(crate) async fn mode_slash_command_sets_mode_with_direct_value() {
 #[tokio::test]
 pub(crate) async fn show_raw_toggles_persists_and_does_not_append_transcript_status() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::RawToggle)
@@ -107,7 +107,7 @@ pub(crate) async fn show_raw_toggles_persists_and_does_not_append_transcript_sta
 #[tokio::test]
 pub(crate) async fn show_raw_rejects_invalid_arguments_through_slash_entry() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/show-raw maybe");
 
@@ -126,7 +126,7 @@ pub(crate) async fn show_raw_rejects_invalid_arguments_through_slash_entry() {
 #[tokio::test]
 pub(crate) async fn copy_command_copies_latest_answer_raw_markdown_without_transcript_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let copied = Arc::new(Mutex::new(Vec::new()));
     let copied_for_sink = Arc::clone(&copied);
     app.clipboard = Arc::new(move |text| {
@@ -168,7 +168,7 @@ pub(crate) async fn copy_command_copies_latest_answer_raw_markdown_without_trans
 #[tokio::test]
 pub(crate) async fn ctrl_o_copies_latest_answer_raw_markdown() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let copied = Arc::new(Mutex::new(Vec::new()));
     let copied_for_sink = Arc::clone(&copied);
     app.clipboard = Arc::new(move |text| {
@@ -213,7 +213,7 @@ pub(crate) async fn ctrl_o_copies_latest_answer_raw_markdown() {
 #[tokio::test]
 pub(crate) async fn configured_slash_alias_and_leader_shortcut_dispatch_commands() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.slash_config = parse_effective_slash_config(&serde_json::json!({
         "tui": {
             "slash_aliases": {
@@ -267,7 +267,7 @@ pub(crate) async fn configured_slash_alias_and_leader_shortcut_dispatch_commands
 #[tokio::test]
 pub(crate) async fn configured_slash_shortcuts_do_not_fire_while_editing_or_in_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.slash_config = parse_effective_slash_config(&serde_json::json!({
         "tui": {
             "slash_keybinds": {
@@ -311,7 +311,7 @@ pub(crate) async fn configured_slash_shortcuts_do_not_fire_while_editing_or_in_p
 #[tokio::test]
 pub(crate) async fn fullscreen_status_uses_single_multiline_command_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Status)
@@ -335,7 +335,7 @@ pub(crate) async fn fullscreen_status_uses_single_multiline_command_row() {
 #[tokio::test]
 pub(crate) async fn fullscreen_help_command_opens_bottom_help_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Help)
@@ -372,7 +372,7 @@ pub(crate) async fn fullscreen_help_command_opens_bottom_help_panel() {
 #[tokio::test]
 pub(crate) async fn fullscreen_help_custom_commands_show_configured_slash_targets() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.slash_config = parse_effective_slash_config(&serde_json::json!({
         "tui": {
             "leader_key": "ctrl+x",
@@ -408,13 +408,14 @@ pub(crate) async fn fullscreen_help_custom_commands_show_configured_slash_target
 #[tokio::test]
 pub(crate) async fn fullscreen_help_bottom_panel_switches_sections_and_closes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Help)
         .await
         .expect("help");
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .await
         .expect("tab");
     let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
         panic!("help panel missing");
@@ -422,6 +423,7 @@ pub(crate) async fn fullscreen_help_bottom_panel_switches_sections_and_closes() 
     assert_eq!(panel.tab, HelpTab::Commands);
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .await
         .expect("right");
     let Some(BottomPanel::Help(panel)) = &ui.bottom_panel else {
         panic!("help panel missing");
@@ -429,6 +431,7 @@ pub(crate) async fn fullscreen_help_bottom_panel_switches_sections_and_closes() 
     assert_eq!(panel.tab, HelpTab::CustomCommands);
 
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
         .expect("esc");
     assert!(ui.bottom_panel.is_none());
 }
@@ -436,8 +439,8 @@ pub(crate) async fn fullscreen_help_bottom_panel_switches_sections_and_closes() 
 #[tokio::test]
 pub(crate) async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usage() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    StateRuntime::open(&app.db_path).await.expect("store");
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/help now");
 
@@ -471,8 +474,8 @@ pub(crate) async fn fullscreen_help_rejects_arguments_and_stats_alias_opens_usag
 #[tokio::test]
 pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    StateRuntime::open(&app.db_path).await.expect("store");
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Usage)
@@ -497,17 +500,19 @@ pub(crate) async fn fullscreen_usage_command_opens_bottom_panel() {
     );
 }
 
-#[test]
-pub(crate) fn usage_panel_groups_persisted_stats_rows() {
+#[tokio::test]
+pub(crate) async fn usage_panel_groups_persisted_stats_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
     store
         .set_session_title(&session_id, "Usage session")
+        .await
         .expect("title");
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     conn.execute(
@@ -559,7 +564,7 @@ pub(crate) fn usage_panel_groups_persisted_stats_rows() {
     )
     .expect("tool result");
 
-    let panel = app.stats_panel().expect("usage panel");
+    let panel = app.stats_panel().await.expect("usage panel");
 
     assert_eq!(panel.title, "Usage");
     assert!(panel.rows.iter().any(|row| {
@@ -603,7 +608,7 @@ pub(crate) fn usage_panel_groups_persisted_stats_rows() {
 #[tokio::test]
 pub(crate) async fn fullscreen_context_command_appends_compact_command_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.last_context_snapshot = Some(test_context_snapshot());
     ui.last_transcript_width = 79;
@@ -640,7 +645,7 @@ pub(crate) async fn fullscreen_context_command_appends_compact_command_row() {
 #[tokio::test]
 pub(crate) async fn fullscreen_context_command_refreshes_bottom_status_snapshot() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     app.last_context_snapshot = Some(test_context_snapshot());
     ui.last_context_snapshot = None;
@@ -657,7 +662,7 @@ pub(crate) async fn fullscreen_context_command_refreshes_bottom_status_snapshot(
 #[tokio::test]
 pub(crate) async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/variant low");
 
@@ -685,10 +690,11 @@ pub(crate) async fn fullscreen_variant_and_upcoming_feedback_use_command_rows() 
 #[tokio::test]
 pub(crate) async fn fullscreen_compact_queues_behind_running_turn() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session = store
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+        .await
         .expect("session");
     app.current_session = Some(session.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -720,7 +726,7 @@ pub(crate) async fn fullscreen_compact_queues_behind_running_turn() {
 #[tokio::test]
 pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
     ui.textarea = textarea_with_text("revise the current answer");
@@ -786,7 +792,7 @@ pub(crate) async fn running_enter_steers_without_immediate_transcript_row() {
 #[tokio::test]
 pub(crate) async fn pending_preview_shows_steer_and_queue_above_composer_without_status_counts() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
 
@@ -840,7 +846,7 @@ pub(crate) async fn pending_preview_shows_steer_and_queue_above_composer_without
 #[tokio::test]
 pub(crate) async fn diff_command_opens_overlay_and_renders_untracked_diff_without_transcript_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     init_git_repo_for_diff_test(&app.cwd);
     fs::write(app.cwd.join("notes.txt"), "hello from diff\n").expect("write");
     let mut ui = FullscreenUi::new(&app);
@@ -874,7 +880,7 @@ pub(crate) async fn diff_command_opens_overlay_and_renders_untracked_diff_withou
 #[tokio::test]
 pub(crate) async fn diff_command_shows_empty_message_for_clean_workspace() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     init_git_repo_for_diff_test(&app.cwd);
     let mut ui = FullscreenUi::new(&app);
 
@@ -891,7 +897,7 @@ pub(crate) async fn diff_command_shows_empty_message_for_clean_workspace() {
 #[tokio::test]
 pub(crate) async fn diff_overlay_scrolls_and_closes_with_keys() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.diff_overlay = Some(DiffOverlay::from_lines(
         (0..80)

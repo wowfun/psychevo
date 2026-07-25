@@ -1,7 +1,7 @@
 #[tokio::test]
 pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::value(serde_json::json!({
@@ -94,10 +94,10 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
     );
 }
 
-#[test]
-pub(crate) fn fullscreen_write_preview_opens_once_and_preserves_manual_collapse() {
+#[tokio::test]
+pub(crate) async fn fullscreen_write_preview_opens_once_and_preserves_manual_collapse() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -148,10 +148,10 @@ pub(crate) fn fullscreen_write_preview_opens_once_and_preserves_manual_collapse(
     assert!(row.expandable_text().contains("first second"));
 }
 
-#[test]
-pub(crate) fn fullscreen_write_preview_transitions_to_writing_and_collapses_once_on_success() {
+#[tokio::test]
+pub(crate) async fn fullscreen_write_preview_transitions_to_writing_and_collapses_once_on_success() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let pending = serde_json::json!({
         "type": "tool_call_pending",
@@ -222,10 +222,10 @@ pub(crate) fn fullscreen_write_preview_transitions_to_writing_and_collapses_once
     }
 }
 
-#[test]
-pub(crate) fn fullscreen_failed_write_retains_preview_and_failure_reason() {
+#[tokio::test]
+pub(crate) async fn fullscreen_failed_write_retains_preview_and_failure_reason() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.apply_value_event(
         &serde_json::json!({
@@ -262,8 +262,8 @@ pub(crate) fn fullscreen_failed_write_retains_preview_and_failure_reason() {
     assert!(row.expandable_text().contains("permission denied"));
 }
 
-#[test]
-pub(crate) fn fullscreen_consumes_gateway_write_preview_metadata() {
+#[tokio::test]
+pub(crate) async fn fullscreen_consumes_gateway_write_preview_metadata() {
     fn entry(status: TranscriptBlockStatus, phase: &str, text: &str, body: &str) -> TranscriptEntry {
         TranscriptEntry {
             id: "live:turn-write:assistant:0".to_string(),
@@ -314,7 +314,7 @@ pub(crate) fn fullscreen_consumes_gateway_write_preview_metadata() {
     }
 
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     app.apply_gateway_transcript_entry(
@@ -359,7 +359,7 @@ pub(crate) fn fullscreen_consumes_gateway_write_preview_metadata() {
 #[tokio::test]
 pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_completion() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("typed-session".to_string());
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
@@ -429,14 +429,16 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
     .expect("send turn complete");
     drop(tx);
 
+    let result_db_path = temp.path().join("state.db");
+    let result_cwd = temp.path().to_path_buf();
     let task = tokio::spawn(async move {
         Ok(psychevo_runtime::types::RunResult {
             session_id: "typed-session".to_string(),
             outcome: Outcome::Normal,
             terminal_reason: None,
             final_answer: "All done.".to_string(),
-            db_path: temp.path().join("state.db"),
-            cwd: temp.path().to_path_buf(),
+            db_path: result_db_path,
+            cwd: result_cwd,
             provider: "mock".to_string(),
             model: "mock-model".to_string(),
             base_url: "http://127.0.0.1".to_string(),
@@ -485,14 +487,14 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
 #[tokio::test]
 pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_without_thread_leaks() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("parent session");
+        .await.expect("parent session");
     let child = store
         .create_child_session_with_metadata(&parent, &app.cwd, "agent", "mock-model", "mock", None)
-        .expect("child session");
+        .await.expect("child session");
     store
         .upsert_agent_edge(
             &parent,
@@ -506,7 +508,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
                 }
             })),
         )
-        .expect("agent edge");
+        .await.expect("agent edge");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
@@ -587,7 +589,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     );
 
     app.open_agent_target_session(&mut ui, &child)
-        .expect("open child session");
+        .await.expect("open child session");
 
     assert_eq!(app.current_session.as_deref(), Some(child.as_str()));
     assert!(ui.transcript.iter().any(|row| {
@@ -654,7 +656,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     );
 
     app.open_session_direct(&mut ui, &parent)
-        .expect("return to parent session");
+        .await.expect("return to parent session");
     assert!(
         ui.transcript.iter().any(|row| row.text == "parent later"),
         "{:?}",
@@ -669,7 +671,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     );
 
     app.open_agent_target_session(&mut ui, &child)
-        .expect("reopen child session");
+        .await.expect("reopen child session");
     assert!(ui.transcript.iter().any(|row| {
         row.kind == TranscriptKind::Answer && row.text == "child answer after open"
     }), "{:?}", ui.transcript);
@@ -685,7 +687,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     );
 
     app.open_session_direct(&mut ui, &parent)
-        .expect("return to parent before child completion");
+        .await.expect("return to parent before child completion");
     app.apply_gateway_event(
         &mut ui,
         Some(&parent),
@@ -713,10 +715,10 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     let _ = done_tx.send(());
 }
 
-#[test]
-pub(crate) fn stale_gateway_running_exec_does_not_reactivate_completed_exec_row() {
+#[tokio::test]
+pub(crate) async fn stale_gateway_running_exec_does_not_reactivate_completed_exec_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("typed-session".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -778,10 +780,10 @@ pub(crate) fn stale_gateway_running_exec_does_not_reactivate_completed_exec_row(
     assert!(!ui.exec_session_rows.contains_key(&7));
 }
 
-#[test]
-pub(crate) fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
+#[tokio::test]
+pub(crate) async fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -886,7 +888,7 @@ pub(crate) fn multi_message_turn_preserves_answer_rows_across_tool_cycles() {
 #[tokio::test]
 pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_finishes() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     tx.send(RunStreamEvent::value(serde_json::json!({
@@ -1046,7 +1048,7 @@ fn gateway_text_entry_for_thread(
 #[tokio::test]
 pub(crate) async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let session_id = "visible-live-session".to_string();
     app.current_session = Some(session_id.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -1110,8 +1112,8 @@ pub(crate) async fn visible_live_auxiliary_turn_defers_terminal_message_meta() {
 #[tokio::test]
 pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -1120,7 +1122,7 @@ pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
             "xiaomi-token-plan",
             None,
         )
-        .expect("session");
+        .await.expect("session");
     insert_tui_message_with_metadata(
         &app.db_path,
         &session_id,
@@ -1159,7 +1161,7 @@ pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     attach_background_agent_running(&mut ui, &session_id);
 
     app.load_current_session_history(&mut ui)
-        .expect("load history");
+        .await.expect("load history");
 
     assert!(
         ui.status_running_elapsed(app.current_session.as_deref())
@@ -1183,10 +1185,10 @@ pub(crate) async fn live_session_history_reload_defers_latest_terminal_meta() {
     }
 }
 
-#[test]
-pub(crate) fn typed_gateway_preamble_completion_updates_existing_answer_row_by_item_id() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_preamble_completion_updates_existing_answer_row_by_item_id() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -1235,10 +1237,10 @@ pub(crate) fn typed_gateway_preamble_completion_updates_existing_answer_row_by_i
     );
 }
 
-#[test]
-pub(crate) fn typed_gateway_reasoning_update_uses_middle_fold_preview() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_reasoning_update_uses_middle_fold_preview() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     let long = numbered_lines(1, 12);
@@ -1271,15 +1273,15 @@ pub(crate) fn typed_gateway_reasoning_update_uses_middle_fold_preview() {
     assert!(!row.text.contains("line 8"), "{}", row.text);
 }
 
-#[test]
-pub(crate) fn typed_gateway_reasoning_collapses_once_for_every_terminal_status() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_reasoning_collapses_once_for_every_terminal_status() {
     for status in [
         TranscriptBlockStatus::Completed,
         TranscriptBlockStatus::Failed,
         TranscriptBlockStatus::Cancelled,
     ] {
         let temp = tempdir().expect("temp");
-        let mut app = test_app(&temp);
+        let mut app = test_app(&temp).await;
         app.current_session = Some("session-1".to_string());
         let mut ui = FullscreenUi::new(&app);
 
@@ -1346,10 +1348,10 @@ pub(crate) fn typed_gateway_reasoning_collapses_once_for_every_terminal_status()
     }
 }
 
-#[test]
-pub(crate) fn streaming_thinking_preview_tail_updates_while_collapsed() {
+#[tokio::test]
+pub(crate) async fn streaming_thinking_preview_tail_updates_while_collapsed() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_stream_event(
@@ -1391,10 +1393,10 @@ pub(crate) fn streaming_thinking_preview_tail_updates_while_collapsed() {
     assert!(!ui.transcript[idx].details_collapsed);
 }
 
-#[test]
-pub(crate) fn typed_gateway_terminal_preamble_keeps_preview_behind_collapsed_row() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_terminal_preamble_keeps_preview_behind_collapsed_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
     let long = numbered_lines(1, 12);
@@ -1425,10 +1427,10 @@ pub(crate) fn typed_gateway_terminal_preamble_keeps_preview_behind_collapsed_row
     assert!(!row.text.contains("line 8"), "{}", row.text);
 }
 
-#[test]
-pub(crate) fn typed_gateway_agent_session_start_makes_running_row_openable() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_agent_session_start_makes_running_row_openable() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("parent-session".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -1491,10 +1493,10 @@ pub(crate) fn typed_gateway_agent_session_start_makes_running_row_openable() {
     assert_eq!(row.text, "Running (0 tool uses)");
 }
 
-#[test]
-pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_start() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_background_agent_handoff_reuses_row_for_session_start() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("parent-session".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -1624,10 +1626,10 @@ pub(crate) fn typed_gateway_background_agent_handoff_reuses_row_for_session_star
     assert_eq!(row.text, "Started in background");
 }
 
-#[test]
-pub(crate) fn typed_gateway_reasoning_completion_is_idempotent_by_item_id() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_reasoning_completion_is_idempotent_by_item_id() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -1659,10 +1661,10 @@ pub(crate) fn typed_gateway_reasoning_completion_is_idempotent_by_item_id() {
     assert!(thinking_rows[0].tool_started.is_none());
 }
 
-#[test]
-pub(crate) fn typed_gateway_final_answer_does_not_enter_thinking_row() {
+#[tokio::test]
+pub(crate) async fn typed_gateway_final_answer_does_not_enter_thinking_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 

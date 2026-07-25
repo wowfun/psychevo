@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn cli_tui_initial_prompt_shows_thinking_by_default() {
+#[tokio::test]
+pub(crate) async fn cli_tui_initial_prompt_shows_thinking_by_default() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text(
         "private chain",
         "visible tui",
@@ -27,8 +27,8 @@ pub(crate) fn cli_tui_initial_prompt_shows_thinking_by_default() {
     assert!(stdout.contains("visible tui"));
 }
 
-#[test]
-pub(crate) fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
+#[tokio::test]
+pub(crate) async fn cli_tui_bang_shell_rejects_missing_provider_config_before_execution() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -50,8 +50,8 @@ pub(crate) fn cli_tui_bang_shell_rejects_missing_provider_config_before_executio
     assert!(!stdout.contains("Answer:"), "{stdout}");
 }
 
-#[test]
-pub(crate) fn cli_tui_bang_shell_persists_context_with_config() {
+#[tokio::test]
+pub(crate) async fn cli_tui_bang_shell_persists_context_with_config() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -101,8 +101,8 @@ pub(crate) fn cli_tui_bang_shell_persists_context_with_config() {
     );
 }
 
-#[test]
-pub(crate) fn cli_tui_debug_shows_usage_metadata_summary() {
+#[tokio::test]
+pub(crate) async fn cli_tui_debug_shows_usage_metadata_summary() {
     let server = MockSseServer::start(vec![sse_metadata_usage_then_text("debug metrics")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -135,8 +135,8 @@ pub(crate) fn cli_tui_debug_shows_usage_metadata_summary() {
     assert!(!stdout.contains("provider_response_id="));
 }
 
-#[test]
-pub(crate) fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
+#[tokio::test]
+pub(crate) async fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("debug chain", "visible tui")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -173,8 +173,8 @@ pub(crate) fn cli_tui_thinking_toggle_hides_reasoning_and_persists() {
     assert!(state.contains(r#""thinking_visible": false"#));
 }
 
-#[test]
-pub(crate) fn cli_tui_status_shows_configured_default_variant() {
+#[tokio::test]
+pub(crate) async fn cli_tui_status_shows_configured_default_variant() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -221,8 +221,8 @@ pub(crate) fn cli_tui_status_shows_configured_default_variant() {
     );
 }
 
-#[test]
-pub(crate) fn cli_tui_help_prints_commands_from_registry() {
+#[tokio::test]
+pub(crate) async fn cli_tui_help_prints_commands_from_registry() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -260,8 +260,8 @@ pub(crate) fn cli_tui_help_prints_commands_from_registry() {
     assert!(!stdout.contains("pevo run"));
 }
 
-#[test]
-pub(crate) fn cli_tui_new_is_silent_until_next_prompt() {
+#[tokio::test]
+pub(crate) async fn cli_tui_new_is_silent_until_next_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -291,8 +291,8 @@ pub(crate) fn cli_tui_new_is_silent_until_next_prompt() {
     assert!(!stdout.contains("new session will start on next prompt"));
 }
 
-#[test]
-pub(crate) fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
+#[tokio::test]
+pub(crate) async fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
     let server = MockSseServer::start(vec![sse_text("visible tui")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -336,8 +336,8 @@ pub(crate) fn cli_tui_scripted_undo_and_redo_print_deterministic_status() {
     assert!(stdout.contains("redone 2 messages; complete"));
 }
 
-#[test]
-pub(crate) fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
+#[tokio::test]
+pub(crate) async fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
     let server = MockSseServer::start(vec![sse_text("planned")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -416,8 +416,8 @@ pub(crate) fn cli_tui_mode_set_plan_persists_and_uses_read_only_tools() {
     assert_eq!(system_messages, 0);
 }
 
-#[test]
-pub(crate) fn cli_tui_model_lists_configured_entries_without_prompt() {
+#[tokio::test]
+pub(crate) async fn cli_tui_model_lists_configured_entries_without_prompt() {
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
     let db = temp.path().join("state.db");
@@ -448,8 +448,8 @@ pub(crate) fn cli_tui_model_lists_configured_entries_without_prompt() {
     assert!(stdout.contains("mock/other-model variant=high"));
 }
 
-#[test]
-pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
+#[tokio::test]
+pub(crate) async fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_session() {
     let server = MockSseServer::start(vec![
         sse_text("first"),
         sse_text("First run title"),
@@ -517,8 +517,8 @@ pub(crate) fn cli_tui_continues_latest_run_or_tui_session_and_new_creates_tui_se
     assert_eq!(tui_sessions, 1);
 }
 
-#[test]
-pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_prompt() {
+#[tokio::test]
+pub(crate) async fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_prompt() {
     let initial_server = MockSseServer::start(vec![
         sse_reasoning_then_text("hidden chain", "visible"),
         sse_text("initial title"),
@@ -572,8 +572,8 @@ pub(crate) fn cli_tui_sessions_lists_sessions_and_unknown_slash_falls_back_to_pr
     assert!(stdout.contains("fallback chain"));
 }
 
-#[test]
-pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
+#[tokio::test]
+pub(crate) async fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());
@@ -615,8 +615,8 @@ pub(crate) fn cli_tui_sessions_scripted_fallback_lists_sessions() {
     assert!(!stdout.contains("hidden chain"));
 }
 
-#[test]
-pub(crate) fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
+#[tokio::test]
+pub(crate) async fn cli_tui_sessions_scripted_fallback_hides_archived_sessions() {
     let server = MockSseServer::start(vec![sse_reasoning_then_text("hidden chain", "visible")]);
     let temp = tempdir().expect("temp");
     let home = init_tui_home(temp.path());

@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn cli_help_lists_aligned_command_descriptions() {
+#[tokio::test]
+pub(crate) async fn cli_help_lists_aligned_command_descriptions() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .arg("--help")
@@ -28,8 +28,8 @@ pub(crate) fn cli_help_lists_aligned_command_descriptions() {
     assert!(stdout.contains("Inspect local context-window usage for a session"));
 }
 
-#[test]
-pub(crate) fn cli_help_describes_representative_commands_and_flags() {
+#[tokio::test]
+pub(crate) async fn cli_help_describes_representative_commands_and_flags() {
     let temp = tempdir().expect("temp");
     assert_help_contains(
         temp.path(),
@@ -149,8 +149,8 @@ pub(crate) fn cli_help_describes_representative_commands_and_flags() {
     );
 }
 
-#[test]
-pub(crate) fn cli_default_command_rejects_non_tty_without_consuming_stdin() {
+#[tokio::test]
+pub(crate) async fn cli_default_command_rejects_non_tty_without_consuming_stdin() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .stdin(Stdio::piped())
@@ -165,8 +165,8 @@ pub(crate) fn cli_default_command_rejects_non_tty_without_consuming_stdin() {
     assert!(stderr.contains("pevo run <prompt>"), "{stderr}");
 }
 
-#[test]
-pub(crate) fn cli_setup_rejects_non_tty_without_prompting() {
+#[tokio::test]
+pub(crate) async fn cli_setup_rejects_non_tty_without_prompting() {
     let temp = tempdir().expect("temp");
     let output = pevo_cmd(temp.path())
         .arg("setup")
@@ -181,8 +181,8 @@ pub(crate) fn cli_setup_rejects_non_tty_without_prompting() {
     assert!(stderr.contains("pevo auth setup"), "{stderr}");
 }
 
-#[test]
-pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
+#[tokio::test]
+pub(crate) async fn cli_doctor_json_reports_local_web_asset_status() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -221,8 +221,8 @@ pub(crate) fn cli_doctor_json_reports_local_web_asset_status() {
     assert_eq!(value["webAssets"]["path"], dist.display().to_string());
 }
 
-#[test]
-pub(crate) fn cli_web_opens_root_cd_with_json_output() {
+#[tokio::test]
+pub(crate) async fn cli_web_opens_root_cd_with_json_output() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -288,8 +288,8 @@ pub(crate) fn cli_web_opens_root_cd_with_json_output() {
     );
 }
 
-#[test]
-pub(crate) fn cli_web_replaces_free_lease_stale_state_instead_of_reusing_dead_url() {
+#[tokio::test]
+pub(crate) async fn cli_web_replaces_free_lease_stale_state_instead_of_reusing_dead_url() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -355,8 +355,8 @@ pub(crate) fn cli_web_replaces_free_lease_stale_state_instead_of_reusing_dead_ur
     );
 }
 
-#[test]
-pub(crate) fn cli_stop_fails_closed_when_lease_owner_cannot_match_recorded_process() {
+#[tokio::test]
+pub(crate) async fn cli_stop_fails_closed_when_lease_owner_cannot_match_recorded_process() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     assert!(
@@ -413,8 +413,8 @@ pub(crate) fn cli_stop_fails_closed_when_lease_owner_cannot_match_recorded_proce
     drop(lease);
 }
 
-#[test]
-pub(crate) fn concurrent_cli_web_calls_reuse_one_managed_instance() {
+#[tokio::test]
+pub(crate) async fn concurrent_cli_web_calls_reuse_one_managed_instance() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -480,8 +480,8 @@ pub(crate) fn concurrent_cli_web_calls_reuse_one_managed_instance() {
     );
 }
 
-#[test]
-pub(crate) fn cli_web_start_failure_surfaces_current_managed_log_output() {
+#[tokio::test]
+pub(crate) async fn cli_web_start_failure_surfaces_current_managed_log_output() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -539,8 +539,8 @@ pub(crate) fn cli_web_start_failure_surfaces_current_managed_log_output() {
     assert!(!gateway_dir.join("token").exists());
 }
 
-#[test]
-pub(crate) fn cli_web_lifecycle_aliases_stop_and_restart_managed_server() {
+#[tokio::test]
+pub(crate) async fn cli_web_lifecycle_aliases_stop_and_restart_managed_server() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -634,8 +634,8 @@ pub(crate) fn cli_web_lifecycle_aliases_stop_and_restart_managed_server() {
     assert_eq!(idempotent_stop_json["stopped"], false);
 }
 
-#[test]
-pub(crate) fn cli_init_reset_state_stops_managed_gateway_before_recreating_state() {
+#[tokio::test]
+pub(crate) async fn cli_init_reset_state_stops_managed_gateway_before_recreating_state() {
     let temp = tempdir().expect("temp");
     let psychevo_home = temp.path().join("psychevo-home");
     let cwd = temp.path().join("work");
@@ -739,8 +739,8 @@ pub(crate) fn assert_help_contains(test_home: &Path, args: &[&str], expected: &[
     }
 }
 
-#[test]
-pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
+#[tokio::test]
+pub(crate) async fn cli_init_creates_home_tree_and_is_idempotent() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let output = pevo_cmd(temp.path())
@@ -792,8 +792,8 @@ pub(crate) fn cli_init_creates_home_tree_and_is_idempotent() {
     );
 }
 
-#[test]
-pub(crate) fn cli_init_reset_state_backs_up_existing_sqlite_files() {
+#[tokio::test]
+pub(crate) async fn cli_init_reset_state_backs_up_existing_sqlite_files() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let init = pevo_cmd(temp.path())

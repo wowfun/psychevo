@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn resolves_unique_and_ambiguous_session_prefixes() {
+#[tokio::test]
+pub(crate) async fn resolves_unique_and_ambiguous_session_prefixes() {
     let sessions = vec![summary("abcdef"), summary("abc999"), summary("def000")];
     assert_eq!(
         resolve_session_ref_from_summaries(&sessions, "def").unwrap(),
@@ -14,8 +14,8 @@ pub(crate) fn resolves_unique_and_ambiguous_session_prefixes() {
     );
 }
 
-#[test]
-pub(crate) fn turn_printer_hides_reasoning_by_default() {
+#[tokio::test]
+pub(crate) async fn turn_printer_hides_reasoning_by_default() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -35,8 +35,8 @@ pub(crate) fn turn_printer_hides_reasoning_by_default() {
     assert!(!output.contains("private"));
 }
 
-#[test]
-pub(crate) fn turn_printer_shows_reasoning_when_enabled() {
+#[tokio::test]
+pub(crate) async fn turn_printer_shows_reasoning_when_enabled() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), true, false);
     let mut output = Vec::new();
     printer
@@ -56,8 +56,8 @@ pub(crate) fn turn_printer_shows_reasoning_when_enabled() {
     assert!(output.contains("visible thinking"));
 }
 
-#[test]
-pub(crate) fn turn_printer_renders_project_instruction_warning() {
+#[tokio::test]
+pub(crate) async fn turn_printer_renders_project_instruction_warning() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -77,8 +77,8 @@ pub(crate) fn turn_printer_renders_project_instruction_warning() {
     assert!(output.contains("suggestion: ln -s CLAUDE.md AGENTS.md"));
 }
 
-#[test]
-pub(crate) fn turn_printer_preserves_bash_command_title_until_tool_end() {
+#[tokio::test]
+pub(crate) async fn turn_printer_preserves_bash_command_title_until_tool_end() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -111,8 +111,8 @@ pub(crate) fn turn_printer_preserves_bash_command_title_until_tool_end() {
     assert!(!output.contains("exec_command command"));
 }
 
-#[test]
-pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
+#[tokio::test]
+pub(crate) async fn turn_printer_announces_streaming_tool_preparation_once() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer
@@ -188,8 +188,8 @@ pub(crate) fn turn_printer_announces_streaming_tool_preparation_once() {
     assert!(output.contains("write report.md 1s:"));
 }
 
-#[test]
-pub(crate) fn turn_printer_scopes_reused_tool_positions_across_messages() {
+#[tokio::test]
+pub(crate) async fn turn_printer_scopes_reused_tool_positions_across_messages() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();
     printer

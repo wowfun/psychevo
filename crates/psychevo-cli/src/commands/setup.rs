@@ -147,7 +147,7 @@ async fn configure_provider_with_io<I: SetupIo>(
         &api_key_env,
     )?;
     if !api_key.trim().is_empty() {
-        let options = base_run_options(env_map, home, cwd)?;
+        let options = base_run_options(env_map, home, cwd).await?;
         set_provider_api_key(&options, config_dir, &provider.provider_id, &api_key)?;
     }
 
@@ -303,7 +303,7 @@ async fn fetch_models_for_setup(
     env_map: &std::collections::BTreeMap<String, String>,
     provider_id: &str,
 ) -> Result<Vec<ModelCatalogEntry>> {
-    let options = base_run_options(env_map, home, cwd)?;
+    let options = base_run_options(env_map, home, cwd).await?;
     let providers = model_catalog_providers(&options)?;
     let provider = providers
         .into_iter()

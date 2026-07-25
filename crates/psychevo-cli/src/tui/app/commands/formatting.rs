@@ -2,8 +2,12 @@
 pub(crate) use super::*;
 
 impl TuiApp {
-    pub(crate) fn record_mission_metadata(&mut self, team: Option<&str>, goal: &str) -> Result<()> {
-        let parent_session_id = self.ensure_mission_parent_session()?;
+    pub(crate) async fn record_mission_metadata(
+        &mut self,
+        team: Option<&str>,
+        goal: &str,
+    ) -> Result<()> {
+        let parent_session_id = self.ensure_mission_parent_session().await?;
         let mission_id = uuid::Uuid::now_v7().to_string();
         let metadata = Some(serde_json::json!({"source": "tui:/mission"}));
         if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
@@ -36,7 +40,8 @@ impl TuiApp {
                     max_parallel_agents: team.max_parallel_agents,
                     status: "running",
                     metadata: metadata.clone(),
-                })?;
+                })
+                .await?;
             self.state_runtime
                 .create_agent_mission_run(AgentMissionRunInput {
                     id: &mission_id,
@@ -47,7 +52,8 @@ impl TuiApp {
                     lead_agent_name: &team.leader,
                     status: "running",
                     metadata,
-                })?;
+                })
+                .await?;
         } else {
             let lead_agent_name = self.current_agent.as_deref().unwrap_or("general");
             self.state_runtime
@@ -60,20 +66,26 @@ impl TuiApp {
                     lead_agent_name,
                     status: "running",
                     metadata,
-                })?;
+                })
+                .await?;
         }
         Ok(())
     }
 
-    fn ensure_mission_parent_session(&mut self) -> Result<String> {
+    async fn ensure_mission_parent_session(&mut self) -> Result<String> {
         if let Some(session_id) = self.current_session.clone()
-            && self.state_runtime.session_summary(&session_id)?.is_some()
+            && self
+                .state_runtime
+                .session_summary(&session_id)
+                .await?
+                .is_some()
         {
             return Ok(session_id);
         }
         let session_id = self
             .state_runtime
-            .create_session_with_metadata(&self.cwd, "tui", "pending", "pending", None)?;
+            .create_session_with_metadata(&self.cwd, "tui", "pending", "pending", None)
+            .await?;
         self.current_session = Some(session_id.clone());
         self.current_session_title = None;
         self.clear_new_session_draft();
@@ -118,7 +130,7 @@ impl TuiApp {
         if let Some(session_id) = result.session_id {
             self.current_session = Some(session_id);
             self.reset_live_agent_reload_poll();
-            self.refresh_current_session_title()?;
+            self.refresh_current_session_title().await?;
             self.clear_new_session_draft();
         }
         if result.outcome != Outcome::Normal || result.tool_failures > 0 {
@@ -151,31 +163,31 @@ impl TuiApp {
         ui.push_user_with_images(display_prompt.clone(), &images);
         ui.mark_optimistic_rows_from(optimistic_start);
         let (tx, rx) = mpsc::unbounded_channel();
-        let event_sink: GatewayEventSink = Arc::new(move |event| {
+        let event_observer = move |event| {
             let _ = tx.send(event);
-        });
+        };
         let (control_handle, control) = run_control();
-        let mut request = self.thread_turn_request_with_images(prompt, image_inputs);
-        request.policy.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
+        let (mut caller, mut intent) = self.thread_turn_request_with_images(prompt, image_inputs);
+        intent.policy.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
         let gateway = self.gateway.clone();
         let source = self.gateway_source();
         let bind_source = self.canonical_gateway_source();
         let selector = GatewayThreadSelector::source(source.source_key());
         let reset_source_binding = self.force_new_once && self.current_session.is_none();
         let gateway_control_handle = control_handle.clone();
-        request.source = Some(source);
-        request.bind_source = Some(bind_source);
-        request.reset_source_binding = reset_source_binding;
-        request.runtime_source = Some("tui".to_string());
-        request.continue_sources = TUI_CONTINUE_SESSION_SOURCES
-            .iter()
-            .map(|source| (*source).to_string())
-            .collect();
-        request.event_sink = Some(event_sink);
-        request.control_handle = Some(gateway_control_handle);
-        request.control = Some(control);
-        let task =
-            tokio::spawn(async move { gateway.run_turn(request).await.map(|turn| turn.result) });
+        intent.source = Some(source);
+        intent.bind_source = Some(bind_source);
+        intent.reset_source_binding = reset_source_binding;
+        caller.observe_gateway_events(event_observer);
+        caller.set_control(gateway_control_handle, control);
+        let task = tokio::spawn(async move {
+            gateway
+                .start_turn(caller, intent)
+                .await?
+                .wait()
+                .await
+                .map(|turn| turn.result)
+        });
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),

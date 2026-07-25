@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-fn bind_native(app: &TuiApp, session_id: &str) {
+async fn bind_native(app: &TuiApp, session_id: &str) {
     let cwd = app.cwd.display().to_string();
     app.state_runtime
         .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
@@ -22,10 +22,11 @@ fn bind_native(app: &TuiApp, session_id: &str) {
             ownership: psychevo_runtime::state::GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
+        .await
         .expect("Native binding");
 }
 
-fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
+async fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
     app.state_runtime
         .append_message_with_undo_snapshot_metadata_and_context_evidence(
             session_id,
@@ -51,11 +52,12 @@ fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
             Some("before [Image #1] after".to_string()),
             &[],
         )
+        .await
         .expect("persist history message")
 }
 
-#[test]
-pub(crate) fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope() {
+#[tokio::test]
+pub(crate) async fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope() {
     let cwd = PathBuf::from("/workspace");
     let attachments = vec![
         PendingImageAttachment {
@@ -98,16 +100,19 @@ pub(crate) fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope() {
 #[tokio::test]
 pub(crate) async fn persisted_user_row_keyboard_and_mouse_open_same_message_actions() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let session_id = app
         .state_runtime
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+        .await
         .expect("session");
-    bind_native(&app, &session_id);
-    persisted_history_message(&app, &session_id);
+    bind_native(&app, &session_id).await;
+    persisted_history_message(&app, &session_id).await;
     app.current_session = Some(session_id);
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
     let row = ui
         .transcript
         .iter()
@@ -171,31 +176,36 @@ pub(crate) async fn persisted_user_row_keyboard_and_mouse_open_same_message_acti
     ));
 }
 
-#[test]
-pub(crate) fn point_fork_editor_preserves_ordered_images_and_prefills_empty_child() {
+#[tokio::test]
+pub(crate) async fn point_fork_editor_preserves_ordered_images_and_prefills_empty_child() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let source = app
         .state_runtime
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+        .await
         .expect("source");
-    bind_native(&app, &source);
-    let message_seq = persisted_history_message(&app, &source);
+    bind_native(&app, &source).await;
+    let message_seq = persisted_history_message(&app, &source).await;
     app.current_session = Some(source.clone());
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     app.begin_history_message_edit(
         &mut ui,
         format!("message:{message_seq}"),
         HistoryMessageAction::Fork,
     )
+    .await
     .expect("begin fork edit");
     assert_eq!(textarea_text(&ui.textarea), "before [Image #1] after");
     assert_eq!(ui.pending_images.len(), 1);
     ui.set_composer_text("edited [Image #1] tail");
     assert!(
         app.submit_history_message_edit(&mut ui)
+            .await
             .expect("point fork")
     );
 
@@ -204,6 +214,7 @@ pub(crate) fn point_fork_editor_preserves_ordered_images_and_prefills_empty_chil
     assert!(
         app.state_runtime
             .load_messages(&child)
+            .await
             .expect("child messages")
             .is_empty()
     );
@@ -213,40 +224,47 @@ pub(crate) fn point_fork_editor_preserves_ordered_images_and_prefills_empty_chil
     assert_eq!(
         app.state_runtime
             .session_metadata(&child)
+            .await
             .expect("metadata")
             .and_then(|metadata| metadata.get("forkedFromThreadId").cloned()),
         Some(serde_json::json!(source))
     );
 }
 
-#[test]
-pub(crate) fn unchanged_tui_update_is_a_structural_no_op() {
+#[tokio::test]
+pub(crate) async fn unchanged_tui_update_is_a_structural_no_op() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let source = app
         .state_runtime
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+        .await
         .expect("source");
-    bind_native(&app, &source);
-    let message_seq = persisted_history_message(&app, &source);
+    bind_native(&app, &source).await;
+    let message_seq = persisted_history_message(&app, &source).await;
     app.current_session = Some(source.clone());
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
     app.begin_history_message_edit(
         &mut ui,
         format!("message:{message_seq}"),
         HistoryMessageAction::UpdateAndRun,
     )
+    .await
     .expect("begin update");
 
     assert!(
         app.submit_history_message_edit(&mut ui)
+            .await
             .expect("unchanged update")
     );
     assert!(ui.history_message_edit.is_none());
     assert!(
         app.state_runtime
             .session_revert_state(&source)
+            .await
             .expect("revert")
             .is_none()
     );
@@ -256,13 +274,14 @@ pub(crate) fn unchanged_tui_update_is_a_structural_no_op() {
 #[tokio::test]
 pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let source = app
         .state_runtime
         .create_session_with_metadata(&app.cwd, "tui", "model", "mock", None)
+        .await
         .expect("source");
-    bind_native(&app, &source);
-    persisted_history_message(&app, &source);
+    bind_native(&app, &source).await;
+    persisted_history_message(&app, &source).await;
     app.current_session = Some(source.clone());
     let mut ui = FullscreenUi::new(&app);
     app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
@@ -272,11 +291,13 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
         &mut ui,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
     )
+    .await
     .expect("arm");
     app.handle_bottom_panel_key(
         &mut ui,
         KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
     )
+    .await
     .expect("fork");
 
     let child = app.current_session.clone().expect("child");
@@ -284,6 +305,7 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     assert_eq!(
         app.state_runtime
             .load_messages(&child)
+            .await
             .expect("messages")
             .len(),
         1
@@ -291,12 +313,14 @@ pub(crate) async fn sessions_action_f_creates_full_root_fork() {
     assert_eq!(
         app.state_runtime
             .session_summary(&child)
+            .await
             .expect("summary")
             .and_then(|summary| summary.parent_session_id),
         None
     );
     let sessions = app
         .session_selection_panel(SessionListView::Active)
+        .await
         .expect("sessions");
     let child_row = sessions
         .rows

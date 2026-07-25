@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn adaptive_theme_falls_back_without_terminal_profile() {
+#[tokio::test]
+pub(crate) async fn adaptive_theme_falls_back_without_terminal_profile() {
     let theme = TuiTheme::from_profile(TerminalProfile::unknown());
 
     assert_eq!(theme.surface_bg, TUI_ROLE_SURFACE_BG);
@@ -9,8 +9,8 @@ pub(crate) fn adaptive_theme_falls_back_without_terminal_profile() {
     assert_eq!(theme.accent, TUI_ROLE_ACCENT);
 }
 
-#[test]
-pub(crate) fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
+#[tokio::test]
+pub(crate) async fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
     let dark = TuiTheme::from_profile(TerminalProfile::dark());
     let light = TuiTheme::from_profile(TerminalProfile::light());
 
@@ -20,8 +20,8 @@ pub(crate) fn adaptive_theme_derives_distinct_light_and_dark_surfaces() {
     assert_ne!(light.accent, TUI_ROLE_ACCENT);
 }
 
-#[test]
-pub(crate) fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
+#[tokio::test]
+pub(crate) async fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
     let profile = TerminalProfile {
         foreground: Some((238, 238, 238)),
         background: Some((12, 12, 14)),
@@ -33,8 +33,8 @@ pub(crate) fn adaptive_theme_ansi16_uses_stable_fallback_surfaces() {
     assert_eq!(theme.menu_bg, Color::Rgb(16, 16, 20));
 }
 
-#[test]
-pub(crate) fn terminal_probe_parses_default_color_replies() {
+#[tokio::test]
+pub(crate) async fn terminal_probe_parses_default_color_replies() {
     let colors = parse_terminal_default_colors(
         b"\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:1010/1212/1414\x1b\\",
     )
@@ -44,13 +44,13 @@ pub(crate) fn terminal_probe_parses_default_color_replies() {
     assert_eq!(colors.background, (16, 18, 20));
 }
 
-#[test]
-pub(crate) fn motion_uses_shared_activity_spinner_frames() {
+#[tokio::test]
+pub(crate) async fn motion_uses_shared_activity_spinner_frames() {
     assert_eq!(activity_spinner_frame(Duration::from_secs(12)), "⠼");
 }
 
-#[test]
-pub(crate) fn markdown_renders_local_links_relative_to_cwd() {
+#[tokio::test]
+pub(crate) async fn markdown_renders_local_links_relative_to_cwd() {
     let temp = tempdir().expect("temp");
     let file = temp.path().join("src/main.rs");
     let markdown = format!("See [ignored label]({}:42) and `inline`.", file.display());
@@ -68,8 +68,8 @@ pub(crate) fn markdown_renders_local_links_relative_to_cwd() {
     );
 }
 
-#[test]
-pub(crate) fn markdown_renders_tables_as_boxes_with_wrapped_overflow_fallback() {
+#[tokio::test]
+pub(crate) async fn markdown_renders_tables_as_boxes_with_wrapped_overflow_fallback() {
     let temp = tempdir().expect("temp");
     let markdown = "| Name | Value |\n|---|---:|\n| alpha | 42 |";
 
@@ -88,8 +88,8 @@ pub(crate) fn markdown_renders_tables_as_boxes_with_wrapped_overflow_fallback() 
     assert!(!narrow_text.contains("┌"), "{narrow_text}");
 }
 
-#[test]
-pub(crate) fn markdown_wraps_wide_recommendation_tables_before_paragraph_wrapping() {
+#[tokio::test]
+pub(crate) async fn markdown_wraps_wide_recommendation_tables_before_paragraph_wrapping() {
     let temp = tempdir().expect("temp");
     let markdown = concat!(
         "| # | Severity | Recommendation |\n",
@@ -129,8 +129,8 @@ pub(crate) fn markdown_wraps_wide_recommendation_tables_before_paragraph_wrappin
     );
 }
 
-#[test]
-pub(crate) fn markdown_unwraps_fenced_markdown_tables_only_when_table_like() {
+#[tokio::test]
+pub(crate) async fn markdown_unwraps_fenced_markdown_tables_only_when_table_like() {
     let temp = tempdir().expect("temp");
     let table_fence = "```markdown\n| Name | Value |\n|---|---|\n| alpha | beta |\n```";
     let rich = render_markdown_lines(table_fence, temp.path(), Some(80));
@@ -145,8 +145,8 @@ pub(crate) fn markdown_unwraps_fenced_markdown_tables_only_when_table_like() {
     assert!(code_text.contains("# Title"), "{code_text}");
 }
 
-#[test]
-pub(crate) fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
+#[tokio::test]
+pub(crate) async fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
     let temp = tempdir().expect("temp");
     let code = (1..=10)
         .map(|index| format!("fn line_{index}() {{ let value = \"{index}\"; }}"))
@@ -168,8 +168,8 @@ pub(crate) fn markdown_code_blocks_have_boundaries_folding_and_highlighting() {
     }));
 }
 
-#[test]
-pub(crate) fn markdown_exposes_normal_link_destinations() {
+#[tokio::test]
+pub(crate) async fn markdown_exposes_normal_link_destinations() {
     let temp = tempdir().expect("temp");
     let lines = render_markdown_lines(
         "See [docs](https://example.test/docs).",
@@ -181,8 +181,8 @@ pub(crate) fn markdown_exposes_normal_link_destinations() {
     assert!(text.contains("docs (https://example.test/docs)"), "{text}");
 }
 
-#[test]
-pub(crate) fn raw_answer_display_keeps_markdown_source_instead_of_rich_projection() {
+#[tokio::test]
+pub(crate) async fn raw_answer_display_keeps_markdown_source_instead_of_rich_projection() {
     let temp = tempdir().expect("temp");
     let row = TranscriptRow::with_title(
         TranscriptKind::Answer,

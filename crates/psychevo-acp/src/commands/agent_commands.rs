@@ -359,7 +359,7 @@ impl PsychevoAcpAgent {
         }
     }
 
-    pub(crate) fn write_artifact_text(
+    pub(crate) async fn write_artifact_text(
         &self,
         session: &AcpSession,
         artifact_kind: SessionArtifactKind,
@@ -397,6 +397,7 @@ impl PsychevoAcpAgent {
                 artifact_kind,
             },
         )
+        .await
         .map_err(acp_internal_error)?;
         Ok(format!(
             "{}: {} ({} bytes)",

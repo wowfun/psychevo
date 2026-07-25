@@ -50,7 +50,8 @@ pub(crate) async fn run_init_command(args: InitArgs) -> Result<ExitCode> {
         let _ = stop_managed_for_home(&home).await?;
         backup_state_files(&home, &state)?;
     }
-    StateRuntime::open(&state)?;
+    let state_runtime = StateRuntime::open(&state).await?;
+    state_runtime.close().await;
 
     println!("home: {}", home.display());
     println!("config: {}", config.display());

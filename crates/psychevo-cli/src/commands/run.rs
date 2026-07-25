@@ -8,7 +8,8 @@ use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo_ai::Outcome;
 use psychevo_gateway::{
-    Gateway, GatewayInputPart, GatewaySource, ThreadTurnRequest, TranscriptBlockKind,
+    Gateway, GatewayInputPart, GatewaySource, ThreadCallerContext, ThreadSurface, ThreadTurnIntent,
+    TranscriptBlockKind,
 };
 use psychevo_runtime::state::StateRuntime;
 use psychevo_runtime::{
@@ -94,7 +95,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         .iter()
         .cloned()
         .collect::<BTreeMap<_, _>>();
-    let state = StateRuntime::open(&db_path)?;
+    let state = StateRuntime::open(&db_path).await?;
     let gateway = Gateway::new(state.clone());
     let source = GatewaySource::new("cli", format!("run:{}", std::process::id()))
         .invocation()
@@ -104,30 +105,31 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             "cwd": cwd.display().to_string(),
         }));
 
-    let mut request = ThreadTurnRequest::new(cwd, vec![GatewayInputPart::Text { text: prompt }]);
-    request.thread_id = args.session.clone();
-    request.source = Some(source);
-    request.policy.snapshot_root = Some(home.join("snapshots"));
-    request.policy.continue_latest = args.continue_latest;
-    request.policy.extract_prompt_image_sources = true;
-    request.policy.config_path = config_path;
-    request.policy.project_context_override = project_context_override;
-    request.policy.model = args.model.clone();
-    request.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-    request.policy.runtime_profile_ref = runtime_ref;
-    request.policy.control_values = runtime_options;
-    request.policy.include_reasoning = args.include_reasoning;
-    request.policy.mode = run_mode;
-    request.policy.permission_mode = permission_mode;
-    request.policy.approval_handler = approval_handler;
-    request.policy.inherited_env = Some(env_map);
-    request.policy.agent_ref = args.agent.clone();
-    request.policy.no_agents = args.no_agents;
-    request.policy.no_skills = args.no_skills;
-    request.policy.skill_inputs = args.skill.clone();
-    request.runtime_source = Some("run".to_string());
-    request.continue_sources = vec!["run".to_string()];
-    let turn_result = gateway.run_turn(request).await?;
+    let mut caller = ThreadCallerContext::new(ThreadSurface::Cli, cwd);
+    caller.runtime_source = "run".to_string();
+    caller.continue_sources = vec!["run".to_string()];
+    let mut intent = ThreadTurnIntent::new(vec![GatewayInputPart::Text { text: prompt }]);
+    intent.thread_id = args.session.clone();
+    intent.source = Some(source);
+    intent.policy.snapshot_root = Some(home.join("snapshots"));
+    intent.policy.continue_latest = args.continue_latest;
+    intent.policy.extract_prompt_image_sources = true;
+    intent.policy.config_path = config_path;
+    intent.policy.project_context_override = project_context_override;
+    intent.policy.model = args.model.clone();
+    intent.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+    intent.policy.runtime_profile_ref = runtime_ref;
+    intent.policy.control_values = runtime_options;
+    intent.policy.include_reasoning = args.include_reasoning;
+    intent.policy.mode = run_mode;
+    intent.policy.permission_mode = permission_mode;
+    intent.policy.approval_handler = approval_handler;
+    intent.policy.inherited_env = Some(env_map);
+    intent.policy.agent_ref = args.agent.clone();
+    intent.policy.no_agents = args.no_agents;
+    intent.policy.no_skills = args.no_skills;
+    intent.policy.skill_inputs = args.skill.clone();
+    let turn_result = gateway.start_turn(caller, intent).await?.wait().await?;
     let committed_entries = turn_result.committed_entries;
     let result = turn_result.result;
 

@@ -15,8 +15,8 @@ use crate::args::{
 use crate::commands::common::{base_run_options, config_scope_dir, print_json_error, scope_label};
 use crate::env::{inherited_env, resolve_psychevo_home};
 
-pub(crate) fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
-    match run_tool_command_inner(&args) {
+pub(crate) async fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
+    match run_tool_command_inner(&args).await {
         Ok(code) => Ok(code),
         Err(err) if tool_json(&args) => {
             print_json_error(&err)?;
@@ -26,14 +26,14 @@ pub(crate) fn run_tool_command(args: ToolArgs) -> Result<ExitCode> {
     }
 }
 
-pub(crate) fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
+pub(crate) async fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
     let Some(command) = args.command.as_ref() else {
-        list_toolsets(&ToolListArgs { json: false })?;
+        list_toolsets(&ToolListArgs { json: false }).await?;
         return Ok(ExitCode::SUCCESS);
     };
     match command {
-        ToolCommand::List(args) => list_toolsets(args)?,
-        ToolCommand::Show(args) => show_toolset(args)?,
+        ToolCommand::List(args) => list_toolsets(args).await?,
+        ToolCommand::Show(args) => show_toolset(args).await?,
         ToolCommand::Enable(args) => set_toolset_enabled(args, true)?,
         ToolCommand::Disable(args) => set_toolset_enabled(args, false)?,
         ToolCommand::Create(args) => create_toolset(args)?,
@@ -42,16 +42,16 @@ pub(crate) fn run_tool_command_inner(args: &ToolArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-pub(crate) fn list_toolsets(args: &ToolListArgs) -> Result<()> {
+pub(crate) async fn list_toolsets(args: &ToolListArgs) -> Result<()> {
     let (env_map, home, cwd) = command_context()?;
-    let options = base_run_options(&env_map, &home, &cwd)?;
+    let options = base_run_options(&env_map, &home, &cwd).await?;
     let value = toolsets_value(&options, ConfigScope::Effective)?;
     print_toolsets_value(&value, args.json)
 }
 
-pub(crate) fn show_toolset(args: &ToolShowArgs) -> Result<()> {
+pub(crate) async fn show_toolset(args: &ToolShowArgs) -> Result<()> {
     let (env_map, home, cwd) = command_context()?;
-    let options = base_run_options(&env_map, &home, &cwd)?;
+    let options = base_run_options(&env_map, &home, &cwd).await?;
     let value = toolsets_value(&options, ConfigScope::Effective)?;
     let row = value["toolsets"]
         .as_array()

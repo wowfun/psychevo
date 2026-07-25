@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn tui_mouse_capture_avoids_any_motion_tracking() {
+#[tokio::test]
+pub(crate) async fn tui_mouse_capture_avoids_any_motion_tracking() {
     assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1000h"));
     assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1002h"));
     assert!(TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1006h"));
@@ -10,8 +10,8 @@ pub(crate) fn tui_mouse_capture_avoids_any_motion_tracking() {
     assert!(!TUI_MOUSE_CAPTURE_ENABLE_ANSI.contains("?1003h"));
 }
 
-#[test]
-pub(crate) fn tui_mouse_capture_disable_restores_alternate_scroll() {
+#[tokio::test]
+pub(crate) async fn tui_mouse_capture_disable_restores_alternate_scroll() {
     assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1007l"));
     assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1006l"));
     assert!(TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1002l"));
@@ -19,8 +19,8 @@ pub(crate) fn tui_mouse_capture_disable_restores_alternate_scroll() {
     assert!(!TUI_MOUSE_CAPTURE_DISABLE_ANSI.contains("?1003l"));
 }
 
-#[test]
-pub(crate) fn fullscreen_enter_commands_enable_clean_alternate_screen() {
+#[tokio::test]
+pub(crate) async fn fullscreen_enter_commands_enable_clean_alternate_screen() {
     let mut output = Vec::new();
     write_fullscreen_enter_commands(&mut output).expect("enter commands");
     let output = String::from_utf8(output).expect("utf8");
@@ -34,8 +34,8 @@ pub(crate) fn fullscreen_enter_commands_enable_clean_alternate_screen() {
     assert!(output.contains("\x1b[1;1H"));
 }
 
-#[test]
-pub(crate) fn fullscreen_exit_commands_restore_terminal_modes() {
+#[tokio::test]
+pub(crate) async fn fullscreen_exit_commands_restore_terminal_modes() {
     let mut output = Vec::new();
     write_fullscreen_exit_commands(&mut output).expect("exit commands");
     let output = String::from_utf8(output).expect("utf8");
@@ -47,10 +47,10 @@ pub(crate) fn fullscreen_exit_commands_restore_terminal_modes() {
     assert!(output.contains("?25h"));
 }
 
-#[test]
-pub(crate) fn terminal_tab_title_uses_session_title_short_id_and_new_session_fallback() {
+#[tokio::test]
+pub(crate) async fn terminal_tab_title_uses_session_title_short_id_and_new_session_fallback() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
 
     app.current_session = Some("019f691d-3360-75b0-80d0-2678847af384".to_string());
     app.current_session_title = None;
@@ -64,8 +64,8 @@ pub(crate) fn terminal_tab_title_uses_session_title_short_id_and_new_session_fal
     assert_eq!(app.terminal_tab_title(), "Pevo | New session");
 }
 
-#[test]
-pub(crate) fn managed_terminal_title_sanitizes_deduplicates_and_clears_osc_output() {
+#[tokio::test]
+pub(crate) async fn managed_terminal_title_sanitizes_deduplicates_and_clears_osc_output() {
     let mut title = ManagedTerminalTitle::default();
     let mut output = Vec::new();
 
@@ -89,8 +89,8 @@ pub(crate) fn managed_terminal_title_sanitizes_deduplicates_and_clears_osc_outpu
     );
 }
 
-#[test]
-pub(crate) fn passive_mouse_motion_does_not_request_redraw() {
+#[tokio::test]
+pub(crate) async fn passive_mouse_motion_does_not_request_redraw() {
     assert!(!mouse_event_needs_redraw(MouseEventKind::Moved));
     assert!(mouse_event_needs_redraw(MouseEventKind::Drag(
         MouseButton::Left
@@ -98,8 +98,8 @@ pub(crate) fn passive_mouse_motion_does_not_request_redraw() {
     assert!(mouse_event_needs_redraw(MouseEventKind::ScrollUp));
 }
 
-#[test]
-pub(crate) fn passive_redraw_due_throttles_timeout_only_motion() {
+#[tokio::test]
+pub(crate) async fn passive_redraw_due_throttles_timeout_only_motion() {
     let start = Instant::now();
     let mut next_due = schedule_next_passive_redraw(start);
 
@@ -117,8 +117,8 @@ pub(crate) fn passive_redraw_due_throttles_timeout_only_motion() {
     ));
 }
 
-#[test]
-pub(crate) fn selection_extracts_text_from_registered_screen_lines() {
+#[tokio::test]
+pub(crate) async fn selection_extracts_text_from_registered_screen_lines() {
     let lines = vec![
         ScreenLine {
             region: SelectableRegion::Transcript,
@@ -143,10 +143,10 @@ pub(crate) fn selection_extracts_text_from_registered_screen_lines() {
     );
 }
 
-#[test]
-pub(crate) fn selection_uses_rendered_wrapped_transcript_rows() {
+#[tokio::test]
+pub(crate) async fn selection_uses_rendered_wrapped_transcript_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.transcript.push(TranscriptRow::with_title(
         TranscriptKind::Answer,
@@ -166,10 +166,10 @@ pub(crate) fn selection_uses_rendered_wrapped_transcript_rows() {
     assert_eq!(ui.selected_text(), Some(format!("{first}\n{second}")));
 }
 
-#[test]
-pub(crate) fn selection_preserves_wide_characters_from_rendered_rows() {
+#[tokio::test]
+pub(crate) async fn selection_preserves_wide_characters_from_rendered_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("中文测试abc".to_string());
 
@@ -181,10 +181,10 @@ pub(crate) fn selection_preserves_wide_characters_from_rendered_rows() {
     assert_eq!(ui.selected_text().as_deref(), Some("中文测试"));
 }
 
-#[test]
-pub(crate) fn selection_can_copy_sidebar_rendered_text() {
+#[tokio::test]
+pub(crate) async fn selection_can_copy_sidebar_rendered_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_forced = true;
     ui.sidebar_hidden = false;
@@ -208,10 +208,10 @@ pub(crate) fn selection_can_copy_sidebar_rendered_text() {
     assert!(cell.modifier.contains(Modifier::BOLD));
 }
 
-#[test]
-pub(crate) fn sidebar_omits_context_section_and_footer_chrome() {
+#[tokio::test]
+pub(crate) async fn sidebar_omits_context_section_and_footer_chrome() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_mode = RunMode::Plan;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_forced = true;
@@ -244,10 +244,10 @@ pub(crate) fn sidebar_omits_context_section_and_footer_chrome() {
     }
 }
 
-#[test]
-pub(crate) fn sidebar_render_clears_stale_terminal_cells() {
+#[tokio::test]
+pub(crate) async fn sidebar_render_clears_stale_terminal_cells() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_forced = true;
     ui.sidebar_hidden = false;
@@ -297,10 +297,10 @@ pub(crate) fn sidebar_render_clears_stale_terminal_cells() {
     );
 }
 
-#[test]
-pub(crate) fn multiline_transcript_selection_ignores_same_row_sidebar_text() {
+#[tokio::test]
+pub(crate) async fn multiline_transcript_selection_ignores_same_row_sidebar_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_forced = true;
     ui.sidebar_hidden = false;
@@ -351,7 +351,7 @@ pub(crate) fn multiline_transcript_selection_ignores_same_row_sidebar_text() {
 #[tokio::test]
 pub(crate) async fn active_selection_highlights_rendered_buffer_and_esc_clears() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("copy me".to_string());
     ui.start_selection(2, 0);
@@ -385,8 +385,8 @@ pub(crate) async fn active_selection_highlights_rendered_buffer_and_esc_clears()
     );
 }
 
-#[test]
-pub(crate) fn osc52_sequence_encodes_clipboard_text() {
+#[tokio::test]
+pub(crate) async fn osc52_sequence_encodes_clipboard_text() {
     assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
     assert_eq!(
         osc52_sequence_with_passthrough("hello", false).expect("osc52"),
@@ -394,8 +394,8 @@ pub(crate) fn osc52_sequence_encodes_clipboard_text() {
     );
 }
 
-#[test]
-pub(crate) fn osc52_sequence_encodes_cjk_clipboard_text_as_utf8() {
+#[tokio::test]
+pub(crate) async fn osc52_sequence_encodes_cjk_clipboard_text_as_utf8() {
     assert_eq!(base64_encode("中文测试".as_bytes()), "5Lit5paH5rWL6K+V");
     assert_eq!(
         osc52_sequence_with_passthrough("中文测试", false).expect("osc52"),
@@ -403,15 +403,15 @@ pub(crate) fn osc52_sequence_encodes_cjk_clipboard_text_as_utf8() {
     );
 }
 
-#[test]
-pub(crate) fn osc52_sequence_rejects_oversized_clipboard_payload() {
+#[tokio::test]
+pub(crate) async fn osc52_sequence_rejects_oversized_clipboard_payload() {
     let text = "x".repeat(100_001);
 
     assert!(osc52_sequence_with_passthrough(&text, false).is_err());
 }
 
-#[test]
-pub(crate) fn wsl_clipboard_detection_uses_kernel_markers_without_env() {
+#[tokio::test]
+pub(crate) async fn wsl_clipboard_detection_uses_kernel_markers_without_env() {
     assert!(is_probably_wsl_from(
         Some("Linux version 6.6.87.2-microsoft-standard-WSL2"),
         None,
@@ -432,8 +432,8 @@ pub(crate) fn wsl_clipboard_detection_uses_kernel_markers_without_env() {
     ));
 }
 
-#[test]
-pub(crate) fn wsl_clipboard_candidates_try_powershell_then_clip_exe() {
+#[tokio::test]
+pub(crate) async fn wsl_clipboard_candidates_try_powershell_then_clip_exe() {
     let candidates = local_clipboard_commands_for(false, false, true, true);
 
     assert_eq!(
@@ -461,8 +461,8 @@ pub(crate) fn wsl_clipboard_candidates_try_powershell_then_clip_exe() {
     );
 }
 
-#[test]
-pub(crate) fn linux_wayland_clipboard_candidates_try_wl_copy_before_x11() {
+#[tokio::test]
+pub(crate) async fn linux_wayland_clipboard_candidates_try_wl_copy_before_x11() {
     let candidates = local_clipboard_commands_for(false, false, false, true);
 
     assert_eq!(
@@ -481,8 +481,8 @@ pub(crate) fn linux_wayland_clipboard_candidates_try_wl_copy_before_x11() {
     );
 }
 
-#[test]
-pub(crate) fn linux_x11_clipboard_candidates_fall_back_to_xclip_and_xsel() {
+#[tokio::test]
+pub(crate) async fn linux_x11_clipboard_candidates_fall_back_to_xclip_and_xsel() {
     let candidates = local_clipboard_commands_for(false, false, false, false);
 
     assert_eq!(
@@ -501,8 +501,8 @@ pub(crate) fn linux_x11_clipboard_candidates_fall_back_to_xclip_and_xsel() {
     );
 }
 
-#[test]
-pub(crate) fn clipboard_backend_reports_failure_when_all_backends_fail() {
+#[tokio::test]
+pub(crate) async fn clipboard_backend_reports_failure_when_all_backends_fail() {
     let candidates = local_clipboard_commands_for(false, false, true, false);
     let mut tried = Vec::new();
 
@@ -530,8 +530,8 @@ pub(crate) fn clipboard_backend_reports_failure_when_all_backends_fail() {
     assert!(message.contains("OSC52: osc blocked"));
 }
 
-#[test]
-pub(crate) fn local_clipboard_emits_osc52_before_native_commands() {
+#[tokio::test]
+pub(crate) async fn local_clipboard_emits_osc52_before_native_commands() {
     let calls = std::cell::RefCell::new(Vec::new());
 
     let result = copy_text_to_clipboard_with(
@@ -560,8 +560,8 @@ pub(crate) fn local_clipboard_emits_osc52_before_native_commands() {
     assert_eq!(calls.into_inner(), ["OSC52", "remote-copy"]);
 }
 
-#[test]
-pub(crate) fn ssh_clipboard_skips_remote_native_commands_and_uses_osc52() {
+#[tokio::test]
+pub(crate) async fn ssh_clipboard_skips_remote_native_commands_and_uses_osc52() {
     let mut local_calls = 0;
     let mut tmux_calls = 0;
     let mut osc_text = None;
@@ -593,8 +593,8 @@ pub(crate) fn ssh_clipboard_skips_remote_native_commands_and_uses_osc52() {
     assert_eq!(osc_text.as_deref(), Some("hello"));
 }
 
-#[test]
-pub(crate) fn ssh_tmux_clipboard_emits_osc52_and_tmux_load_buffer() {
+#[tokio::test]
+pub(crate) async fn ssh_tmux_clipboard_emits_osc52_and_tmux_load_buffer() {
     let mut local_calls = 0;
     let mut tmux_text = None;
     let mut osc_text = None;
@@ -626,8 +626,8 @@ pub(crate) fn ssh_tmux_clipboard_emits_osc52_and_tmux_load_buffer() {
     assert_eq!(tmux_text.as_deref(), Some("hello"));
 }
 
-#[test]
-pub(crate) fn ssh_tmux_clipboard_succeeds_when_tmux_fails_after_osc52() {
+#[tokio::test]
+pub(crate) async fn ssh_tmux_clipboard_succeeds_when_tmux_fails_after_osc52() {
     let mut local_calls = 0;
     let mut tmux_calls = 0;
     let mut osc_text = None;
@@ -659,8 +659,8 @@ pub(crate) fn ssh_tmux_clipboard_succeeds_when_tmux_fails_after_osc52() {
     assert_eq!(osc_text.as_deref(), Some("hello"));
 }
 
-#[test]
-pub(crate) fn ssh_tmux_clipboard_succeeds_when_osc52_fails_but_tmux_succeeds() {
+#[tokio::test]
+pub(crate) async fn ssh_tmux_clipboard_succeeds_when_osc52_fails_but_tmux_succeeds() {
     let mut local_calls = 0;
     let mut tmux_text = None;
     let mut osc_calls = 0;
@@ -692,8 +692,8 @@ pub(crate) fn ssh_tmux_clipboard_succeeds_when_osc52_fails_but_tmux_succeeds() {
     assert_eq!(tmux_text.as_deref(), Some("hello"));
 }
 
-#[test]
-pub(crate) fn ssh_tmux_clipboard_reports_osc52_and_tmux_failures() {
+#[tokio::test]
+pub(crate) async fn ssh_tmux_clipboard_reports_osc52_and_tmux_failures() {
     let result = copy_text_to_clipboard_with(
         "hello",
         ClipboardEnvironment {
@@ -711,8 +711,8 @@ pub(crate) fn ssh_tmux_clipboard_reports_osc52_and_tmux_failures() {
     assert!(message.contains("tmux: tmux unavailable"));
 }
 
-#[test]
-pub(crate) fn tmux_clipboard_ready_rejects_disabled_or_missing_forwarding() {
+#[tokio::test]
+pub(crate) async fn tmux_clipboard_ready_rejects_disabled_or_missing_forwarding() {
     assert!(
         tmux_clipboard_copy_ready(
             || Ok("external\n".to_string()),
@@ -743,7 +743,7 @@ pub(crate) fn tmux_clipboard_ready_rejects_disabled_or_missing_forwarding() {
 #[tokio::test]
 pub(crate) async fn mouse_drag_copies_selected_text_through_clipboard_sink() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let copied = Arc::new(Mutex::new(Vec::new()));
     let copied_for_sink = Arc::clone(&copied);
     app.clipboard = Arc::new(move |text| {
@@ -800,7 +800,7 @@ pub(crate) async fn mouse_drag_copies_selected_text_through_clipboard_sink() {
 #[tokio::test]
 pub(crate) async fn mouse_up_clipboard_failure_clears_selection_without_quitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.clipboard = Arc::new(|_| Err(io::Error::other("blocked")));
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("copy this line".to_string());
@@ -866,7 +866,7 @@ pub(crate) async fn wait_for_clipboard_task(app: &mut TuiApp, ui: &mut Fullscree
 #[tokio::test]
 pub(crate) async fn ctrl_c_copies_active_selection_without_quitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let copied = Arc::new(Mutex::new(Vec::new()));
     let copied_for_sink = Arc::clone(&copied);
     app.clipboard = Arc::new(move |text| {
@@ -901,7 +901,7 @@ pub(crate) async fn ctrl_c_copies_active_selection_without_quitting() {
 #[tokio::test]
 pub(crate) async fn clipboard_failure_during_ctrl_c_is_consumed_without_quitting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.clipboard = Arc::new(|_| Err(io::Error::other("blocked")));
     let mut ui = FullscreenUi::new(&app);
     ui.push_screen_line(0, 0, "selected text");

@@ -20,14 +20,14 @@ pub(crate) fn print_json_error(err: &anyhow::Error) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn base_run_options(
+pub(crate) async fn base_run_options(
     env_map: &BTreeMap<String, String>,
     home: &Path,
     cwd: &Path,
 ) -> Result<RunOptions> {
     let db_path = resolve_state_db(env_map, home, cwd)?;
     Ok(RunOptions {
-        state: StateRuntime::open(&db_path)?,
+        state: StateRuntime::open(&db_path).await?,
         cwd: cwd.to_path_buf(),
         snapshot_root: None,
         session: None,

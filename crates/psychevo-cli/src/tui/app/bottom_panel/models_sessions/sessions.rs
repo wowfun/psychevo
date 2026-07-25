@@ -2,7 +2,7 @@
 pub(crate) use super::*;
 
 impl TuiApp {
-    pub(crate) fn apply_session_panel_action(
+    pub(crate) async fn apply_session_panel_action(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         action: char,
@@ -18,10 +18,12 @@ impl TuiApp {
             return Ok(());
         };
         match (view, action.to_ascii_lowercase()) {
-            (SessionListView::Active, 'a') => self.archive_session_from_panel(ui, session_id),
-            (SessionListView::Active, 'f') => self.fork_session_from_panel(ui, session_id),
-            (SessionListView::Archived, 'r') => self.restore_session_from_panel(ui, session_id),
-            (_, 'd') => self.delete_session_from_panel(ui, session_id),
+            (SessionListView::Active, 'a') => self.archive_session_from_panel(ui, session_id).await,
+            (SessionListView::Active, 'f') => self.fork_session_from_panel(ui, session_id).await,
+            (SessionListView::Archived, 'r') => {
+                self.restore_session_from_panel(ui, session_id).await
+            }
+            (_, 'd') => self.delete_session_from_panel(ui, session_id).await,
             (SessionListView::Active, _) => {
                 if let Some(BottomPanel::Sessions(panel)) = &mut ui.bottom_panel {
                     panel.notice = Some("action: F fork  A archive  D delete".to_string());
@@ -37,7 +39,7 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn archive_session_from_panel(
+    pub(crate) async fn archive_session_from_panel(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: String,
@@ -49,30 +51,32 @@ impl TuiApp {
             }
             return Ok(());
         }
-        self.state_runtime.archive_session(&session_id)?;
+        self.state_runtime.archive_session(&session_id).await?;
         if self.current_session.as_deref() == Some(session_id.as_str()) {
             self.clear_current_session_after_management(ui);
         }
-        self.rebuild_session_panel(ui, SessionListView::Active, None, Some("session archived"))?;
+        self.rebuild_session_panel(ui, SessionListView::Active, None, Some("session archived"))
+            .await?;
         Ok(())
     }
 
-    pub(crate) fn restore_session_from_panel(
+    pub(crate) async fn restore_session_from_panel(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: String,
     ) -> Result<()> {
-        self.state_runtime.restore_session(&session_id)?;
+        self.state_runtime.restore_session(&session_id).await?;
         self.rebuild_session_panel(
             ui,
             SessionListView::Archived,
             None,
             Some("session restored"),
-        )?;
+        )
+        .await?;
         Ok(())
     }
 
-    pub(crate) fn delete_session_from_panel(
+    pub(crate) async fn delete_session_from_panel(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         session_id: String,
@@ -95,11 +99,12 @@ impl TuiApp {
         }
         let view = panel.session_view.unwrap_or(SessionListView::Active);
         panel.delete_confirm = None;
-        self.state_runtime.delete_session(&session_id)?;
+        self.state_runtime.delete_session(&session_id).await?;
         if self.current_session.as_deref() == Some(session_id.as_str()) {
             self.clear_current_session_after_management(ui);
         }
-        self.rebuild_session_panel(ui, view, None, Some("session deleted"))?;
+        self.rebuild_session_panel(ui, view, None, Some("session deleted"))
+            .await?;
         Ok(())
     }
 
@@ -121,7 +126,10 @@ impl TuiApp {
         ui.refresh_sidebar(self);
     }
 
-    pub(crate) fn toggle_session_panel_view(&mut self, ui: &mut FullscreenUi<'_>) -> Result<()> {
+    pub(crate) async fn toggle_session_panel_view(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+    ) -> Result<()> {
         let Some(BottomPanel::Sessions(panel)) = &ui.bottom_panel else {
             return Ok(());
         };
@@ -130,13 +138,13 @@ impl TuiApp {
             SessionListView::Active => SessionListView::Archived,
             SessionListView::Archived => SessionListView::Active,
         };
-        let mut panel = self.session_selection_panel(next)?;
+        let mut panel = self.session_selection_panel(next).await?;
         panel.query = query;
         ui.bottom_panel = Some(BottomPanel::Sessions(panel));
         Ok(())
     }
 
-    pub(crate) fn rebuild_session_panel(
+    pub(crate) async fn rebuild_session_panel(
         &mut self,
         ui: &mut FullscreenUi<'_>,
         view: SessionListView,
@@ -148,7 +156,7 @@ impl TuiApp {
             .as_ref()
             .map(|panel| panel.selection().query.clone())
             .unwrap_or_default();
-        let mut panel = self.session_selection_panel(view)?;
+        let mut panel = self.session_selection_panel(view).await?;
         panel.query = query;
         if let Some(key) = selected_key {
             panel.select_value_key(&key);

@@ -7,10 +7,10 @@ pub(crate) fn composer_ctrl_a_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)
 }
 
-#[test]
-pub(crate) fn composer_terminal_cursor_anchors_empty_input() {
+#[tokio::test]
+pub(crate) async fn composer_terminal_cursor_anchors_empty_input() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     let (_buffer, cursor) = draw_fullscreen_with_cursor_for_test(&app, &mut ui, 48, 10);
@@ -19,10 +19,10 @@ pub(crate) fn composer_terminal_cursor_anchors_empty_input() {
     assert_eq!(cursor, (input.x, input.y));
 }
 
-#[test]
-pub(crate) fn composer_terminal_cursor_anchors_normal_text() {
+#[tokio::test]
+pub(crate) async fn composer_terminal_cursor_anchors_normal_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("hello");
 
@@ -32,10 +32,10 @@ pub(crate) fn composer_terminal_cursor_anchors_normal_text() {
     assert_eq!(cursor, (input.x + 5, input.y));
 }
 
-#[test]
-pub(crate) fn composer_terminal_cursor_anchors_shell_mode_text() {
+#[tokio::test]
+pub(crate) async fn composer_terminal_cursor_anchors_shell_mode_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("echo");
@@ -46,10 +46,10 @@ pub(crate) fn composer_terminal_cursor_anchors_shell_mode_text() {
     assert_eq!(cursor, (input.x + 4, input.y));
 }
 
-#[test]
-pub(crate) fn composer_terminal_cursor_anchors_cjk_wide_text() {
+#[tokio::test]
+pub(crate) async fn composer_terminal_cursor_anchors_cjk_wide_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("你好x");
 
@@ -59,10 +59,10 @@ pub(crate) fn composer_terminal_cursor_anchors_cjk_wide_text() {
     assert_eq!(cursor, (input.x + 5, input.y));
 }
 
-#[test]
-pub(crate) fn long_single_line_composer_grows_to_wrapped_rows() {
+#[tokio::test]
+pub(crate) async fn long_single_line_composer_grows_to_wrapped_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("abcdefghijklmnopqrstuvwxyz");
 
@@ -73,10 +73,10 @@ pub(crate) fn long_single_line_composer_grows_to_wrapped_rows() {
     assert_eq!(cursor, (input.x + 6, input.y + 2));
 }
 
-#[test]
-pub(crate) fn empty_composer_retains_one_input_row() {
+#[tokio::test]
+pub(crate) async fn empty_composer_retains_one_input_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     let _ = draw_fullscreen_for_test(&app, &mut ui, 48, 10);
@@ -85,10 +85,10 @@ pub(crate) fn empty_composer_retains_one_input_row() {
     assert_eq!(input.height, 1);
 }
 
-#[test]
-pub(crate) fn multiline_composer_uses_logical_rows_when_wide() {
+#[tokio::test]
+pub(crate) async fn multiline_composer_uses_logical_rows_when_wide() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("one\ntwo\nthree");
 
@@ -98,10 +98,10 @@ pub(crate) fn multiline_composer_uses_logical_rows_when_wide() {
     assert_eq!(input.height, 3);
 }
 
-#[test]
-pub(crate) fn long_composer_height_is_capped_at_six_rows() {
+#[tokio::test]
+pub(crate) async fn long_composer_height_is_capped_at_six_rows() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text(&"abcdefghijklmnopqrstuvwxyz".repeat(4));
 
@@ -111,10 +111,10 @@ pub(crate) fn long_composer_height_is_capped_at_six_rows() {
     assert_eq!(input.height, 6);
 }
 
-#[test]
-pub(crate) fn composer_terminal_cursor_stays_anchored_with_popup_above() {
+#[tokio::test]
+pub(crate) async fn composer_terminal_cursor_stays_anchored_with_popup_above() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/sess");
 
@@ -131,7 +131,7 @@ pub(crate) fn composer_terminal_cursor_stays_anchored_with_popup_above() {
 #[tokio::test]
 pub(crate) async fn enter_executes_first_slash_menu_suggestion() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/sess");
 
@@ -151,7 +151,7 @@ pub(crate) async fn enter_executes_first_slash_menu_suggestion() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_selects_all_and_backspace_clears() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("hello\n世界");
 
@@ -176,7 +176,7 @@ pub(crate) async fn composer_ctrl_a_selects_all_and_backspace_clears() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_delete_clears_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("delete me");
 
@@ -194,7 +194,7 @@ pub(crate) async fn composer_ctrl_a_delete_clears_selection() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_input_replaces_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("old text");
 
@@ -215,7 +215,7 @@ pub(crate) async fn composer_ctrl_a_input_replaces_selection() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_paste_replaces_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("old text");
 
@@ -233,7 +233,7 @@ pub(crate) async fn composer_ctrl_a_paste_replaces_selection() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_empty_composer_is_noop() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_key(&mut ui, composer_ctrl_a_key())
@@ -247,7 +247,7 @@ pub(crate) async fn composer_ctrl_a_empty_composer_is_noop() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_shell_mode_deletes_command_without_exiting() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("printf shell");
@@ -278,7 +278,7 @@ pub(crate) async fn composer_ctrl_a_shell_mode_deletes_command_without_exiting()
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_bottom_panel_keeps_focus() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("draft");
     ui.bottom_panel = Some(BottomPanel::Help(app.help_panel()));
@@ -295,7 +295,7 @@ pub(crate) async fn composer_ctrl_a_bottom_panel_keeps_focus() {
 #[tokio::test]
 pub(crate) async fn composer_ctrl_a_esc_cancels_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("draft");
 
@@ -311,10 +311,10 @@ pub(crate) async fn composer_ctrl_a_esc_cancels_selection() {
     assert!(ui.running.is_none());
 }
 
-#[test]
-pub(crate) fn composer_ctrl_a_selection_is_highlighted() {
+#[tokio::test]
+pub(crate) async fn composer_ctrl_a_selection_is_highlighted() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("highlight");
     ui.textarea.select_all();
@@ -332,7 +332,7 @@ pub(crate) fn composer_ctrl_a_selection_is_highlighted() {
 #[tokio::test]
 pub(crate) async fn composer_mouse_selection_selects_text_without_clipboard_copy() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let copied = Arc::new(Mutex::new(Vec::new()));
     let copied_for_sink = Arc::clone(&copied);
     app.clipboard = Arc::new(move |text| {
@@ -384,7 +384,7 @@ pub(crate) async fn composer_mouse_selection_selects_text_without_clipboard_copy
 #[tokio::test]
 pub(crate) async fn composer_mouse_selection_backspace_and_delete_clear_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("delete me");
     draw_fullscreen_for_test(&app, &mut ui, 48, 10);
@@ -439,7 +439,7 @@ pub(crate) async fn composer_mouse_selection_backspace_and_delete_clear_selectio
 #[tokio::test]
 pub(crate) async fn composer_mouse_selection_input_and_paste_replace_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("old text");
     draw_fullscreen_for_test(&app, &mut ui, 48, 10);
@@ -494,7 +494,7 @@ pub(crate) async fn composer_mouse_selection_input_and_paste_replace_selection()
 #[tokio::test]
 pub(crate) async fn composer_mouse_selection_maps_cjk_width_to_text_columns() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("你好ab");
     draw_fullscreen_for_test(&app, &mut ui, 48, 10);
@@ -533,7 +533,7 @@ pub(crate) async fn composer_mouse_selection_maps_cjk_width_to_text_columns() {
 #[tokio::test]
 pub(crate) async fn composer_mouse_click_moves_cursor_and_clears_old_selection() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("abcdef");
     ui.textarea.select_all();
@@ -568,7 +568,7 @@ pub(crate) async fn composer_mouse_click_moves_cursor_and_clears_old_selection()
 #[tokio::test]
 pub(crate) async fn composer_mouse_selection_shell_mode_keeps_shell_state() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("echo hi");
@@ -616,7 +616,7 @@ pub(crate) async fn composer_mouse_selection_shell_mode_keeps_shell_state() {
 #[tokio::test]
 pub(crate) async fn paste_event_inserts_full_path_without_dropping_chars() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let pasted =
         "/home/kevin/Projects/psychevo/.local/data/subagents-vs-agent-teams-dark.txt\r\n描述该文件";
@@ -636,7 +636,7 @@ pub(crate) async fn paste_event_inserts_full_path_without_dropping_chars() {
 #[tokio::test]
 pub(crate) async fn standalone_pasted_image_source_adds_pending_attachment() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let image = app.cwd.join("image.png");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -661,7 +661,7 @@ pub(crate) async fn standalone_pasted_image_source_adds_pending_attachment() {
 #[tokio::test]
 pub(crate) async fn standalone_pasted_url_remains_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let pasted = "https://example.com/token-plan/mimo-v2.5-pro";
 
@@ -679,7 +679,7 @@ pub(crate) async fn standalone_pasted_url_remains_text() {
 #[tokio::test]
 pub(crate) async fn pasted_prompt_with_embedded_image_path_remains_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let image = app.cwd.join("img1.avif");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -702,7 +702,7 @@ pub(crate) async fn pasted_prompt_with_embedded_image_path_remains_text() {
 #[tokio::test]
 pub(crate) async fn missing_standalone_image_paste_is_inserted_as_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let missing = app.cwd.join("missing.avif");
     let mut ui = FullscreenUi::new(&app);
 
@@ -721,7 +721,7 @@ pub(crate) async fn missing_standalone_image_paste_is_inserted_as_text() {
 #[tokio::test]
 pub(crate) async fn cjk_prompt_with_relative_image_name_pastes_as_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let pasted = "描述这张图片的内容：img1.avif";
 
@@ -737,7 +737,7 @@ pub(crate) async fn cjk_prompt_with_relative_image_name_pastes_as_text() {
 #[tokio::test]
 pub(crate) async fn image_slash_command_adds_attachment_and_restores_prompt() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let image = app.cwd.join("image one.png");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -765,7 +765,7 @@ pub(crate) async fn image_slash_command_adds_attachment_and_restores_prompt() {
 #[tokio::test]
 pub(crate) async fn image_slash_command_error_uses_command_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.submit_fullscreen_text(&mut ui, "/image missing.png".to_string(), true)
@@ -785,7 +785,7 @@ pub(crate) async fn image_slash_command_error_uses_command_row() {
 #[tokio::test]
 pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_command() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let image = app.cwd.join("image.avif");
     fs::write(&image, [1, 2, 3]).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -820,7 +820,7 @@ pub(crate) async fn leading_absolute_image_path_submits_as_prompt_not_slash_comm
 #[tokio::test]
 pub(crate) async fn leading_absolute_markdown_path_submits_as_prompt_not_slash_command() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let path = app.cwd.join("docs").join("evaluation").join("README.md");
     fs::create_dir_all(path.parent().expect("parent")).expect("docs dir");
     fs::write(&path, "# Evaluation\n").expect("markdown");
@@ -855,7 +855,7 @@ pub(crate) async fn leading_absolute_markdown_path_submits_as_prompt_not_slash_c
 #[tokio::test]
 pub(crate) async fn unknown_slash_input_submits_as_prompt() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let prompt = "/made-up explain this".to_string();
 
@@ -886,7 +886,7 @@ pub(crate) async fn unknown_slash_input_submits_as_prompt() {
 #[tokio::test]
 pub(crate) async fn uninstalled_dynamic_slash_input_submits_as_prompt() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let prompt = "/helper apply it to src/lib.rs".to_string();
 
@@ -917,7 +917,7 @@ pub(crate) async fn uninstalled_dynamic_slash_input_submits_as_prompt() {
 #[tokio::test]
 pub(crate) async fn known_slash_command_argument_errors_remain_command_errors() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.submit_fullscreen_text(&mut ui, "/model set mock/model".to_string(), true)
@@ -933,7 +933,7 @@ pub(crate) async fn known_slash_command_argument_errors_remain_command_errors() 
 #[tokio::test]
 pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let image = app.cwd.join("img1.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);
@@ -971,7 +971,7 @@ pub(crate) async fn embedded_absolute_image_path_submits_as_text() {
 #[tokio::test]
 pub(crate) async fn image_only_submit_uses_pending_attachment_and_clears_composer() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     let image = app.cwd.join("image.png");
     fs::write(&image, tiny_png_bytes()).expect("image");
     let mut ui = FullscreenUi::new(&app);

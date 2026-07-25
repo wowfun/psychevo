@@ -76,9 +76,12 @@ impl GatewayContext {
         })
     }
 
-    pub(super) fn run_options(&self, cwd: PathBuf) -> Result<psychevo_runtime::types::RunOptions> {
+    pub(super) async fn run_options(
+        &self,
+        cwd: PathBuf,
+    ) -> Result<psychevo_runtime::types::RunOptions> {
         Ok(psychevo_runtime::types::RunOptions {
-            state: psychevo_runtime::state::StateRuntime::open(self.home.join("state.db"))?,
+            state: psychevo_runtime::state::StateRuntime::open(self.home.join("state.db")).await?,
             cwd,
             snapshot_root: Some(self.home.join("snapshots")),
             session: None,

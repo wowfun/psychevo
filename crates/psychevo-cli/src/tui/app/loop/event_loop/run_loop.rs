@@ -42,7 +42,7 @@ impl TuiApp {
     ) -> Result<()> {
         let mut ui = FullscreenUi::new(self);
         self.journey_profile.mark_ui_constructed();
-        self.load_current_session_history(&mut ui)?;
+        self.load_current_session_history(&mut ui).await?;
         self.journey_profile.mark_history_loaded();
         terminal_guard.sync_title(terminal.backend_mut(), &self.terminal_tab_title());
         let mut needs_draw = true;
@@ -99,7 +99,7 @@ impl TuiApp {
         }
         if let Some(running) = ui.running.take() {
             if let Some(selector) = running.selector.clone() {
-                self.gateway.interrupt_turn(selector);
+                self.gateway.interrupt_turn(selector).await;
             }
             running.control.abort();
             ui.discard_permission_approvals_for_abort();

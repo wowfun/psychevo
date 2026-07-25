@@ -37,7 +37,7 @@ async fn doctor_report(args: &DoctorArgs) -> Result<Value> {
     let home_config = home.join("config.toml");
     let home_initialized = home_config.exists();
 
-    let options = base_run_options(&env_map, &home, &cwd);
+    let options = base_run_options(&env_map, &home, &cwd).await;
     let config = match &options {
         Ok(options) => capture_value(|| {
             Ok(config_show_value(

@@ -4,10 +4,11 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent");
     insert_tui_message_with_metadata(
         &app.db_path,
@@ -24,7 +25,9 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     );
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Btw(None))
         .await
@@ -40,6 +43,7 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     assert!(ui.transcript.is_empty());
     assert!(
         app.tui_sessions(SessionListView::Active)
+            .await
             .expect("sessions")
             .iter()
             .all(|session| session.summary.id != side)
@@ -79,8 +83,10 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
     assert!(app.side_conversation.is_none());
     assert!(
         StateRuntime::open(&app.db_path)
+            .await
             .expect("store")
             .session_summary(&side)
+            .await
             .expect("summary")
             .is_none()
     );
@@ -94,10 +100,11 @@ pub(crate) async fn fullscreen_btw_opens_hidden_side_and_ctrl_c_deletes_it() {
 #[tokio::test]
 pub(crate) async fn fullscreen_btw_detaches_running_parent() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent");
     app.current_session = Some(parent.clone());
     let mut ui = FullscreenUi::new(&app);
@@ -126,10 +133,11 @@ pub(crate) async fn fullscreen_btw_detaches_running_parent() {
 #[tokio::test]
 pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app_with_models(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let parent = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("parent");
     let side = store
         .create_child_session_with_metadata(
@@ -140,6 +148,7 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
             "mock",
             Some(serde_json::json!({SIDE_CONVERSATION_METADATA_KEY: {"ephemeral": true}})),
         )
+        .await
         .expect("side");
     app.current_session = Some(parent);
     let mut ui = FullscreenUi::new(&app);
@@ -156,8 +165,10 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
 
     assert!(
         StateRuntime::open(&app.db_path)
+            .await
             .expect("store")
             .session_summary(&side)
+            .await
             .expect("summary")
             .is_none()
     );
@@ -171,7 +182,7 @@ pub(crate) async fn fullscreen_refresh_cleans_orphan_side_conversations() {
 #[tokio::test]
 pub(crate) async fn mouse_click_can_execute_slash_menu_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.textarea = textarea_with_text("/mo");
     ui.last_slash_menu_areas = vec![(
@@ -202,7 +213,7 @@ pub(crate) async fn mouse_click_can_execute_slash_menu_row() {
 #[tokio::test]
 pub(crate) async fn mouse_wheel_scrolls_transcript_inside_tui() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     for index in 0..12 {
         ui.transcript.push(TranscriptRow::simple(
@@ -233,7 +244,7 @@ pub(crate) async fn mouse_wheel_scrolls_transcript_inside_tui() {
 #[tokio::test]
 pub(crate) async fn mouse_wheel_in_transcript_does_not_recall_composer_history() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["older prompt".to_string()];
     for index in 0..18 {
@@ -267,7 +278,7 @@ pub(crate) async fn mouse_wheel_in_transcript_does_not_recall_composer_history()
 #[tokio::test]
 pub(crate) async fn mouse_wheel_in_composer_or_status_is_ignored() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["older prompt".to_string()];
     for index in 0..18 {
@@ -304,7 +315,7 @@ pub(crate) async fn mouse_wheel_in_composer_or_status_is_ignored() {
 #[tokio::test]
 pub(crate) async fn mouse_wheel_routes_between_bottom_panel_and_transcript_by_hover() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     for index in 0..18 {
         ui.transcript.push(TranscriptRow::simple(
@@ -361,7 +372,7 @@ pub(crate) async fn mouse_wheel_routes_between_bottom_panel_and_transcript_by_ho
 #[tokio::test]
 pub(crate) async fn empty_composer_down_without_active_history_does_not_scroll_or_recall() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["older prompt".to_string()];
     for index in 0..18 {
@@ -388,7 +399,7 @@ pub(crate) async fn empty_composer_down_without_active_history_does_not_scroll_o
 #[tokio::test]
 pub(crate) async fn empty_composer_up_recalls_latest_prompt_without_scrolling_transcript() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["older prompt".to_string(), "latest prompt".to_string()];
     for index in 0..18 {
@@ -416,7 +427,7 @@ pub(crate) async fn empty_composer_up_recalls_latest_prompt_without_scrolling_tr
 #[tokio::test]
 pub(crate) async fn non_empty_composer_up_recalls_prompt_history_and_down_restores_draft() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["older prompt".to_string()];
     ui.textarea = textarea_with_text("draft");

@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 use super::*;
 
-#[test]
-pub(crate) fn streaming_tool_completion_reuses_pending_row_as_completed_evidence() {
+#[tokio::test]
+pub(crate) async fn streaming_tool_completion_reuses_pending_row_as_completed_evidence() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -47,10 +47,10 @@ pub(crate) fn streaming_tool_completion_reuses_pending_row_as_completed_evidence
     assert!(row.tool_started.is_none());
 }
 
-#[test]
-pub(crate) fn agent_pending_row_with_position_id_upgrade_merges_into_resolved_child_row() {
+#[tokio::test]
+pub(crate) async fn agent_pending_row_with_position_id_upgrade_merges_into_resolved_child_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let agent_args = serde_json::json!({
         "agent_type": "translate",
@@ -122,10 +122,10 @@ pub(crate) fn agent_pending_row_with_position_id_upgrade_merges_into_resolved_ch
     assert_eq!(row.text, "Done (0 tool uses · 864 tokens)");
 }
 
-#[test]
-pub(crate) fn parallel_agent_pending_rows_match_by_position_not_agent_name() {
+#[tokio::test]
+pub(crate) async fn parallel_agent_pending_rows_match_by_position_not_agent_name() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let cn_args = serde_json::json!({
         "agent_type": "translate",
@@ -247,10 +247,10 @@ pub(crate) fn parallel_agent_pending_rows_match_by_position_not_agent_name() {
     );
 }
 
-#[test]
-pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
+#[tokio::test]
+pub(crate) async fn late_agent_pending_after_completion_does_not_create_third_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let cn_args = serde_json::json!({
         "agent_type": "translate",
@@ -415,10 +415,10 @@ pub(crate) fn late_agent_pending_after_completion_does_not_create_third_row() {
     );
 }
 
-#[test]
-pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_position() {
+#[tokio::test]
+pub(crate) async fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_position() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let cn_args = serde_json::json!({
         "agent_type": "translate",
@@ -543,10 +543,10 @@ pub(crate) fn weak_agent_placeholder_with_only_agent_type_adopts_resolved_positi
     );
 }
 
-#[test]
-pub(crate) fn agent_session_start_with_unknown_id_does_not_steal_pending_row() {
+#[tokio::test]
+pub(crate) async fn agent_session_start_with_unknown_id_does_not_steal_pending_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let cn_args = serde_json::json!({
         "agent_type": "translate",
@@ -605,10 +605,10 @@ pub(crate) fn agent_session_start_with_unknown_id_does_not_steal_pending_row() {
     assert_eq!(agent_rows(&ui).len(), 3, "{:#?}", ui.transcript);
 }
 
-#[test]
-pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending() {
+#[tokio::test]
+pub(crate) async fn background_agent_handoff_keeps_single_row_for_late_partial_pending() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let cn_pending = serde_json::json!({
         "agent_type": "translate",
@@ -735,10 +735,10 @@ pub(crate) fn background_agent_handoff_keeps_single_row_for_late_partial_pending
     assert_eq!(en_row.text, "Started in background");
 }
 
-#[test]
-pub(crate) fn background_agent_handoff_stepwise_never_duplicates_or_interrupts() {
+#[tokio::test]
+pub(crate) async fn background_agent_handoff_stepwise_never_duplicates_or_interrupts() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let cn_args = serde_json::json!({
         "agent_type": "translate",

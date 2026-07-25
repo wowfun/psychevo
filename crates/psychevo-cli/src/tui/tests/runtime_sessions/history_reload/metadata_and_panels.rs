@@ -1,11 +1,11 @@
-#[test]
-pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
+#[tokio::test]
+pub(crate) async fn message_history_completed_assistant_restores_turn_meta() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     insert_tui_message_with_metadata(
         &app.db_path,
@@ -28,7 +28,7 @@ pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
     );
 
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let answer = ui
         .transcript
@@ -47,14 +47,14 @@ pub(crate) fn message_history_completed_assistant_restores_turn_meta() {
     assert!(answer < meta);
 }
 
-#[test]
-pub(crate) fn message_history_merges_write_stdin_into_exec_command_row() {
+#[tokio::test]
+pub(crate) async fn message_history_merges_write_stdin_into_exec_command_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
-        .expect("session");
+        .await.expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -138,7 +138,7 @@ pub(crate) fn message_history_merges_write_stdin_into_exec_command_row() {
         }),
     );
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui).await.expect("history");
 
     let rows = ui
         .transcript
@@ -158,10 +158,10 @@ pub(crate) fn message_history_merges_write_stdin_into_exec_command_row() {
     assert!(rows[0].tool_started.is_none());
 }
 
-#[test]
-pub(crate) fn typed_empty_reasoning_completion_does_not_create_blank_row() {
+#[tokio::test]
+pub(crate) async fn typed_empty_reasoning_completion_does_not_create_blank_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -181,10 +181,10 @@ pub(crate) fn typed_empty_reasoning_completion_does_not_create_blank_row() {
     assert!(ui.transcript.is_empty());
 }
 
-#[test]
-pub(crate) fn typed_write_stdin_completion_uses_cached_args_and_hides_row() {
+#[tokio::test]
+pub(crate) async fn typed_write_stdin_completion_uses_cached_args_and_hides_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     app.current_session = Some("session-1".to_string());
     let mut ui = FullscreenUi::new(&app);
 
@@ -265,14 +265,14 @@ pub(crate) fn typed_write_stdin_completion_uses_cached_args_and_hides_row() {
 #[tokio::test]
 pub(crate) async fn sessions_panel_switches_without_status_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let first = store
         .create_session_with_metadata(&app.cwd, "tui", "model-a", "mock", None)
-        .expect("first");
+        .await.expect("first");
     let second = store
         .create_session_with_metadata(&app.cwd, "tui", "model-b", "mock", None)
-        .expect("second");
+        .await.expect("second");
     app.current_session = Some(first.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
     insert_tui_message(
@@ -307,7 +307,7 @@ pub(crate) async fn sessions_panel_switches_without_status_row() {
 
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui)
-        .expect("first history");
+        .await.expect("first history");
     assert_eq!(ui.history.as_slice(), ["first prompt"]);
     ui.push_submitted_history("/sessions".to_string());
     app.handle_fullscreen_command(&mut ui, SlashCommand::Sessions)
@@ -318,10 +318,10 @@ pub(crate) async fn sessions_panel_switches_without_status_row() {
             &mut ui,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE),
         )
-        .expect("query");
+        .await.expect("query");
     }
     app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("select");
+        .await.expect("select");
 
     assert_eq!(app.current_session.as_deref(), Some(second.as_str()));
     assert!(ui.bottom_panel.is_none());

@@ -5,7 +5,7 @@ impl PsychevoAcpAgent {
         prompt: String,
         image_inputs: Vec<ImageInput>,
         approval_handler: Option<Arc<dyn ApprovalHandler>>,
-    ) -> ThreadTurnRequest {
+    ) -> (ThreadCallerContext, ThreadTurnIntent) {
         let mut input = Vec::with_capacity(1 + image_inputs.len());
         if !prompt.is_empty() {
             input.push(GatewayInputPart::Text { text: prompt });
@@ -22,20 +22,22 @@ impl PsychevoAcpAgent {
                     },
                 }),
         );
-        let mut request = ThreadTurnRequest::new(session.cwd.clone(), input);
-        request.thread_id = session.runtime_session_id.clone();
-        request.policy.snapshot_root = Some(self.options.home.join("snapshots"));
-        request.policy.config_path = self.options.config_path.clone();
-        request.policy.model = session.model.clone();
-        request.policy.reasoning_effort = session.reasoning_effort.clone();
-        request.policy.include_reasoning = true;
-        request.policy.mode = session.mode;
-        request.policy.permission_mode = session.permission_mode;
-        request.policy.approval_mode = Some(ApprovalMode::Manual);
-        request.policy.approval_handler = approval_handler;
-        request.policy.inherited_env = Some(self.options.inherited_env.clone());
-        request.policy.mcp_servers = session.mcp_servers.clone();
-        request
+        let caller =
+            ThreadCallerContext::new(ThreadSurface::InboundAcp, session.cwd.clone());
+        let mut intent = ThreadTurnIntent::new(input);
+        intent.thread_id = session.runtime_session_id.clone();
+        intent.policy.snapshot_root = Some(self.options.home.join("snapshots"));
+        intent.policy.config_path = self.options.config_path.clone();
+        intent.policy.model = session.model.clone();
+        intent.policy.reasoning_effort = session.reasoning_effort.clone();
+        intent.policy.include_reasoning = true;
+        intent.policy.mode = session.mode;
+        intent.policy.permission_mode = session.permission_mode;
+        intent.policy.approval_mode = Some(ApprovalMode::Manual);
+        intent.policy.approval_handler = approval_handler;
+        intent.policy.inherited_env = Some(self.options.inherited_env.clone());
+        intent.policy.mcp_servers = session.mcp_servers.clone();
+        (caller, intent)
     }
 
     pub(crate) fn run_options(

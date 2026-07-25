@@ -1,10 +1,10 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[test]
-pub(crate) fn history_tool_result_updates_rehydrated_pending_write_row() {
+#[tokio::test]
+pub(crate) async fn history_tool_result_updates_rehydrated_pending_write_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_history_message(
@@ -73,10 +73,10 @@ pub(crate) fn history_tool_result_updates_rehydrated_pending_write_row() {
     assert!(ui.tool_rows.is_empty());
 }
 
-#[test]
-pub(crate) fn live_reasoning_only_final_message_gets_turn_meta() {
+#[tokio::test]
+pub(crate) async fn live_reasoning_only_final_message_gets_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -124,10 +124,10 @@ pub(crate) fn live_reasoning_only_final_message_gets_turn_meta() {
     assert_eq!(row.text, "xiaomi-token-plan/mimo-v2.5-pro low  7m05s");
 }
 
-#[test]
-pub(crate) fn bottom_context_usage_stays_visible_while_model_answers_without_usage() {
+#[tokio::test]
+pub(crate) async fn bottom_context_usage_stays_visible_while_model_answers_without_usage() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.last_context_snapshot = Some(test_context_snapshot());
     ui.sidebar_forced = true;
@@ -167,10 +167,10 @@ pub(crate) fn bottom_context_usage_stays_visible_while_model_answers_without_usa
     assert!(ui.last_context_snapshot.is_some());
 }
 
-#[test]
-pub(crate) fn bottom_status_line_renders_minimal_cwd_branch_and_context() {
+#[tokio::test]
+pub(crate) async fn bottom_status_line_renders_minimal_cwd_branch_and_context() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar.branch = "main".to_string();
     ui.last_context_snapshot = Some(test_context_snapshot());
@@ -186,10 +186,10 @@ pub(crate) fn bottom_status_line_renders_minimal_cwd_branch_and_context() {
     assert!(!text.contains("context:"), "{text}");
 }
 
-#[test]
-pub(crate) fn bottom_status_context_hides_missing_branch_and_unknown_limit() {
+#[tokio::test]
+pub(crate) async fn bottom_status_context_hides_missing_branch_and_unknown_limit() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar.branch = "(none)".to_string();
     ui.last_context_snapshot = Some(test_context_snapshot());
@@ -205,10 +205,10 @@ pub(crate) fn bottom_status_context_hides_missing_branch_and_unknown_limit() {
     assert_eq!(text, "~/work");
 }
 
-#[test]
-pub(crate) fn bottom_status_context_uses_live_input_usage_before_snapshot() {
+#[tokio::test]
+pub(crate) async fn bottom_status_context_uses_live_input_usage_before_snapshot() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar.branch = "main".to_string();
     ui.sidebar_tokens = Some(29_800);
@@ -219,10 +219,10 @@ pub(crate) fn bottom_status_context_uses_live_input_usage_before_snapshot() {
     assert_eq!(text, "29.8k/1.0M (3.0%) · ~/work · main");
 }
 
-#[test]
-pub(crate) fn bottom_status_context_hides_branch_before_context_usage() {
+#[tokio::test]
+pub(crate) async fn bottom_status_context_hides_branch_before_context_usage() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar.branch = "main".to_string();
     ui.last_context_snapshot = Some(test_context_snapshot());
@@ -232,8 +232,8 @@ pub(crate) fn bottom_status_context_hides_branch_before_context_usage() {
     assert_eq!(text, "~50/100 (50.0%) estimated · ~/work");
 }
 
-#[test]
-pub(crate) fn directory_display_uses_home_prefix_and_display_width_truncation() {
+#[tokio::test]
+pub(crate) async fn directory_display_uses_home_prefix_and_display_width_truncation() {
     let home = Path::new("/home/kevin");
 
     assert_eq!(
@@ -265,10 +265,11 @@ pub(crate) fn directory_display_uses_home_prefix_and_display_width_truncation() 
     );
 }
 
-#[test]
-pub(crate) fn last_context_token_count_uses_complete_provider_turn_when_later_usage_arrives() {
+#[tokio::test]
+pub(crate) async fn last_context_token_count_uses_complete_provider_turn_when_later_usage_arrives()
+{
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_tokens = Some(12_345);
 
@@ -293,10 +294,10 @@ pub(crate) fn last_context_token_count_uses_complete_provider_turn_when_later_us
     assert_eq!(ui.sidebar_tokens, Some(23_456));
 }
 
-#[test]
-pub(crate) fn bottom_status_session_observability_degrades_with_width() {
+#[tokio::test]
+pub(crate) async fn bottom_status_session_observability_degrades_with_width() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_tokens = Some(900);
     ui.sidebar_context_limit = Some(1_000);
@@ -343,10 +344,10 @@ pub(crate) fn bottom_status_session_observability_degrades_with_width() {
     );
 }
 
-#[test]
-pub(crate) fn last_context_token_count_accepts_authoritative_total_only_usage() {
+#[tokio::test]
+pub(crate) async fn last_context_token_count_accepts_authoritative_total_only_usage() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.sidebar_tokens = Some(12_345);
 
@@ -367,10 +368,10 @@ pub(crate) fn last_context_token_count_accepts_authoritative_total_only_usage() 
     assert_eq!(ui.sidebar_tokens, Some(23_456));
 }
 
-#[test]
-pub(crate) fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
+#[tokio::test]
+pub(crate) async fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -422,10 +423,10 @@ pub(crate) fn live_tool_call_reasoning_message_does_not_get_turn_meta() {
     );
 }
 
-#[test]
-pub(crate) fn reasoning_only_write_message_waits_for_typed_tool_call() {
+#[tokio::test]
+pub(crate) async fn reasoning_only_write_message_waits_for_typed_tool_call() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -514,10 +515,10 @@ pub(crate) fn reasoning_only_write_message_waits_for_typed_tool_call() {
     );
 }
 
-#[test]
-pub(crate) fn hidden_thinking_write_intent_does_not_create_provisional_updating() {
+#[tokio::test]
+pub(crate) async fn hidden_thinking_write_intent_does_not_create_provisional_updating() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
@@ -537,10 +538,10 @@ pub(crate) fn hidden_thinking_write_intent_does_not_create_provisional_updating(
     assert!(ui.transcript.iter().all(|row| row.title != "write"));
 }
 
-#[test]
-pub(crate) fn visible_thinking_run_text_waits_for_typed_command_call() {
+#[tokio::test]
+pub(crate) async fn visible_thinking_run_text_waits_for_typed_command_call() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
 
@@ -594,10 +595,10 @@ pub(crate) fn visible_thinking_run_text_waits_for_typed_command_call() {
     assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_wc"));
 }
 
-#[test]
-pub(crate) fn prompt_block_uses_full_width_background_without_left_rail() {
+#[tokio::test]
+pub(crate) async fn prompt_block_uses_full_width_background_without_left_rail() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("inspect prompt styling".to_string());
     let backend = TestBackend::new(48, 10);
@@ -613,10 +614,10 @@ pub(crate) fn prompt_block_uses_full_width_background_without_left_rail() {
     assert_ne!(buffer.cell((0, 0)).expect("cell").symbol(), "▌");
 }
 
-#[test]
-pub(crate) fn composer_and_prompt_share_full_width_surface() {
+#[tokio::test]
+pub(crate) async fn composer_and_prompt_share_full_width_surface() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("match the composer surface".to_string());
     let backend = TestBackend::new(48, 10);
@@ -663,10 +664,10 @@ pub(crate) fn composer_and_prompt_share_full_width_surface() {
     );
 }
 
-#[test]
-pub(crate) fn wrapped_prompt_rows_keep_full_width_background_for_wide_text() {
+#[tokio::test]
+pub(crate) async fn wrapped_prompt_rows_keep_full_width_background_for_wide_text() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("中文测试中文测试中文测试中文测试".to_string());
     let backend = TestBackend::new(24, 10);
@@ -695,10 +696,10 @@ pub(crate) fn wrapped_prompt_rows_keep_full_width_background_for_wide_text() {
     }
 }
 
-#[test]
-pub(crate) fn empty_composer_uses_one_surface_row() {
+#[tokio::test]
+pub(crate) async fn empty_composer_uses_one_surface_row() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let backend = TestBackend::new(48, 10);
     let mut terminal = Terminal::new(backend).expect("terminal");
@@ -725,8 +726,8 @@ pub(crate) fn empty_composer_uses_one_surface_row() {
     );
 }
 
-#[test]
-pub(crate) fn thinking_new_paragraphs_do_not_use_label_width_indent() {
+#[tokio::test]
+pub(crate) async fn thinking_new_paragraphs_do_not_use_label_width_indent() {
     let row = TranscriptRow::with_title(
         TranscriptKind::Thinking,
         "Thinking",
@@ -744,8 +745,8 @@ pub(crate) fn thinking_new_paragraphs_do_not_use_label_width_indent() {
     assert!(!line_text(&lines[0]).contains("▌"));
 }
 
-#[test]
-pub(crate) fn bash_tool_title_uses_actual_first_command_line() {
+#[tokio::test]
+pub(crate) async fn bash_tool_title_uses_actual_first_command_line() {
     let title = tool_title(
         "exec_command",
         &serde_json::json!({
@@ -755,8 +756,8 @@ pub(crate) fn bash_tool_title_uses_actual_first_command_line() {
     assert_eq!(title, "exec_command cargo test -p psychevo-cli");
 }
 
-#[test]
-pub(crate) fn bash_tool_title_skips_leading_shell_comments() {
+#[tokio::test]
+pub(crate) async fn bash_tool_title_skips_leading_shell_comments() {
     let title = tool_title(
         "exec_command",
         &serde_json::json!({
@@ -781,10 +782,10 @@ pub(crate) fn bash_tool_title_skips_leading_shell_comments() {
     assert_eq!(active, "exec_command python3 -c 'print(42)'");
 }
 
-#[test]
-pub(crate) fn fullscreen_bash_title_survives_tool_end_without_args() {
+#[tokio::test]
+pub(crate) async fn fullscreen_bash_title_survives_tool_end_without_args() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.apply_value_event(
@@ -816,10 +817,10 @@ pub(crate) fn fullscreen_bash_title_survives_tool_end_without_args() {
     assert_ne!(row.title, "exec_command command");
 }
 
-#[test]
-pub(crate) fn history_tool_result_reuses_persisted_bash_command_title() {
+#[tokio::test]
+pub(crate) async fn history_tool_result_reuses_persisted_bash_command_title() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let assistant = serde_json::json!({
         "role": "assistant",
@@ -862,7 +863,7 @@ pub(crate) fn history_tool_result_reuses_persisted_bash_command_title() {
 #[tokio::test]
 pub(crate) async fn sidebar_toggle_persists_visibility() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     assert!(!ui.sidebar_enabled());
 

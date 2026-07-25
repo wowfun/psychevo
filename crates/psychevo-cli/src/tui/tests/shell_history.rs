@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-#[test]
-pub(crate) fn shell_escape_parser_accepts_leading_space_and_preserves_command() {
+#[tokio::test]
+pub(crate) async fn shell_escape_parser_accepts_leading_space_and_preserves_command() {
     let parsed = parse_shell_escape_input("  !echo hi").expect("shell escape");
 
     assert_eq!(parsed.command, "echo hi");
@@ -13,10 +13,10 @@ pub(crate) fn shell_escape_parser_accepts_leading_space_and_preserves_command() 
     assert!(parse_shell_escape_input("echo hi").is_none());
 }
 
-#[test]
-pub(crate) fn shell_escape_history_survives_session_history_replacement() {
+#[tokio::test]
+pub(crate) async fn shell_escape_history_survives_session_history_replacement() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     ui.push_submitted_history("first prompt".to_string());
@@ -36,7 +36,7 @@ pub(crate) fn shell_escape_history_survives_session_history_replacement() {
 #[tokio::test]
 pub(crate) async fn esc_clears_empty_shell_mode_composer() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
 
@@ -51,10 +51,10 @@ pub(crate) async fn esc_clears_empty_shell_mode_composer() {
     assert!(ui.running.is_none());
 }
 
-#[test]
-pub(crate) fn status_line_marks_shell_mode_for_bang_input() {
+#[tokio::test]
+pub(crate) async fn status_line_marks_shell_mode_for_bang_input() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
     ui.textarea = textarea_with_text("printf shell");
@@ -68,7 +68,7 @@ pub(crate) fn status_line_marks_shell_mode_for_bang_input() {
 #[tokio::test]
 pub(crate) async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
@@ -106,7 +106,7 @@ pub(crate) async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
 #[tokio::test]
 pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
@@ -157,13 +157,14 @@ pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     }
 }
 
-#[test]
-pub(crate) fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
+#[tokio::test]
+pub(crate) async fn historical_unfinished_prompt_without_live_work_does_not_show_running_elapsed() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("session");
     let prompt_ms = wall_now_ms() - 12_500;
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -181,7 +182,9 @@ pub(crate) fn historical_unfinished_prompt_without_live_work_does_not_show_runni
     );
     app.current_session = Some(session);
     let mut ui = FullscreenUi::new(&app);
-    app.load_current_session_history(&mut ui).expect("history");
+    app.load_current_session_history(&mut ui)
+        .await
+        .expect("history");
 
     let buffer = draw_fullscreen_for_test(&app, &mut ui, 80, 12);
     let text = buffer_text(&buffer);
@@ -192,7 +195,7 @@ pub(crate) fn historical_unfinished_prompt_without_live_work_does_not_show_runni
 #[tokio::test]
 pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
@@ -233,7 +236,7 @@ pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
 #[tokio::test]
 pub(crate) async fn esc_dismisses_slash_menu_before_interrupting_running_turn() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
@@ -270,7 +273,7 @@ pub(crate) async fn esc_dismisses_slash_menu_before_interrupting_running_turn() 
 #[tokio::test]
 pub(crate) async fn shifted_one_key_enters_shell_mode() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_key(
@@ -290,7 +293,7 @@ pub(crate) async fn shifted_one_key_enters_shell_mode() {
 #[tokio::test]
 pub(crate) async fn empty_shell_mode_uses_bang_prompt_and_backspace_exits() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
 
@@ -326,7 +329,7 @@ pub(crate) async fn empty_shell_mode_uses_bang_prompt_and_backspace_exits() {
 #[tokio::test]
 pub(crate) async fn pasted_bang_input_imports_shell_mode_without_literal_bang() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_event(
@@ -343,7 +346,7 @@ pub(crate) async fn pasted_bang_input_imports_shell_mode_without_literal_bang() 
 #[tokio::test]
 pub(crate) async fn shell_mode_submit_records_bang_history_and_executes_command_text() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
     ui.enter_shell_mode();
@@ -370,10 +373,10 @@ pub(crate) async fn shell_mode_submit_records_bang_history_and_executes_command_
     );
 }
 
-#[test]
-pub(crate) fn user_shell_transcript_row_uses_prompt_surface_command_line() {
+#[tokio::test]
+pub(crate) async fn user_shell_transcript_row_uses_prompt_surface_command_line() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let mut row = TranscriptRow::with_title(TranscriptKind::Ran, "Ran ! ls", "feeds\ntmp1.txt");
     row.user_shell = true;
@@ -418,7 +421,7 @@ pub(crate) fn user_shell_transcript_row_uses_prompt_surface_command_line() {
 #[tokio::test]
 pub(crate) async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_escape() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
 
@@ -459,11 +462,13 @@ pub(crate) async fn fullscreen_user_shell_runs_locally_and_drains_queued_shell_e
 pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_then_starts_auxiliary_task()
  {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.current_session = None;
     let session_id = StateRuntime::open(&app.db_path)
+        .await
         .expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
+        .await
         .expect("session");
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
@@ -531,10 +536,12 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
 #[tokio::test]
 pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_command() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let session_id = StateRuntime::open(&app.db_path)
+        .await
         .expect("store")
         .create_session_with_metadata(&app.cwd, "tui", "mock/model", "mock", None)
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
     let marker = app.cwd.join("should-not-exist");
@@ -595,7 +602,7 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
 #[tokio::test]
 pub(crate) async fn persisted_user_shell_history_reloads_as_ran_evidence() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     app.current_session = None;
     let mut ui = FullscreenUi::new(&app);
 
@@ -606,6 +613,7 @@ pub(crate) async fn persisted_user_shell_history_reloads_as_ran_evidence() {
 
     let mut reloaded = FullscreenUi::new(&app);
     app.load_current_session_history(&mut reloaded)
+        .await
         .expect("load history");
     assert_eq!(reloaded.history.as_slice(), ["!printf reload-shell"]);
     assert!(
@@ -624,10 +632,10 @@ pub(crate) async fn persisted_user_shell_history_reloads_as_ran_evidence() {
     );
 }
 
-#[test]
-pub(crate) fn composer_history_recall_preserves_draft() {
+#[tokio::test]
+pub(crate) async fn composer_history_recall_preserves_draft() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["first".to_string(), "second".to_string()];
     ui.textarea = textarea_with_text("draft");
@@ -648,10 +656,10 @@ pub(crate) fn composer_history_recall_preserves_draft() {
     assert_eq!(ui.history_index, None);
 }
 
-#[test]
-pub(crate) fn shell_history_recall_restores_shell_mode_and_strips_bang() {
+#[tokio::test]
+pub(crate) async fn shell_history_recall_restores_shell_mode_and_strips_bang() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_submitted_history("!echo hi".to_string());
     ui.textarea = textarea_with_text("draft");
@@ -665,10 +673,10 @@ pub(crate) fn shell_history_recall_restores_shell_mode_and_strips_bang() {
     assert_eq!(textarea_text(&ui.textarea), "draft");
 }
 
-#[test]
-pub(crate) fn composer_history_recall_respects_multiline_boundaries() {
+#[tokio::test]
+pub(crate) async fn composer_history_recall_respects_multiline_boundaries() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.history = vec!["older".to_string()];
     ui.textarea = textarea_with_text("line one\nline two");
@@ -679,10 +687,10 @@ pub(crate) fn composer_history_recall_respects_multiline_boundaries() {
     assert!(ui.can_recall_history_previous());
 }
 
-#[test]
-pub(crate) fn tool_only_thinking_message_does_not_create_turn_meta() {
+#[tokio::test]
+pub(crate) async fn tool_only_thinking_message_does_not_create_turn_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -721,10 +729,10 @@ pub(crate) fn tool_only_thinking_message_does_not_create_turn_meta() {
     );
 }
 
-#[test]
-pub(crate) fn tool_failure_without_answer_keeps_failure_meta() {
+#[tokio::test]
+pub(crate) async fn tool_failure_without_answer_keeps_failure_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -774,10 +782,10 @@ pub(crate) fn tool_failure_without_answer_keeps_failure_meta() {
     );
 }
 
-#[test]
-pub(crate) fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
+#[tokio::test]
+pub(crate) async fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.interrupt_requested = true;
@@ -848,10 +856,10 @@ pub(crate) fn interrupted_bash_tool_renders_interrupted_without_failure_meta() {
     assert!(!meta.text.contains("failure"), "{meta:?}");
 }
 
-#[test]
-pub(crate) fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
+#[tokio::test]
+pub(crate) async fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.apply_value_event(
@@ -896,10 +904,10 @@ pub(crate) fn interrupted_reasoning_only_turn_meta_includes_interrupted() {
     assert!(!meta.text.contains("failure"), "{meta:?}");
 }
 
-#[test]
-pub(crate) fn interrupted_user_shell_renders_interrupted_marker() {
+#[tokio::test]
+pub(crate) async fn interrupted_user_shell_renders_interrupted_marker() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.start_assistant();
     ui.interrupt_requested = true;

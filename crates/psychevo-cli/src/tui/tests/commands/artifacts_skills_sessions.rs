@@ -4,7 +4,7 @@ pub(crate) use super::*;
 #[tokio::test]
 pub(crate) async fn pending_preview_queue_edit_confirm_and_escape() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
 
@@ -76,7 +76,7 @@ pub(crate) async fn pending_preview_queue_edit_confirm_and_escape() {
 #[tokio::test]
 pub(crate) async fn pending_preview_steer_edit_updates_before_drain() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
 
@@ -105,7 +105,7 @@ pub(crate) async fn pending_preview_steer_edit_updates_before_drain() {
 #[tokio::test]
 pub(crate) async fn pending_preview_late_confirm_resubmits_as_new_input() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
 
@@ -154,7 +154,7 @@ pub(crate) async fn pending_preview_late_confirm_resubmits_as_new_input() {
 #[tokio::test]
 pub(crate) async fn pending_preview_undo_removes_steer_and_queue() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
 
@@ -189,7 +189,7 @@ pub(crate) async fn pending_preview_undo_removes_steer_and_queue() {
 #[tokio::test]
 pub(crate) async fn pending_cancel_clears_unsent_steer_and_queue() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     attach_pending_agent_running(&mut ui);
 
@@ -230,7 +230,7 @@ pub(crate) fn queued_prompt_sequence(ui: &FullscreenUi<'_>) -> u64 {
 #[tokio::test]
 pub(crate) async fn explicit_steer_errors_when_idle() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::Steer("too soon".to_string()))
@@ -248,8 +248,8 @@ pub(crate) async fn explicit_steer_errors_when_idle() {
 #[tokio::test]
 pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let mut app = test_app(&temp).await;
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(
             &app.cwd,
@@ -266,6 +266,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
                 }
             })),
         )
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
     let conn = rusqlite::Connection::open(&app.db_path).expect("conn");
@@ -421,10 +422,10 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
     }));
 }
 
-#[test]
-pub(crate) fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
+#[tokio::test]
+pub(crate) async fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
     let temp = tempdir().expect("temp");
-    let app = test_app(&temp);
+    let app = test_app(&temp).await;
     fs::create_dir_all(app.cwd.join(".git")).expect("git marker");
     let home_skills = app.home.join("skills");
     let project_skills = app.cwd.join(".psychevo").join("skills");
@@ -490,7 +491,7 @@ pub(crate) fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
 #[tokio::test]
 pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_dynamic_slash() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     fs::create_dir_all(app.cwd.join(".git")).expect("git marker");
     let skill_dir = app.home.join("skills").join("helper");
     fs::create_dir_all(&skill_dir).expect("skill dir");
@@ -642,7 +643,7 @@ pub(crate) async fn fullscreen_skills_command_lists_dynamic_entries_and_submits_
 #[tokio::test]
 pub(crate) async fn enter_on_dynamic_slash_menu_item_submits_without_skill_marker_rewrite() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app_with_models(&temp);
+    let mut app = test_app_with_models(&temp).await;
     fs::create_dir_all(app.cwd.join(".git")).expect("git marker");
     let skill_dir = app.home.join("skills").join("helper");
     fs::create_dir_all(&skill_dir).expect("skill dir");
@@ -751,7 +752,7 @@ pub(crate) fn test_context_snapshot() -> ContextSnapshot {
 #[tokio::test]
 pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     assert!(
         std::process::Command::new("git")
             .arg("-C")
@@ -764,9 +765,10 @@ pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript
     );
     let file = app.cwd.join("tracked.txt");
     fs::write(&file, "base\n").expect("base");
-    let store = StateRuntime::open(&app.db_path).expect("store");
+    let store = StateRuntime::open(&app.db_path).await.expect("store");
     let session_id = store
         .create_session_with_metadata(&app.cwd, "tui", "mock-model", "mock", None)
+        .await
         .expect("session");
     app.current_session = Some(session_id.clone());
 
@@ -837,6 +839,7 @@ pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript
 
     let mut ui = FullscreenUi::new(&app);
     app.load_current_session_history(&mut ui)
+        .await
         .expect("load history");
     ui.textarea = textarea_with_text("/undo");
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -877,7 +880,7 @@ pub(crate) async fn fullscreen_undo_restores_prompt_and_redo_restores_transcript
 #[tokio::test]
 pub(crate) async fn fullscreen_new_command_resets_session_without_status_row() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     ui.push_user("previous prompt".to_string());
 
@@ -900,7 +903,7 @@ pub(crate) async fn fullscreen_new_command_resets_session_without_status_row() {
 #[tokio::test]
 pub(crate) async fn fullscreen_reload_context_points_to_refresh() {
     let temp = tempdir().expect("temp");
-    let mut app = test_app(&temp);
+    let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
 
     app.handle_fullscreen_command(&mut ui, SlashCommand::ReloadContextDeprecated)
