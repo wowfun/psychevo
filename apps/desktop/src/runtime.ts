@@ -1,4 +1,4 @@
-import { ThreadController } from "@psychevo/client";
+import { ThreadSession } from "@psychevo/client";
 import type { FloatingRuntime } from "@psychevo/floating";
 import { LocalHostStorage, capabilityFailure, unsupported, type GatewayEndpoint, type HostCapabilityResult, type HostRect, type PsychevoHost } from "@psychevo/host";
 import type { WorkbenchRuntime } from "@psychevo/workbench/runtime";
@@ -81,31 +81,34 @@ export function createDesktopFloatingRuntime(connectionId: string): FloatingRunt
       return openThreadInWorkbench(threadId);
     },
     async turnControls({ client, scope, threadId }) {
-      const discovery = await client.request("thread/context/read", {
-        threadId,
-        target: null,
-        scope
-      });
-      const discoveryController = new ThreadController();
-      discoveryController.setContext(discovery);
-      const discoveryTargetId = discovery.selectedTargetId ?? discovery.suggestedTargetId;
-      const target = threadId || !discoveryTargetId
-        ? null
-        : discoveryController.contextReadTarget(discoveryTargetId);
-      const context = target
-        ? await client.request("thread/context/read", { threadId: null, target, scope })
-        : discovery;
-      const controller = new ThreadController();
-      controller.setContext(context);
-      const controls = controller.turnControls(context.selectedTargetId ?? "", Object.fromEntries(
-        context.controls.flatMap((control) => (
-          control.effectiveValue == null ? [] : [[control.id, control.effectiveValue]]
-        ))
-      ));
-      return {
-        context,
-        controls
-      };
+      const session = new ThreadSession();
+      try {
+        const discovery = await client.request("thread/context/read", {
+          threadId,
+          target: null,
+          scope
+        });
+        session.setContext(discovery);
+        const discoveryTargetId = discovery.selectedTargetId ?? discovery.suggestedTargetId;
+        const target = threadId || !discoveryTargetId
+          ? null
+          : session.contextReadTarget(discoveryTargetId);
+        const context = target
+          ? await client.request("thread/context/read", { threadId: null, target, scope })
+          : discovery;
+        session.setContext(context);
+        const controls = session.turnControls(context.selectedTargetId ?? "", Object.fromEntries(
+          context.controls.flatMap((control) => (
+            control.effectiveValue == null ? [] : [[control.id, control.effectiveValue]]
+          ))
+        ));
+        return {
+          context,
+          controls
+        };
+      } finally {
+        session.dispose();
+      }
     }
   };
 }

@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { GatewayClient } from "@psychevo/client";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import {
+  CapabilitiesApplication,
+  type CapabilitiesClient
+} from "@psychevo/client";
 import { ActionButton, CreatePanel, DisclosureButton, IconButton, MarkdownText, SegmentedControl, Switch, Tabs, useActionReceipts, useConfirmAction } from "@psychevo/components";
 import type {
   GatewayRequestScope,
@@ -198,7 +201,7 @@ export function CapabilitiesPage({
   backendDraft,
   backendDoctor,
   backends,
-  client,
+  client: gatewayClient,
   cwd,
   disabled,
   onActiveTabChange,
@@ -219,7 +222,7 @@ export function CapabilitiesPage({
   backendDraft: BackendDraft | null;
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
-  client: GatewayClient | null;
+  client: CapabilitiesClient | null;
   cwd: string;
   disabled: boolean;
   onActiveTabChange(value: CapabilityTab): void;
@@ -238,25 +241,7 @@ export function CapabilitiesPage({
   scope: GatewayRequestScope | null;
 }) {
   const [query, setQuery] = useState("");
-  const [data, setData] = useState<Record<CapabilityTab, JsonObject | null>>({
-    agents: null,
-    skills: null,
-    plugins: null,
-    mcp: null,
-    tools: null
-  });
-  const [selected, setSelected] = useState<Record<CapabilityTab, string | null>>({
-    agents: null,
-    skills: null,
-    plugins: null,
-    mcp: null,
-    tools: null
-  });
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [refreshToken, setRefreshToken] = useState(0);
   const [createPanel, setCreatePanel] = useState<CapabilityTab | null>(null);
   const [skillInstall, setSkillInstall] = useState<SkillInstallDraft>({ source: "", name: "", target: "profile", force: false });
   const [pluginInstall, setPluginInstall] = useState<PluginInstallDraft>({ source: "", kind: "local", npmVersion: "", npmRegistry: "", force: false, inspection: null });
@@ -270,87 +255,37 @@ export function CapabilitiesPage({
     oauthClientId: ""
   });
   const [toolPolicyDraft, setToolPolicyDraft] = useState({ enabledTools: "", disabledTools: "" });
-  const [oauthSession, setOauthSession] = useState<string | null>(null);
-  const [pluginConnectSession, setPluginConnectSession] = useState<string | null>(null);
   const [pluginDetail, setPluginDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
   const [pluginOperation, setPluginOperation] = useState<JsonObject | null>(null);
   const receipts = useActionReceipts();
 
   const requestScope = scope ?? (cwd ? { cwd, source: { kind: "web", rawId: null, lifetime: "persistent", rawIdentity: null, visibleName: null } } as GatewayRequestScope : null);
+  const application = useMemo(() => new CapabilitiesApplication(), []);
+  const client = gatewayClient ? application : null;
+  const applicationSnapshot = useSyncExternalStore(
+    (listener) => application.subscribe(listener),
+    () => application.getSnapshot(requestScope),
+    () => application.getSnapshot(requestScope)
+  );
+  const data = applicationSnapshot.data as Readonly<Record<CapabilityTab, JsonObject | null>>;
+  const selected = applicationSnapshot.selection;
+  const loading = applicationSnapshot.loading[activeTab];
+  const saving = applicationSnapshot.mutation !== null;
+  const error = applicationSnapshot.error;
+  const poll = applicationSnapshot.poll;
+
+  useEffect(() => {
+    application.attachClient(gatewayClient);
+    return () => application.attachClient(null);
+  }, [application, gatewayClient]);
+
+  useEffect(() => () => application.dispose(), [application]);
 
   useEffect(() => {
     if (!client || !requestScope) return;
-    const activeClient = client;
     const activeScope = requestScope;
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await requestTab(activeClient, activeTab, activeScope);
-        if (cancelled) return;
-        setData((current) => ({ ...current, [activeTab]: objectValue(result) }));
-      } catch (err) {
-        if (!cancelled) setError(errorMessage(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, client, refreshToken, requestScope?.cwd]);
-
-  useEffect(() => {
-    if (!client || !requestScope || !oauthSession) return;
-    let stopped = false;
-    const timer = window.setInterval(() => {
-      void client.request("mcp/oauth/status", { sessionId: oauthSession, scope: requestScope }).then((result) => {
-        const status = stringField(result, "status");
-        if (stopped || status === "pending") return;
-        window.clearInterval(timer);
-        setOauthSession(null);
-        setNotice(status === "succeeded" ? "OAuth login saved. Changes apply to the next run/session." : stringField(result, "error") || "OAuth login failed.");
-        setRefreshToken((value) => value + 1);
-      }).catch((err) => {
-        if (!stopped) {
-          window.clearInterval(timer);
-          setOauthSession(null);
-          setError(errorMessage(err));
-        }
-      });
-    }, 1200);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, [client, oauthSession, requestScope?.cwd]);
-
-  useEffect(() => {
-    if (!client || !requestScope || !pluginConnectSession) return;
-    let stopped = false;
-    const timer = window.setInterval(() => {
-      void client.request("plugin/connect/status", { sessionId: pluginConnectSession, scope: requestScope }).then((result) => {
-        const status = stringField(result, "status");
-        if (stopped || status === "pending") return;
-        window.clearInterval(timer);
-        setPluginConnectSession(null);
-        setNotice(status === "succeeded" ? "Plugin connection is ready." : stringField(result, "reason") || "Plugin connection failed.");
-        setRefreshToken((value) => value + 1);
-      }).catch((err) => {
-        if (!stopped) {
-          window.clearInterval(timer);
-          setPluginConnectSession(null);
-          setError(errorMessage(err));
-        }
-      });
-    }, 1200);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, [client, pluginConnectSession, requestScope?.cwd]);
+    void application.refresh(activeScope, activeTab).catch(() => undefined);
+  }, [activeTab, application, client, requestScope?.cwd]);
 
   const rows = useMemo(() => {
     const source = data[activeTab];
@@ -387,12 +322,11 @@ export function CapabilitiesPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, client, refreshToken, requestScope?.cwd, selectedRow?.id]);
+  }, [activeTab, applicationSnapshot.revision, client, requestScope?.cwd, selectedRow?.id]);
 
   async function mutate(action: () => Promise<unknown>, options: MutationOptions = {}): Promise<boolean> {
     if (!client || !requestScope) return false;
-    setSaving(true);
-    setError(null);
+    application.clearError(requestScope);
     setPluginOperation(null);
     try {
       const result = await action();
@@ -409,13 +343,10 @@ export function CapabilitiesPage({
       } else {
         setNotice(null);
       }
-      if (options.refresh !== false) setRefreshToken((value) => value + 1);
       return true;
     } catch (err) {
-      setError(errorMessage(err));
+      application.reportError(requestScope, err);
       return false;
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -428,7 +359,14 @@ export function CapabilitiesPage({
           <h2>Capabilities</h2>
           <span>{cwd}</span>
         </div>
-        <IconButton disabled={busy} icon={<RefreshCw size={15} />} label="Refresh" onClick={() => setRefreshToken((value) => value + 1)} />
+        <IconButton
+          disabled={busy}
+          icon={<RefreshCw size={15} />}
+          label="Refresh"
+          onClick={() => {
+            if (requestScope) void application.refresh(requestScope, activeTab);
+          }}
+        />
       </header>
 
       <Tabs<CapabilityTab>
@@ -463,9 +401,13 @@ export function CapabilitiesPage({
         </div>
       )}
 
-      {(error || notice || oauthSession || pluginConnectSession) && (
+      {(error || notice || poll) && (
         <div className={`capabilityBanner ${error ? "is-error" : ""}`}>
-          {error ?? (oauthSession ? "OAuth login pending" : pluginConnectSession ? "Plugin connection pending" : notice)}
+          {error ?? poll?.message ?? (poll?.kind === "mcpOAuth"
+            ? "OAuth login pending"
+            : poll
+              ? "Plugin connection pending"
+              : notice)}
         </div>
       )}
 
@@ -512,14 +454,16 @@ export function CapabilitiesPage({
           mutate={mutate}
           onCopyText={onCopyText}
           query={query}
-          refreshToken={refreshToken}
+          refreshToken={applicationSnapshot.revision}
           scope={requestScope}
           createOpen={createPanel === "skills"}
           selectedId={selected.skills}
           setSkillInstall={setSkillInstall}
           skillInstall={skillInstall}
           onCloseCreate={() => setCreatePanel(null)}
-          onSelect={(id) => setSelected((current) => ({ ...current, skills: id }))}
+          onSelect={(id) => {
+            if (requestScope) application.select(requestScope, "skills", id);
+          }}
         />
       ) : (
         <>
@@ -570,7 +514,9 @@ export function CapabilitiesPage({
                       <button
                         aria-label={`${rowKindLabel(activeTab)} ${row.name}`}
                         className="capabilityRowSelect"
-                        onClick={() => setSelected((current) => ({ ...current, [activeTab]: row.id }))}
+                        onClick={() => {
+                          if (requestScope) application.select(requestScope, activeTab, row.id);
+                        }}
                         type="button"
                       >
                         <span className="capabilityRowMain">
@@ -601,7 +547,9 @@ export function CapabilitiesPage({
                   <button
                     className={`capabilityRow${selectedClass}`}
                     key={row.id}
-                    onClick={() => setSelected((current) => ({ ...current, [activeTab]: row.id }))}
+                    onClick={() => {
+                      if (requestScope) application.select(requestScope, activeTab, row.id);
+                    }}
                     type="button"
                   >
                     <span className="capabilityRowMain">
@@ -635,8 +583,14 @@ export function CapabilitiesPage({
                     toolPolicyDraft={toolPolicyDraft}
                     setToolPolicyDraft={setToolPolicyDraft}
                     mutate={mutate}
-                    onOAuthSession={setOauthSession}
-                    onPluginConnectSession={setPluginConnectSession}
+                    onOAuthSession={(sessionId) => {
+                      if (sessionId && requestScope) application.watchMcpOAuth(requestScope, sessionId);
+                    }}
+                    onPluginConnectSession={(sessionId) => {
+                      if (sessionId && requestScope) {
+                        application.watchPluginConnect(requestScope, sessionId);
+                      }
+                    }}
                     pluginDetail={pluginDetail?.id === selectedRow.id ? pluginDetail.value : null}
                   />
                   {activeTab === "plugins" && (
@@ -686,7 +640,7 @@ function AgentsCapabilityPanel({
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
   busy: boolean;
-  client: GatewayClient | null;
+  client: CapabilitiesClient | null;
   data: JsonObject | null;
   disabled: boolean;
   loading: boolean;
@@ -1321,7 +1275,7 @@ function RuntimeProfilesPanel({
   backendDoctor: Record<string, WorkbenchBackendDoctor>;
   backends: WorkbenchBackend[];
   busy: boolean;
-  client: GatewayClient;
+  client: CapabilitiesClient;
   loading: boolean;
   mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   query: string;
@@ -2025,7 +1979,7 @@ function SkillsPanel({
   skillInstall
 }: {
   busy: boolean;
-  client: GatewayClient | null;
+  client: CapabilitiesClient | null;
   createOpen: boolean;
   data: JsonObject | null;
   loading: boolean;
@@ -2325,7 +2279,7 @@ function CapabilityActions({
   toolPolicyDraft
 }: {
   busy: boolean;
-  client: GatewayClient | null;
+  client: CapabilitiesClient | null;
   mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   onOAuthSession(sessionId: string | null): void;
   onPluginConnectSession(sessionId: string | null): void;
@@ -2453,7 +2407,7 @@ function CodexAuthorityCard({
 }: {
   authority: JsonObject;
   busy: boolean;
-  client: GatewayClient | null;
+  client: CapabilitiesClient | null;
   mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   scope: GatewayRequestScope | null;
 }) {
@@ -2520,7 +2474,7 @@ function PluginOperationResult({ value }: { value: JsonObject }) {
 
 function CapabilityForms(props: {
   busy: boolean;
-  client: GatewayClient | null;
+  client: CapabilitiesClient | null;
   mcpDraft: { name: string; transport: string; command: string; url: string; bearerTokenEnvVar: string; oauthClientId: string };
   mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
   onClose(): void;
@@ -3151,29 +3105,8 @@ function readinessStageLabel(id: string): string {
   return id.split(/[-_]/g).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ");
 }
 
-async function requestTab(client: GatewayClient, tab: CapabilityTab, scope: GatewayRequestScope) {
-  if (tab === "agents") {
-    const backendList = await client.request("backend/list", { scope });
-    const [agents, teams, runtimeProfiles] = await Promise.all([
-      client.request("agent/list", { scope }),
-      client.request("team/list", { scope }),
-      client.request("runtime/profile/list", { scope })
-    ]);
-    return {
-      ...objectValue(agents),
-      ...objectValue(backendList),
-      teams: objectValue(teams),
-      runtimeProfiles: objectValue(runtimeProfiles)
-    };
-  }
-  if (tab === "skills") return client.request("skill/list", { scope });
-  if (tab === "plugins") return client.request("plugin/list", { scope });
-  if (tab === "mcp") return client.request("mcp/list", { scope });
-  return client.request("tool/list", { scope });
-}
-
 function manageAcpBackend(
-  client: GatewayClient,
+  client: CapabilitiesClient,
   scope: GatewayRequestScope,
   id: string,
   action: ManagedBackendAction
@@ -3184,7 +3117,7 @@ function manageAcpBackend(
   return client.request("backend/upgrade", params);
 }
 
-async function setCapabilityEnabled(client: GatewayClient | null, scope: GatewayRequestScope | null, tab: CapabilityTab, row: CapabilityRow, enabled: boolean) {
+async function setCapabilityEnabled(client: CapabilitiesClient | null, scope: GatewayRequestScope | null, tab: CapabilityTab, row: CapabilityRow, enabled: boolean) {
   if (!client || !scope) return;
   if (tab === "skills") return client.request("skill/setEnabled", { name: row.name, enabled, scope });
   if (tab === "plugins") return client.request("plugin/setEnabled", {
@@ -3197,7 +3130,7 @@ async function setCapabilityEnabled(client: GatewayClient | null, scope: Gateway
 }
 
 async function startOAuth(
-  client: GatewayClient,
+  client: CapabilitiesClient,
   scope: GatewayRequestScope,
   name: string,
   onOAuthSession: (sessionId: string | null) => void,
@@ -3229,7 +3162,7 @@ function codexConnectTarget(detail: JsonObject | null): CodexConnectTarget | nul
 }
 
 async function startPluginConnect(
-  client: GatewayClient,
+  client: CapabilitiesClient,
   scope: GatewayRequestScope,
   selector: string,
   target: CodexConnectTarget,

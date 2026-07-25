@@ -2781,9 +2781,10 @@ vi.mock("@psychevo/client", async () => {
   }
 
   return {
+    CapabilitiesApplication: actual.CapabilitiesApplication,
     GatewayClient,
     GatewayClientError: actual.GatewayClientError,
-    ThreadController: actual.ThreadController,
+    ThreadSession: actual.ThreadSession,
     acceptThreadTurn: actual.acceptThreadTurn,
     appendOptimisticPrompt: (current: unknown, text: string) => {
       gatewayMock.optimisticLog.push(text);

@@ -6,12 +6,11 @@ import {
   type HistoryDraftSession
 } from "@psychevo/components";
 import {
-  GatewayClientError,
   GatewayClient,
   latestAssistantTranscriptText,
   parseThreadSnapshot,
   scopeForCwd,
-  ThreadController
+  ThreadSession
 } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
@@ -37,7 +36,7 @@ import {
   type WorkspaceFilesResult
 } from "@psychevo/protocol";
 import { createCommandActions } from "./command-actions";
-import { createAppActions, type PendingUnknownTurnStart } from "./app-actions";
+import { createAppActions } from "./app-actions";
 import { useWorkbenchEffects } from "./app-effects";
 import { ComposerSessionCoordinator } from "./composer-session-coordinator";
 import { useAutomations } from "./app-automations";
@@ -151,12 +150,12 @@ export function App({ runtimeFactory = createBrowserWorkbenchRuntime }: { runtim
 
 function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFactory }) {
   const confirmAction = useConfirmAction();
-  const threadController = useMemo(() => new ThreadController(EMPTY_SNAPSHOT), []);
+  const threadSession = useMemo(() => new ThreadSession({ snapshot: EMPTY_SNAPSHOT }), []);
   const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
   const threadSnapshotStore = useMemo(() => ({
-    getSnapshot: () => threadController.snapshot() ?? EMPTY_SNAPSHOT,
-    subscribe: (listener: () => void) => threadController.subscribe(listener)
-  }), [threadController]);
+    getSnapshot: () => threadSession.getSnapshot() ?? EMPTY_SNAPSHOT,
+    subscribe: (listener: () => void) => threadSession.subscribe(listener)
+  }), [threadSession]);
   const snapshot = useSyncExternalStore(
     threadSnapshotStore.subscribe,
     threadSnapshotStore.getSnapshot,
@@ -244,8 +243,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const commandContextKeyRef = useRef<string | null>(null);
   const detachedShellTokenRef = useRef(0);
   const pendingDetachedShellRef = useRef<PendingDetachedShell | null>(null);
-  const pendingUnknownTurnStartRef = useRef<PendingUnknownTurnStart | null>(null);
-  const gatewayRecoveryRef = useRef<() => void>(() => undefined);
   const firstTurnContextRefreshPendingRef = useRef(false);
   const skipNextPinnedPersistRef = useRef(false);
   const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
@@ -255,10 +252,17 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const runtimeMutationSequenceRef = useRef(0);
   const startupRetryRef = useRef(false);
 
+  useEffect(() => {
+    threadSession.attachClient(client);
+    return () => threadSession.attachClient(null);
+  }, [client, threadSession]);
+
+  useEffect(() => () => threadSession.dispose(), [threadSession]);
+
   function setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) {
-    const current = threadController.snapshot() ?? EMPTY_SNAPSHOT;
+    const current = threadSession.getSnapshot() ?? EMPTY_SNAPSHOT;
     const next = typeof value === "function" ? value(current) : value;
-    if (next !== current) threadController.reset(next);
+    if (next !== current) threadSession.reset(next, threadSession.getContext());
   }
 
   const activity = normalizeActivity(snapshot.activity);
@@ -316,7 +320,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     }
     if (!client || (!startupStable && !startupRetryRef.current)) {
       setRuntimeContext(null);
-      threadController.setContext(null);
+      threadSession.setContext(null);
       return;
     }
     if (
@@ -330,7 +334,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     let cancelled = false;
     const requestedTarget = currentThreadId || runtimeBinding
       ? null
-      : threadController.contextReadTarget(pendingTargetSelectionRef.current ?? selectedTargetId);
+      : threadSession.contextReadTarget(pendingTargetSelectionRef.current ?? selectedTargetId);
     setRuntimeOptionsLoading(true);
     setRuntimeOptionsError(null);
     void client.request("thread/context/read", {
@@ -341,7 +345,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       if (cancelled) return;
       const context = parseThreadContext(value);
       if (shouldRetainFirstTurnDraftContext(
-        threadController.context(),
+        threadSession.getContext(),
         context,
         firstTurnContextRefreshPendingRef.current,
         currentThreadId
@@ -349,7 +353,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         return;
       }
       setRuntimeContext(context);
-      threadController.setContext(context);
+      threadSession.setContext(context);
       const pendingTarget = context.compatibleTargets.find((target) => (
         target.targetId === pendingTargetSelectionRef.current
       )) ?? null;
@@ -376,7 +380,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       if (cancelled) return;
       setRuntimeContext(null);
       setRuntimeContextTargetId("");
-      threadController.setContext(null);
+      threadSession.setContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     }).finally(() => {
       if (!cancelled) setRuntimeOptionsLoading(false);
@@ -538,7 +542,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   } = useGatewayLiveEvents({
     selectedThreadIdRef,
     setLatestGatewayEvent,
-    threadController
+    threadSession
   });
 
   const {
@@ -638,14 +642,12 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     draftSession,
     gatewayEventQueueRef,
     gatewayEventRafRef,
-    gatewayRecoveryRef,
     host,
     initScope: init?.scope ?? null,
     mainView,
     mainViewRef,
     mobilePanel,
     pendingDetachedShellRef,
-    pendingUnknownTurnStartRef,
     firstTurnContextRefreshPendingRef,
     pinnedSessionIds,
     rightTabs,
@@ -660,7 +662,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     skipNextPinnedPersistRef,
     snapshot,
     startupStable,
-    threadController,
+    threadSession,
     viewEpochRef,
     adoptSnapshotScope,
     applyGatewayEvent,
@@ -718,7 +720,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     pendingTargetSelectionRef.current = null;
     viewEpochRef.current += 1;
     pendingDetachedShellRef.current = null;
-    pendingUnknownTurnStartRef.current = null;
     clearCommandTransientUi();
     setDraftSession(null);
     selectedThreadIdRef.current = null;
@@ -853,8 +854,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     initScope: init?.scope ?? null,
     isThreadArchived: (threadId: string) => archivedSessions.some((session) => session.id === threadId),
     pendingDetachedShellRef,
-    pendingUnknownTurnStartRef,
-    gatewayRecoveryRef,
     firstTurnContextRefreshPendingRef,
     runtimeControls,
     runtimeControlDrafts,
@@ -897,7 +896,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setWorkspaceChanges,
     setWorkspaceDiff,
     patchComposerDraft,
-    threadController,
+    threadSession,
     updateMainView
   });
 
@@ -948,7 +947,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     if (runtimeBinding) {
       setRuntimeContext((current) => current ? { ...current, binding: null, selectionState: "draft" } : current);
       setRuntimeContextTargetId("");
-      threadController.setContext(null);
+      threadSession.setContext(null);
     }
     const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
     try {
@@ -972,7 +971,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       }
       const context = parseThreadContext(result.context);
       setRuntimeContext(context);
-      threadController.setContext(context);
+      threadSession.setContext(context);
       setRuntimeContextTargetId(context.selectedTargetId ?? "");
       pendingTargetSelectionRef.current = null;
       if (result.problem) {
@@ -988,7 +987,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       composerSessionCoordinator.cancelPending();
       pendingTargetSelectionRef.current = null;
       setRuntimeContextTargetId("");
-      threadController.setContext(null);
+      threadSession.setContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (ownsTransition()) {
@@ -1014,24 +1013,20 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
       setRuntimeOptionsLoading(true);
       try {
-        threadController.setContext(runtimeContext);
-        const result = await client.request(
-          "thread/control/set",
-          threadController.controlSetParams(
-            selectedTargetId,
-            control,
-            value,
-            scope,
-            currentThreadId ?? null
-          )
-        );
+        threadSession.setContext(runtimeContext);
+        const result = await threadSession.setControl({
+          control,
+          scope,
+          targetId: selectedTargetId,
+          threadId: currentThreadId ?? null,
+          value
+        });
         if (
           runtimeMutationSequenceRef.current !== mutationId
           || viewEpochRef.current !== mutationEpoch
         ) {
           return;
         }
-        threadController.applyControlReceipt(result);
         setRuntimeContext(result.context);
         setRuntimeContextTargetId(result.context.selectedTargetId ?? "");
         setRuntimeControlDrafts((current) => {
@@ -1077,13 +1072,13 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       target: null,
       scope: targetScope
     }));
-    const targetController = selectedAtStart
-      ? threadController
-      : new ThreadController(targetSnapshot);
-    targetController.setContext(targetContext);
+    const targetSession = selectedAtStart
+      ? threadSession
+      : new ThreadSession({ client, snapshot: targetSnapshot });
+    targetSession.setContext(targetContext);
     const binding = targetContext.binding;
-    const turnControls = targetController.turnControls(targetContext.selectedTargetId ?? "", {});
-    const admission = targetController.admitTurn({ controls: turnControls, input, mentions });
+    const turnControls = targetSession.turnControls(targetContext.selectedTargetId ?? "", {});
+    const admission = targetSession.admitTurn({ controls: turnControls, input, mentions });
     if (!admission.allowed) {
       setCommandFeedback({
         accepted: false,
@@ -1098,7 +1093,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       || trimmed
       || input.filter((part) => part.type === "image").map(() => "[Image]").join(" ");
     const turnEpoch = viewEpochRef.current;
-    const plan = targetController.beginTurn({
+    const outcome = await targetSession.send({
       controls: turnControls,
       input,
       mentions,
@@ -1106,40 +1101,26 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       scope: targetScope,
       threadId
     });
-    const result = await client.request("turn/start", plan.params).catch((error) => {
-      if (error instanceof GatewayClientError && error.delivery === "unknown") {
-        pendingUnknownTurnStartRef.current = {
-          epoch: turnEpoch,
-          prepared: plan.prepared,
-          isInputCurrent: () => true,
-          clearInput: () => undefined
-        };
-        setCommandFeedback({
-          accepted: false,
-          command: "turn/start",
-          message: "Send status is unknown. Verifying the Thread.",
-          feedbackAnchor: "composer"
-        });
-        gatewayRecoveryRef.current();
-        return null;
-      }
-      targetController.rejectTurnStart(plan.prepared);
+    if (outcome.status === "not_sent") {
       if (selectedAtStart && viewEpochRef.current === turnEpoch) {
         setRuntimeContextRefreshRevision((current) => current + 1);
       }
-      throw error;
-    });
-    if (!result) {
+      if (!selectedAtStart) targetSession.dispose();
+      throw outcome.error;
+    }
+    if (outcome.status === "cancelled") {
+      if (!selectedAtStart) targetSession.dispose();
       return;
     }
     if (selectedAtStart && viewEpochRef.current !== turnEpoch) {
       await refreshHistory();
       return;
     }
-    const accepted = targetController.acceptTurnStart(result, plan.prepared);
     if (selectedAtStart) {
-      selectedThreadIdRef.current = accepted.threadId;
+      selectedThreadIdRef.current = outcome.threadId;
       setRuntimeContextRefreshRevision((current) => current + 1);
+    } else {
+      targetSession.dispose();
     }
     await refreshHistory();
   }
@@ -1362,7 +1343,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,
     composerPresentationReady: startupStable,
     composerShellVisible,
-    onGatewayRetry: () => gatewayRecoveryRef.current(),
+    onGatewayRetry: () => void client?.reconnectNow(),
     onComposerRetry: retryComposerStartup,
     workspaceBranch, workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
   }} />;

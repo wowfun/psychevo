@@ -40,6 +40,27 @@ export const CHANNELS_VISUAL_ENV = [
 ].join("\n");
 const CHANNELS_SCREENSHOT_DIR = path.join(repoRoot, ".local/playwright/screenshots/channels");
 
+export async function selectLiveProviderModel(page: Page, model: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Model", exact: true }).first();
+  await expect(trigger).toBeVisible({ timeout: 60_000 });
+  await trigger.click();
+  const picker = page.getByRole("dialog", { name: "Model and reasoning" });
+  await expect(picker).toBeVisible({ timeout: 30_000 });
+  const option = picker.locator(`[data-model-value=${JSON.stringify(model)}]`);
+  await expect(option, `live model ${model} must be selectable in Workbench`).toBeVisible({
+    timeout: 60_000
+  });
+  await option.click();
+  await expect(
+    trigger,
+    `Workbench must project the selected live model ${model}`
+  ).toHaveAttribute("title", new RegExp(escapeRegExp(model)), { timeout: 30_000 });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export async function startAutomationToolMockProvider(): Promise<{
   baseUrl: string;
   close(): Promise<void>;

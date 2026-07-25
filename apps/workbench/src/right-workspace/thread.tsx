@@ -5,7 +5,8 @@ import {
   appendOptimisticPrompt,
   parseThreadSnapshot,
   scopeForCwd,
-  ThreadController
+  ThreadSession,
+  type ThreadSessionClient
 } from "@psychevo/client";
 import type { GatewayClient } from "@psychevo/client";
 import type {
@@ -25,7 +26,6 @@ import { parseThreadContext } from "../runtime-context";
 import { idleActivity, normalizeSnapshot } from "../session-utils";
 import {
   hydrateThreadSnapshotHistory,
-  runThreadInterrupt,
   threadApplicationTarget
 } from "../thread-application";
 
@@ -62,11 +62,14 @@ export function ThreadPanel({
   onPendingPromptConsumed,
   workspaceFileLinks
 }: ThreadPanelProps) {
-  const controller = useMemo(() => new ThreadController(null), [threadId]);
+  const threadSession = useMemo(
+    () => new ThreadSession({ client: adaptThreadSessionClient(client), snapshot: null }),
+    [threadId]
+  );
   const snapshotStore = useMemo(() => ({
-    getSnapshot: () => controller.snapshot(),
-    subscribe: (listener: () => void) => controller.subscribe(listener)
-  }), [controller]);
+    getSnapshot: () => threadSession.getSnapshot(),
+    subscribe: (listener: () => void) => threadSession.subscribe(listener)
+  }), [threadSession]);
   const snapshot = useSyncExternalStore(
     snapshotStore.subscribe,
     snapshotStore.getSnapshot,
@@ -114,8 +117,7 @@ export function ThreadPanel({
     const barrierSeq = gatewayEventFeedRef.current.latestSeq;
     lastAppliedGatewayEventSeqRef.current = barrierSeq;
     if (!client || !threadId) {
-      controller.reset(null);
-      controller.setContext(null);
+      threadSession.reset(null);
       setThreadContext(null);
       setObservedHistoryFidelity(registeredHistoryFidelity);
       setThreadActions([]);
@@ -125,7 +127,7 @@ export function ThreadPanel({
     }
     setLoading(true);
     setError(null);
-    controller.setContext(null);
+    threadSession.setContext(null);
     setThreadContext(null);
     setAccess(kind === "sideConversation" ? "readWrite" : "checking");
     setThreadActions([]);
@@ -168,11 +170,10 @@ export function ThreadPanel({
       }
       const pending = gatewayEventsForThread(gatewayEventFeedRef.current, threadId)
         .filter((record) => record.seq > barrierSeq);
-      controller.reset(next);
-      controller.setContext(nextContext);
+      threadSession.reset(next, nextContext);
       setThreadContext(nextContext);
-      refreshAfterTerminal = applyGatewayFeed(controller, pending);
-      nextHistoryFidelity = controller.snapshot()?.history.fidelity ?? nextHistoryFidelity;
+      refreshAfterTerminal = applyGatewayFeed(threadSession, pending);
+      nextHistoryFidelity = threadSession.getSnapshot()?.history.fidelity ?? nextHistoryFidelity;
       lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? barrierSeq;
       setAccess(nextAccess);
       setThreadActions(nextActions);
@@ -194,12 +195,14 @@ export function ThreadPanel({
   }
 
   useEffect(() => {
+    threadSession.attachClient(adaptThreadSessionClient(client));
     void refresh();
     consumedPendingPromptRef.current = null;
     return () => {
       refreshGenerationRef.current += 1;
+      threadSession.dispose();
     };
-  }, [client, kind, registeredHistoryFidelity, scope, threadId]);
+  }, [client, kind, registeredHistoryFidelity, scope, threadId, threadSession]);
 
   useEffect(() => {
     const pending = gatewayEventsForThread(gatewayEventFeed, threadId)
@@ -207,15 +210,15 @@ export function ThreadPanel({
     if (pending.length === 0) {
       return;
     }
-    if ((controller.snapshot()?.thread?.id ?? null) !== threadId) {
+    if ((threadSession.getSnapshot()?.thread?.id ?? null) !== threadId) {
       return;
     }
-    const refreshAfterTerminal = applyGatewayFeed(controller, pending);
+    const refreshAfterTerminal = applyGatewayFeed(threadSession, pending);
     lastAppliedGatewayEventSeqRef.current = pending.at(-1)?.seq ?? lastAppliedGatewayEventSeqRef.current;
     if (refreshAfterTerminal) {
       void refresh();
     }
-  }, [controller, gatewayEventFeed.latestSeq, threadId]);
+  }, [gatewayEventFeed.latestSeq, threadId, threadSession]);
 
   useEffect(() => {
     const prompt = pendingPrompt?.trim();
@@ -245,19 +248,19 @@ export function ThreadPanel({
     if (!client || !snapshot) {
       return;
     }
-    const context = controller.context();
+    const context = threadSession.getContext();
     if (!context) {
       setError("Thread Context is required before starting a turn.");
       return;
     }
     const input = [{ type: "text" as const, text: text.trim() }];
-    const controls = controller.turnControls(context.selectedTargetId ?? "", {});
-    const admission = controller.admitTurn({ controls, input, mentions });
+    const controls = threadSession.turnControls(context.selectedTargetId ?? "", {});
+    const admission = threadSession.admitTurn({ controls, input, mentions });
     if (!admission.allowed) {
       setError(admission.reason ?? "This Agent target cannot start a turn.");
       return;
     }
-    const plan = controller.beginTurn({
+    const outcome = await threadSession.send({
       controls,
       input,
       mentions,
@@ -265,12 +268,12 @@ export function ThreadPanel({
       scope: snapshot.scope,
       threadId
     });
-    try {
-      const result = await client.request("turn/start", plan.params);
-      controller.acceptTurnStart(result, plan.prepared);
-    } catch (submitError) {
-      controller.rejectTurnStart(plan.prepared);
-      setError(submitError instanceof Error ? submitError.message : String(submitError));
+    if (outcome.status === "not_sent") {
+      setError(outcome.error.message);
+    } else if (outcome.status === "cancelled") {
+      return;
+    } else if (outcome.status === "reconciled" && !outcome.accepted) {
+      setError("The recovered Thread did not accept that Send.");
     }
   }
 
@@ -288,9 +291,12 @@ export function ThreadPanel({
         setError("The selected Runtime Profile does not support steering this turn.");
         return;
       }
-      const current = controller.snapshot();
+      const current = threadSession.getSnapshot();
       if (current) {
-        controller.reset(normalizeSnapshot(appendOptimisticPrompt(current, text.trim())));
+        threadSession.reset(
+          normalizeSnapshot(appendOptimisticPrompt(current, text.trim())),
+          threadSession.getContext()
+        );
       }
     } catch (steerError) {
       setError(steerError instanceof Error ? steerError.message : String(steerError));
@@ -303,7 +309,7 @@ export function ThreadPanel({
       return;
     }
     try {
-      await runThreadInterrupt(client, target);
+      await threadSession.interrupt(target.scope, target.threadId);
       await refresh();
     } catch (interruptError) {
       setError(interruptError instanceof Error ? interruptError.message : String(interruptError));
@@ -406,13 +412,32 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
   };
 }
 
+function adaptThreadSessionClient(client: GatewayClient | null): ThreadSessionClient | null {
+  if (!client) return null;
+  const optional = client as GatewayClient & Partial<ThreadSessionClient>;
+  return {
+    connectionSnapshot: () => optional.connectionSnapshot?.() ?? {
+      attempt: 0,
+      generation: 1,
+      nextRetryMs: null,
+      state: "connected"
+    },
+    request: (method, params, options) => options === undefined
+      ? client.request(method, params)
+      : client.request(method, params, options),
+    subscribe: () => () => undefined,
+    subscribeConnectionState: (handler) =>
+      optional.subscribeConnectionState?.(handler) ?? (() => undefined)
+  };
+}
+
 function applyGatewayFeed(
-  controller: ThreadController,
+  session: ThreadSession,
   records: GatewayEventFeedItem[]
 ): boolean {
   let terminalObserved = false;
   for (const record of records) {
-    controller.applyGatewayEvent(record.event);
+    session.ingestGatewayEvent(record.event);
     terminalObserved ||= record.event.type === "turnCompleted";
   }
   return terminalObserved;

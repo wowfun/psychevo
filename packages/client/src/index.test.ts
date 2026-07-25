@@ -7,6 +7,7 @@ import type {
 } from "@psychevo/protocol";
 import {
   GatewayClient,
+  GatewayClientError,
   parseThreadSnapshot,
   runThreadInterrupt,
   scopeForCwd,
@@ -215,6 +216,34 @@ describe("GatewayClient transport", () => {
       code: "disconnected",
       delivery: "unknown",
       message: "bridge closed"
+    });
+  });
+
+  it("preserves JSON-RPC error code and data as an acknowledged server failure", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    await client.connect();
+
+    const pending = client.request("thread/list", {});
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      error: {
+        code: -32042,
+        message: "Thread scope is stale",
+        data: { currentRevision: "revision-2" }
+      }
+    }));
+
+    const error = await pending.catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(GatewayClientError);
+    expect(error).toMatchObject({
+      code: "server_error",
+      data: { currentRevision: "revision-2" },
+      delivery: "acknowledged",
+      kind: "server",
+      message: "Thread scope is stale",
+      rpcCode: -32042
     });
   });
 

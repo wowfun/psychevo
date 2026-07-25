@@ -7,7 +7,8 @@ import {
   captureWorkbench,
   ensureLiveAutomationCwd,
   ensureLiveSubagentCwd,
-  expectNoTransientAssistantDuplicateDuring
+  expectNoTransientAssistantDuplicateDuring,
+  selectLiveProviderModel
 } from "./workbench.support";
 
 test.describe("pevo Web Workbench", () => {
@@ -34,15 +35,18 @@ test.describe("pevo Web Workbench", () => {
         timeout: 60_000
       });
       await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
+      await selectLiveProviderModel(page, context.model);
 
       await page.getByPlaceholder("Ask Psychevo...").fill(
         "Reply with exactly this text and nothing else: psychevo web live ok"
       );
       await page.getByRole("button", { name: "Send message" }).click();
 
-      await expect(
-        page.locator(".pevo-message.is-assistant").getByText(/psychevo web live ok/i)
-      ).toBeVisible({ timeout: 240_000 });
+      const answer = page.locator(".pevo-message.is-assistant").getByText(/psychevo web live ok/i);
+      const failure = page.locator(".errorBand");
+      await expect(answer.or(failure).first()).toBeVisible({ timeout: 240_000 });
+      await expect(failure, "the live turn must not terminate with a Workbench error").toHaveCount(0);
+      await expect(answer).toBeVisible();
     } finally {
       await server.stop();
     }
@@ -68,6 +72,10 @@ test.describe("pevo Web Workbench", () => {
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
+        timeout: 60_000
+      });
+      await selectLiveProviderModel(page, context.model);
 
       await page.getByPlaceholder("Ask Psychevo...").fill(
         "请使用 automation 工具创建一个自动化。标题必须是 pevo-live-engineering-tip，schedule 必须是 interval everyMinutes=1（当前系统不支持秒级，使用最快支持间隔），prompt 是：每次发送一条最有价值的软件工程 tip。不要显式指定 project 或 currentThread；按当前对话的默认目标创建。请实际创建，不要等待触发，不要只说明。"
@@ -122,6 +130,10 @@ test.describe("pevo Web Workbench", () => {
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
+      await expect(page.locator('.appShell[data-composer-state="ready"]')).toBeVisible({
+        timeout: 60_000
+      });
+      await selectLiveProviderModel(page, context.model);
 
       await page.getByPlaceholder("Ask Psychevo...").fill(LIVE_TRANSLATE_SUBAGENT_PROMPT);
       await page.getByRole("button", { name: "Send message" }).click();

@@ -1,13 +1,12 @@
 import {
   GatewayClient,
   emptyThreadSnapshot,
-  runThreadInterrupt,
-  ThreadController,
+  ThreadSession,
   type ThreadTurnControls
 } from "@psychevo/client";
 import { ActionButton, IconButton, TranscriptPanel } from "@psychevo/components";
 import type { HostCapabilityResult } from "@psychevo/host";
-import type { GatewayEvent, GatewayRequestScope, ThreadContextReadResult, ThreadSnapshot } from "@psychevo/protocol";
+import type { GatewayRequestScope, ThreadContextReadResult, ThreadSnapshot } from "@psychevo/protocol";
 import { ArrowUp, Camera, FilePlus2, Languages, Maximize2, MessageCircle, Minus, RefreshCcw, Sparkles, Square, TextCursorInput, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
@@ -70,7 +69,8 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
   const [transcript, setTranscript] = useState<ThreadSnapshot | null>(null);
   const capsuleRef = useRef<HTMLElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const threadControllerRef = useRef(new ThreadController(null));
+  const threadSessionRef = useRef(new ThreadSession());
+  const lastSessionRunningRef = useRef(false);
   const lastWindowFitRef = useRef<{ width: number; height: number } | null>(null);
   const locale = useMemo(
     () => runtime.locale ?? (typeof navigator === "undefined" ? "system locale" : navigator.language || "system locale"),
@@ -144,26 +144,32 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
   }, [runtime]);
 
   useEffect(() => {
-    if (!client) {
-      return;
-    }
-    return client.subscribe((notification) => {
-      if (notification.method !== "gateway/event") {
-        return;
-      }
-      const applied = threadControllerRef.current.applyGatewayEvent(notification.params as GatewayEvent);
-      if (!applied.applied) {
-        return;
-      }
-      setTranscript(applied.snapshot);
-      if (applied.running !== null) {
-        dispatch({ running: applied.running, type: "running" });
-      }
-      if (applied.completed) {
-        dispatch({ type: "completed" });
+    const session = threadSessionRef.current;
+    session.attachClient(client);
+    const unsubscribe = session.subscribe(() => {
+      const snapshot = session.getSnapshot();
+      setTranscript(snapshot);
+      const running = snapshot?.activity.running ?? false;
+      if (running !== lastSessionRunningRef.current) {
+        const completed = lastSessionRunningRef.current && !running;
+        lastSessionRunningRef.current = running;
+        dispatch({ running, type: "running" });
+        if (completed) {
+          dispatch({ type: "completed" });
+        }
       }
     });
+    return () => {
+      unsubscribe();
+      session.attachClient(null);
+    };
   }, [client]);
+
+  useEffect(() => {
+    return () => {
+      threadSessionRef.current.dispose();
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -208,7 +214,8 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
   }
 
   function resetTranscript(snapshot: ThreadSnapshot | null) {
-    threadControllerRef.current.reset(snapshot);
+    lastSessionRunningRef.current = snapshot?.activity.running ?? false;
+    threadSessionRef.current.reset(snapshot);
     setTranscript(snapshot);
   }
 
@@ -267,8 +274,9 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
         scope,
         requestedThreadId ?? null
       );
-      threadControllerRef.current.setContext(preparation.context);
-      const plan = threadControllerRef.current.beginTurn({
+      const session = threadSessionRef.current;
+      session.reset(session.getSnapshot(), preparation.context);
+      const send = session.send({
         controls: preparation.controls,
         input,
         optimisticText: prompt,
@@ -276,15 +284,20 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
         threadId: requestedThreadId ?? null
       });
       dispatch({ type: "submit", action, prompt });
-      setTranscript(plan.snapshot);
-      const result = await client.request("turn/start", plan.params).catch((error) => {
-        const snapshot = threadControllerRef.current.rejectTurnStart(plan.prepared);
-        setTranscript(snapshot);
-        throw error;
-      });
-      const accepted = threadControllerRef.current.acceptTurnStart(result, plan.prepared, "floating turn");
-      const threadId = accepted.threadId;
-      setTranscript(accepted.snapshot);
+      const outcome = await send;
+      if (outcome.status === "not_sent") {
+        throw outcome.error;
+      }
+      if (outcome.status === "cancelled") {
+        return;
+      }
+      if (outcome.status === "reconciled" && !outcome.accepted) {
+        throw new Error("The recovered Thread did not accept that Send.");
+      }
+      const threadId = outcome.threadId;
+      if (!threadId) {
+        throw new Error("Gateway accepted the Floating turn without a Thread identity.");
+      }
       dispatch({ type: "accepted", threadId });
     } catch (error) {
       dispatch({ type: "error", message: errorMessage(error) });
@@ -310,10 +323,10 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
       return;
     }
     try {
-      await runThreadInterrupt(client, {
-        scope: floatingScope(cwd || "/", state.activationId),
-        threadId: state.threadId
-      });
+      await threadSessionRef.current.interrupt(
+        floatingScope(cwd || "/", state.activationId),
+        state.threadId
+      );
       dispatch({ running: false, type: "running" });
     } catch (error) {
       dispatch({ type: "error", message: errorMessage(error) });
@@ -478,12 +491,14 @@ async function floatingTurnPreparation(
   });
   let context = discovery;
   if (!threadId) {
-    const discoveryController = new ThreadController();
-    discoveryController.setContext(discovery);
     const discoveryTargetId = discovery.selectedTargetId ?? discovery.suggestedTargetId;
-    const target = discoveryTargetId
-      ? discoveryController.contextReadTarget(discoveryTargetId)
-      : null;
+    const targetView = discovery.compatibleTargets.find(
+      (candidate) => candidate.targetId === discoveryTargetId
+    ) ?? null;
+    const target = targetView ? {
+      agentRef: targetView.agentRef ?? null,
+      runtimeProfileRef: targetView.runtimeProfileRef
+    } : null;
     if (!target) {
       throw new Error("Gateway did not provide a canonical Floating Agent target.");
     }
@@ -493,11 +508,15 @@ async function floatingTurnPreparation(
       scope
     });
   }
-  const controller = new ThreadController();
-  controller.setContext(context);
   return {
     context,
-    controls: controller.turnControls(context.selectedTargetId ?? "", {})
+    controls: {
+      expectedContextRevision: context.contextRevision,
+      expectedControlRevision: context.controlRevision,
+      omitTarget: Boolean(context.binding),
+      targetId: context.selectedTargetId ?? "",
+      turnOverrides: {}
+    }
   };
 }
 

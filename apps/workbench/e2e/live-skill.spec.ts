@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { repoRoot, startPevoWeb } from "./harness";
 import { liveContextFor, screenshotRoot } from "./liveContext";
+import { selectLiveProviderModel } from "./workbench.support";
 
 type DomRow = {
   blockId: string | null;
@@ -74,6 +75,7 @@ test.describe("pevo Web live skill validation", () => {
         timeout: 60_000
       });
       await expect(transcript.locator(".pevo-threadItems > article")).toHaveCount(0);
+      await selectLiveProviderModel(page, context.model);
       const composer = page.getByPlaceholder("Ask Psychevo...");
       await expect(composer).toBeVisible();
       const send = page.getByRole("button", { name: "Send" });

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react
 import {
   parseThreadSnapshot,
   type GatewayClient,
-  type ThreadController
+  type ThreadSession
 } from "@psychevo/client";
 import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
 import {
@@ -50,7 +50,6 @@ import {
   type ComposerSessionCoordinator,
   type DraftOpenToken
 } from "./composer-session-coordinator";
-import type { PendingUnknownTurnStart } from "./app-actions";
 
 const COMMAND_FEEDBACK_AUTO_DISMISS_MS = 3_000;
 const TURN_SETTLEMENT_CONTEXT_ACTIONS = new Set([
@@ -109,14 +108,12 @@ type AppEffectsParams = {
   draftSession: unknown;
   gatewayEventQueueRef: MutableRefObject<GatewayEvent[]>;
   gatewayEventRafRef: MutableRefObject<number | null>;
-  gatewayRecoveryRef: MutableRefObject<() => void>;
   host: PsychevoHost | null;
   initScope: GatewayRequestScope | null;
   mainView: MainView;
   mobilePanel: "history" | "transcript" | "status";
   pinnedSessionIds: string[];
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
-  pendingUnknownTurnStartRef: MutableRefObject<PendingUnknownTurnStart | null>;
   firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   rightTabs: RightWorkspaceTab[];
   rightWorkspaceOpen: boolean;
@@ -128,7 +125,7 @@ type AppEffectsParams = {
   skipNextPinnedPersistRef: MutableRefObject<boolean>;
   snapshot: ThreadSnapshot;
   startupStable: boolean;
-  threadController: ThreadController;
+  threadSession: ThreadSession;
   scopeRef: MutableRefObject<GatewayRequestScope | null>;
   selectedThreadIdRef: MutableRefObject<string | null>;
   mainViewRef: MutableRefObject<MainView>;
@@ -354,53 +351,13 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       }
       const threadId = current.selectedThreadIdRef.current;
       try {
-        const pendingUnknown = current.pendingUnknownTurnStartRef.current;
-        if (pendingUnknown && pendingUnknown.epoch === epoch) {
-          const request = threadId ? { threadId, scope } : { scope };
-          const incoming = normalizeSnapshot(parseThreadSnapshot(
-            await runtimeClient.request("thread/resume", request)
-          ));
-          if (
-            !alive
-            || current.viewEpochRef.current !== epoch
-            || runtimeClient.connectionSnapshot().generation !== generation
-          ) {
-            return "stale";
-          }
-          const reconciled = current.threadController.reconcileUncertainTurnStart(
-            pendingUnknown.prepared,
-            incoming
-          );
-          current.selectedThreadIdRef.current = reconciled.snapshot.thread?.id ?? null;
-          await current.adoptSnapshotScope(runtimeClient, reconciled.snapshot);
-          if (
-            !alive
-            || current.viewEpochRef.current !== epoch
-            || runtimeClient.connectionSnapshot().generation !== generation
-          ) {
-            return "stale";
-          }
-          current.pendingUnknownTurnStartRef.current = null;
-          current.firstTurnContextRefreshPendingRef.current = false;
-          if (reconciled.accepted) {
-            pendingUnknown.clearInput();
-          } else {
-            current.setCommandFeedback({
-              accepted: false,
-              command: "turn/start",
-              message: "The recovered Thread did not accept that Send. Your draft was preserved.",
-              feedbackAnchor: "composer"
-            });
-          }
-        } else {
-          await current.refreshSnapshot(
-            runtimeClient,
-            threadId ?? undefined,
-            scope,
-            false,
-            epoch
-          );
-        }
+        await current.refreshSnapshot(
+          runtimeClient,
+          threadId ?? undefined,
+          scope,
+          false,
+          epoch
+        );
         if (
           !alive
           || current.viewEpochRef.current !== epoch
@@ -438,11 +395,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       if (!alive || !initialized || recoveringGeneration === generation) {
         return;
       }
-      const current = latestParamsRef.current;
-      const pendingUnknown = current.pendingUnknownTurnStartRef.current;
-      if (generation <= lastRecoveredGeneration && !pendingUnknown) {
+      if (generation <= lastRecoveredGeneration) {
         return;
       }
+      const current = latestParamsRef.current;
       recoveringGeneration = generation;
       current.setStatus("recovering");
       void rehydrate(runtimeClient, generation).then((result) => {
@@ -469,15 +425,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
     }
 
     function attachRuntime(runtimeClient: GatewayClient) {
-      const retryRecovery = () => {
-        const snapshot = runtimeClient.connectionSnapshot();
-        if (snapshot.state === "connected") {
-          recoverGeneration(runtimeClient, snapshot.generation);
-        } else {
-          void runtimeClient.reconnectNow();
-        }
-      };
-      latestParamsRef.current.gatewayRecoveryRef.current = retryRecovery;
       connectionUnlisten = runtimeClient.subscribeConnectionState((snapshot) => {
         if (!alive) return;
         if (snapshot.state === "connected") {
@@ -550,7 +497,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             if (!threadId) {
               return;
             }
-            const context = params.threadController.context();
+            const context = params.threadSession.getContext();
             const refreshFirstTurnContext = params.firstTurnContextRefreshPendingRef.current;
             if (refreshFirstTurnContext) {
               params.firstTurnContextRefreshPendingRef.current = false;
@@ -742,7 +689,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
           params.setSnapshot(normalized);
           params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));
-          params.threadController.setContext(nextContext);
+          params.threadSession.setContext(nextContext);
           params.setRuntimeContext(nextContext);
           params.setWorkspaceBranch(workspaceBranch);
           params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
@@ -791,7 +738,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       }
       openThreadUnlisten?.();
       connectionUnlisten?.();
-      params.gatewayRecoveryRef.current = () => undefined;
       activeClient?.close();
     };
   }, []);

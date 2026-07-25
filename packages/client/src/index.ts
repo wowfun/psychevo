@@ -30,8 +30,7 @@ export {
   emptyThreadSnapshot,
   latestAssistantTranscriptText,
   prepareThreadTurn,
-  threadTurnStartParams,
-  ThreadController
+  threadTurnStartParams
 } from "./thread-controller";
 export type {
   ThreadGatewayEventApplication,
@@ -42,6 +41,23 @@ export type {
   ThreadTurnStartInput,
   ThreadTurnStartPlan
 } from "./thread-controller";
+export { ThreadSession } from "./thread-session";
+export {
+  CapabilitiesApplication,
+  type CapabilitiesClient,
+  type CapabilitiesSnapshot,
+  type CapabilityDomain,
+  type CapabilityOperationReceipt,
+  type CapabilityPollState
+} from "./capabilities-application";
+export type {
+  ThreadSessionClient,
+  ThreadSessionControlInput,
+  ThreadSessionLoadInput,
+  ThreadSessionOptions,
+  ThreadSessionSendInput,
+  ThreadSessionSendOutcome
+} from "./thread-session";
 
 export type NotificationHandler = (notification: RpcNotification) => void;
 export type GatewayRawMessageHandler = (data: unknown) => void;
@@ -98,7 +114,7 @@ export type GatewayConnectionState =
   | "error"
   | "closed";
 
-export type GatewayDelivery = "not_sent" | "unknown";
+export type GatewayDelivery = "not_sent" | "unknown" | "acknowledged";
 
 export interface GatewayConnectionSnapshot {
   state: GatewayConnectionState;
@@ -120,17 +136,37 @@ export type GatewayClientErrorCode =
   | "disconnected"
   | "request_timeout"
   | "request_aborted"
-  | "protocol_fault";
+  | "protocol_fault"
+  | "server_error";
+
+export type GatewayClientErrorKind = "transport" | "server" | "protocol";
+
+export interface GatewayClientErrorDetails {
+  data?: unknown;
+  kind?: GatewayClientErrorKind;
+  rpcCode?: number | null;
+}
 
 export class GatewayClientError extends Error {
   readonly code: GatewayClientErrorCode;
+  readonly data: unknown;
   readonly delivery: GatewayDelivery;
+  readonly kind: GatewayClientErrorKind;
+  readonly rpcCode: number | null;
 
-  constructor(code: GatewayClientErrorCode, delivery: GatewayDelivery, message: string) {
+  constructor(
+    code: GatewayClientErrorCode,
+    delivery: GatewayDelivery,
+    message: string,
+    details: GatewayClientErrorDetails = {}
+  ) {
     super(message);
     this.name = "GatewayClientError";
     this.code = code;
+    this.data = details.data;
     this.delivery = delivery;
+    this.kind = details.kind ?? (code === "protocol_fault" ? "protocol" : "transport");
+    this.rpcCode = details.rpcCode ?? null;
   }
 }
 
@@ -371,7 +407,16 @@ export class GatewayClient {
       }
       this.takePending(key);
       if ("error" in response) {
-        pending.reject(new Error(response.error.message));
+        pending.reject(new GatewayClientError(
+          "server_error",
+          "acknowledged",
+          response.error.message,
+          {
+            data: response.error.data,
+            kind: "server",
+            rpcCode: response.error.code
+          }
+        ));
       } else {
         pending.resolve(response.result);
       }

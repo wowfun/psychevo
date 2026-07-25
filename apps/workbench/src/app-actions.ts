@@ -1,11 +1,9 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import {
-  GatewayClientError,
   parseThreadSnapshot,
   scopeForCwd,
   type GatewayClient,
-  type ThreadController,
-  type ThreadTurnPreparation
+  type ThreadSession
 } from "@psychevo/client";
 import {
   SettingsReadResultSchema,
@@ -73,13 +71,6 @@ import type { ComposerSessionCoordinator } from "./composer-session-coordinator"
 
 type ChannelUpdateDraft = Partial<Omit<ChannelUpdateParams, "id" | "scope">>;
 
-export type PendingUnknownTurnStart = {
-  epoch: number;
-  prepared: ThreadTurnPreparation;
-  isInputCurrent: () => boolean;
-  clearInput(): void;
-};
-
 type StartNewThreadOptions = {
   rejectProblem?: boolean;
   refreshHistory?: boolean;
@@ -115,8 +106,6 @@ type AppActionsParams = {
   fallbackCwd: string;
   turnBlockReason: string;
   pendingDetachedShellRef: MutableRefObject<PendingDetachedShell | null>;
-  pendingUnknownTurnStartRef: MutableRefObject<PendingUnknownTurnStart | null>;
-  gatewayRecoveryRef: MutableRefObject<() => void>;
   firstTurnContextRefreshPendingRef: MutableRefObject<boolean>;
   runtimeControls: ThreadControlDescriptorView[];
   runtimeControlDrafts: Record<string, unknown>;
@@ -124,7 +113,7 @@ type AppActionsParams = {
   selectedThreadIdRef: MutableRefObject<string | null>;
   settings: SettingsReadResult | undefined;
   snapshot: ThreadSnapshot;
-  threadController: ThreadController;
+  threadSession: ThreadSession;
   viewEpochRef: MutableRefObject<number>;
   adoptSnapshotScope(nextClient: GatewayClient, nextSnapshot: ThreadSnapshot): Promise<void>;
   beginExplicitViewSwitch(): number;
@@ -242,7 +231,7 @@ export function createAppActions(params: AppActionsParams) {
       params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
       params.setSnapshot(normalized);
       params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
-      params.threadController.setContext(nextContext);
+      params.threadSession.setContext(nextContext);
       params.setRuntimeContext(nextContext);
       params.setWorkspaceBranch(workspaceBranch);
       params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
@@ -374,8 +363,8 @@ export function createAppActions(params: AppActionsParams) {
     const optimisticText = displayText?.trim()
       || text.trim()
       || params.attachments.map((attachment) => `[Attachment: ${attachment.name}]`).join(" ");
-    const liveSnapshot = params.threadController.snapshot() ?? params.snapshot;
-    const liveContext = params.threadController.context();
+    const liveSnapshot = params.threadSession.getSnapshot() ?? params.snapshot;
+    const liveContext = params.threadSession.getContext();
     const turnOverrides = runtimeControlSelections(
       liveContext?.controls ?? params.runtimeControls,
       params.runtimeControlDrafts
@@ -393,15 +382,15 @@ export function createAppActions(params: AppActionsParams) {
         target: null,
         scope: scope()
       }));
-      params.threadController.setContext(restoredContext);
+      params.threadSession.setContext(restoredContext);
       turnTargetId = restoredContext.selectedTargetId ?? "";
       params.refreshRuntimeContext();
     }
-    const turnControls = params.threadController.turnControls(
+    const turnControls = params.threadSession.turnControls(
       turnTargetId,
       turnOverrides
     );
-    const admission = params.threadController.admitTurn({ controls: turnControls, input: nextInput, mentions });
+    const admission = params.threadSession.admitTurn({ controls: turnControls, input: nextInput, mentions });
     if (!admission.allowed) {
       params.setCommandFeedback({
         accepted: false,
@@ -414,49 +403,53 @@ export function createAppActions(params: AppActionsParams) {
     params.pendingDetachedShellRef.current = null;
     params.clearCommandTransientUi();
     params.firstTurnContextRefreshPendingRef.current = selectedThreadId === null;
-    const plan = params.threadController.beginTurn({
-      controls: turnControls,
-      input: nextInput,
-      mentions,
-      optimisticText,
-      scope: liveSnapshot.scope,
-      startedAtMs: submittedAtMs,
-      threadId: liveSnapshot.thread?.id ?? null
-    });
-    const result = await params.client.request("turn/start", plan.params).catch((error) => {
-      if (error instanceof GatewayClientError && error.delivery === "unknown") {
-        params.pendingUnknownTurnStartRef.current = {
-          epoch: turnEpoch,
-          prepared: plan.prepared,
-          isInputCurrent,
-          clearInput: () => {
-            if (!isInputCurrent()) return;
-            params.patchComposerDraft("");
-            params.setAttachments([]);
-          }
-        };
-        params.setCommandFeedback({
+    const outcome = await params.threadSession.send(
+      {
+        controls: turnControls,
+        input: nextInput,
+        mentions,
+        optimisticText,
+        scope: liveSnapshot.scope,
+        startedAtMs: submittedAtMs,
+        threadId: liveSnapshot.thread?.id ?? null
+      },
+      {
+        deliveryUnknown: () => params.setCommandFeedback({
           accepted: false,
           command: "turn/start",
           message: "Send status is unknown. Verifying the Thread; the draft is preserved.",
           feedbackAnchor: "composer"
-        });
-        params.gatewayRecoveryRef.current();
-        return null;
+        })
       }
+    );
+    if (outcome.status === "not_sent") {
       if (params.viewEpochRef.current === turnEpoch) {
-        params.threadController.rejectTurnStart(plan.prepared);
         params.firstTurnContextRefreshPendingRef.current = false;
         params.refreshRuntimeContext();
       }
-      throw error;
-    });
-    if (!result) {
+      throw outcome.error;
+    }
+    if (outcome.status === "cancelled") {
       return false;
     }
     if (params.viewEpochRef.current === turnEpoch) {
-      const accepted = params.threadController.acceptTurnStart(result, plan.prepared);
-      params.selectedThreadIdRef.current = accepted.threadId;
+      params.selectedThreadIdRef.current = outcome.threadId;
+    }
+    if (outcome.status === "reconciled" && !outcome.accepted) {
+      params.firstTurnContextRefreshPendingRef.current = false;
+      params.setCommandFeedback({
+        accepted: false,
+        command: "turn/start",
+        message: "The recovered Thread did not accept that Send. Your draft was preserved.",
+        feedbackAnchor: "composer"
+      });
+      return false;
+    }
+    if (outcome.status === "accepted" && outcome.detached) {
+      if (selectedThreadId === null) {
+        await params.refreshHistory();
+      }
+      return true;
     }
     params.setAttachments([]);
     if (selectedThreadId === null) {
@@ -606,7 +599,7 @@ export function createAppActions(params: AppActionsParams) {
       return;
     }
     const attachments = await Promise.all(files.map((file) => attachmentFromFile(file)));
-    const admission = params.threadController.admitInput(attachments.map((attachment) => attachment.input));
+    const admission = params.threadSession.admitInput(attachments.map((attachment) => attachment.input));
     if (!admission.allowed) {
       params.setError(admission.reason ?? "The selected Agent target does not accept this attachment.");
       return;

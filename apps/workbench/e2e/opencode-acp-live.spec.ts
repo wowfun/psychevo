@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
 import { liveContextFor, screenshotRoot } from "./liveContext";
-import { ensureRightInspectorOpen } from "./workbench.support";
+import { ensureRightInspectorOpen, selectLiveProviderModel } from "./workbench.support";
 
 let screenshotDir = path.join(repoRoot, ".local/playwright/screenshots/opencode-acp-live");
 
@@ -210,6 +210,7 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expectWorkbenchStartupSettled(page);
       await page.getByRole("button", { name: "New Session", exact: true }).click();
       await expectEmptyDraftReady(page);
+      await selectLiveProviderModel(page, context.model);
 
       await page.getByRole("button", { name: "Agent target", exact: true }).click();
       const targetPopover = page.getByRole("dialog", { name: "Agent target" });

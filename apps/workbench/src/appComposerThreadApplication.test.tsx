@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { GatewayClientError, ThreadController } from "@psychevo/client";
+import { GatewayClientError, ThreadSession } from "@psychevo/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deferred, gatewayMock, sessionSummary } from "./appComposerAgent.fixture";
 import { App } from "./App";
@@ -762,8 +762,8 @@ describe("Workbench public Thread Application interactions", () => {
     });
   });
 
-  it("replaces the ThreadController snapshot when the selected session changes", async () => {
-    const reset = vi.spyOn(ThreadController.prototype, "reset");
+  it("replaces the ThreadSession snapshot when the selected session changes", async () => {
+    const reset = vi.spyOn(ThreadSession.prototype, "reset");
 
     render(<App />);
     await resumeSession();
@@ -774,12 +774,10 @@ describe("Workbench public Thread Application interactions", () => {
     expect(await screen.findByText("Active session")).toBeTruthy();
   });
 
-  it("routes first-turn streaming and terminal completion through ThreadController before acceptance", async () => {
+  it("routes first-turn streaming and terminal completion through ThreadSession before acceptance", async () => {
     const pending = deferred<Record<string, unknown>>();
     gatewayMock.turnStart = () => pending.promise;
-    const beginTurn = vi.spyOn(ThreadController.prototype, "beginTurn");
-    const acceptTurnStart = vi.spyOn(ThreadController.prototype, "acceptTurnStart");
-    const applyGatewayEvent = vi.spyOn(ThreadController.prototype, "applyGatewayEvent");
+    const send = vi.spyOn(ThreadSession.prototype, "send");
 
     render(<App />);
     await waitForDraftContext();
@@ -791,7 +789,7 @@ describe("Workbench public Thread Application interactions", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(beginTurn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     emit("gateway/event", {
       selectedSkills: [],
       threadId: null,
@@ -807,13 +805,11 @@ describe("Workbench public Thread Application interactions", () => {
 
     emit("gateway/event", turnCompletedEvent("Completed before acceptance."));
     expect(await screen.findByText("Completed before acceptance.")).toBeTruthy();
-    expect(applyGatewayEvent).toHaveBeenCalled();
 
     await act(async () => {
       pending.resolve(turnStartResult());
       await pending.promise;
     });
-    await waitFor(() => expect(acceptTurnStart).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Completed before acceptance.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
   });
@@ -821,8 +817,6 @@ describe("Workbench public Thread Application interactions", () => {
   it("routes a failed turnCompleted event without resurrecting its turn on acceptance", async () => {
     const pending = deferred<Record<string, unknown>>();
     gatewayMock.turnStart = () => pending.promise;
-    const acceptTurnStart = vi.spyOn(ThreadController.prototype, "acceptTurnStart");
-    const applyGatewayEvent = vi.spyOn(ThreadController.prototype, "applyGatewayEvent");
 
     render(<App />);
     await waitForDraftContext();
@@ -846,13 +840,11 @@ describe("Workbench public Thread Application interactions", () => {
     emit("gateway/event", turnCompletedEvent("Turn failed before acceptance.", "failed"));
     expect((await screen.findAllByText("Turn failed before acceptance.")).length).toBeGreaterThan(0);
     expect(document.querySelector(".errorBand")?.textContent).toContain("Turn failed before acceptance.");
-    expect(applyGatewayEvent).toHaveBeenCalled();
 
     await act(async () => {
       pending.resolve(turnStartResult());
       await pending.promise;
     });
-    await waitFor(() => expect(acceptTurnStart).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: "Interrupt active turn" })).toBeNull();
   });
 
@@ -881,7 +873,7 @@ describe("Workbench public Thread Application interactions", () => {
     gatewayMock.turnStart = () => Promise.reject(new Error(
       "Thread Context changed; refresh it before starting the turn."
     ));
-    const rejectTurnStart = vi.spyOn(ThreadController.prototype, "rejectTurnStart");
+    const send = vi.spyOn(ThreadSession.prototype, "send");
 
     render(<App />);
     await waitForDraftContext();
@@ -900,7 +892,7 @@ describe("Workbench public Thread Application interactions", () => {
     expect(await screen.findByText(
       "Thread Context changed; refresh it before starting the turn."
     )).toBeTruthy();
-    await waitFor(() => expect(rejectTurnStart).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect((screen.getByPlaceholderText("Ask Psychevo...") as HTMLTextAreaElement).value).toBe("say hi");
     await waitFor(() => {
       expect(gatewayMock.requestLog.filter((entry) => (
