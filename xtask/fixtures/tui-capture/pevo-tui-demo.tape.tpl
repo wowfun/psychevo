@@ -19,6 +19,7 @@ Enter
 Wait+Screen /Add provider/
 Sleep 500 ms
 Screenshot "01-model-picker.png"
+Sleep 500 ms
 Escape
 Sleep 100 ms
 Type "/diff"
