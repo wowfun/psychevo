@@ -17,7 +17,7 @@ struct AutoCompactionAfterTurn<'a> {
     model: Option<String>,
     reasoning_effort: Option<String>,
     inherited_env: Option<BTreeMap<String, String>>,
-    event_sink: Option<&'a GatewayEventSink>,
+    event_sink: Option<&'a GatewayEventEmitter>,
     turn_id: &'a str,
 }
 
@@ -43,13 +43,14 @@ impl Gateway {
                 event_sink.as_ref(),
                 error,
             )
+            .await
         {
             return Err(Error::Message(format!(
                 "{error}; failed to persist the accepted turn terminal: {terminal_error}"
             )));
         }
         if result.is_err()
-            && let Err(delivery_error) = self.state.finish_gateway_turn_delivery(&turn_id)
+            && let Err(delivery_error) = self.state.finish_gateway_turn_delivery(&turn_id).await
         {
             return Err(Error::Message(format!(
                 "{}; failed to finalize the accepted turn delivery ledger: {delivery_error}",
@@ -67,7 +68,7 @@ impl Gateway {
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
         let base_event_sink = request.event_sink.clone();
         let queue_source = request.source.clone();
-        let alias_source_to_active = request.thread_id.is_none();
+        let alias_source_to_active = !request.explicit_thread;
         let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
         let bind_source_generation = bind_source
             .as_ref()
@@ -96,7 +97,7 @@ impl Gateway {
         let mapped_thread_id = if !request.reset_source_binding
             && let Some(source) = &request.source
         {
-            self.lookup_source_thread(source)?
+            self.lookup_source_thread(source).await?
         } else {
             None
         };
@@ -115,17 +116,22 @@ impl Gateway {
                 active_thread_id = self
                     .state
 
-                    .latest_session_for_cwd_with_sources(&options.cwd, &continue_source_refs)?;
+                    .latest_session_for_cwd_with_sources(&options.cwd, &continue_source_refs)
+                    .await?;
             }
         }
         if active_thread_id.is_none() {
-            active_thread_id = Some(self.state.create_session_with_metadata(
-                &options.cwd,
-                &source_name,
-                "pending",
-                "pending",
-                None,
-            )?);
+            active_thread_id = Some(
+                self.state
+                    .create_session_with_metadata(
+                        &options.cwd,
+                        &source_name,
+                        "pending",
+                        "pending",
+                        None,
+                    )
+                    .await?,
+            );
         }
         gateway_profile_mark(
             "gateway_thread_materialized",
@@ -137,14 +143,15 @@ impl Gateway {
             },
         );
         if let Some(thread_id) = active_thread_id.clone() {
-            options.cwd = self.thread_cwd(&thread_id)?;
+            options.cwd = self.thread_cwd(&thread_id).await?;
             options.session = Some(thread_id);
             options.continue_latest = false;
             if options.runtime_ref.is_none()
                 && let Some(binding) = self
                     .state
 
-                    .gateway_runtime_binding(options.session.as_deref().expect("active thread"))?
+                    .gateway_runtime_binding(options.session.as_deref().expect("active thread"))
+                    .await?
             {
                 options.runtime_ref = binding.runtime_ref;
             }
@@ -155,11 +162,12 @@ impl Gateway {
             && let Some(lane) = self
                 .state
 
-                .gateway_source_lane(&source.source_key().0)?
+                .gateway_source_lane(&source.source_key().0)
+                .await?
         {
             options.runtime_ref = lane.draft_profile_ref;
         }
-        let durable_source_key = if request.thread_id.is_some() {
+        let durable_source_key = if request.explicit_thread {
             None
         } else {
             queue_source
@@ -171,16 +179,18 @@ impl Gateway {
             .as_ref()
             .or(bind_source.as_ref())
             .map(|source| source.source_key().0);
-        let first_committed_seq = active_thread_id
-            .as_deref()
-            .and_then(|thread_id| {
-                self.state
-
-                    .load_tui_message_summaries(thread_id)
-                    .ok()
-            })
-            .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
-            .unwrap_or(1);
+        let first_committed_seq = match active_thread_id.as_deref() {
+            Some(thread_id) => self
+                .state
+                .load_tui_message_summaries(thread_id)
+                .await
+                .ok()
+                .and_then(|summaries| {
+                    summaries.last().map(|summary| summary.session_seq + 1)
+                })
+                .unwrap_or(1),
+            None => 1,
+        };
         let durable_intent = json!({
             "kind": "turn",
             "threadId": active_thread_id.clone(),
@@ -201,7 +211,8 @@ impl Gateway {
                 queued_turns: 0,
                 intent: Some(durable_intent),
             },
-        )?);
+        )
+        .await?);
         let _heartbeat = durable_activity
             .clone()
             .map(|activity| self.spawn_durable_activity_heartbeat(activity));
@@ -243,7 +254,7 @@ impl Gateway {
                 ..GatewayProfileFields::default()
             },
         );
-        lifecycle.start();
+        let _ = lifecycle.start();
         if alias_source_to_active
             && let Some(source) = queue_source.as_ref().or(bind_source.as_ref())
         {
@@ -267,7 +278,8 @@ impl Gateway {
             let bound_target = resolve_bound_gateway_agent_target(
                 &options,
                 options.runtime_ref.as_deref(),
-            )?;
+            )
+            .await?;
             let (profile_config, profile_revision, profile_fingerprint) = match bound_target.as_ref()
             {
                 Some(target) => (
@@ -275,14 +287,15 @@ impl Gateway {
                     target.revision,
                     target.fingerprint.clone(),
                 ),
-                None => resolve_gateway_runtime_profile(&options)?,
+                None => resolve_gateway_runtime_profile(&options).await?,
             };
             options.runtime_ref = Some(profile_config.id.clone());
             let existing_binding = match bound_target.as_ref() {
                 Some(target) => Some(target.binding.clone()),
                 None => self.state.gateway_runtime_binding(
                     active_thread_id.as_deref().expect("gateway thread exists"),
-                )?,
+                )
+                .await?,
             };
             let agent_binding = resolve_gateway_agent_binding_snapshot(
                 &options,
@@ -301,6 +314,17 @@ impl Gateway {
                     Some(queue_key.to_string()),
                     self.pending_permissions.clone(),
                     event_sink,
+                    GatewayPendingActionContext {
+                        thread_id: active_thread_id.clone(),
+                        turn_id: Some(turn_id.clone()),
+                        activity_id: durable_activity
+                            .as_ref()
+                            .map(|activity| activity.activity_id.clone()),
+                        source_key: draft_source_key.clone(),
+                        owner_id: durable_activity
+                            .as_ref()
+                            .map(|activity| activity.owner_id.clone()),
+                    },
                     session_authorization_lifetime,
                 )));
             }
@@ -311,7 +335,8 @@ impl Gateway {
                 &profile_config,
                 profile_revision,
                 &profile_fingerprint,
-            )?;
+            )
+            .await?;
             if existing_binding.is_none() && !initial_thread_preferences.is_empty() {
                 let preferences = initial_thread_preferences
                     .iter()
@@ -330,7 +355,8 @@ impl Gateway {
                             thread_preferences: Some(&preferences),
                             runtime_observed: None,
                         },
-                    )?;
+                    )
+                    .await?;
             }
             if existing_binding.is_none()
                 && profile_config.runtime == RuntimeProfileKind::Acp
@@ -350,12 +376,14 @@ impl Gateway {
                     &binding.thread_id,
                     binding.binding_revision,
                     &native_session_id,
-                )?;
+                )
+                .await?;
                 options.runtime_session_id = Some(native_session_id);
                 binding = self
                     .state
 
-                    .gateway_runtime_binding(&binding.thread_id)?
+                    .gateway_runtime_binding(&binding.thread_id)
+                    .await?
                     .ok_or_else(|| {
                         agent_session_configuration_error(
                             "Promoted ACP draft lost its immutable Thread binding.",
@@ -370,7 +398,8 @@ impl Gateway {
                     runtime_ref: &profile_config.id,
                     input_json: &delivery_input_json,
                     input_hash: &delivery_input_hash,
-                })?;
+                })
+                .await?;
             let peer = if let Some(target) = bound_target {
                 target.peer
             } else if profile_config.runtime == RuntimeProfileKind::Acp {
@@ -383,7 +412,7 @@ impl Gateway {
             if peer.is_none()
                 && let Some(thread_id) = active_thread_id.as_deref()
             {
-                clear_acp_peer_usage_update(&self.state, thread_id)?;
+                clear_acp_peer_usage_update(&self.state, thread_id).await?;
             }
             if peer.is_none() {
                 options.external_agent_delegate = Some(Arc::new(GatewayExternalAgentDelegate {
@@ -411,47 +440,49 @@ impl Gateway {
             let session_ready = (profile_config.runtime == RuntimeProfileKind::Acp)
                 .then(|| acp_session_ready_for_binding(self.state.clone(), binding));
             let output = attached
-                .transact(AgentSessionCommand::SubmitTurn {
-                    request: Box::new(backend_request),
-                    turn_id: turn_id.clone(),
-                    session_ready,
-                })
-                .await?
-                .into_turn()?;
+                .run_turn(backend_request, turn_id.clone(), session_ready)
+                .await?;
             Ok((output.run, output.backend))
         }
         .await;
+        let backend_result = match (backend_result, lifecycle.delivery_error()) {
+            (Ok(_), Some(error)) => Err(Error::Message(format!(
+                "Gateway event durability failed during the accepted Turn: {error}"
+            ))),
+            (result, _) => result,
+        };
         let (result, backend_info) = match backend_result {
             Ok(value) => value,
             Err(err) => {
-                let thread_id = active_thread_id.clone().or_else(|| {
-                    durable_activity.as_ref().and_then(|activity| {
-                        self.state
-
-                            .gateway_activity(&activity.activity_id)
-                            .ok()
-                            .flatten()
-                            .and_then(|record| record.thread_id)
-                    })
-                });
+                let durable_thread_id = if let Some(activity) = durable_activity.as_ref() {
+                    self.state
+                        .gateway_activity(&activity.activity_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|record| record.thread_id)
+                } else {
+                    None
+                };
+                let thread_id = active_thread_id.clone().or(durable_thread_id);
                 let error_message = err.to_string();
                 let error_data = err.structured_data().cloned();
-                let last_committed_seq = thread_id
-                    .as_deref()
-                    .and_then(|thread_id| {
-                        self.state
-
-                            .load_tui_message_summaries(thread_id)
-                            .ok()
-                    })
-                    .and_then(|summaries| {
-                        summaries
-                            .iter()
-                            .rev()
-                            .find(|summary| summary.session_seq >= first_committed_seq)
-                            .map(|summary| summary.session_seq)
-                    })
-                    .unwrap_or_else(|| first_committed_seq.saturating_sub(1));
+                let last_committed_seq = match thread_id.as_deref() {
+                    Some(thread_id) => self
+                        .state
+                        .load_tui_message_summaries(thread_id)
+                        .await
+                        .ok()
+                        .and_then(|summaries| {
+                            summaries
+                                .iter()
+                                .rev()
+                                .find(|summary| summary.session_seq >= first_committed_seq)
+                                .map(|summary| summary.session_seq)
+                        })
+                        .unwrap_or_else(|| first_committed_seq.saturating_sub(1)),
+                    None => first_committed_seq.saturating_sub(1),
+                };
                 let turn = self.record_and_project_terminal_turn(TerminalTurnInput {
                     thread_id: thread_id.as_deref(),
                     turn_id: &turn_id,
@@ -463,17 +494,24 @@ impl Gateway {
                     first_committed_seq: Some(first_committed_seq),
                     last_committed_seq: Some(last_committed_seq),
                     durable_activity: durable_activity.as_ref(),
-                })?;
-                let committed_entries = self.project_terminal_entry_for_turn(&turn_id);
-                if let Some(event_sink) = event_sink_for_completion {
-                    event_sink(GatewayEvent::TurnCompleted {
+                })
+                .await?;
+                let committed_entries = self.project_terminal_entry_for_turn(&turn_id).await;
+                let terminal_delivery = lifecycle
+                    .complete(GatewayEvent::TurnCompleted {
                         thread_id,
                         turn_id: turn_id.clone(),
                         turn,
                         committed_entries,
-                    });
+                    })
+                    .await;
+                self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed")
+                    .await;
+                if let Err(terminal_error) = terminal_delivery {
+                    return Err(Error::Message(format!(
+                        "{err}; failed to flush the accepted Turn terminal: {terminal_error}"
+                    )));
                 }
-                self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed");
                 return Err(err);
             }
         };
@@ -499,7 +537,7 @@ impl Gateway {
                 Ok(result) => auto_compaction = result,
                 Err(err) => {
                     if let Some(event_sink) = event_sink_for_completion.as_ref() {
-                        event_sink(GatewayEvent::Warning {
+                        let _ = event_sink.emit(GatewayEvent::Warning {
                             kind: "compaction_failed".to_string(),
                             message: err.to_string(),
                             source_path: None,
@@ -515,10 +553,22 @@ impl Gateway {
         let summaries = self
             .state
 
-            .load_tui_message_summaries(&result.session_id)?;
-        let turn_status = gateway_turn_status_for_outcome(result.outcome);
-        let terminal_message = terminal_message_for_result(&result);
-        let classified_terminal_error = classified_terminal_error_for_result(&result);
+            .load_tui_message_summaries(&result.session_id)
+            .await?;
+        let lifecycle_delivery_error = lifecycle.delivery_error();
+        let turn_status = if lifecycle_delivery_error.is_some() {
+            GatewayTurnStatus::Failed
+        } else {
+            gateway_turn_status_for_outcome(result.outcome)
+        };
+        let terminal_message = lifecycle_delivery_error
+            .as_ref()
+            .map(|error| format!("Gateway event durability failed: {error}"))
+            .or_else(|| terminal_message_for_result(&result));
+        let classified_terminal_error = lifecycle_delivery_error
+            .is_none()
+            .then(|| classified_terminal_error_for_result(&result))
+            .flatten();
         let last_committed_seq = summaries
             .iter()
             .rev()
@@ -529,15 +579,18 @@ impl Gateway {
             thread_id: Some(&result.session_id),
             turn_id: &turn_id,
             status: turn_status,
-            outcome: Some(result.outcome.as_str()),
+            outcome: lifecycle_delivery_error
+                .is_none()
+                .then(|| result.outcome.as_str()),
             error_message: terminal_message.as_deref(),
             error_data: None,
             classified_error: classified_terminal_error.as_ref(),
             first_committed_seq: Some(first_committed_seq),
             last_committed_seq: Some(last_committed_seq),
             durable_activity: durable_activity.as_ref(),
-        })?;
-        self.state.finish_gateway_turn_delivery(&turn_id)?;
+        })
+        .await?;
+        self.state.finish_gateway_turn_delivery(&turn_id).await?;
         let mut committed_entries = transcript::project_committed_turn_window_entries(
             &result.session_id,
             &summaries,
@@ -549,13 +602,14 @@ impl Gateway {
         let agent_edges = self
             .state
 
-            .list_agent_edges_for_parent(&result.session_id)?;
+            .list_agent_edges_for_parent(&result.session_id)
+            .await?;
         transcript::enrich_agent_blocks_from_edges(&mut committed_entries, &agent_edges);
         if let Some(checkpoint_id) = auto_compaction
             .as_ref()
             .filter(|result| result.compacted)
             .and_then(|result| result.checkpoint_id)
-            && let Some(record) = self.state.session_compaction(checkpoint_id)?
+            && let Some(record) = self.state.session_compaction(checkpoint_id).await?
             && record.session_id == result.session_id
         {
             committed_entries.extend(transcript::project_compaction_entries(
@@ -563,31 +617,41 @@ impl Gateway {
                 &[record],
             ));
         }
-        committed_entries.extend(self.project_terminal_entry_for_turn(&turn_id));
+        committed_entries.extend(self.project_terminal_entry_for_turn(&turn_id).await);
         self.finish_durable_gateway_activity(
             durable_activity.as_ref(),
             durable_activity_status_for_turn(turn_status),
-        );
-        if let Some(event_sink) = event_sink_for_completion {
+        )
+        .await;
+        if event_sink_for_completion.is_some() {
             gateway_profile_mark(
                 "gateway_turn_completed",
                 Some(&turn_id),
                 Some(&result.session_id),
                 GatewayProfileFields::default(),
             );
-            event_sink(GatewayEvent::TurnCompleted {
-                thread_id: Some(result.session_id.clone()),
-                turn_id: turn_id.clone(),
-                turn: turn.clone(),
-                committed_entries: committed_entries.clone(),
+            lifecycle
+                .complete(GatewayEvent::TurnCompleted {
+                    thread_id: Some(result.session_id.clone()),
+                    turn_id: turn_id.clone(),
+                    turn: turn.clone(),
+                    committed_entries: committed_entries.clone(),
+                })
+                .await
+                .map_err(|error| {
+                    Error::Message(format!(
+                        "failed to flush the accepted Turn terminal: {error}"
+                    ))
+                })?;
+        }
+        if let Some(event_sink) = event_sink_for_completion
+            && let Ok(Some(summary)) = self.state.session_summary(&result.session_id).await
+        {
+            let _ = event_sink.emit(GatewayEvent::TitleChanged {
+                thread_id: result.session_id.clone(),
+                title: summary.title.clone(),
+                display_title: summary.title,
             });
-            if let Ok(Some(summary)) = self.state.session_summary(&result.session_id) {
-                event_sink(GatewayEvent::TitleChanged {
-                    thread_id: result.session_id.clone(),
-                    title: summary.title.clone(),
-                    display_title: summary.title,
-                });
-            }
         }
         if let Some(source) = &bind_source {
             self.bind_source_to_result(
@@ -596,7 +660,8 @@ impl Gateway {
                 &backend_info,
                 result_lineage,
                 bind_source_generation,
-            )?;
+            )
+            .await?;
         }
         if let Some(source) = &queue_source
             && bind_source
@@ -609,7 +674,8 @@ impl Gateway {
                 &backend_info,
                 None,
                 queue_source_generation,
-            )?;
+            )
+            .await?;
         }
 
         Ok(GatewayTurnResult {
@@ -633,16 +699,16 @@ impl Gateway {
         })
     }
 
-    fn ensure_failed_terminal_after_turn_error(
+    async fn ensure_failed_terminal_after_turn_error(
         &self,
         turn_id: &str,
         thread_hint: Option<&str>,
-        event_sink: Option<&GatewayEventSink>,
+        event_sink: Option<&GatewayEventEmitter>,
         error: &Error,
     ) -> psychevo_runtime::Result<()> {
-        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id)? {
+        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id).await? {
             self.mark_active_turn_terminal(turn_id);
-            if let Some(activity) = self.state.gateway_activity(turn_id)? {
+            if let Some(activity) = self.state.gateway_activity(turn_id).await? {
                 self.finish_durable_gateway_activity(
                     Some(&DurableGatewayActivity {
                         activity_id: activity.activity_id,
@@ -652,11 +718,12 @@ impl Gateway {
                         kind: activity.kind,
                     }),
                     &terminal.status,
-                );
+                )
+                .await;
             }
             return Ok(());
         }
-        let activity_record = self.state.gateway_activity(turn_id)?;
+        let activity_record = self.state.gateway_activity(turn_id).await?;
         let thread_id = thread_hint.map(str::to_string).or_else(|| {
             activity_record
                 .as_ref()
@@ -687,11 +754,13 @@ impl Gateway {
             first_committed_seq: None,
             last_committed_seq: None,
             durable_activity: durable_activity.as_ref(),
-        })?;
-        let committed_entries = self.project_terminal_entry_for_turn(turn_id);
-        self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed");
+        })
+        .await?;
+        let committed_entries = self.project_terminal_entry_for_turn(turn_id).await;
+        self.finish_durable_gateway_activity(durable_activity.as_ref(), "failed")
+            .await;
         if let Some(event_sink) = event_sink {
-            event_sink(GatewayEvent::TurnCompleted {
+            let _ = event_sink.emit(GatewayEvent::TurnCompleted {
                 thread_id: Some(thread_id),
                 turn_id: turn_id.to_string(),
                 turn,
@@ -701,15 +770,18 @@ impl Gateway {
         Ok(())
     }
 
-    fn record_and_project_terminal_turn(
+    async fn record_and_project_terminal_turn(
         &self,
         input: TerminalTurnInput<'_>,
     ) -> psychevo_runtime::Result<GatewayTurn> {
         let completed_at_ms = gateway_now_ms();
-        let started_at_ms = input
-            .durable_activity
-            .and_then(|activity| persisted_gateway_activity(&self.state, activity))
-            .map(|record| record.started_at_ms);
+        let started_at_ms = if let Some(activity) = input.durable_activity {
+            persisted_gateway_activity(&self.state, activity)
+                .await
+                .map(|record| record.started_at_ms)
+        } else {
+            None
+        };
         let turn = GatewayTurn {
             id: input.turn_id.to_string(),
             thread_id: input.thread_id.map(str::to_string),
@@ -741,16 +813,18 @@ impl Gateway {
                         "firstCommittedSeq": input.first_committed_seq,
                         "lastCommittedSeq": input.last_committed_seq,
                     })),
-                })?;
+                })
+                .await?;
         }
         self.mark_active_turn_terminal(input.turn_id);
         Ok(turn)
     }
 
-    fn project_terminal_entry_for_turn(&self, turn_id: &str) -> Vec<TranscriptEntry> {
+    async fn project_terminal_entry_for_turn(&self, turn_id: &str) -> Vec<TranscriptEntry> {
         self.state
 
             .gateway_turn_terminal(turn_id)
+            .await
             .ok()
             .flatten()
             .map(|terminal| transcript::project_turn_terminal_entries(&[terminal]))
@@ -787,7 +861,7 @@ impl Gateway {
         }
         let started_at_ms = gateway_now_ms();
         if let Some(event_sink) = event_sink {
-            event_sink(GatewayEvent::EntryStarted {
+            let _ = event_sink.emit(GatewayEvent::EntryStarted {
                 turn_id: turn_id.to_string(),
                 entry: transcript::transient_compaction_entry(
                     &result.session_id,
@@ -813,7 +887,7 @@ impl Gateway {
         .await;
         let completed_at_ms = gateway_now_ms();
         if let Some(event_sink) = event_sink {
-            event_sink(GatewayEvent::EntryCompleted {
+            let _ = event_sink.emit(GatewayEvent::EntryCompleted {
                 turn_id: turn_id.to_string(),
                 entry: transcript::transient_compaction_entry(
                     &check.session,
@@ -843,12 +917,13 @@ impl Gateway {
                 let source = request.source.as_ref().ok_or_else(|| {
                     Error::Message("no thread is bound for compaction".to_string())
                 })?;
-                self.lookup_source_thread(source)?.ok_or_else(|| {
+                self.lookup_source_thread(source).await?.ok_or_else(|| {
                     Error::Message("no thread is bound for compaction".to_string())
                 })?
             }
         };
-        let bound_profile = resolve_bound_gateway_runtime_profile(&self.state, &thread_id, None)?;
+        let bound_profile =
+            resolve_bound_gateway_runtime_profile(&self.state, &thread_id, None).await?;
         if let Some(bound) = bound_profile.as_ref()
             && let Some(requested) = request
                 .runtime_ref
@@ -870,12 +945,14 @@ impl Gateway {
             ));
         }
         let legacy_non_native_runtime = if bound_profile.is_none() {
-            self.non_native_compaction_runtime(&request, &thread_id)?
+            self.non_native_compaction_runtime(&request, &thread_id)
+                .await?
         } else {
             None
         };
         let cwd = self
             .thread_cwd(&thread_id)
+            .await
             .unwrap_or_else(|_| request.cwd.clone());
         let source_key = request.source.as_ref().map(|source| source.source_key().0);
         let durable_activity = Some(self.claim_durable_gateway_activity(
@@ -895,7 +972,8 @@ impl Gateway {
                     "reason": request.reason.as_str(),
                 })),
             },
-        )?);
+        )
+        .await?);
         let _heartbeat = durable_activity
             .clone()
             .map(|activity| self.spawn_durable_activity_heartbeat(activity));
@@ -906,10 +984,12 @@ impl Gateway {
             self.register_active_queue_alias(&source_key_key(&source.source_key()), queue_key);
         }
         if let Some(event_sink) = request.event_sink.as_ref() {
-            event_sink(GatewayEvent::ActivityChanged {
+            let _ = event_sink.emit(GatewayEvent::ActivityChanged {
                 thread_id: Some(thread_id.clone()),
                 activity: gateway_activity_view(
-                    &self.activity_for_selector(GatewayThreadSelector::thread_id(&thread_id)),
+                    &self
+                        .activity_for_selector(GatewayThreadSelector::thread_id(&thread_id))
+                        .await,
                 ),
             });
         }
@@ -948,7 +1028,8 @@ impl Gateway {
             } else {
                 "failed"
             },
-        );
+        )
+        .await;
         result
     }
 
@@ -1004,18 +1085,18 @@ impl Gateway {
         let mut context = request.context;
         context.state = self.state.clone();
         let explicit_thread_or_session = request.thread_id.is_some() || context.session.is_some();
+        let source_thread_id = if let Some(source) = request.source.as_ref() {
+            self.lookup_source_thread(source).await.ok().flatten()
+        } else {
+            None
+        };
         let active_thread_id = request
             .thread_id
             .clone()
             .or_else(|| context.session.clone())
-            .or_else(|| {
-                request
-                    .source
-                    .as_ref()
-                    .and_then(|source| self.lookup_source_thread(source).ok().flatten())
-            });
+            .or(source_thread_id);
         if let Some(thread_id) = active_thread_id.clone() {
-            let cwd = self.thread_cwd(&thread_id)?;
+            let cwd = self.thread_cwd(&thread_id).await?;
             request.cwd = cwd;
             context.session = Some(thread_id);
             context.continue_latest = false;
@@ -1028,16 +1109,18 @@ impl Gateway {
                 .or(bind_source.as_ref())
                 .map(|source| source.source_key().0)
         };
-        let first_committed_seq = active_thread_id
-            .as_deref()
-            .and_then(|thread_id| {
-                self.state
-
-                    .load_tui_message_summaries(thread_id)
-                    .ok()
-            })
-            .and_then(|summaries| summaries.last().map(|summary| summary.session_seq + 1))
-            .unwrap_or(1);
+        let first_committed_seq = match active_thread_id.as_deref() {
+            Some(thread_id) => self
+                .state
+                .load_tui_message_summaries(thread_id)
+                .await
+                .ok()
+                .and_then(|summaries| {
+                    summaries.last().map(|summary| summary.session_seq + 1)
+                })
+                .unwrap_or(1),
+            None => 1,
+        };
         let durable_intent = json!({
             "kind": "shell",
             "threadId": active_thread_id.clone(),
@@ -1058,7 +1141,8 @@ impl Gateway {
                     owner_surface: Some(&context.source),
                     queued_turns: 0,
                     intent: Some(durable_intent),
-                })?,
+                })
+                .await?,
             )
         } else {
             None
@@ -1106,7 +1190,8 @@ impl Gateway {
             && bind_source_generation
                 .is_none_or(|generation| self.source_generation(source) == generation)
         {
-            self.bind_source_thread(source, &session_id, &backend, request.lineage)?;
+            self.bind_source_thread(source, &session_id, &backend, request.lineage)
+                .await?;
         }
         if let Some(source) = &queue_source
             && bind_source
@@ -1115,9 +1200,13 @@ impl Gateway {
             && queue_source_generation
                 .is_none_or(|generation| self.source_generation(source) == generation)
         {
-            self.bind_source_thread(source, &session_id, &backend, None)?;
+            self.bind_source_thread(source, &session_id, &backend, None)
+                .await?;
         }
-        let summaries = self.state.load_tui_message_summaries(&session_id)?;
+        let summaries = self
+            .state
+            .load_tui_message_summaries(&session_id)
+            .await?;
         let committed_entries = transcript::project_committed_turn_window_entries(
             &session_id,
             &summaries,
@@ -1128,13 +1217,14 @@ impl Gateway {
         );
         if let Some(event_sink) = event_sink_for_completion {
             for entry in committed_entries.clone() {
-                event_sink(GatewayEvent::EntryUpdated {
+                let _ = event_sink.emit(GatewayEvent::EntryUpdated {
                     turn_id: shell_event_id.clone(),
                     entry,
                 });
             }
         }
-        self.finish_durable_gateway_activity(durable_activity.as_ref(), "completed");
+        self.finish_durable_gateway_activity(durable_activity.as_ref(), "completed")
+            .await;
         Ok(GatewayShellResult {
             thread: GatewayThread {
                 id: session_id,
@@ -1147,11 +1237,12 @@ impl Gateway {
         })
     }
 
-    fn thread_cwd(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
+    async fn thread_cwd(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
         let summary = self
             .state
 
-            .session_summary(thread_id)?
+            .session_summary(thread_id)
+            .await?
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
         Ok(PathBuf::from(summary.cwd))
     }
@@ -1180,13 +1271,14 @@ fn gateway_delivery_input_parts(request: &SendTurnRequest) -> Vec<GatewayInputPa
     input
 }
 
-fn persisted_gateway_activity(
+async fn persisted_gateway_activity(
     state: &StateRuntime,
     activity: &DurableGatewayActivity,
 ) -> Option<GatewayActivityRecord> {
     state
 
         .gateway_activity(&activity.activity_id)
+        .await
         .ok()
         .flatten()
 }

@@ -1,5 +1,5 @@
-#[test]
-fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
+#[tokio::test]
+async fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
     assert_eq!(
         workspace::normalized_workspace_path_identity(Path::new(
             r"\\?\C:\Users\Ada\project\index.html",
@@ -14,8 +14,8 @@ fn workspace_path_identity_normalizes_verbatim_drive_and_unc_paths() {
     );
 }
 
-#[test]
-fn workspace_drive_roots_follow_the_windows_logical_drive_mask() {
+#[tokio::test]
+async fn workspace_drive_roots_follow_the_windows_logical_drive_mask() {
     let roots = workspace::windows_drive_roots_from_mask((1 << 2) | (1 << 3) | (1 << 25));
 
     assert_eq!(
@@ -29,7 +29,7 @@ fn workspace_drive_roots_follow_the_windows_logical_drive_mask() {
 
 #[tokio::test]
 async fn workspace_external_actions_rpc_classifies_regular_files_without_launching_apps() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::write(state.inner.cwd.join("index.html"), "<main>Hello</main>\n")
         .expect("html fixture");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -65,7 +65,7 @@ async fn workspace_external_actions_rpc_classifies_regular_files_without_launchi
 
 #[tokio::test]
 async fn browser_external_file_rpcs_reject_a_scope_outside_the_current_session() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::write(state.inner.cwd.join("README.md"), "workspace\n").expect("workspace file");
     let outside = temp.path().join("outside");
     std::fs::create_dir_all(&outside).expect("outside workspace");
@@ -129,7 +129,7 @@ async fn browser_external_file_rpcs_reject_a_scope_outside_the_current_session()
 
 #[tokio::test]
 async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scope_pivot() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let arbitrary = temp.path().join("arbitrary-workspace");
     std::fs::create_dir_all(&arbitrary).expect("arbitrary workspace");
     std::fs::write(arbitrary.join("README.md"), "ungranted\n").expect("arbitrary file");
@@ -202,7 +202,7 @@ async fn browser_workspace_external_actions_reject_two_step_ungranted_draft_scop
 
 #[tokio::test]
 async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let thread_id = state
         .inner
         .state
@@ -214,12 +214,12 @@ async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
             "fake-provider",
             None,
         )
-        .expect("stored thread");
+        .await.expect("stored thread");
     let trusted_scope = ResolvedScope {
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    bind_source_to_thread(&state, &trusted_scope, &thread_id).expect("source binding");
+    bind_source_to_thread(&state, &trusted_scope, &thread_id).await.expect("source binding");
     let arbitrary = temp.path().join("paired-cwd");
     std::fs::create_dir_all(&arbitrary).expect("paired cwd");
     let arbitrary = canonicalize_cwd(&arbitrary).expect("canonical paired cwd");
@@ -270,7 +270,7 @@ async fn browser_source_default_resume_does_not_grant_a_caller_paired_cwd() {
 
 #[tokio::test]
 async fn workspace_external_actions_reject_directories_and_symlink_escapes() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(state.inner.cwd.join("folder")).expect("folder");
     let outside = temp.path().join("outside.txt");
     std::fs::write(&outside, "secret\n").expect("outside file");
@@ -307,7 +307,7 @@ async fn workspace_external_actions_reject_directories_and_symlink_escapes() {
 
 #[tokio::test]
 async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boundary() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let root = temp.path().join("workspaces");
     let alpha = root.join("alpha");
     let nested = alpha.join("nested");
@@ -388,7 +388,7 @@ async fn workspace_folder_rpc_browses_host_folders_without_a_workspace_root_boun
 
 #[tokio::test]
 async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     git(&state.inner.cwd, ["init", "-b", "main"]);
     git(
         &state.inner.cwd,
@@ -470,7 +470,7 @@ async fn workspace_git_branch_rpcs_list_switch_and_create_local_branches() {
 
 #[tokio::test]
 async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let src = state.inner.cwd.join("src");
     std::fs::create_dir_all(&src).expect("src");
     std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
@@ -579,7 +579,7 @@ async fn workspace_file_rpcs_are_scoped_to_current_project_tree() {
 
 #[tokio::test]
 async fn workspace_file_write_creates_a_new_file_in_an_existing_parent() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(state.inner.cwd.join("generated")).expect("generated dir");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -632,7 +632,7 @@ async fn workspace_file_write_creates_a_new_file_in_an_existing_parent() {
 #[cfg(unix)]
 #[tokio::test]
 async fn workspace_file_read_and_write_reject_symlink_escapes() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let outside = temp.path().join("outside");
     std::fs::create_dir_all(&outside).expect("outside dir");
     std::fs::write(outside.join("secret.txt"), "outside\n").expect("outside file");
@@ -707,7 +707,7 @@ async fn workspace_file_read_and_write_reject_symlink_escapes() {
 
 #[tokio::test]
 async fn workspace_diff_rpc_returns_selected_file_diff_preview() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     git(&state.inner.cwd, ["init"]);
     git(
         &state.inner.cwd,
@@ -756,7 +756,7 @@ async fn workspace_diff_rpc_returns_selected_file_diff_preview() {
 
 #[tokio::test]
 async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let src = state.inner.cwd.join("src");
     std::fs::create_dir_all(&src).expect("src");
     std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
@@ -834,7 +834,7 @@ async fn workspace_file_write_rejects_revision_conflicts_and_allows_force() {
 
 #[tokio::test]
 async fn workspace_change_reject_restores_pre_turn_dirty_content() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     git(&state.inner.cwd, ["init"]);
     git(
         &state.inner.cwd,
@@ -923,9 +923,9 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
     );
 }
 
-#[test]
-fn workspace_review_records_patch_paths_and_opaque_invalidations() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn workspace_review_records_patch_paths_and_opaque_invalidations() {
+    let (_temp, state) = web_state().await;
     let cwd = &state.inner.cwd;
     std::fs::write(cwd.join("update.txt"), "before update\n").expect("update baseline");
     std::fs::write(cwd.join("delete.txt"), "before delete\n").expect("delete baseline");
@@ -1008,7 +1008,7 @@ fn workspace_review_records_patch_paths_and_opaque_invalidations() {
 
 #[tokio::test]
 async fn completion_list_ranks_dollar_prefix_matches_first() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_project_skill(&state, "x-daily", "Fetch X daily posts.");
     write_project_skill(&state, "explore", "Explore code and X references.");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -1054,7 +1054,7 @@ async fn completion_list_ranks_dollar_prefix_matches_first() {
 
 #[tokio::test]
 async fn command_execute_opens_web_utility_panels() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1123,7 +1123,7 @@ async fn command_execute_opens_web_utility_panels() {
 
 #[tokio::test]
 async fn command_execute_queue_preserves_original_slash_display_text() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1160,13 +1160,13 @@ async fn command_execute_queue_preserves_original_slash_display_text() {
 
 #[tokio::test]
 async fn command_execute_compact_returns_native_compaction_action() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .expect("session");
+        .await.expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1198,13 +1198,13 @@ async fn command_execute_compact_returns_native_compaction_action() {
 
 #[tokio::test]
 async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .expect("session");
+        .await.expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let profile = generated_runtime_profiles()
         .into_iter()
@@ -1237,7 +1237,7 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
-        .expect("binding");
+        .await.expect("binding");
     let scope = scope.to_wire_scope();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -1293,13 +1293,13 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
 
 #[tokio::test]
 async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_binding() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .expect("session");
+        .await.expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     state
         .inner
@@ -1315,14 +1315,14 @@ async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_bi
             backend_native_id: Some("retired-native-session"),
             lineage: Some(json!({"runtimeRef": "codex"})),
         })
-        .expect("legacy source-row evidence");
+        .await.expect("legacy source-row evidence");
     assert!(
         state
             .inner
             .state
 
             .gateway_runtime_binding(&session_id)
-            .expect("runtime binding lookup")
+            .await.expect("runtime binding lookup")
             .is_none(),
         "the Thread remains unbound"
     );
@@ -1358,20 +1358,20 @@ async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_bi
 
 #[tokio::test]
 async fn thread_transcript_projects_compaction_checkpoint_divider() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .expect("session");
+        .await.expect("session");
     let store = &state.inner.state;
     store
         .append_message(&session_id, &runtime_user_message("first task", 1))
-        .expect("user message");
+        .await.expect("user message");
     store
         .append_message(&session_id, &runtime_assistant_message("done", 2))
-        .expect("assistant message");
+        .await.expect("assistant message");
     let record = store
         .append_session_compaction(psychevo_runtime::state::SessionCompactionInput {
             session_id: session_id.clone(),
@@ -1386,13 +1386,13 @@ async fn thread_transcript_projects_compaction_checkpoint_divider() {
             instructions: Some("keep decisions".to_string()),
             metadata: Some(json!({"test": true})),
         })
-        .expect("compaction");
+        .await.expect("compaction");
 
     let entries = state
         .inner
         .gateway
         .thread_transcript(&session_id)
-        .expect("transcript");
+        .await.expect("transcript");
     let divider = entries
         .iter()
         .find(|entry| entry.id == format!("compaction:{}", record.id))
@@ -1419,7 +1419,7 @@ async fn thread_transcript_projects_compaction_checkpoint_divider() {
 
 #[tokio::test]
 async fn command_execute_mission_records_team_metadata_and_returns_thread() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1486,14 +1486,14 @@ async fn command_execute_mission_records_team_metadata_and_returns_thread() {
         .state
 
         .find_active_agent_team_run(&thread_id)
-        .expect("team")
+        .await.expect("team")
         .expect("active team");
     let mission = state
         .inner
         .state
 
         .find_active_agent_mission_run(&thread_id)
-        .expect("mission")
+        .await.expect("mission")
         .expect("active mission");
     assert_eq!(team.team_name, "ship");
     assert_eq!(mission.goal, "implement feature");
@@ -1502,7 +1502,7 @@ async fn command_execute_mission_records_team_metadata_and_returns_thread() {
 
 #[tokio::test]
 async fn command_execute_btw_creates_side_chat_session() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1511,13 +1511,13 @@ async fn command_execute_btw_creates_side_chat_session() {
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     state
         .inner
         .state
 
         .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
-        .expect("parent message");
+        .await.expect("parent message");
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let no_thread = handle_rpc(
@@ -1567,7 +1567,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         "Select an Agent target before starting a side chat."
     );
 
-    let parent_binding = bind_native_runtime_to_thread(&state, &parent_session);
+    let parent_binding = bind_native_runtime_to_thread(&state, &parent_session).await;
 
     let result = handle_rpc(
         state.clone(),
@@ -1603,7 +1603,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         .state
 
         .session_summary(side_thread_id)
-        .expect("summary")
+        .await.expect("summary")
         .expect("side chat");
     assert_eq!(
         side_summary.parent_session_id.as_deref(),
@@ -1617,7 +1617,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         .state
 
         .session_metadata(side_thread_id)
-        .expect("metadata")
+        .await.expect("metadata")
         .expect("metadata value");
     assert_eq!(
         side_metadata["side_conversation"]["parent_session_id"].as_str(),
@@ -1632,7 +1632,7 @@ async fn command_execute_btw_creates_side_chat_session() {
         .state
 
         .gateway_runtime_binding(side_thread_id)
-        .expect("side binding")
+        .await.expect("side binding")
         .expect("resolved side binding");
     assert_eq!(side_binding.status, GatewayRuntimeBindingStatus::Resolved);
     assert_eq!(side_binding.agent_ref, parent_binding.agent_ref);
@@ -1647,7 +1647,7 @@ async fn command_execute_btw_creates_side_chat_session() {
 
 #[tokio::test]
 async fn command_execute_btw_snapshots_live_effective_acp_controls() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let resolved_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let parent_session = state
         .inner
@@ -1660,8 +1660,8 @@ async fn command_execute_btw_snapshots_live_effective_acp_controls() {
             "fake-provider",
             None,
         )
-        .expect("parent session");
-    bind_persisted_acp_runtime_to_thread(&state, &parent_session);
+        .await.expect("parent session");
+    bind_persisted_acp_runtime_to_thread(&state, &parent_session).await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let parent_context = handle_rpc(
@@ -1720,7 +1720,7 @@ async fn command_execute_btw_snapshots_live_effective_acp_controls() {
         .state
 
         .gateway_runtime_binding(side_thread_id)
-        .expect("side binding")
+        .await.expect("side binding")
         .expect("resolved side binding");
 
     assert_eq!(side_binding.thread_preferences, effective_controls);
@@ -1731,7 +1731,7 @@ async fn command_execute_btw_snapshots_live_effective_acp_controls() {
 #[tokio::test]
 async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend);
+    let (_temp, state) = web_state_with_automation_backend(backend).await;
     let resolved_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let scope = resolved_scope.to_wire_scope();
     let parent_session = state
@@ -1739,15 +1739,15 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     state
         .inner
         .state
 
         .append_message(&parent_session, &runtime_user_message("parent prompt", 1))
-        .expect("parent message");
-    bind_source_to_thread(&state, &resolved_scope, &parent_session).expect("bind parent source");
-    let parent_binding = bind_native_runtime_to_thread(&state, &parent_session);
+        .await.expect("parent message");
+    bind_source_to_thread(&state, &resolved_scope, &parent_session).await.expect("bind parent source");
+    let parent_binding = bind_native_runtime_to_thread(&state, &parent_session).await;
     let mut parent_preferences = BTreeMap::new();
     parent_preferences.insert("mode".to_string(), json!("plan"));
     let mut parent_observed = BTreeMap::new();
@@ -1765,7 +1765,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
                 runtime_observed: Some(&parent_observed),
             },
         )
-        .expect("parent control state");
+        .await.expect("parent control state");
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -1815,7 +1815,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
         .state
 
         .gateway_runtime_binding(&side_thread_id)
-        .expect("side binding")
+        .await.expect("side binding")
         .expect("resolved side binding");
     assert_eq!(side_binding.thread_preferences["mode"], json!("plan"));
     assert_eq!(
@@ -1865,7 +1865,7 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             .inner
             .gateway
             .resolve_source_thread(&resolved_scope.source)
-            .expect("source binding")
+            .await.expect("source binding")
             .as_deref(),
         Some(parent_session.as_str())
     );
@@ -1890,12 +1890,15 @@ async fn side_chat_turn_does_not_rebind_current_source_and_can_be_deleted() {
             .state
 
             .session_summary(&side_thread_id)
-            .expect("side summary")
+            .await.expect("side summary")
             .is_none()
     );
 }
 
-fn bind_native_runtime_to_thread(state: &WebState, thread_id: &str) -> GatewayRuntimeBindingRecord {
+async fn bind_native_runtime_to_thread(
+    state: &WebState,
+    thread_id: &str,
+) -> GatewayRuntimeBindingRecord {
     let profile = generated_runtime_profiles()
         .into_iter()
         .find(|profile| profile.id == "native")
@@ -1927,10 +1930,10 @@ fn bind_native_runtime_to_thread(state: &WebState, thread_id: &str) -> GatewayRu
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
-        .expect("native runtime binding")
+        .await.expect("native runtime binding")
 }
 
-fn bind_persisted_acp_runtime_to_thread(
+async fn bind_persisted_acp_runtime_to_thread(
     state: &WebState,
     thread_id: &str,
 ) -> GatewayRuntimeBindingRecord {
@@ -1999,7 +2002,7 @@ default_mode = "default"
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
-        .expect("ACP runtime binding");
+        .await.expect("ACP runtime binding");
     let persisted_projection = crate::acp_peer::AcpSessionSnapshot {
         native_session_id: "ephemeral-native-1".to_string(),
         agent: Some(crate::acp_peer::AcpAgentIdentitySnapshot {
@@ -2085,13 +2088,13 @@ default_mode = "default"
                 "sessionProjection": persisted_projection,
             })),
         )
-        .expect("persist ACP projection");
+        .await.expect("persist ACP projection");
     binding
 }
 
 #[tokio::test]
 async fn command_execute_undo_redo_restores_session_snapshot() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     git(&state.inner.cwd, ["init"]);
     let file = state.inner.cwd.join("tracked.txt");
     std::fs::write(&file, "base\n").expect("base");
@@ -2100,7 +2103,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     let snapshot_root = state.inner.home.join("snapshots");
     let before_first = track_snapshot(&snapshot_root, &state.inner.cwd);
     state
@@ -2112,14 +2115,14 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
             &runtime_user_message("first prompt", 1),
             Some(before_first),
         )
-        .expect("first user");
+        .await.expect("first user");
     std::fs::write(&file, "after first\n").expect("after first");
     state
         .inner
         .state
 
         .append_message(&session_id, &runtime_assistant_message("first answer", 2))
-        .expect("first assistant");
+        .await.expect("first assistant");
     let before_second = track_snapshot(&snapshot_root, &state.inner.cwd);
     state
         .inner
@@ -2130,14 +2133,14 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
             &runtime_user_message("second prompt", 3),
             Some(before_second),
         )
-        .expect("second user");
+        .await.expect("second user");
     std::fs::write(&file, "after second\n").expect("after second");
     state
         .inner
         .state
 
         .append_message(&session_id, &runtime_assistant_message("second answer", 4))
-        .expect("second assistant");
+        .await.expect("second assistant");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -2177,7 +2180,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
             .state
 
             .load_tui_message_summaries(&session_id)
-            .expect("visible")
+            .await.expect("visible")
             .len(),
         2
     );
@@ -2216,7 +2219,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
             .state
 
             .load_tui_message_summaries(&session_id)
-            .expect("visible")
+            .await.expect("visible")
             .len(),
         4
     );
@@ -2224,7 +2227,7 @@ async fn command_execute_undo_redo_restores_session_snapshot() {
 
 #[tokio::test]
 async fn command_execute_undo_redo_bounded_without_matching_session() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -2259,7 +2262,7 @@ async fn command_execute_undo_redo_bounded_without_matching_session() {
         .state
 
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .expect("other session");
+        .await.expect("other session");
     let cross_cwd = handle_rpc(
         state,
         AuthContext::Bearer,

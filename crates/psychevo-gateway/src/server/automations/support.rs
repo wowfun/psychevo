@@ -1,4 +1,4 @@
-fn resolve_automation_target_scope(
+async fn resolve_automation_target_scope(
     state: &WebState,
     auth: &AuthContext,
     scope: Option<wire::GatewayRequestScope>,
@@ -14,8 +14,8 @@ fn resolve_automation_target_scope(
             })
         }
         wire::AutomationTargetInput::ThreadHeartbeat { thread_id } => {
-            authorize_thread(state, auth, thread_id)?;
-            let thread_scope = resolved_scope_for_thread(state, thread_id)?;
+            authorize_thread(state, auth, thread_id).await?;
+            let thread_scope = resolved_scope_for_thread(state, thread_id).await?;
             if let Some(scope) = scope {
                 let scope = resolve_required_scope(state, auth, scope)?;
                 if scope.cwd != thread_scope.cwd {
@@ -39,7 +39,7 @@ struct ResolvedAutomationTarget {
     target_thread_id: Option<String>,
 }
 
-fn automation_task_for_request(
+async fn automation_task_for_request(
     state: &WebState,
     _auth: &AuthContext,
     automation_id: &str,
@@ -48,12 +48,13 @@ fn automation_task_for_request(
         .inner
         .state
 
-        .automation_task(automation_id)?
+        .automation_task(automation_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("automation not found: {automation_id}")))?;
     Ok(record)
 }
 
-fn automation_task_view(
+async fn automation_task_view(
     state: &WebState,
     record: AutomationTaskRecord,
 ) -> psychevo_runtime::Result<wire::AutomationTaskView> {
@@ -61,7 +62,8 @@ fn automation_task_view(
         .inner
         .state
 
-        .automation_runs_for_task(&record.id, AUTOMATION_RUN_HISTORY_LIMIT)?
+        .automation_runs_for_task(&record.id, AUTOMATION_RUN_HISTORY_LIMIT)
+        .await?
         .into_iter()
         .map(automation_run_view)
         .collect();

@@ -88,14 +88,15 @@ struct PreviousAcpPromptUsage {
     native_session_id: Option<String>,
 }
 
-fn acp_prompt_usage_delta(
+async fn acp_prompt_usage_delta(
     store: &psychevo_runtime::state::StateRuntime,
     session_id: &str,
     native_session_id: &str,
     cumulative: &Value,
 ) -> psychevo_runtime::Result<(Value, bool)> {
     let previous = store
-        .load_tui_message_summaries(session_id)?
+        .load_tui_message_summaries(session_id)
+        .await?
         .into_iter()
         .rev()
         .filter(|summary| {
@@ -196,7 +197,7 @@ fn acp_history_message_metadata(
     metadata
 }
 
-fn commit_acp_replay_and_current_input(
+async fn commit_acp_replay_and_current_input(
     state: &psychevo_runtime::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
@@ -210,7 +211,8 @@ fn commit_acp_replay_and_current_input(
         session_id,
         Some(current_turn_id),
         replay,
-    )?;
+    )
+    .await?;
     state.append_message(
         session_id,
         &Message::User {
@@ -218,18 +220,19 @@ fn commit_acp_replay_and_current_input(
             timestamp_ms: gateway_now_ms(),
         },
     )
+    .await
 }
 
-pub(crate) fn commit_imported_acp_replay(
+pub(crate) async fn commit_imported_acp_replay(
     state: &psychevo_runtime::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     replay: &AcpHistoryReplayProjection,
 ) -> psychevo_runtime::Result<()> {
-    commit_acp_replay(state, peer, session_id, None, replay)
+    commit_acp_replay(state, peer, session_id, None, replay).await
 }
 
-fn commit_acp_replay(
+async fn commit_acp_replay(
     state: &psychevo_runtime::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
@@ -239,7 +242,9 @@ fn commit_acp_replay(
     let store = state.clone();
     let unknown = match current_turn_id {
         Some(current_turn_id) => {
-            store.unknown_gateway_turn_deliveries_for_thread(session_id, current_turn_id)?
+            store
+                .unknown_gateway_turn_deliveries_for_thread(session_id, current_turn_id)
+                .await?
         }
         None => Vec::new(),
     };
@@ -260,7 +265,7 @@ fn commit_acp_replay(
         .filter(|entry| matches!(entry, AcpHistoryReplayEntry::Assistant { .. }))
         .flat_map(replay_entry_delivery_message_ids)
         .collect::<BTreeSet<_>>();
-    let existing = store.load_tui_message_summaries(session_id)?;
+    let existing = store.load_tui_message_summaries(session_id).await?;
     let mut existing_replay_ids = BTreeSet::new();
     let mut reconciliation_evidence = BTreeSet::new();
     for summary in &existing {
@@ -306,7 +311,8 @@ fn commit_acp_replay(
                         replay_turn_id,
                         None,
                     )),
-                )?;
+                )
+                .await?;
             }
             AcpHistoryReplayEntry::Assistant {
                 content_slots,
@@ -335,9 +341,10 @@ fn commit_acp_replay(
                         replay_turn_id,
                         plan.as_ref(),
                     )),
-                )?;
+                )
+                .await?;
                 for message in persisted_tool_result_messages(content_slots, tools) {
-                    store.append_message(session_id, &message)?;
+                    store.append_message(session_id, &message).await?;
                 }
                 if prior_unknown.is_some() {
                     reconciliation_evidence.extend(delivery_message_ids.iter().cloned());
@@ -359,7 +366,9 @@ fn commit_acp_replay(
             &prior_unknown.turn_id,
             session_id,
             Some(&metadata),
-        )? {
+        )
+        .await?
+        {
             return Err(crate::agent_session_error(
                 "unknown_delivery_reconciliation_race",
                 crate::AgentErrorStage::History,
@@ -392,7 +401,7 @@ pub(crate) async fn run_acp_peer_turn(
     let options = request.options;
     let state = options.state.clone();
     let store = state.clone();
-    let local_session = ensure_local_session(&peer, &options)?;
+    let local_session = ensure_local_session(&peer, &options).await?;
     let session_id = local_session.session_id;
     let auto_title_new_session = local_session.created;
     let existing_native_id = local_session
@@ -400,7 +409,8 @@ pub(crate) async fn run_acp_peer_turn(
         .or(options.runtime_session_id.clone());
     let is_new_native_session = existing_native_id.is_none();
     let is_first_gateway_turn = store
-        .list_gateway_turn_terminals_for_thread(&session_id)?
+        .list_gateway_turn_terminals_for_thread(&session_id)
+        .await?
         .is_empty();
     let mcp_servers = resolve_peer_mcp_server_handoffs(&peer, &options)?;
     let (peer_model, peer_reasoning_effort, peer_runtime_options) =
@@ -413,14 +423,22 @@ pub(crate) async fn run_acp_peer_turn(
     let before_prompt_turn_id = turn_id.clone();
     let before_prompt_user_text = prompt_for_history.clone();
     let before_prompt: AcpBeforePromptCallback = Arc::new(move |replay| {
-        commit_acp_replay_and_current_input(
-            &before_prompt_state,
-            &before_prompt_peer,
-            &before_prompt_session_id,
-            &before_prompt_turn_id,
-            replay,
-            &before_prompt_user_text,
-        )
+        let state = before_prompt_state.clone();
+        let peer = before_prompt_peer.clone();
+        let session_id = before_prompt_session_id.clone();
+        let turn_id = before_prompt_turn_id.clone();
+        let user_text = before_prompt_user_text.clone();
+        Box::pin(async move {
+            commit_acp_replay_and_current_input(
+                &state,
+                &peer,
+                &session_id,
+                &turn_id,
+                &replay,
+                &user_text,
+            )
+            .await
+        })
     });
     let home = resolve_skills_home(&peer.env, &options.cwd)?;
     let acp_context = AcpPeerTurnContext {
@@ -530,12 +548,13 @@ pub(crate) async fn run_acp_peer_turn(
             &options.runtime_options,
             Some(&acp.session_snapshot),
         )),
-    )?;
+    )
+    .await?;
     if let Some(title) = acp.session_title.as_deref() {
-        set_session_title_if_empty(&store, &session_id, title);
+        set_session_title_if_empty(&store, &session_id, title).await;
     } else if auto_title_new_session {
         let title = fallback_visible_session_title(&prompt_for_history);
-        set_session_title_if_empty(&store, &session_id, &title);
+        set_session_title_if_empty(&store, &session_id, &title).await;
     }
     let assistant_content = acp.persisted_assistant_content();
     let prompt_usage_cumulative = acp.prompt_usage.clone();
@@ -546,7 +565,8 @@ pub(crate) async fn run_acp_peer_turn(
                 &session_id,
                 &acp.native_session_id,
                 cumulative,
-            )?;
+            )
+            .await?;
             (Some(delta), reset)
         }
         None => (None, false),
@@ -572,10 +592,11 @@ pub(crate) async fn run_acp_peer_turn(
                 &acp.native_session_id,
                 usage_counter_reset,
             ),
-        )?;
+        )
+        .await?;
     }
     for message in acp.persisted_tool_result_messages() {
-        store.append_message(&session_id, &message)?;
+        store.append_message(&session_id, &message).await?;
     }
     emit_runtime_event(
         &request.stream,
@@ -653,13 +674,14 @@ fn acp_peer_turn_controls(
     (peer_model, peer_reasoning_effort, runtime_options)
 }
 
-fn set_session_title_if_empty(
+async fn set_session_title_if_empty(
     store: &psychevo_runtime::state::StateRuntime,
     session_id: &str,
     title: &str,
 ) {
     if store
         .session_summary(session_id)
+        .await
         .ok()
         .flatten()
         .and_then(|summary| summary.title)
@@ -667,7 +689,7 @@ fn set_session_title_if_empty(
     {
         return;
     }
-    let _ = store.set_session_title(session_id, title);
+    let _ = store.set_session_title(session_id, title).await;
 }
 
 #[cfg(test)]

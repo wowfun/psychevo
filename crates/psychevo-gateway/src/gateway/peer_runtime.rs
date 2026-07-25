@@ -113,11 +113,11 @@ pub(crate) fn resolve_peer_turn(
     }))
 }
 
-fn clear_acp_peer_usage_update(
+async fn clear_acp_peer_usage_update(
     state: &StateRuntime,
     session_id: &str,
 ) -> psychevo_runtime::Result<()> {
-    let Some(metadata) = state.session_metadata(session_id)? else {
+    let Some(metadata) = state.session_metadata(session_id).await? else {
         return Ok(());
     };
     let Some(peer) = metadata.get(ACP_PEER_METADATA_KEY) else {
@@ -131,6 +131,6 @@ fn clear_acp_peer_usage_update(
     }
     let value = (!peer.is_empty()).then_some(Value::Object(peer));
     state
-
         .set_session_metadata_field(session_id, ACP_PEER_METADATA_KEY, value)
+        .await
 }

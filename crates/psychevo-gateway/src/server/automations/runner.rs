@@ -1,25 +1,29 @@
 pub(super) async fn run_due_automations_once(state: WebState) -> psychevo_runtime::Result<usize> {
-    recover_stale_automation_runs(&state)?;
+    recover_stale_automation_runs(&state).await?;
     let now = gateway_now_ms();
     let due = state
         .inner
         .state
 
-        .due_automation_tasks(now, AUTOMATION_DUE_LIMIT)?;
+        .due_automation_tasks(now, AUTOMATION_DUE_LIMIT)
+        .await?;
     let mut accepted = 0;
     for task in due {
         let schedule = automation_schedule_from_value(task.schedule.clone())?;
         if latest_due_at_ms(&schedule, task.created_at_ms, task.last_run_at_ms, now)?.is_none() {
             continue;
         }
-        if start_automation_run(state.clone(), task, "scheduler", None)?.is_some() {
+        if start_automation_run(state.clone(), task, "scheduler", None)
+            .await?
+            .is_some()
+        {
             accepted += 1;
         }
     }
     Ok(accepted)
 }
 
-fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<usize> {
+async fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<usize> {
     let now = gateway_now_ms();
     let candidates = state
         .inner
@@ -29,7 +33,8 @@ fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<u
             now,
             AUTOMATION_STALE_RUN_RECOVERY_MS,
             AUTOMATION_STALE_RUN_RECOVERY_LIMIT,
-        )?;
+        )
+        .await?;
     let mut recovered = 0;
     for candidate in candidates {
         let next = next_run_after_now(&candidate.task)?;
@@ -59,7 +64,8 @@ fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<u
                 error: Some(AUTOMATION_STALE_RUN_RECOVERY_ERROR),
                 metadata: Some(metadata),
                 next_run_at_ms: next,
-            })?
+            })
+            .await?
             .is_some()
         {
             recovered += 1;
@@ -68,7 +74,7 @@ fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<u
     Ok(recovered)
 }
 
-fn start_automation_run(
+async fn start_automation_run(
     state: WebState,
     task: AutomationTaskRecord,
     trigger: &str,
@@ -78,7 +84,8 @@ fn start_automation_run(
         .inner
         .state
 
-        .claim_automation_run(&task.id, trigger)?
+        .claim_automation_run(&task.id, trigger)
+        .await?
     else {
         return Ok(None);
     };
@@ -122,7 +129,8 @@ async fn execute_automation_run(
                     error: None,
                     metadata: Some(metadata),
                     next_run_at_ms: next,
-                });
+                })
+                .await;
         }
         Err(err) => {
             let next = next_run_after_now(&task).unwrap_or(None);
@@ -139,7 +147,8 @@ async fn execute_automation_run(
                     error: Some(&error),
                     metadata: Some(json!({"trigger": run.trigger})),
                     next_run_at_ms: next,
-                });
+                })
+                .await;
         }
     }
 }
@@ -153,7 +162,7 @@ async fn send_automation_turn(
     let (thread_id, source, bind_source) = match automation_kind_from_str(&task.kind)? {
         wire::AutomationTaskKind::Project => {
             let source = automation_source(&task.id, &task.title);
-            let thread_id = state.inner.gateway.resolve_source_thread(&source)?;
+            let thread_id = state.inner.gateway.resolve_source_thread(&source).await?;
             (thread_id, Some(source.clone()), Some(source))
         }
         wire::AutomationTaskKind::ThreadHeartbeat => {
@@ -175,36 +184,37 @@ async fn send_automation_turn(
     let event_state = state.clone();
     let event_cwd = cwd.clone();
     let event_tx = out_tx.clone();
-    let mut request = state.thread_turn_request(
+    let (mut caller, mut intent) = state.thread_turn_request(
         cwd,
         thread_id,
         vec![GatewayInputPart::Text {
             text: task.prompt.clone(),
         }],
     );
-    request.source = source;
-    request.bind_source = bind_source;
-    request.policy.model = task.model.clone();
-    request.policy.reasoning_effort = task.reasoning_effort.clone();
-    request.set_runtime_tools(Vec::new());
+    intent.source = source;
+    intent.bind_source = bind_source;
+    intent.policy.model = task.model.clone();
+    intent.policy.reasoning_effort = task.reasoning_effort.clone();
+    caller.set_runtime_tools(Vec::new());
     match automation_execution_from_value(task.execution.clone())?.policy {
         wire::AutomationExecutionPolicy::AutoSandbox => {
-            request.policy.permission_mode = Some(PermissionMode::BypassPermissions);
-            request.policy.sandbox_override = Some(RunSandboxOverride::workspace_write());
+            intent.policy.permission_mode = Some(PermissionMode::BypassPermissions);
+            intent.policy.sandbox_override = Some(RunSandboxOverride::workspace_write());
         }
         wire::AutomationExecutionPolicy::AskFirst => {
-            request.policy.permission_mode = Some(PermissionMode::Default);
+            intent.policy.permission_mode = Some(PermissionMode::Default);
         }
     }
-    request.runtime_source = Some("automation".to_string());
-    request.continue_sources = vec![
+    caller.surface = crate::ThreadSurface::Automation;
+    caller.runtime_source = "automation".to_string();
+    caller.continue_sources = vec![
         "run".to_string(),
         "tui".to_string(),
         "web".to_string(),
         "automation".to_string(),
     ];
-    request.lineage = Some(json!({"automationId": task.id}));
-    request.event_sink = Some(Arc::new(move |event| {
+    intent.lineage = Some(json!({"automationId": task.id}));
+    caller.observe_gateway_events(move |event| {
         let context = event_selector
             .as_ref()
             .map(|selector| {
@@ -217,6 +227,12 @@ async fn send_automation_turn(
             Some(&event_cwd),
             event_tx.as_ref(),
         );
-    }));
-    state.inner.gateway.run_turn(request).await
+    });
+    state
+        .inner
+        .gateway
+        .start_turn(caller, intent)
+        .await?
+        .wait()
+        .await
 }

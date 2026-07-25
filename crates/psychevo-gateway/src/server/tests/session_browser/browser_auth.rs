@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connection() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
@@ -9,7 +9,7 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
         .state
 
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     let browser_session_id = "browser-session".to_string();
     state
         .inner
@@ -74,7 +74,7 @@ async fn browser_cross_project_resume_authorizes_followup_rpcs_on_same_connectio
 
 #[tokio::test]
 async fn browser_session_profile_auth_allows_global_settings_for_other_cwd() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
@@ -117,7 +117,7 @@ async fn browser_session_profile_auth_allows_global_settings_for_other_cwd() {
 
 #[tokio::test]
 async fn browser_project_group_start_adopts_known_session_project_scope() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
@@ -126,7 +126,7 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
         .state
 
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .expect("existing project session");
+        .await.expect("existing project session");
     let browser_session_id = "browser-session".to_string();
     state
         .inner
@@ -203,7 +203,7 @@ async fn browser_project_group_start_adopts_known_session_project_scope() {
 
 #[tokio::test]
 async fn browser_workspace_create_uses_configured_root_and_authorizes_cwd() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),

@@ -2,7 +2,7 @@
     async fn typed_steer_requires_expected_turn_id() {
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let source = GatewaySource::new("tui", "cwd").process();
         let selector = GatewayThreadSelector::source(source.source_key());
 
@@ -16,7 +16,7 @@
 
         let active_turn_id = harness
             .gateway
-            .activity_for_selector(selector.clone())
+            .local_activity_for_selector(&selector)
             .active_turn_id
             .expect("active turn id");
         let message = Message::User {
@@ -28,12 +28,12 @@
             harness
                 .gateway
                 .steer_turn(selector.clone(), Some("stale-turn"), message.clone())
-                .is_none()
+                .await.is_none()
         );
         let input_id = harness
             .gateway
             .steer_turn(selector.clone(), Some(&active_turn_id), message.clone())
-            .expect("current turn steer");
+            .await.expect("current turn steer");
         assert!(!harness.gateway.update_steer(
             selector.clone(),
             Some("stale-turn"),
@@ -64,7 +64,7 @@
     #[tokio::test]
         async fn native_agent_adapter_lowers_runtime_control_map_without_dispatch_name_branch() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let mut request = request(
             &harness,
             GatewaySource::new("web", "native-controls").process(),
@@ -94,7 +94,7 @@
                 .state
 
                 .gateway_runtime_binding(&result.thread.id)
-                .expect("binding read")
+                .await.expect("binding read")
                 .expect("binding");
             assert_eq!(binding.agent_ref, None);
             assert!(binding.agent_fingerprint.is_some());
@@ -109,7 +109,7 @@
         #[tokio::test]
         async fn bound_named_agent_ignores_current_definition_drift() {
             let backend = Arc::new(FakeBackend::default());
-            let harness = harness(backend);
+            let harness = harness(backend).await;
             let home = harness._temp.path().join("home");
             let agents = harness.cwd.join(".psychevo/agents");
             std::fs::create_dir_all(&home).expect("home");
@@ -136,7 +136,7 @@
                 .state
 
                 .gateway_runtime_binding(&first.thread.id)
-                .expect("binding read")
+                .await.expect("binding read")
                 .expect("binding");
             assert_eq!(binding.agent_ref.as_deref(), Some("reviewer"));
             assert!(binding.agent_definition_json.as_deref().is_some_and(|snapshot| {
@@ -150,6 +150,7 @@
             .expect("changed Agent Definition");
             let mut second = request(&harness, source, "second");
             second.thread_id = Some(first.thread.id);
+            second.explicit_thread = true;
             second.options.inherited_env = Some(env);
             let second = harness
                 .gateway
@@ -160,7 +161,7 @@
                 .state
 
                 .gateway_runtime_binding(&second.thread.id)
-                .expect("binding read")
+                .await.expect("binding read")
                 .expect("binding");
             assert!(binding.agent_definition_json.as_deref().is_some_and(|snapshot| {
                 snapshot.contains("Review version one.")
@@ -168,14 +169,14 @@
             }));
         }
 
-        #[test]
-    fn acp_binding_rejects_public_steer_before_queueing() {
-        let harness = harness(Arc::new(FakeBackend::default()));
+        #[tokio::test]
+    async fn acp_binding_rejects_public_steer_before_queueing() {
+        let harness = harness(Arc::new(FakeBackend::default())).await;
         let thread_id = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "test", "model", "provider", None)
-            .expect("session");
+            .await.expect("session");
         let cwd = harness.cwd.to_string_lossy().to_string();
         harness
             .state
@@ -198,7 +199,7 @@
                 ownership: GatewayRuntimeBindingOwnership::ReadWrite,
                 parent_thread_id: None,
             })
-            .expect("runtime binding");
+            .await.expect("runtime binding");
         let (handle, _control) = run_control();
         harness.gateway.register_active(
             &thread_key(&thread_id),
@@ -216,19 +217,24 @@
                     Some("turn-1"),
                     psychevo_agent_core::user_text_message("unsupported steer"),
                 )
-                .is_none()
+                .await.is_none()
         );
-        assert!(!harness.gateway.steer_foreign_turn(
-            selector,
-            Some("turn-1"),
-            psychevo_agent_core::user_text_message("unsupported foreign steer"),
-        ));
+        assert!(
+            !harness
+                .gateway
+                .steer_foreign_turn(
+                    selector,
+                    Some("turn-1"),
+                    psychevo_agent_core::user_text_message("unsupported foreign steer"),
+                )
+                .await
+        );
     }
     #[tokio::test]
     async fn interrupt_aborts_active_and_clear_queue_drops_pending_turns() {
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("tui", "cwd").process();
 
         let (handle, control) = run_control();
@@ -245,7 +251,7 @@
         tokio::task::yield_now().await;
 
         let selector = GatewayThreadSelector::source(source.source_key());
-        assert!(harness.gateway.interrupt_turn(selector.clone()));
+        assert!(harness.gateway.interrupt_turn(selector.clone()).await);
         let mut cleared = harness.gateway.clear_queue(selector);
         for _ in 0..10 {
             if cleared > 0 {
@@ -270,7 +276,7 @@
     #[tokio::test]
     async fn runtime_ref_resolves_generated_peer_backend_without_agent_selection() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let home = harness._temp.path().join("home");
         std::fs::create_dir_all(&home).expect("home");
         std::fs::write(
@@ -308,7 +314,7 @@ client_capabilities = ["fs.read"]
     #[tokio::test]
     async fn runtime_ref_rejects_local_agent_definitions() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let home = harness._temp.path().join("home");
         std::fs::create_dir_all(&home).expect("home");
         std::fs::write(

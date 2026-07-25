@@ -200,31 +200,6 @@ struct AgentSessionRef {
     mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
 }
 
-enum AgentSessionCommand {
-    // Context projection currently uses the cache-only public read path; keep
-    // inspection in the sealed host protocol for adapter conformance.
-    #[allow(dead_code)]
-    Inspect(AgentSessionRef),
-    SetControl {
-        session: AgentSessionRef,
-        control_id: String,
-        value: Value,
-    },
-    SubmitTurn {
-        request: Box<BackendTurnRequest>,
-        turn_id: String,
-        session_ready: Option<acp_peer::AcpSessionReadyCallback>,
-    },
-    LoadSession(AgentSessionRef),
-    ResumeSession(AgentSessionRef),
-    ForkSession {
-        source: AgentSessionRef,
-        fork_local_session_id: String,
-    },
-    CloseSession(AgentSessionRef),
-    DeleteSession(AgentSessionRef),
-}
-
 struct AgentSessionDiscoveryQuery {
     cwd_filter: Option<PathBuf>,
     cursor: Option<String>,
@@ -232,112 +207,16 @@ struct AgentSessionDiscoveryQuery {
 
 #[derive(Debug)]
 enum AgentSessionSnapshot {
+    #[cfg(test)]
     Native { profile_id: String },
     Acp(Box<acp_peer::AcpSessionSnapshot>),
-}
-
-#[derive(Debug)]
-enum AgentSessionResponse {
-    #[allow(dead_code)]
-    Inspected(AgentSessionSnapshot),
-    ControlSet(AgentSessionSnapshot),
-    TurnSubmitted(Box<AgentTurnOutput>),
-    SessionLoaded(Box<acp_peer::AcpSessionLoadOutput>),
-    SessionResumed(AgentSessionSnapshot),
-    SessionForked(AgentSessionSnapshot),
-    SessionClosed,
-    SessionDeleted,
-}
-
-impl AgentSessionResponse {
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::Inspected(_) => "inspection",
-            Self::ControlSet(_) => "control",
-            Self::TurnSubmitted(_) => "turn",
-            Self::SessionLoaded(_) => "session-loaded",
-            Self::SessionResumed(_) => "session-resumed",
-            Self::SessionForked(_) => "session-forked",
-            Self::SessionClosed => "session-closed",
-            Self::SessionDeleted => "session-deleted",
-        }
-    }
-
-    fn mismatch(expected: &str, actual: &str) -> Error {
-        agent_session_error(
-            "agent_session_response_mismatch",
-            AgentErrorStage::Configuration,
-            "never",
-            "unknown",
-            format!(
-                "Agent Session Adapter returned `{actual}` for a command expecting `{expected}`."
-            ),
-            Some("agent-session:response-kind".to_string()),
-        )
-    }
-
-    #[allow(dead_code)]
-    fn into_inspection(self) -> psychevo_runtime::Result<AgentSessionSnapshot> {
-        match self {
-            Self::Inspected(snapshot) => Ok(snapshot),
-            response => Err(Self::mismatch("inspection", response.kind())),
-        }
-    }
-
-    fn into_control(self) -> psychevo_runtime::Result<AgentSessionSnapshot> {
-        match self {
-            Self::ControlSet(snapshot) => Ok(snapshot),
-            response => Err(Self::mismatch("control", response.kind())),
-        }
-    }
-
-    fn into_turn(self) -> psychevo_runtime::Result<AgentTurnOutput> {
-        match self {
-            Self::TurnSubmitted(output) => Ok(*output),
-            response => Err(Self::mismatch("turn", response.kind())),
-        }
-    }
-
-    fn into_resumed(self) -> psychevo_runtime::Result<AgentSessionSnapshot> {
-        match self {
-            Self::SessionResumed(snapshot) => Ok(snapshot),
-            response => Err(Self::mismatch("session-resumed", response.kind())),
-        }
-    }
-
-    fn into_loaded(self) -> psychevo_runtime::Result<acp_peer::AcpSessionLoadOutput> {
-        match self {
-            Self::SessionLoaded(output) => Ok(*output),
-            response => Err(Self::mismatch("session-loaded", response.kind())),
-        }
-    }
-
-    fn into_forked(self) -> psychevo_runtime::Result<AgentSessionSnapshot> {
-        match self {
-            Self::SessionForked(snapshot) => Ok(snapshot),
-            response => Err(Self::mismatch("session-forked", response.kind())),
-        }
-    }
-
-    fn into_closed(self) -> psychevo_runtime::Result<()> {
-        match self {
-            Self::SessionClosed => Ok(()),
-            response => Err(Self::mismatch("session-closed", response.kind())),
-        }
-    }
-
-    fn into_deleted(self) -> psychevo_runtime::Result<()> {
-        match self {
-            Self::SessionDeleted => Ok(()),
-            response => Err(Self::mismatch("session-deleted", response.kind())),
-        }
-    }
 }
 
 impl AgentSessionSnapshot {
     fn into_acp(self) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
         match self {
             Self::Acp(snapshot) => Ok(*snapshot),
+            #[cfg(test)]
             Self::Native { profile_id } => Err(agent_session_error(
                 "agent_session_snapshot_mismatch",
                 AgentErrorStage::Configuration,
@@ -363,17 +242,19 @@ impl AgentDeliveryObserver {
         Self { state, turn_id }
     }
 
-    fn mark_unknown(&self) -> psychevo_runtime::Result<()> {
+    async fn mark_unknown(&self) -> psychevo_runtime::Result<()> {
         self.state
 
             .mark_gateway_turn_delivery_unknown(&self.turn_id)
+            .await
             .map(|_| ())
     }
 
-    fn confirm(&self) -> psychevo_runtime::Result<()> {
+    async fn confirm(&self) -> psychevo_runtime::Result<()> {
         self.state
 
             .confirm_gateway_turn_delivery(&self.turn_id)
+            .await
             .map(|_| ())
     }
 }
@@ -747,7 +628,7 @@ impl AgentSessionHost {
 
     // Protocol and authentication diagnosis belong to backend administration,
     // not to an attached public Thread session, so they deliberately stay
-    // outside the sealed AgentSessionCommand family.
+    // outside the typed attached-session operation family.
     async fn probe_acp_protocol_compatibility(
         &self,
         peer: ResolvedPeerTurn,
@@ -816,38 +697,11 @@ fn lower_native_runtime_options(options: &mut RunOptions) -> psychevo_runtime::R
 }
 
 impl AttachedAgent {
-    fn transact(
-        &self,
-        command: AgentSessionCommand,
-    ) -> BoxFuture<'_, psychevo_runtime::Result<AgentSessionResponse>> {
-        Box::pin(async move { match command {
-            AgentSessionCommand::Inspect(session) => self.inspect(session).await,
-            AgentSessionCommand::SetControl {
-                session,
-                control_id,
-                value,
-            } => self.set_control(session, control_id, value).await,
-            AgentSessionCommand::SubmitTurn {
-                request,
-                turn_id,
-                session_ready,
-            } => self.run_turn(*request, turn_id, session_ready).await,
-            AgentSessionCommand::LoadSession(session) => self.load_session(session).await,
-            AgentSessionCommand::ResumeSession(session) => self.resume_session(session).await,
-            AgentSessionCommand::ForkSession {
-                source,
-                fork_local_session_id,
-            } => self.fork_session(source, fork_local_session_id).await,
-            AgentSessionCommand::CloseSession(session) => self.close_session(session).await,
-            AgentSessionCommand::DeleteSession(session) => self.delete_session(session).await,
-        } })
-    }
-
-    fn unsupported_lifecycle(
+    fn unsupported_lifecycle<T>(
         &self,
         profile: &RuntimeProfileConfig,
         operation: &str,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<T> {
         Err(agent_session_error(
             "agent_session_lifecycle_unsupported",
             AgentErrorStage::History,
@@ -861,7 +715,7 @@ impl AttachedAgent {
     async fn resume_session(
         &self,
         session: AgentSessionRef,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<AgentSessionSnapshot> {
         match &self.target {
             AgentSessionTarget::Native { profile } => self.unsupported_lifecycle(profile, "resume"),
             AgentSessionTarget::Acp { peer, .. } => self
@@ -877,16 +731,14 @@ impl AttachedAgent {
                     session.mcp_servers,
                 )
                 .await
-                .map(|snapshot| {
-                    AgentSessionResponse::SessionResumed(AgentSessionSnapshot::Acp(Box::new(snapshot)))
-                }),
+                .map(|snapshot| AgentSessionSnapshot::Acp(Box::new(snapshot))),
         }
     }
 
     async fn load_session(
         &self,
         session: AgentSessionRef,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<acp_peer::AcpSessionLoadOutput> {
         match &self.target {
             AgentSessionTarget::Native { profile } => self.unsupported_lifecycle(profile, "load"),
             AgentSessionTarget::Acp { peer, .. } => self
@@ -899,8 +751,7 @@ impl AttachedAgent {
                     session.native_session_id,
                     session.mcp_servers,
                 )
-                .await
-                .map(|output| AgentSessionResponse::SessionLoaded(Box::new(output))),
+                .await,
         }
     }
 
@@ -908,7 +759,7 @@ impl AttachedAgent {
         &self,
         source: AgentSessionRef,
         fork_local_session_id: String,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<AgentSessionSnapshot> {
         match &self.target {
             AgentSessionTarget::Native { profile } => self.unsupported_lifecycle(profile, "fork"),
             AgentSessionTarget::Acp { peer, .. } => self
@@ -924,16 +775,14 @@ impl AttachedAgent {
                     fork_local_session_id,
                 )
                 .await
-                .map(|snapshot| {
-                    AgentSessionResponse::SessionForked(AgentSessionSnapshot::Acp(Box::new(snapshot)))
-                }),
+                .map(|snapshot| AgentSessionSnapshot::Acp(Box::new(snapshot))),
         }
     }
 
     async fn close_session(
         &self,
         session: AgentSessionRef,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<()> {
         match &self.target {
             AgentSessionTarget::Native { profile } => self.unsupported_lifecycle(profile, "close"),
             AgentSessionTarget::Acp { peer, .. } => self
@@ -947,15 +796,14 @@ impl AttachedAgent {
                         native_session_id: session.native_session_id,
                     },
                 )
-                .await
-                .map(|()| AgentSessionResponse::SessionClosed),
+                .await,
         }
     }
 
     async fn delete_session(
         &self,
         session: AgentSessionRef,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<()> {
         match &self.target {
             AgentSessionTarget::Native { profile } => self.unsupported_lifecycle(profile, "delete"),
             AgentSessionTarget::Acp { peer, .. } => {
@@ -980,21 +828,19 @@ impl AttachedAgent {
                         resident,
                     )
                     .await
-                    .map(|()| AgentSessionResponse::SessionDeleted)
             }
         }
     }
 
+    #[cfg(test)]
     async fn inspect(
         &self,
         session: AgentSessionRef,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<AgentSessionSnapshot> {
         match &self.target {
-            AgentSessionTarget::Native { profile } => Ok(AgentSessionResponse::Inspected(
-                AgentSessionSnapshot::Native {
-                    profile_id: profile.id.clone(),
-                },
-            )),
+            AgentSessionTarget::Native { profile } => Ok(AgentSessionSnapshot::Native {
+                profile_id: profile.id.clone(),
+            }),
             AgentSessionTarget::Acp { peer, .. } => {
                 let snapshot = self
                     .host
@@ -1007,9 +853,7 @@ impl AttachedAgent {
                         session.mcp_servers,
                     )
                     .await?;
-                Ok(AgentSessionResponse::Inspected(AgentSessionSnapshot::Acp(
-                    Box::new(snapshot),
-                )))
+                Ok(AgentSessionSnapshot::Acp(Box::new(snapshot)))
             }
         }
     }
@@ -1019,7 +863,7 @@ impl AttachedAgent {
         session: AgentSessionRef,
         control_id: String,
         value: Value,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<AgentSessionSnapshot> {
         match &self.target {
             AgentSessionTarget::Native { profile } => Err(agent_session_error(
                 "unsupported_control",
@@ -1046,9 +890,7 @@ impl AttachedAgent {
                         value,
                     })
                     .await?;
-                Ok(AgentSessionResponse::ControlSet(AgentSessionSnapshot::Acp(
-                    Box::new(snapshot),
-                )))
+                Ok(AgentSessionSnapshot::Acp(Box::new(snapshot)))
             }
         }
     }
@@ -1058,7 +900,7 @@ impl AttachedAgent {
         mut request: BackendTurnRequest,
         turn_id: String,
         session_ready: Option<acp_peer::AcpSessionReadyCallback>,
-    ) -> psychevo_runtime::Result<AgentSessionResponse> {
+    ) -> psychevo_runtime::Result<AgentTurnOutput> {
         let delivery = AgentDeliveryObserver::new(request.options.state.clone(), turn_id.clone());
         match &self.target {
             AgentSessionTarget::Native { profile } => {
@@ -1079,7 +921,7 @@ impl AttachedAgent {
                     ));
                 }
                 let runtime_ref = request.options.runtime_ref.clone();
-                delivery.confirm()?;
+                delivery.confirm().await?;
                 gateway_profile_mark(
                     "native_adapter_submitted",
                     Some(&turn_id),
@@ -1090,16 +932,14 @@ impl AttachedAgent {
                     },
                 );
                 let run = self.host.native.run_turn(request).await?;
-                Ok(AgentSessionResponse::TurnSubmitted(Box::new(
-                    AgentTurnOutput {
-                        run,
-                        backend: GatewayBackendInfo {
-                            kind: self.host.native.kind(),
-                            runtime_ref: runtime_ref.or_else(|| Some(profile.id.clone())),
-                            native_id: None,
-                        },
+                Ok(AgentTurnOutput {
+                    run,
+                    backend: GatewayBackendInfo {
+                        kind: self.host.native.kind(),
+                        runtime_ref: runtime_ref.or_else(|| Some(profile.id.clone())),
+                        native_id: None,
                     },
-                )))
+                })
             }
             AgentSessionTarget::Acp { peer, profile } => {
                 let session_ready = session_ready.ok_or_else(|| {
@@ -1124,20 +964,18 @@ impl AttachedAgent {
                 )
                 .await?;
                 let native_session_id = result.native_session_id;
-                Ok(AgentSessionResponse::TurnSubmitted(Box::new(
-                    AgentTurnOutput {
-                        backend: GatewayBackendInfo {
-                            kind: BackendKind::Acp,
-                            runtime_ref: Some(profile.id.clone()),
-                            native_id: Some(runtime_session_handle(
-                                &profile.id,
-                                &cwd,
-                                &native_session_id,
-                            )),
-                        },
-                        run: result.run,
+                Ok(AgentTurnOutput {
+                    backend: GatewayBackendInfo {
+                        kind: BackendKind::Acp,
+                        runtime_ref: Some(profile.id.clone()),
+                        native_id: Some(runtime_session_handle(
+                            &profile.id,
+                            &cwd,
+                            &native_session_id,
+                        )),
                     },
-                )))
+                    run: result.run,
+                })
             }
         }
     }
@@ -1148,13 +986,17 @@ fn acp_session_ready_for_binding(
     binding: GatewayRuntimeBindingRecord,
 ) -> acp_peer::AcpSessionReadyCallback {
     Arc::new(move |native_session_id| {
-        state
-
-            .attach_gateway_runtime_native_session(
-                &binding.thread_id,
-                binding.binding_revision,
-                native_session_id,
-            )
-            .map(|_| ())
+        let state = state.clone();
+        let binding = binding.clone();
+        Box::pin(async move {
+            state
+                .attach_gateway_runtime_native_session(
+                    &binding.thread_id,
+                    binding.binding_revision,
+                    &native_session_id,
+                )
+                .await
+                .map(|_| ())
+        })
     })
 }

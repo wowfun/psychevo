@@ -113,7 +113,7 @@ pub(super) fn channel_enable_result(
     channel_show_result(state, scope, &params.id)
 }
 
-pub(super) fn channel_update_result(
+pub(super) async fn channel_update_result(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ChannelUpdateParams,
@@ -158,7 +158,8 @@ pub(super) fn channel_update_result(
         state
             .inner
             .gateway
-            .rotate_channel_connection_sources(&params.id)?;
+            .rotate_channel_connection_sources(&params.id)
+            .await?;
         state.inner.channel_runtime.restart(&params.id);
     }
     channel_runtime::reconcile(state.clone());
@@ -192,7 +193,7 @@ pub(super) fn channel_delete_result(
     channel_list_result_for_scope(state, scope)
 }
 
-pub(super) fn channel_source_list_result(
+pub(super) async fn channel_source_list_result(
     state: &WebState,
     _scope: &ResolvedScope,
     params: wire::ChannelIdParams,
@@ -200,7 +201,8 @@ pub(super) fn channel_source_list_result(
     let bindings = state
         .inner
         .state
-        .gateway_source_bindings_for_connection_id(&params.id)?;
+        .gateway_source_bindings_for_connection_id(&params.id)
+        .await?;
     let mut sources = Vec::new();
     for binding in bindings {
         let raw = &binding.raw_identity;
@@ -225,11 +227,16 @@ pub(super) fn channel_source_list_result(
             .get("userId")
             .and_then(Value::as_str)
             .map(redacted_remote_label);
-        let summary = state.inner.state.session_summary(&binding.thread_id)?;
+        let summary = state
+            .inner
+            .state
+            .session_summary(&binding.thread_id)
+            .await?;
         let activity = state
             .inner
             .gateway
-            .activity_for_selector(GatewayThreadSelector::thread_id(&binding.thread_id));
+            .activity_for_selector(GatewayThreadSelector::thread_id(&binding.thread_id))
+            .await;
         let activity_status = if activity.running {
             "running"
         } else if activity.queued_turns > 0 {

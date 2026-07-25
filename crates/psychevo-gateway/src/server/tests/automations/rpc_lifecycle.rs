@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn automation_rpc_create_list_and_delete_round_trips() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let created = handle_rpc(
@@ -88,7 +88,7 @@ async fn automation_rpc_create_list_and_delete_round_trips() {
 
 #[tokio::test]
 async fn browser_session_can_manage_automation_for_other_cwd() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
@@ -159,7 +159,7 @@ async fn browser_session_can_manage_automation_for_other_cwd() {
 
 #[tokio::test]
 async fn automation_rpc_accepts_one_shot_delay_schedule() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let created = handle_rpc(
@@ -190,7 +190,7 @@ async fn automation_rpc_accepts_one_shot_delay_schedule() {
 
 #[tokio::test]
 async fn automation_rpc_pause_resume_are_explicit_lifecycle_mutations() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let created = handle_rpc(

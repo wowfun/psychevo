@@ -1,4 +1,4 @@
-fn thread_browser_value(
+async fn thread_browser_value(
     state: &WebState,
     params: wire::ThreadBrowserParams,
     cwd: Option<PathBuf>,
@@ -14,7 +14,7 @@ fn thread_browser_value(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    let activity_snapshot = state.inner.gateway.session_activity_snapshot()?;
+    let activity_snapshot = state.inner.gateway.session_activity_snapshot().await?;
     let active_ids = activity_snapshot
         .iter()
         .filter(|(_, activity)| activity.running || activity.takeover_state.is_some())
@@ -38,7 +38,8 @@ fn thread_browser_value(
             include_session_ids: &include_ids,
             active_session_ids: &active_ids,
         },
-    )?;
+    )
+    .await?;
 
     let mut workspaces = projections
         .into_iter()

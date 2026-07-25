@@ -2,13 +2,16 @@ use super::*;
 
 pub(super) fn prewarm_codex_runtime_inventory(state: &WebState, cwd: PathBuf) {
     let warm_state = state.clone();
-    tokio::spawn(async move {
-        let _ = warm_state
-            .inner
-            .codex_capability_broker
-            .refresh_runtime_inventory(&cwd)
-            .await;
-    });
+    state
+        .inner
+        .gateway
+        .spawn_background("codex-runtime-inventory-prewarm", async move {
+            let _ = warm_state
+                .inner
+                .codex_capability_broker
+                .refresh_runtime_inventory(&cwd)
+                .await;
+        });
 }
 
 pub(super) async fn inspect_thread(
@@ -18,7 +21,7 @@ pub(super) async fn inspect_thread(
 ) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     if let Some(thread_id) = params.thread_id.as_deref() {
-        authorize_thread(state, auth, thread_id)?;
+        authorize_thread(state, auth, thread_id).await?;
     }
     thread_context_read_result_live(state, &scope, params).await
 }
@@ -44,7 +47,7 @@ pub(super) async fn set_thread_control(
 ) -> psychevo_runtime::Result<wire::ThreadControlSetResult> {
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     if let Some(thread_id) = params.thread_id.as_deref() {
-        authorize_thread(state, auth, thread_id)?;
+        authorize_thread(state, auth, thread_id).await?;
     }
     thread_control_set_result(state, &scope, params).await
 }
@@ -59,13 +62,13 @@ pub(super) async fn run_thread_action(
     run_action(state, auth, &scope, params, out_tx).await
 }
 
-pub(super) fn respond_to_thread_interaction(
+pub(super) async fn respond_to_thread_interaction(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadInteractionRespondParams,
 ) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
     let scope = resolve_required_scope(state, auth, params.scope.clone())?;
-    respond_to_interaction(state, auth, &scope, params)
+    respond_to_interaction(state, auth, &scope, params).await
 }
 
 pub(super) async fn read_thread_history(
@@ -112,11 +115,15 @@ pub(super) async fn open_thread_draft(
         .gateway
         .release_prepared_agent_session(&scope.source.source_key().0)
         .await?;
-    state.inner.gateway.clear_source_binding(&scope.source)?;
+    state
+        .inner
+        .gateway
+        .clear_source_binding(&scope.source)
+        .await?;
     prewarm_codex_runtime_inventory(state, scope.cwd.clone());
     let snapshot_scope = detached_draft_scope(&scope, auth);
-    update_browser_session_for_draft_scope(state, auth, &snapshot_scope)?;
-    let snapshot = serde_json::from_value(thread_snapshot(state, &snapshot_scope, None)?)?;
+    update_browser_session_for_draft_scope(state, auth, &snapshot_scope).await?;
+    let snapshot = serde_json::from_value(thread_snapshot(state, &snapshot_scope, None).await?)?;
     let target_catalog = RunnableTargetCatalog::load(state, &snapshot_scope)?;
     gateway_profile_mark(
         "thread_draft_catalog_loaded",
@@ -140,7 +147,9 @@ pub(super) async fn open_thread_draft(
                     ..GatewayProfileFields::default()
                 },
             );
-            let target = target_catalog.default_draft_target(state, &snapshot_scope)?;
+            let target = target_catalog
+                .default_draft_target(state, &snapshot_scope)
+                .await?;
             gateway_profile_mark(
                 "thread_draft_target_discovery_completed",
                 None,
@@ -177,7 +186,7 @@ pub(super) async fn open_thread_draft(
         }
     };
     let source_lane_prepared = if target.ready {
-        prepare_draft_source_lane(state, &snapshot_scope, &target)?;
+        prepare_draft_source_lane(state, &snapshot_scope, &target).await?;
         true
     } else {
         false
@@ -271,16 +280,16 @@ pub(super) async fn start_thread_turn(
     let input = params.input_parts()?;
     let requested_thread_id = match params.thread_id.clone() {
         Some(thread_id) => {
-            authorize_thread(state, auth, &thread_id)?;
+            authorize_thread(state, auth, &thread_id).await?;
             Some(thread_id)
         }
         None => None,
     };
-    let existing_binding = requested_thread_id
-        .as_deref()
-        .map(|thread_id| state.inner.state.gateway_runtime_binding(thread_id))
-        .transpose()?
-        .flatten();
+    let existing_binding = if let Some(thread_id) = requested_thread_id.as_deref() {
+        state.inner.state.gateway_runtime_binding(thread_id).await?
+    } else {
+        None
+    };
     let validated_target = params
         .target
         .as_ref()
@@ -363,7 +372,8 @@ pub(super) async fn start_thread_turn(
         &scope,
         requested_thread_id.as_deref(),
         &mut control_values,
-    )?;
+    )
+    .await?;
     let initial_thread_preferences = source_draft_control_values(&turn_context)?;
     control_values.extend(initial_thread_preferences.clone());
     let response_backend_kind = validated_target
@@ -388,22 +398,22 @@ pub(super) async fn start_thread_turn(
                 })
                 .unwrap_or_else(|| runtime_backend_kind(state, &scope, &runtime_profile_ref))
         })?;
-    let requested_side_conversation_thread = requested_thread_id
-        .as_deref()
-        .map(|thread_id| {
-            state
-                .inner
-                .state
-                .session_summary(thread_id)?
-                .map(|summary| side_conversation_session_source(&summary.source))
-                .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))
-        })
-        .transpose()?
-        .unwrap_or(false);
+    let requested_side_conversation_thread = if let Some(thread_id) = requested_thread_id.as_deref()
+    {
+        state
+            .inner
+            .state
+            .session_summary(thread_id)
+            .await?
+            .map(|summary| side_conversation_session_source(&summary.source))
+            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?
+    } else {
+        false
+    };
     let thread_id = if requested_side_conversation_thread {
         requested_thread_id
     } else {
-        ensure_turn_start_thread(state, &scope, requested_thread_id)?
+        ensure_turn_start_thread(state, &scope, requested_thread_id).await?
     };
     let source = (!requested_side_conversation_thread).then(|| scope.source.clone());
     let event_selector = thread_id
@@ -414,7 +424,7 @@ pub(super) async fn start_thread_turn(
     let event_state = state.clone();
     let review_cwd = scope.cwd.clone();
     let event_tx = out_tx.clone();
-    let event_sink: GatewayEventSink = Arc::new(move |event| {
+    let event_sink = GatewayEventEmitter::new(move |event| {
         let context =
             event_state.pending_context_for_selector(&event_selector, event_thread_id.as_deref());
         event_state.publish_gateway_event_for_connection(
@@ -425,7 +435,7 @@ pub(super) async fn start_thread_turn(
         );
     });
     let bind_source = (!requested_side_conversation_thread).then(|| cwd_source(&scope.cwd));
-    let response_thread_id = thread_id.clone().ok_or_else(|| {
+    thread_id.as_ref().ok_or_else(|| {
         agent_session_error(
             "thread_creation_failed",
             AgentErrorStage::Binding,
@@ -436,16 +446,45 @@ pub(super) async fn start_thread_turn(
         )
     })?;
     let requested_turn_id = Uuid::now_v7().to_string();
-    let response_turn_id = requested_turn_id.clone();
     let mutation_turn_id = requested_turn_id.clone();
     let mutation_cwd = scope.cwd.clone();
     let review = state.inner.review.clone();
     let workspace_mutations = WorkspaceMutationSink::new(move |mutation| {
         review.observe_mutation(&mutation_turn_id, &mutation_cwd, mutation);
     });
+    let mut prepared = prepare_routed_turn(
+        state,
+        &scope,
+        RoutedThreadTurn {
+            thread_id,
+            context: turn_context,
+            control_values,
+            initial_thread_preferences,
+            input,
+            mentions: params.mentions,
+            turn_overrides: params.turn_overrides,
+            runtime_source: "web".to_string(),
+            continue_sources: vec!["run".to_string(), "tui".to_string(), "web".to_string()],
+            event_sink: Some(event_sink),
+            workspace_mutations: Some(workspace_mutations),
+            lineage: None,
+            source,
+            bind_source,
+            turn_id: Some(requested_turn_id),
+        },
+    )
+    .await?;
+    prepared.intent.client_turn_id = Some(params.client_turn_id);
+    let accepted = state
+        .inner
+        .gateway
+        .start_turn(prepared.caller, prepared.intent)
+        .await?;
+    let response_thread_id = accepted.receipt.thread_id.clone();
+    let response_turn_id = accepted.receipt.turn_id.clone();
     gateway_profile_mark(
         "turn_start_admitted",
-        Some(&requested_turn_id),
+        Some(&response_turn_id),
         Some(&response_thread_id),
         GatewayProfileFields {
             request_method: Some("turn/start"),
@@ -453,37 +492,20 @@ pub(super) async fn start_thread_turn(
             ..GatewayProfileFields::default()
         },
     );
-    state.inner.state.record_gateway_turn_start_receipt(
-        &response_thread_id,
-        &params.client_turn_id,
-        &requested_turn_id,
-    )?;
-    let turn_state = state.clone();
-    let turn_scope = scope.clone();
-    tokio::spawn(async move {
-        let _ = run_routed_turn(
-            &turn_state,
-            &turn_scope,
-            RoutedThreadTurn {
-                thread_id,
-                context: turn_context,
-                control_values,
-                initial_thread_preferences,
-                input,
-                mentions: params.mentions,
-                turn_overrides: params.turn_overrides,
-                runtime_source: "web".to_string(),
-                continue_sources: vec!["run".to_string(), "tui".to_string(), "web".to_string()],
-                event_sink: Some(event_sink),
-                workspace_mutations: Some(workspace_mutations),
-                lineage: None,
-                source,
-                bind_source,
-                turn_id: Some(requested_turn_id.clone()),
+    if let Some(lease_id) = prepared.codex_lease_id {
+        let lease_state = state.clone();
+        state.inner.gateway.spawn_accepted_turn(
+            format!("web-turn-completion:{response_turn_id}"),
+            async move {
+                let _ = accepted.wait().await;
+                lease_state
+                    .inner
+                    .codex_capability_broker
+                    .release_turn_lease(&lease_id)
+                    .await;
             },
-        )
-        .await;
-    });
+        );
+    }
     gateway_profile_mark(
         "turn_start_accepted",
         Some(&response_turn_id),
@@ -521,7 +543,7 @@ pub(super) struct RoutedThreadTurn {
     pub(super) turn_overrides: BTreeMap<String, Value>,
     pub(super) runtime_source: String,
     pub(super) continue_sources: Vec<String>,
-    pub(super) event_sink: Option<GatewayEventSink>,
+    pub(super) event_sink: Option<GatewayEventEmitter>,
     pub(super) workspace_mutations: Option<WorkspaceMutationSink>,
     pub(super) lineage: Option<Value>,
     pub(super) source: Option<GatewaySource>,
@@ -557,6 +579,37 @@ pub(super) async fn run_routed_turn(
     scope: &ResolvedScope,
     request: RoutedThreadTurn,
 ) -> psychevo_runtime::Result<crate::GatewayTurnResult> {
+    let prepared = prepare_routed_turn(state, scope, request).await?;
+    let result = match state
+        .inner
+        .gateway
+        .start_turn(prepared.caller, prepared.intent)
+        .await
+    {
+        Ok(accepted) => accepted.wait().await,
+        Err(error) => Err(error),
+    };
+    if let Some(lease_id) = prepared.codex_lease_id.as_deref() {
+        state
+            .inner
+            .codex_capability_broker
+            .release_turn_lease(lease_id)
+            .await;
+    }
+    result
+}
+
+struct PreparedRoutedTurn {
+    caller: crate::ThreadCallerContext,
+    intent: crate::ThreadTurnIntent,
+    codex_lease_id: Option<String>,
+}
+
+async fn prepare_routed_turn(
+    state: &WebState,
+    scope: &ResolvedScope,
+    request: RoutedThreadTurn,
+) -> psychevo_runtime::Result<PreparedRoutedTurn> {
     let context = request.context;
     let selected_target_id = selected_context_target_id(&context)?.to_string();
     let target = context
@@ -601,29 +654,43 @@ pub(super) async fn run_routed_turn(
     if context.binding.is_none() {
         ensure_turn_runtime_profile_supported(state, scope, Some(&target.runtime_profile_ref))?;
     }
-    let mut gateway_request =
+    let (mut caller, mut intent) =
         state.thread_turn_request(scope.cwd.clone(), request.thread_id.clone(), request.input);
-    gateway_request.policy.runtime_profile_ref = Some(target.runtime_profile_ref);
-    gateway_request.policy.agent_ref = target.agent_ref;
-    gateway_request.policy.control_values = request.control_values;
-    gateway_request.policy.initial_thread_preferences = request.initial_thread_preferences;
+    intent.policy.runtime_profile_ref = Some(target.runtime_profile_ref);
+    intent.policy.agent_ref = target.agent_ref;
+    intent.policy.control_values = request.control_values;
+    intent.policy.initial_thread_preferences = request.initial_thread_preferences;
     for (control_id, value) in &request.turn_overrides {
-        gateway_request.policy.control_values.insert(
+        intent.policy.control_values.insert(
             control_id.clone(),
             thread_control_override_string_value(value)?,
         );
     }
-    apply_mentions_to_turn_policy(&mut gateway_request.policy, &request.mentions)?;
-    gateway_request.source = request.source;
-    gateway_request.bind_source = request.bind_source;
-    gateway_request.runtime_source = Some(request.runtime_source);
-    gateway_request.continue_sources = request.continue_sources;
-    gateway_request.event_sink = request.event_sink;
-    gateway_request.workspace_mutations = request.workspace_mutations;
-    gateway_request.lineage = request.lineage;
-    gateway_request.turn_id = request.turn_id;
+    apply_mentions_to_turn_policy(&mut intent.policy, &request.mentions)?;
+    intent.source = request.source;
+    intent.bind_source = request.bind_source;
+    caller.surface = if request.runtime_source == "web" {
+        crate::ThreadSurface::Web
+    } else if request.runtime_source.starts_with("channel/") {
+        crate::ThreadSurface::Channel
+    } else if request.runtime_source == "automation" {
+        crate::ThreadSurface::Automation
+    } else {
+        crate::ThreadSurface::Other(request.runtime_source.clone())
+    };
+    caller.runtime_source = request.runtime_source;
+    caller.continue_sources = request.continue_sources;
+    let event_sink = request.event_sink.clone();
+    if let Some(event_sink) = event_sink.clone() {
+        caller.set_event_observer(event_sink);
+    }
+    if let Some(workspace_mutations) = request.workspace_mutations {
+        caller.set_workspace_mutations(workspace_mutations);
+    }
+    intent.lineage = request.lineage;
+    intent.turn_id = request.turn_id;
     let mut codex_lease_id = None;
-    if let Some(thread_id) = gateway_request.thread_id.clone() {
+    if let Some(thread_id) = intent.thread_id.clone() {
         match state
             .inner
             .codex_capability_broker
@@ -631,18 +698,18 @@ pub(super) async fn run_routed_turn(
                 state.clone(),
                 &scope.cwd,
                 &thread_id,
-                gateway_request.turn_id.clone(),
-                gateway_request.event_sink.clone(),
+                intent.turn_id.clone(),
+                event_sink.clone(),
             )
             .await
         {
             Ok(contributions) => {
                 codex_lease_id = contributions.lease_id;
-                gateway_request
+                intent
                     .policy
                     .selected_capability_roots
                     .extend(contributions.capability_roots);
-                gateway_request.extend_runtime_tools(contributions.runtime_tools);
+                caller.extend_runtime_tools(contributions.runtime_tools);
             }
             Err(err) => {
                 eprintln!(
@@ -657,18 +724,14 @@ pub(super) async fn run_routed_turn(
             }
         }
     }
-    let result = state.inner.gateway.run_turn(gateway_request).await;
-    if let Some(lease_id) = codex_lease_id.as_deref() {
-        state
-            .inner
-            .codex_capability_broker
-            .release_turn_lease(lease_id)
-            .await;
-    }
-    result
+    Ok(PreparedRoutedTurn {
+        caller,
+        intent,
+        codex_lease_id,
+    })
 }
 
-pub(super) fn action_descriptors(
+pub(super) async fn action_descriptors(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
@@ -679,14 +742,15 @@ pub(super) fn action_descriptors(
     let Some(thread_id) = thread_id else {
         return Ok(Vec::new());
     };
-    let activity = snapshot_activity(state, &scope.source, Some(thread_id))?;
+    let activity = snapshot_activity(state, &scope.source, Some(thread_id)).await?;
     let active = activity.running || activity.queued_turns > 0;
-    let binding = state.inner.state.gateway_runtime_binding(thread_id)?;
+    let binding = state.inner.state.gateway_runtime_binding(thread_id).await?;
     let acp = binding
         .as_ref()
         .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"));
-    let revert = state.inner.state.session_revert_state(thread_id)?;
-    let native_history_reason = native_history_action_unavailable_reason(state, scope, thread_id)?;
+    let revert = state.inner.state.session_revert_state(thread_id).await?;
+    let native_history_reason =
+        native_history_action_unavailable_reason(state, scope, thread_id).await?;
     let stability = stability.unwrap_or(wire::RuntimeStabilityView::Stable);
     let descriptor =
         |id, label: &str, enabled: bool, channel_safe: bool, unavailable_reason: Option<String>| {
@@ -808,7 +872,7 @@ pub(super) fn action_descriptors(
     Ok(actions)
 }
 
-fn native_history_action_unavailable_reason(
+async fn native_history_action_unavailable_reason(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
@@ -818,9 +882,10 @@ fn native_history_action_unavailable_reason(
         thread_id,
         &scope.source.kind,
     )
+    .await
 }
 
-pub(super) fn pending_interactions(
+pub(super) async fn pending_interactions(
     state: &WebState,
     _scope: &ResolvedScope,
     thread_id: Option<&str>,
@@ -829,7 +894,8 @@ pub(super) fn pending_interactions(
         return Ok(Vec::new());
     };
     let selector = GatewayThreadSelector::thread_id(thread_id);
-    Ok(prune_pending_actions(state, &selector, Some(thread_id))?
+    Ok(prune_pending_actions(state, &selector, Some(thread_id))
+        .await?
         .into_iter()
         .filter(|action| {
             matches!(
@@ -840,22 +906,22 @@ pub(super) fn pending_interactions(
         .collect())
 }
 
-pub(super) fn authoritative_history_view(
+pub(super) async fn authoritative_history_view(
     state: &WebState,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<wire::ThreadHistoryView> {
-    cached_thread_history_descriptor(state, thread_id)
+    cached_thread_history_descriptor(state, thread_id).await
 }
 
-pub(super) fn authoritative_history_projection(
+pub(super) async fn authoritative_history_projection(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
-    let activity = snapshot_activity(state, &scope.source, Some(thread_id))?;
-    let mut entries = state.inner.gateway.thread_transcript(thread_id)?;
+    let activity = snapshot_activity(state, &scope.source, Some(thread_id)).await?;
+    let mut entries = state.inner.gateway.thread_transcript(thread_id).await?;
     if let Some((turn_id, first_committed_seq)) =
-        active_turn_projection_window(state, thread_id, &activity)?
+        active_turn_projection_window(state, thread_id, &activity).await?
     {
         transcript::stamp_committed_entries_for_turn_window(
             &mut entries,
@@ -865,7 +931,7 @@ pub(super) fn authoritative_history_projection(
             },
         );
     }
-    replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries)?;
+    replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries).await?;
     Ok(entries)
 }
 
@@ -875,8 +941,8 @@ pub(super) async fn read_history(
     requested_scope: &ResolvedScope,
     params: wire::ThreadHistoryReadParams,
 ) -> psychevo_runtime::Result<wire::ThreadHistoryReadResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id).await?;
     if scope.cwd != requested_scope.cwd {
         return Err(agent_session_error(
             "thread_scope_mismatch",
@@ -897,7 +963,7 @@ pub(super) async fn read_history(
         },
     )
     .await?;
-    let entries = authoritative_history_projection(state, &scope, &params.thread_id)?;
+    let entries = authoritative_history_projection(state, &scope, &params.thread_id).await?;
     let start = match params.cursor.as_deref() {
         None => 0,
         Some(cursor) => entries
@@ -937,8 +1003,8 @@ pub(super) async fn read_history_draft(
     requested_scope: &ResolvedScope,
     params: wire::ThreadHistoryDraftReadParams,
 ) -> psychevo_runtime::Result<wire::ThreadHistoryDraftReadResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id).await?;
     if scope.cwd != requested_scope.cwd {
         return Err(agent_session_error(
             "thread_scope_mismatch",
@@ -949,10 +1015,10 @@ pub(super) async fn read_history_draft(
             Some(format!("thread:{}", params.thread_id)),
         ));
     }
-    read_history_draft_for_scope(state, &scope, params)
+    read_history_draft_for_scope(state, &scope, params).await
 }
 
-fn read_history_draft_for_scope(
+async fn read_history_draft_for_scope(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadHistoryDraftReadParams,
@@ -964,6 +1030,7 @@ fn read_history_draft_for_scope(
         &params.message_id,
         &scope.source.kind,
     )
+    .await
 }
 
 pub(super) async fn run_action(
@@ -973,8 +1040,8 @@ pub(super) async fn run_action(
     params: wire::ThreadActionRunParams,
     out_tx: ConnectionSender,
 ) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id).await?;
     if scope.cwd != requested_scope.cwd {
         return Err(agent_session_error(
             "thread_scope_mismatch",
@@ -1038,7 +1105,7 @@ pub(super) async fn run_routed_action(
     let selector = GatewayThreadSelector::thread_id(&params.thread_id);
     match params.action {
         wire::ThreadActionInput::Interrupt => {
-            let interrupted = state.inner.gateway.interrupt_turn(selector.clone());
+            let interrupted = state.inner.gateway.interrupt_turn(selector.clone()).await;
             let cleared = state.inner.gateway.clear_queue(selector);
             Ok(wire::ThreadActionRunResult::Interrupt {
                 thread_id: params.thread_id,
@@ -1068,12 +1135,13 @@ pub(super) async fn run_routed_action(
                 .inner
                 .gateway
                 .steer_turn(selector.clone(), Some(&expected_turn_id), message.clone())
+                .await
                 .is_some()
-                || state.inner.gateway.steer_foreign_turn(
-                    selector,
-                    Some(&expected_turn_id),
-                    message,
-                );
+                || state
+                    .inner
+                    .gateway
+                    .steer_foreign_turn(selector, Some(&expected_turn_id), message)
+                    .await;
             Ok(wire::ThreadActionRunResult::Steer {
                 thread_id: params.thread_id,
                 accepted,
@@ -1098,12 +1166,13 @@ pub(super) async fn run_routed_action(
             let native = state
                 .inner
                 .state
-                .gateway_runtime_binding(&params.thread_id)?
+                .gateway_runtime_binding(&params.thread_id)
+                .await?
                 .is_some_and(|binding| binding.backend_kind.as_deref() == Some("native"));
             if native {
                 fork_native_thread(state, scope, &params.thread_id, None).await
             } else {
-                fork_acp_thread(state, scope, &params.thread_id).await
+                fork_acp_thread(state, scope, &params.thread_id, &context).await
             }
         }
         wire::ThreadActionInput::ForkBefore { message_id } => {
@@ -1115,7 +1184,8 @@ pub(super) async fn run_routed_action(
                     thread_id: params.thread_id.clone(),
                     message_id,
                 },
-            )?;
+            )
+            .await?;
             let message_seq = editable_message_seq(&draft)?;
             fork_native_thread(state, scope, &params.thread_id, Some(message_seq)).await
         }
@@ -1127,7 +1197,8 @@ pub(super) async fn run_routed_action(
                 &message_id,
                 &draft,
                 &scope.source.kind,
-            )?;
+            )
+            .await?;
             let no_op = !staged;
             Ok(wire::ThreadActionRunResult::RevertConversation {
                 thread_id: params.thread_id.clone(),
@@ -1142,7 +1213,8 @@ pub(super) async fn run_routed_action(
             let draft = crate::history_editing::restore_native_conversation_edit(
                 &state.inner.state,
                 &params.thread_id,
-            )?;
+            )
+            .await?;
             Ok(wire::ThreadActionRunResult::UnrevertConversation {
                 thread_id: params.thread_id.clone(),
                 draft,
@@ -1152,6 +1224,72 @@ pub(super) async fn run_routed_action(
             })
         }
     }
+}
+
+/// Accepts a routed compaction at the Thread Application boundary and returns
+/// a completion future only after the operation has entered the authoritative
+/// per-Thread queue.
+pub(super) async fn enqueue_routed_compact_action(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: String,
+    instructions: Option<String>,
+    out_tx: ConnectionSender,
+) -> psychevo_runtime::Result<
+    BoxFuture<'static, psychevo_runtime::Result<wire::ThreadActionRunResult>>,
+> {
+    let context = thread_context_read_result_live(
+        state,
+        scope,
+        wire::ThreadContextReadParams {
+            thread_id: Some(thread_id.clone()),
+            target: None,
+            scope: Some(scope.to_wire_scope()),
+        },
+    )
+    .await?;
+    let descriptor = context
+        .actions
+        .iter()
+        .find(|descriptor| descriptor.id == wire::ThreadActionKind::Compact)
+        .ok_or_else(|| {
+            agent_session_error(
+                "action_unsupported",
+                AgentErrorStage::Control,
+                "user_action",
+                "not_delivered",
+                "This Thread runtime does not support the requested action.",
+                Some(format!("thread:{thread_id}")),
+            )
+        })?;
+    if !descriptor.enabled {
+        return Err(agent_session_error(
+            "action_unavailable",
+            AgentErrorStage::Control,
+            "retry",
+            "not_delivered",
+            descriptor
+                .unavailable_reason
+                .clone()
+                .unwrap_or_else(|| "The requested action is temporarily unavailable.".to_string()),
+            Some(format!("thread:{thread_id}")),
+        ));
+    }
+    let completion = enqueue_thread_compact_result_for_thread(
+        state,
+        scope,
+        thread_id.clone(),
+        instructions,
+        context.runtime_profile_ref,
+        out_tx,
+    )
+    .await?;
+    Ok(Box::pin(async move {
+        Ok(wire::ThreadActionRunResult::Compact {
+            thread_id,
+            result: Box::new(completion.await?),
+        })
+    }))
 }
 
 fn editable_message_seq(
@@ -1179,14 +1317,14 @@ fn editable_message_seq(
     })
 }
 
-pub(super) fn respond_to_interaction(
+pub(super) async fn respond_to_interaction(
     state: &WebState,
     auth: &AuthContext,
     requested_scope: &ResolvedScope,
     params: wire::ThreadInteractionRespondParams,
 ) -> psychevo_runtime::Result<wire::ThreadInteractionRespondResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id).await?;
     if scope.cwd != requested_scope.cwd {
         return Err(agent_session_error(
             "thread_scope_mismatch",
@@ -1197,7 +1335,7 @@ pub(super) fn respond_to_interaction(
             Some(format!("thread:{}", params.thread_id)),
         ));
     }
-    let pending = pending_interactions(state, &scope, Some(&params.thread_id))?;
+    let pending = pending_interactions(state, &scope, Some(&params.thread_id)).await?;
     let action = pending
         .iter()
         .find(|action| action.action_id == params.interaction_id)
@@ -1218,12 +1356,13 @@ pub(super) fn respond_to_interaction(
         action.kind,
         params.response,
     )
+    .await
 }
 
 /// Resolves a typed interaction already authorized by an internal broker such
 /// as the Channel token router. Public RPC callers must go through
 /// `respond_to_interaction`, which first proves projection visibility.
-pub(super) fn respond_to_routed_interaction(
+pub(super) async fn respond_to_routed_interaction(
     state: &WebState,
     thread_id: &str,
     interaction_id: &str,
@@ -1237,12 +1376,13 @@ pub(super) fn respond_to_routed_interaction(
         expected_kind,
         response,
     )
+    .await
 }
 
 /// Resolves an interaction through an internal broker-owned selector. Channel
 /// tokens are source-scoped, so their authoritative queue selector may remain
 /// the source alias while the public action already carries its bound Thread.
-pub(super) fn respond_to_routed_interaction_for_selector(
+pub(super) async fn respond_to_routed_interaction_for_selector(
     state: &WebState,
     selector: GatewayThreadSelector,
     interaction_id: &str,
@@ -1273,32 +1413,41 @@ pub(super) fn respond_to_routed_interaction_for_selector(
                 GatewayActionOutcome::Accepted
             };
             (
-                state.inner.gateway.submit_permission(
-                    selector,
-                    interaction_id,
-                    permission_decision(decision, directory),
-                ),
+                state
+                    .inner
+                    .gateway
+                    .submit_permission(
+                        selector,
+                        interaction_id,
+                        permission_decision(decision, directory),
+                    )
+                    .await,
                 outcome,
             )
         }
         (GatewayActionKind::Clarify, wire::ThreadInteractionResponse::Clarify { answers }) => (
-            state.inner.gateway.submit_clarify(
-                selector,
-                interaction_id,
-                ClarifyResult::Answered(ClarifyResponse {
-                    answers: answers
-                        .into_iter()
-                        .map(|answers| ClarifyAnswer { answers })
-                        .collect(),
-                }),
-            ),
+            state
+                .inner
+                .gateway
+                .submit_clarify(
+                    selector,
+                    interaction_id,
+                    ClarifyResult::Answered(ClarifyResponse {
+                        answers: answers
+                            .into_iter()
+                            .map(|answers| ClarifyAnswer { answers })
+                            .collect(),
+                    }),
+                )
+                .await,
             GatewayActionOutcome::Accepted,
         ),
         (GatewayActionKind::Clarify, wire::ThreadInteractionResponse::CancelClarify) => (
             state
                 .inner
                 .gateway
-                .submit_clarify(selector, interaction_id, ClarifyResult::Cancelled),
+                .submit_clarify(selector, interaction_id, ClarifyResult::Cancelled)
+                .await,
             GatewayActionOutcome::Cancelled,
         ),
         _ => {

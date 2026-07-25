@@ -29,7 +29,7 @@ struct PersistGatewayEventResult {
 }
 
 impl Gateway {
-    fn claim_durable_gateway_activity(
+    async fn claim_durable_gateway_activity(
         &self,
         claim: DurableGatewayActivityClaim<'_>,
     ) -> psychevo_runtime::Result<DurableGatewayActivity> {
@@ -48,7 +48,8 @@ impl Gateway {
                 queued_turns: claim.queued_turns,
                 superseded_activity_id: None,
                 intent: claim.intent,
-            })?;
+            })
+            .await?;
         Ok(DurableGatewayActivity {
             activity_id: record.activity_id,
             owner_id: record.owner_id,
@@ -64,7 +65,9 @@ impl Gateway {
     ) -> oneshot::Sender<()> {
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
         let gateway = self.clone();
-        tokio::spawn(async move {
+        self.spawn_accepted_turn(
+            format!("activity-heartbeat:{}", activity.activity_id),
+            async move {
             let mut tick = tokio::time::interval(Duration::from_millis(GATEWAY_CONTROL_POLL_MS));
             let mut last_heartbeat_ms = 0;
             loop {
@@ -79,55 +82,129 @@ impl Gateway {
                                 &activity.owner_id,
                                 activity.generation,
                                 lease_expires_at_ms,
-                            );
+                            ).await;
                             last_heartbeat_ms = now;
                         }
-                        gateway.apply_pending_gateway_control_commands();
+                        gateway.apply_pending_gateway_control_commands().await;
                     }
                 }
             }
-        });
+            },
+        );
         stop_tx
     }
 
     fn wrap_gateway_event_sink(
         &self,
-        event_sink: Option<GatewayEventSink>,
+        event_sink: Option<GatewayEventEmitter>,
         activity: Option<DurableGatewayActivity>,
         queue_key: Option<String>,
         default_turn_id: Option<String>,
-    ) -> Option<GatewayEventSink> {
+    ) -> Option<GatewayEventEmitter> {
         if event_sink.is_none() && activity.is_none() {
             return None;
         }
-        let gateway = self.clone();
-        Some(Arc::new(move |event: GatewayEvent| {
-            let effective_activity =
-                gateway.activity_for_gateway_event(activity.as_ref(), &event);
-            let event = gateway
-                .attention_event_with_public_provenance(event, effective_activity.as_ref());
-            let accepted_thread_id = effective_activity.as_ref().and_then(|activity| {
-                gateway
-                    .persist_gateway_event(activity, &event, default_turn_id.as_deref())
-                    .accepted_thread_id
-            });
-            if let Some(thread_id) = accepted_thread_id.as_deref()
-                && let Some(queue_key) = queue_key.as_deref()
-                && effective_activity.as_ref().is_some_and(|effective| {
-                    activity
-                        .as_ref()
-                        .is_some_and(|root| effective.activity_id == root.activity_id)
+        let immediate_gateway = self.clone();
+        let immediate_event_sink = event_sink.clone();
+        let immediate_activity = activity.clone();
+        let immediate_queue_key = queue_key.clone();
+        let immediate_default_turn_id = default_turn_id.clone();
+        let waiting_gateway = self.clone();
+        Some(GatewayEventEmitter::try_new_with_wait(
+            move |event: GatewayEvent| {
+            let local_result = immediate_event_sink
+                .as_ref()
+                .map(|event_sink| event_sink.emit(event.clone()))
+                .transpose();
+            let durable_result = immediate_activity
+                .as_ref()
+                .map(|root_activity| {
+                    immediate_gateway.event_ingress.submit(
+                        immediate_gateway.clone(),
+                        GatewayEventEnvelope {
+                            root_activity_id: Some(root_activity.activity_id.clone()),
+                            activity: root_activity.clone(),
+                            completion: None,
+                            default_turn_id: immediate_default_turn_id.clone(),
+                            event,
+                            queue_key: immediate_queue_key.clone(),
+                        },
+                    )
                 })
-            {
-                gateway.register_active_thread_alias(queue_key, thread_id);
+                .transpose();
+            match (local_result, durable_result) {
+                (Err(error), _) | (_, Err(error)) => Err(error),
+                (Ok(_), Ok(_)) => Ok(()),
             }
-            if let Some(event_sink) = event_sink.as_ref() {
-                event_sink(event);
-            }
-        }) as GatewayEventSink)
+        },
+        move |event: GatewayEvent| {
+            let gateway = waiting_gateway.clone();
+            let event_sink = event_sink.clone();
+            let activity = activity.clone();
+            let queue_key = queue_key.clone();
+            let default_turn_id = default_turn_id.clone();
+            Box::pin(async move {
+                let local_result = event_sink
+                    .as_ref()
+                    .map(|event_sink| event_sink.emit(event.clone()))
+                    .transpose();
+                let durable_result = match activity {
+                    Some(root_activity) => gateway
+                        .event_ingress
+                        .submit_wait(
+                            gateway.clone(),
+                            GatewayEventEnvelope {
+                                root_activity_id: Some(root_activity.activity_id.clone()),
+                                activity: root_activity,
+                                completion: None,
+                                default_turn_id,
+                                event,
+                                queue_key,
+                            },
+                        )
+                        .await,
+                    None => Ok(()),
+                };
+                match (local_result, durable_result) {
+                    (Err(error), _) | (_, Err(error)) => Err(error),
+                    (Ok(_), Ok(_)) => Ok(()),
+                }
+            })
+        },
+        ))
     }
 
-    fn activity_for_gateway_event(
+    async fn persist_gateway_event_envelope(&self, envelope: GatewayEventEnvelope) {
+        let effective_activity = self
+            .activity_for_gateway_event(Some(&envelope.activity), &envelope.event)
+            .await
+            .unwrap_or_else(|| envelope.activity.clone());
+        let event = self
+            .attention_event_with_public_provenance(
+                envelope.event,
+                Some(&effective_activity),
+            )
+            .await;
+        let accepted_thread_id = self
+            .persist_gateway_event(
+                &effective_activity,
+                &event,
+                envelope.default_turn_id.as_deref(),
+            )
+            .await
+            .accepted_thread_id;
+        if let Some(thread_id) = accepted_thread_id.as_deref()
+            && let Some(queue_key) = envelope.queue_key.as_deref()
+            && envelope
+                .root_activity_id
+                .as_deref()
+                .is_some_and(|root| root == effective_activity.activity_id)
+        {
+            self.register_active_thread_alias(queue_key, thread_id);
+        }
+    }
+
+    async fn activity_for_gateway_event(
         &self,
         root: Option<&DurableGatewayActivity>,
         event: &GatewayEvent,
@@ -135,39 +212,42 @@ impl Gateway {
         let Some(thread_id) = gateway_event_thread_id(event) else {
             return root.cloned();
         };
-        if root.is_some_and(|activity| {
-            self.state
-
-                .gateway_activity(&activity.activity_id)
+        if let Some(root) = root
+            && self
+                .state
+                .gateway_activity(&root.activity_id)
+                .await
                 .ok()
                 .flatten()
                 .and_then(|record| record.thread_id)
                 .as_deref()
                 == Some(thread_id.as_str())
-        }) {
-            return root.cloned();
+        {
+            return Some(root.clone());
         }
         let event_turn_id = gateway_event_turn_id(event);
-        let matching_turn = event_turn_id
-            .and_then(|turn_id| self.state.gateway_activity(turn_id).ok().flatten())
+        let matching_turn = if let Some(turn_id) = event_turn_id {
+            self.state.gateway_activity(turn_id).await.ok().flatten()
+        } else {
+            None
+        }
             .filter(|record| {
                 record.owner_id == self.owner_id()
                     && record.thread_id.as_deref() == Some(thread_id.as_str())
             });
+        let matching_thread = self
+            .state
+            .active_gateway_activity_for_thread(&thread_id)
+            .await
+            .ok()
+            .flatten()
+            .filter(|record| {
+                record.owner_id == self.owner_id()
+                    && event_turn_id
+                        .is_none_or(|turn_id| record.turn_id.as_deref() == Some(turn_id))
+            });
         matching_turn
-            .or_else(|| {
-                self.state
-
-                    .active_gateway_activity_for_thread(&thread_id)
-                    .ok()
-                    .flatten()
-                    .filter(|record| {
-                        record.owner_id == self.owner_id()
-                            && event_turn_id.is_none_or(|turn_id| {
-                                record.turn_id.as_deref() == Some(turn_id)
-                            })
-                    })
-            })
+            .or(matching_thread)
             .map(|record| DurableGatewayActivity {
                 activity_id: record.activity_id,
                 owner_id: record.owner_id,
@@ -178,7 +258,7 @@ impl Gateway {
             .or_else(|| root.cloned())
     }
 
-    fn attention_event_with_public_provenance(
+    async fn attention_event_with_public_provenance(
         &self,
         event: GatewayEvent,
         activity: Option<&DurableGatewayActivity>,
@@ -188,14 +268,15 @@ impl Gateway {
             GatewayEvent::ActionUpdated { action } => (action, true),
             event => return event,
         };
-        let activity_record = activity
-            .and_then(|activity| {
-                self.state
-
-                    .gateway_activity(&activity.activity_id)
-                    .ok()
-            })
-            .flatten();
+        let activity_record = if let Some(activity) = activity {
+            self.state
+                .gateway_activity(&activity.activity_id)
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
         let activity_thread_id = activity_record
             .as_ref()
             .and_then(|record| record.thread_id.clone());
@@ -210,10 +291,15 @@ impl Gateway {
                 .lease_expires_at_ms
                 .or(Some(record.lease_expires_at_ms));
         }
-        let binding = thread_id
-            .as_deref()
-            .and_then(|thread_id| self.state.gateway_runtime_binding(thread_id).ok())
-            .flatten();
+        let binding = if let Some(thread_id) = thread_id.as_deref() {
+            self.state
+                .gateway_runtime_binding(thread_id)
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
         let runtime_ref = binding
             .as_ref()
             .and_then(|binding| binding.runtime_ref.clone())
@@ -271,7 +357,7 @@ impl Gateway {
         }
     }
 
-    fn persist_gateway_event(
+    async fn persist_gateway_event(
         &self,
         activity: &DurableGatewayActivity,
         event: &GatewayEvent,
@@ -292,13 +378,15 @@ impl Gateway {
                     thread_id,
                     gateway_now_ms() + GATEWAY_ACTIVITY_LEASE_MS,
                 )
+                .await
                 .unwrap_or(false)
         {
             result.accepted_thread_id = Some(thread_id.clone());
         }
 
         if matches!(event, GatewayEvent::TurnCompleted { .. }) {
-            self.flush_gateway_live_snapshots_for_activity(&activity.activity_id);
+            self.flush_gateway_live_snapshots_for_activity(&activity.activity_id)
+                .await;
         }
 
         let Ok(event_value) = serde_json::to_value(event) else {
@@ -313,7 +401,8 @@ impl Gateway {
                     .or(default_turn_id)
                     .or(activity.turn_id.as_deref()),
                 &event_value,
-            );
+            )
+            .await;
         } else if let Some((event_kind, entry)) = gateway_live_snapshot_entry(event) {
             self.retain_gateway_live_snapshot(
                 activity,
@@ -323,12 +412,13 @@ impl Gateway {
                     .or(activity.turn_id.as_deref()),
                 entry,
                 event_value,
-            );
+            )
+            .await;
         }
         result
     }
 
-    fn retain_gateway_live_snapshot(
+    async fn retain_gateway_live_snapshot(
         &self,
         activity: &DurableGatewayActivity,
         event_kind: &'static str,
@@ -381,11 +471,11 @@ impl Gateway {
             }
         };
         if let Some(snapshot) = snapshot {
-            self.flush_gateway_live_snapshot(&snapshot);
+            self.flush_gateway_live_snapshot(&snapshot).await;
         }
     }
 
-    fn flush_gateway_live_snapshots_for_activity(&self, activity_id: &str) {
+    async fn flush_gateway_live_snapshots_for_activity(&self, activity_id: &str) {
         let now = gateway_now_ms();
         let snapshots = {
             let mut pending = self
@@ -405,11 +495,11 @@ impl Gateway {
                 .collect::<Vec<_>>()
         };
         for snapshot in snapshots {
-            self.flush_gateway_live_snapshot(&snapshot);
+            self.flush_gateway_live_snapshot(&snapshot).await;
         }
     }
 
-    fn flush_gateway_live_snapshot(&self, snapshot: &PendingGatewayLiveSnapshot) {
+    async fn flush_gateway_live_snapshot(&self, snapshot: &PendingGatewayLiveSnapshot) {
         let _ = self
             .state
 
@@ -421,10 +511,11 @@ impl Gateway {
                 turn_id: snapshot.turn_id.as_deref(),
                 event_kind: &snapshot.event_kind,
                 event: snapshot.event.clone(),
-            });
+            })
+            .await;
     }
 
-    fn clear_gateway_live_snapshots_for_activity(&self, activity_id: &str) {
+    async fn clear_gateway_live_snapshots_for_activity(&self, activity_id: &str) {
         {
             let mut pending = self
                 .live_snapshots
@@ -435,10 +526,11 @@ impl Gateway {
         let _ = self
             .state
 
-            .delete_gateway_live_snapshots_for_activity(activity_id);
+            .delete_gateway_live_snapshots_for_activity(activity_id)
+            .await;
     }
 
-    fn finish_durable_gateway_activity(
+    async fn finish_durable_gateway_activity(
         &self,
         activity: Option<&DurableGatewayActivity>,
         status: &str,
@@ -449,22 +541,24 @@ impl Gateway {
                 &activity.owner_id,
                 activity.generation,
                 status,
-            );
-            self.clear_gateway_live_snapshots_for_activity(&activity.activity_id);
+            )
+            .await;
+            self.clear_gateway_live_snapshots_for_activity(&activity.activity_id)
+                .await;
         }
     }
 
-    pub fn takeover_turn(
+    pub async fn takeover_turn(
         &self,
         selector: GatewayThreadSelector,
     ) -> psychevo_runtime::Result<(bool, GatewayActivity)> {
         let now = gateway_now_ms();
         for key in self.selector_keys(&selector) {
-            let Some(record) = self.durable_activity_for_key(&key)? else {
+            let Some(record) = self.durable_activity_for_key(&key).await? else {
                 continue;
             };
             if record.owner_id == self.owner_id() {
-                return Ok((false, self.activity_for_selector(selector)));
+                return Ok((false, self.activity_for_selector(selector).await));
             }
             if record.status != "running" && record.status != "queued" {
                 continue;
@@ -474,15 +568,17 @@ impl Gateway {
                 let accepted = self.state.supersede_stale_gateway_activity(
                     &record.activity_id,
                     &superseded_by_activity_id,
-                )?;
-                let mut activity = self.activity_for_selector(selector);
+                )
+                .await?;
+                let mut activity = self.activity_for_selector(selector).await;
                 if accepted {
                     activity.takeover_state = Some("takenOver".to_string());
                     self.append_gateway_activity_changed(
                         record.thread_id,
                         &activity,
                         Some(&record.activity_id),
-                    );
+                    )
+                    .await;
                 }
                 return Ok((accepted, activity));
             }
@@ -493,17 +589,18 @@ impl Gateway {
                     "activityId": record.activity_id,
                     "requestedOwnerId": self.owner_id(),
                 }),
-            );
-            let mut activity = self.activity_for_selector(selector);
+            )
+            .await;
+            let mut activity = self.activity_for_selector(selector).await;
             if accepted {
                 activity.takeover_state = Some("requested".to_string());
             }
             return Ok((accepted, activity));
         }
-        Ok((false, self.activity_for_selector(selector)))
+        Ok((false, self.activity_for_selector(selector).await))
     }
 
-    fn append_gateway_activity_changed(
+    async fn append_gateway_activity_changed(
         &self,
         thread_id: Option<String>,
         activity: &GatewayActivity,
@@ -520,11 +617,12 @@ impl Gateway {
                 thread_id.as_deref(),
                 activity.active_turn_id.as_deref(),
                 &event_value,
-            );
+            )
+            .await;
         }
     }
 
-    fn enqueue_foreign_control_command(
+    async fn enqueue_foreign_control_command(
         &self,
         selector: &GatewayThreadSelector,
         command_kind: &str,
@@ -532,7 +630,7 @@ impl Gateway {
     ) -> bool {
         let now = gateway_now_ms();
         for key in self.selector_keys(selector) {
-            let Ok(Some(record)) = self.durable_activity_for_key(&key) else {
+            let Ok(Some(record)) = self.durable_activity_for_key(&key).await else {
                 continue;
             };
             if record.owner_id == self.owner_id()
@@ -550,16 +648,18 @@ impl Gateway {
                     command_kind,
                     payload,
                 })
+                .await
                 .is_ok();
         }
         false
     }
 
-    fn apply_pending_gateway_control_commands(&self) {
+    async fn apply_pending_gateway_control_commands(&self) {
         let Ok(commands) = self
             .state
 
             .pending_gateway_control_commands(self.owner_id(), 50)
+            .await
         else {
             return;
         };
@@ -572,7 +672,9 @@ impl Gateway {
                         true
                     })
                     .unwrap_or(false),
-                "takeover" => self.apply_takeover_control_command(&command.activity_id),
+                "takeover" => self
+                    .apply_takeover_control_command(&command.activity_id)
+                    .await,
                 "steer" => self.apply_steer_control_command(&command.activity_id, &command.payload),
                 "permission" => self.apply_permission_control_command(&command.payload),
                 "clarify" => self.apply_clarify_control_command(&command.payload),
@@ -580,36 +682,35 @@ impl Gateway {
             };
             let store = &self.state;
             let _ = if applied {
-                store.mark_gateway_control_command_applied(command.id)
+                store.mark_gateway_control_command_applied(command.id).await
             } else {
-                store.mark_gateway_control_command_failed(command.id, "no matching active control")
+                store
+                    .mark_gateway_control_command_failed(command.id, "no matching active control")
+                    .await
             };
         }
     }
 
-    fn apply_takeover_control_command(&self, activity_id: &str) -> bool {
+    async fn apply_takeover_control_command(&self, activity_id: &str) -> bool {
         let control = self.control_for_activity_id(activity_id);
         if let Some(control) = control.as_ref() {
             control.abort();
         }
-        let released = self
-            .state
-
-            .gateway_activity(activity_id)
-            .ok()
-            .flatten()
-            .and_then(|record| {
-                self.state
-
-                    .finish_gateway_activity(
-                        activity_id,
-                        self.owner_id(),
-                        record.generation,
-                        "released",
-                    )
-                    .ok()
-            })
-            .unwrap_or(false);
+        let released = if let Some(record) =
+            self.state.gateway_activity(activity_id).await.ok().flatten()
+        {
+            self.state
+                .finish_gateway_activity(
+                    activity_id,
+                    self.owner_id(),
+                    record.generation,
+                    "released",
+                )
+                .await
+                .unwrap_or(false)
+        } else {
+            false
+        };
         released || control.is_some()
     }
 
@@ -856,5 +957,125 @@ fn permission_decision_from_label(
         "allow_always" => Some(PermissionApprovalDecision::allow_always()),
         "deny" => Some(PermissionApprovalDecision::deny()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod event_ingress_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use psychevo_runtime::state::StateRuntime;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn local_delivery_precedes_bounded_durability_and_survives_closed_ingress() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cwd = temp.path().join("work");
+        std::fs::create_dir_all(&cwd).expect("cwd");
+        let state = StateRuntime::open(temp.path().join("state.db"))
+            .await
+            .expect("state");
+        let thread_id = state
+            .create_session_with_metadata(&cwd, "test", "model", "provider", None)
+            .await
+            .expect("thread");
+        let gateway = Gateway::new(state.clone());
+        let activity = gateway
+            .claim_durable_gateway_activity(DurableGatewayActivityClaim {
+                activity_id: "turn-ingress",
+                thread_id: Some(&thread_id),
+                source_key: None,
+                turn_id: Some("turn-ingress"),
+                kind: "turn",
+                owner_surface: Some("test"),
+                queued_turns: 0,
+                intent: None,
+            })
+            .await
+            .expect("activity");
+
+        let local_deliveries = Arc::new(AtomicUsize::new(0));
+        let local_deliveries_for_sink = local_deliveries.clone();
+        let local_sink = GatewayEventEmitter::new(move |_| {
+            local_deliveries_for_sink.fetch_add(1, Ordering::SeqCst);
+        });
+        let sink = gateway
+            .wrap_gateway_event_sink(
+                Some(local_sink),
+                Some(activity),
+                Some("thread:test".to_string()),
+                Some("turn-ingress".to_string()),
+            )
+            .expect("wrapped sink");
+
+        sink.emit(GatewayEvent::TurnStarted {
+            thread_id: Some(thread_id.clone()),
+            turn_id: "turn-ingress".to_string(),
+            selected_skills: Vec::new(),
+        })
+        .expect("accepted ingress event");
+        assert_eq!(
+            local_deliveries.load(Ordering::SeqCst),
+            1,
+            "local observers must run before asynchronous durable relay completion"
+        );
+
+        gateway.wait_for_gateway_events().await;
+        let durable_events = state
+            .list_gateway_live_events_after(0, 10)
+            .await
+            .expect("durable events");
+        assert_eq!(durable_events.len(), 1);
+        let diagnostics = gateway.event_ingress.diagnostics();
+        assert_eq!(diagnostics.accepted, 1);
+        assert_eq!(diagnostics.completed, 1);
+        assert_eq!(diagnostics.rejected, 0);
+
+        sink.emit_wait(GatewayEvent::TurnCompleted {
+            thread_id: Some(thread_id.clone()),
+            turn_id: "turn-ingress".to_string(),
+            turn: GatewayTurn {
+                id: "turn-ingress".to_string(),
+                thread_id: Some(thread_id.clone()),
+                status: GatewayTurnStatus::Completed,
+                outcome: Some("completed".to_string()),
+                error: None,
+                started_at_ms: Some(1),
+                completed_at_ms: Some(2),
+            },
+            committed_entries: Vec::new(),
+        })
+        .await
+        .expect("terminal durability flush");
+        let diagnostics = gateway.event_ingress.diagnostics();
+        assert_eq!(diagnostics.accepted, 2);
+        assert_eq!(
+            diagnostics.completed, 2,
+            "emit_wait must return only after its terminal envelope is processed"
+        );
+
+        gateway.event_ingress.close();
+        let error = sink
+            .emit(GatewayEvent::TurnQueued {
+                thread_id: Some(thread_id),
+                turn_id: "turn-ingress-queued".to_string(),
+                queue_position: 1,
+            })
+            .expect_err("closed durable ingress");
+        assert!(error.to_string().contains("ingress is closed"));
+        assert_eq!(
+            local_deliveries.load(Ordering::SeqCst),
+            3,
+            "durable relay rejection must not suppress local delivery"
+        );
+        assert_eq!(gateway.event_ingress.diagnostics().rejected, 1);
+
+        gateway
+            .shutdown_application(false)
+            .await
+            .expect("shutdown gateway");
+        state.close().await;
     }
 }

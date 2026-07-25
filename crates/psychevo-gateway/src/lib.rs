@@ -60,7 +60,83 @@ pub use protocol::{
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};
 
-pub type GatewayEventSink = Arc<dyn Fn(GatewayEvent) + Send + Sync>;
+type GatewayEventWaitEmitter =
+    dyn Fn(GatewayEvent) -> BoxFuture<'static, Result<(), GatewayEventEmitError>> + Send + Sync;
+
+#[derive(Clone)]
+pub struct GatewayEventEmitter {
+    emit: Arc<dyn Fn(GatewayEvent) -> Result<(), GatewayEventEmitError> + Send + Sync>,
+    emit_wait: Option<Arc<GatewayEventWaitEmitter>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GatewayEventEmitError {
+    message: Arc<str>,
+}
+
+impl GatewayEventEmitError {
+    fn new(message: impl Into<Arc<str>>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for GatewayEventEmitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for GatewayEventEmitError {}
+
+impl fmt::Debug for GatewayEventEmitter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("GatewayEventEmitter(..)")
+    }
+}
+
+impl GatewayEventEmitter {
+    pub fn new(emit: impl Fn(GatewayEvent) + Send + Sync + 'static) -> Self {
+        Self::try_new(move |event| {
+            emit(event);
+            Ok(())
+        })
+    }
+
+    fn try_new(
+        emit: impl Fn(GatewayEvent) -> Result<(), GatewayEventEmitError> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            emit: Arc::new(emit),
+            emit_wait: None,
+        }
+    }
+
+    fn try_new_with_wait(
+        emit: impl Fn(GatewayEvent) -> Result<(), GatewayEventEmitError> + Send + Sync + 'static,
+        emit_wait: impl Fn(GatewayEvent) -> BoxFuture<'static, Result<(), GatewayEventEmitError>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self {
+            emit: Arc::new(emit),
+            emit_wait: Some(Arc::new(emit_wait)),
+        }
+    }
+
+    pub fn emit(&self, event: GatewayEvent) -> Result<(), GatewayEventEmitError> {
+        (self.emit)(event)
+    }
+
+    pub async fn emit_wait(&self, event: GatewayEvent) -> Result<(), GatewayEventEmitError> {
+        match self.emit_wait.as_ref() {
+            Some(emit_wait) => emit_wait(event).await,
+            None => self.emit(event),
+        }
+    }
+}
 
 pub(crate) const ACP_PEER_METADATA_KEY: &str = "peer_agent";
 
@@ -73,6 +149,11 @@ fn gateway_now_ms() -> i64 {
 
 #[path = "gateway/agent_session_binding.rs"]
 mod agent_session_binding;
+#[path = "gateway/supervisor.rs"]
+mod supervisor;
+use supervisor::GatewaySupervisor;
+#[path = "gateway/event_ingress.rs"]
+mod event_ingress;
 pub(crate) use agent_session_binding::{
     BoundGatewayAgentTarget, agent_definition_matches_runtime_profile,
     gateway_agent_definition_fingerprint, generated_gateway_runtime_profiles,
@@ -83,6 +164,7 @@ use agent_session_binding::{
     ensure_gateway_runtime_binding, resolve_bound_gateway_runtime_profile,
     resolve_gateway_agent_binding_snapshot, resolve_gateway_runtime_profile,
 };
+use event_ingress::{GatewayEventEnvelope, GatewayEventIngress};
 
 include!("gateway/state.rs");
 

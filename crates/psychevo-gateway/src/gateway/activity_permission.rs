@@ -31,7 +31,11 @@ enum ActiveActivityKind {
 enum ShellStartState {
     Standalone,
     Auxiliary(RunControlHandle),
-    Queued(oneshot::Receiver<psychevo_runtime::Result<GatewayShellResult>>),
+    Queued {
+        receiver: oneshot::Receiver<psychevo_runtime::Result<GatewayShellResult>>,
+        active_activity_id: Option<String>,
+        queue_position: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -57,6 +61,7 @@ struct PendingQueuedShell {
 
 #[derive(Debug)]
 struct PendingQueuedCompact {
+    _admission: supervisor::GatewayActivityPermit,
     compact_id: String,
     request: SendCompactRequest,
     responder: oneshot::Sender<psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult>>,
@@ -69,11 +74,21 @@ struct PendingPermission {
     responder: oneshot::Sender<PermissionApprovalDecision>,
 }
 
+#[derive(Clone, Default)]
+struct GatewayPendingActionContext {
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    activity_id: Option<String>,
+    source_key: Option<String>,
+    owner_id: Option<String>,
+}
+
 #[derive(Clone)]
 struct GatewayApprovalHandler {
     selector_key: Option<String>,
     pending_permissions: PendingPermissionMap,
-    event_sink: GatewayEventSink,
+    event_sink: GatewayEventEmitter,
+    action_context: GatewayPendingActionContext,
     timeout_secs: u64,
     session_authorization_lifetime: Option<&'static str>,
 }
@@ -82,13 +97,15 @@ impl GatewayApprovalHandler {
     fn new(
         selector_key: Option<String>,
         pending_permissions: PendingPermissionMap,
-        event_sink: GatewayEventSink,
+        event_sink: GatewayEventEmitter,
+        action_context: GatewayPendingActionContext,
         session_authorization_lifetime: Option<&'static str>,
     ) -> Self {
         Self {
             selector_key,
             pending_permissions,
             event_sink,
+            action_context,
             timeout_secs: 300,
             session_authorization_lifetime,
         }
@@ -122,6 +139,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
         let selector_key = self.selector_key.clone();
         let pending_permissions = self.pending_permissions.clone();
         let event_sink = self.event_sink.clone();
+        let action_context = self.action_context.clone();
         let timeout_secs = self.timeout_secs;
         let session_authorization_lifetime = self.session_authorization_lifetime;
         Box::pin(async move {
@@ -140,7 +158,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
             }
             let allow_always = request.allow_always;
             let filesystem = request.filesystem.clone();
-            event_sink(GatewayEvent::ActionRequested {
+            let _ = event_sink.emit(GatewayEvent::ActionRequested {
                 action: PendingActionView {
                     action_id: request_id.clone(),
                     kind: GatewayActionKind::Permission,
@@ -163,11 +181,11 @@ impl ApprovalHandler for GatewayApprovalHandler {
                         "alwaysAuthorizationLifetime": allow_always.then_some("permanent"),
                         "timeoutSecs": request.timeout_secs,
                     }),
-                    thread_id: None,
-                    turn_id: None,
-                    activity_id: None,
-                    source_key: None,
-                    owner_id: None,
+                    thread_id: action_context.thread_id,
+                    turn_id: action_context.turn_id,
+                    activity_id: action_context.activity_id,
+                    source_key: action_context.source_key,
+                    owner_id: action_context.owner_id,
                     lease_expires_at_ms: None,
                 },
             });
@@ -182,7 +200,7 @@ impl ApprovalHandler for GatewayApprovalHandler {
                     .expect("gateway pending permission map poisoned");
                 pending.remove(&request_id);
             }
-            event_sink(GatewayEvent::ActionResolved {
+            let _ = event_sink.emit(GatewayEvent::ActionResolved {
                 action_id: request_id,
                 kind: GatewayActionKind::Permission,
                 outcome: permission_action_outcome(&decision),
@@ -201,14 +219,10 @@ pub struct QueuedGatewayInput {
     pub input: Vec<GatewayInputPart>,
 }
 
-/// Caller intent for one Thread Application turn.
-///
-/// Runtime state, public-thread session lowering, Adapter delegates, resident
-/// session ids, and the active-queue envelope deliberately do not cross this
-/// Interface.
+/// Caller-visible execution preferences. Runtime state, Adapter delegates, and
+/// queue envelopes never cross the Thread Application Interface.
 #[derive(Clone)]
 pub struct ThreadTurnPolicy {
-    pub cwd: PathBuf,
     pub snapshot_root: Option<PathBuf>,
     pub continue_latest: bool,
     pub extract_prompt_image_sources: bool,
@@ -241,7 +255,6 @@ impl fmt::Debug for ThreadTurnPolicy {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ThreadTurnPolicy")
-            .field("cwd", &self.cwd)
             .field("snapshot_root", &self.snapshot_root)
             .field("continue_latest", &self.continue_latest)
             .field("config_path", &self.config_path)
@@ -269,10 +282,9 @@ impl fmt::Debug for ThreadTurnPolicy {
     }
 }
 
-impl ThreadTurnPolicy {
-    pub fn new(cwd: PathBuf) -> Self {
+impl Default for ThreadTurnPolicy {
+    fn default() -> Self {
         Self {
-            cwd,
             snapshot_root: None,
             continue_latest: false,
             extract_prompt_image_sources: false,
@@ -303,50 +315,80 @@ impl ThreadTurnPolicy {
     }
 }
 
-pub struct ThreadTurnRequest {
-    pub thread_id: Option<String>,
-    pub source: Option<GatewaySource>,
-    pub bind_source: Option<GatewaySource>,
-    pub reset_source_binding: bool,
-    pub input: Vec<GatewayInputPart>,
-    pub policy: ThreadTurnPolicy,
-    pub runtime_source: Option<String>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ThreadSurface {
+    Cli,
+    Tui,
+    InboundAcp,
+    Web,
+    Channel,
+    Automation,
+    Other(String),
+}
+
+/// Immutable host facts and observation/control ports supplied by one caller.
+/// Callback construction is owned here so Adapters do not assemble Gateway
+/// event emitters or lower queue requests.
+pub struct ThreadCallerContext {
+    pub surface: ThreadSurface,
+    pub cwd: PathBuf,
+    pub runtime_source: String,
     pub continue_sources: Vec<String>,
-    pub stream: Option<RunStreamSink>,
-    pub event_sink: Option<GatewayEventSink>,
-    pub(crate) workspace_mutations: Option<WorkspaceMutationSink>,
-    pub control_handle: Option<RunControlHandle>,
-    pub control: Option<RunControl>,
-    pub lineage: Option<Value>,
-    /// A transport may reserve the public turn id before dispatch so early
-    /// events and the response correlate to one identity.
-    pub turn_id: Option<String>,
+    stream_observer: Option<RunStreamSink>,
+    event_observer: Option<GatewayEventEmitter>,
+    workspace_mutations: Option<WorkspaceMutationSink>,
+    control_handle: Option<RunControlHandle>,
+    control: Option<RunControl>,
     runtime_tools: Vec<psychevo_runtime::types::RuntimeTool>,
 }
 
-impl ThreadTurnRequest {
-    pub fn new(cwd: PathBuf, input: Vec<GatewayInputPart>) -> Self {
+impl ThreadCallerContext {
+    pub fn new(surface: ThreadSurface, cwd: PathBuf) -> Self {
         Self {
-            thread_id: None,
-            source: None,
-            bind_source: None,
-            reset_source_binding: false,
-            input,
-            policy: ThreadTurnPolicy::new(cwd),
-            runtime_source: None,
+            surface,
+            cwd,
+            runtime_source: "gateway".to_string(),
             continue_sources: Vec::new(),
-            stream: None,
-            event_sink: None,
+            stream_observer: None,
+            event_observer: None,
             workspace_mutations: None,
             control_handle: None,
             control: None,
-            lineage: None,
-            turn_id: None,
             runtime_tools: Vec::new(),
         }
     }
 
-    pub(crate) fn set_runtime_tools(&mut self, tools: Vec<psychevo_runtime::types::RuntimeTool>) {
+    pub fn observe_runtime_events(
+        &mut self,
+        observer: impl Fn(RunStreamEvent) + Send + Sync + 'static,
+    ) {
+        self.stream_observer = Some(Arc::new(observer));
+    }
+
+    pub fn observe_gateway_events(
+        &mut self,
+        observer: impl Fn(GatewayEvent) + Send + Sync + 'static,
+    ) {
+        self.event_observer = Some(GatewayEventEmitter::new(observer));
+    }
+
+    pub fn set_control(&mut self, handle: RunControlHandle, control: RunControl) {
+        self.control_handle = Some(handle);
+        self.control = Some(control);
+    }
+
+    pub(crate) fn set_workspace_mutations(&mut self, sink: WorkspaceMutationSink) {
+        self.workspace_mutations = Some(sink);
+    }
+
+    pub(crate) fn set_event_observer(&mut self, observer: GatewayEventEmitter) {
+        self.event_observer = Some(observer);
+    }
+
+    pub(crate) fn set_runtime_tools(
+        &mut self,
+        tools: Vec<psychevo_runtime::types::RuntimeTool>,
+    ) {
         self.runtime_tools = tools;
     }
 
@@ -356,11 +398,61 @@ impl ThreadTurnRequest {
     ) {
         self.runtime_tools.extend(tools);
     }
+}
 
-    fn into_queue_request(self, state: StateRuntime) -> SendTurnRequest {
+impl fmt::Debug for ThreadCallerContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ThreadCallerContext")
+            .field("surface", &self.surface)
+            .field("cwd", &self.cwd)
+            .field("runtime_source", &self.runtime_source)
+            .field("continue_sources", &self.continue_sources)
+            .field("has_runtime_observer", &self.stream_observer.is_some())
+            .field("has_gateway_observer", &self.event_observer.is_some())
+            .field("runtime_tool_count", &self.runtime_tools.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Caller intent for one accepted turn.
+pub struct ThreadTurnIntent {
+    pub thread_id: Option<String>,
+    pub source: Option<GatewaySource>,
+    pub bind_source: Option<GatewaySource>,
+    pub reset_source_binding: bool,
+    pub input: Vec<GatewayInputPart>,
+    pub policy: ThreadTurnPolicy,
+    pub lineage: Option<Value>,
+    pub client_turn_id: Option<String>,
+    pub turn_id: Option<String>,
+}
+
+impl ThreadTurnIntent {
+    pub fn new(input: Vec<GatewayInputPart>) -> Self {
+        Self {
+            thread_id: None,
+            source: None,
+            bind_source: None,
+            reset_source_binding: false,
+            input,
+            policy: ThreadTurnPolicy::default(),
+            lineage: None,
+            client_turn_id: None,
+            turn_id: None,
+        }
+    }
+
+    fn into_queue_request(
+        self,
+        caller: ThreadCallerContext,
+        state: StateRuntime,
+        explicit_thread: bool,
+    ) -> SendTurnRequest {
         let policy = self.policy;
         SendTurnRequest {
             thread_id: self.thread_id.clone(),
+            explicit_thread,
             source: self.source,
             bind_source: self.bind_source,
             reset_source_binding: self.reset_source_binding,
@@ -368,7 +460,7 @@ impl ThreadTurnRequest {
             initial_thread_preferences: policy.initial_thread_preferences,
             options: RunOptions {
                 state,
-                cwd: policy.cwd,
+                cwd: caller.cwd,
                 snapshot_root: policy.snapshot_root,
                 session: self.thread_id,
                 continue_latest: policy.continue_latest,
@@ -399,40 +491,93 @@ impl ThreadTurnRequest {
                 selected_capability_roots: policy.selected_capability_roots,
                 skill_inputs: policy.skill_inputs,
                 mcp_servers: policy.mcp_servers,
-                workspace_mutations: self.workspace_mutations,
-                runtime_tools: self.runtime_tools,
+                workspace_mutations: caller.workspace_mutations,
+                runtime_tools: caller.runtime_tools,
             },
-            runtime_source: self.runtime_source,
-            continue_sources: self.continue_sources,
-            stream: self.stream,
-            event_sink: self.event_sink,
-            control_handle: self.control_handle,
-            control: self.control,
+            runtime_source: Some(caller.runtime_source),
+            continue_sources: caller.continue_sources,
+            stream: caller.stream_observer,
+            event_sink: caller.event_observer,
+            control_handle: caller.control_handle,
+            control: caller.control,
             lineage: self.lineage,
         }
     }
 }
 
-impl fmt::Debug for ThreadTurnRequest {
+impl fmt::Debug for ThreadTurnIntent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ThreadTurnRequest")
+            .debug_struct("ThreadTurnIntent")
             .field("thread_id", &self.thread_id)
             .field("source", &self.source)
             .field("bind_source", &self.bind_source)
             .field("reset_source_binding", &self.reset_source_binding)
             .field("input", &self.input)
             .field("policy", &self.policy)
-            .field("runtime_source", &self.runtime_source)
-            .field("continue_sources", &self.continue_sources)
+            .field("client_turn_id", &self.client_turn_id)
             .field("turn_id", &self.turn_id)
-            .field("runtime_tool_count", &self.runtime_tools.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcceptedTurnReceipt {
+    pub accepted: bool,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub client_turn_id: Option<String>,
+}
+
+pub struct AcceptedTurn {
+    pub receipt: AcceptedTurnReceipt,
+    completion: AcceptedTurnCompletion,
+}
+
+impl AcceptedTurn {
+    pub fn into_completion(self) -> AcceptedTurnCompletion {
+        self.completion
+    }
+
+    pub async fn wait(self) -> psychevo_runtime::Result<GatewayTurnResult> {
+        self.completion.wait().await
+    }
+}
+
+impl fmt::Debug for AcceptedTurn {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AcceptedTurn")
+            .field("receipt", &self.receipt)
+            .finish_non_exhaustive()
+    }
+}
+
+pub struct AcceptedTurnCompletion {
+    receiver: oneshot::Receiver<psychevo_runtime::Result<GatewayTurnResult>>,
+}
+
+impl AcceptedTurnCompletion {
+    pub async fn wait(self) -> psychevo_runtime::Result<GatewayTurnResult> {
+        self.receiver.await.map_err(|_| {
+            Error::Message(
+                "accepted turn ended without publishing a completion result".to_string(),
+            )
+        })?
+    }
+}
+
+impl fmt::Debug for AcceptedTurnCompletion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AcceptedTurnCompletion")
             .finish_non_exhaustive()
     }
 }
 
 pub(crate) struct SendTurnRequest {
     pub thread_id: Option<String>,
+    pub explicit_thread: bool,
     pub source: Option<GatewaySource>,
     pub bind_source: Option<GatewaySource>,
     pub reset_source_binding: bool,
@@ -442,7 +587,7 @@ pub(crate) struct SendTurnRequest {
     pub runtime_source: Option<String>,
     pub continue_sources: Vec<String>,
     pub stream: Option<RunStreamSink>,
-    pub event_sink: Option<GatewayEventSink>,
+    pub event_sink: Option<GatewayEventEmitter>,
     pub control_handle: Option<RunControlHandle>,
     pub control: Option<RunControl>,
     pub lineage: Option<Value>,
@@ -453,6 +598,7 @@ impl fmt::Debug for SendTurnRequest {
         formatter
             .debug_struct("SendTurnRequest")
             .field("thread_id", &self.thread_id)
+            .field("explicit_thread", &self.explicit_thread)
             .field("source", &self.source)
             .field("bind_source", &self.bind_source)
             .field("reset_source_binding", &self.reset_source_binding)
@@ -481,7 +627,7 @@ pub struct SendShellRequest {
     pub command: String,
     pub context: UserShellContextOptions,
     pub stream: Option<RunStreamSink>,
-    pub event_sink: Option<GatewayEventSink>,
+    pub event_sink: Option<GatewayEventEmitter>,
     pub lineage: Option<Value>,
 }
 
@@ -497,7 +643,7 @@ pub struct SendCompactRequest {
     pub force: bool,
     pub reason: psychevo_runtime::compaction::CompactionReason,
     pub inherited_env: Option<BTreeMap<String, String>>,
-    pub event_sink: Option<GatewayEventSink>,
+    pub event_sink: Option<GatewayEventEmitter>,
 }
 
 impl fmt::Debug for SendCompactRequest {

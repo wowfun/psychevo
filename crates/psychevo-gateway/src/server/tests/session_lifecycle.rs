@@ -15,7 +15,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("agent-session-lifecycle.jsonl");
@@ -200,7 +200,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
             .state
 
             .gateway_runtime_binding(&imported_thread_id)
-            .expect("binding")
+            .await.expect("binding")
             .expect("imported binding")
             .native_session_id
             .as_deref(),
@@ -263,7 +263,7 @@ async fn agent_session_import_lifecycle_is_explicit_opaque_and_capability_gated(
             .state
 
             .session_summary(&imported_thread_id)
-            .expect("deleted lookup")
+            .await.expect("deleted lookup")
             .is_none()
     );
 
@@ -322,7 +322,7 @@ async fn agent_session_import_surfaces_partial_ordered_replacement_history_and_r
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("agent-session-history-review.jsonl");
@@ -567,7 +567,7 @@ async fn agent_session_import_rejects_resume_only_history_without_publishing_a_t
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("agent-session-resume-only.jsonl");
@@ -680,7 +680,7 @@ async fn agent_session_import_rejects_resume_only_history_without_publishing_a_t
             .state
 
             .gateway_runtime_binding_by_native_session("resume-only-fixture", "listed-native")
-            .expect("binding lookup")
+            .await.expect("binding lookup")
             .is_none()
     );
 
@@ -726,7 +726,7 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
                 )
             })
             .expect("Python is required by the ACP fixture");
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/fake_acp_lifecycle.py");
         let log = state.inner.cwd.join(format!("agent-session-delete-{mode}.jsonl"));
@@ -861,7 +861,7 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
                 .state
 
                 .session_summary(&thread_id)
-                .expect("local Thread lookup")
+                .await.expect("local Thread lookup")
                 .is_some(),
             "{mode} must preserve local history when remote deletion is not acknowledged"
         );
@@ -874,23 +874,25 @@ async fn agent_session_delete_requires_remote_capability_and_acknowledgement() {
     }
 }
 
-async fn rpc_test_request(
-    state: &WebState,
-    tx: &mpsc::UnboundedSender<String>,
-    method: &str,
+fn rpc_test_request<'a>(
+    state: &'a WebState,
+    tx: &'a mpsc::UnboundedSender<String>,
+    method: &'a str,
     params: Value,
-) -> Value {
-    handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!(format!("test-{method}"))),
-            method: method.to_string(),
-            params: Some(params),
-        },
-    )
-    .await
-    .unwrap_or_else(|error| panic!("{method} failed: {error}"))
+) -> futures::future::BoxFuture<'a, Value> {
+    Box::pin(async move {
+        handle_rpc(
+            state.clone(),
+            AuthContext::Bearer,
+            tx.clone(),
+            RpcRequest {
+                jsonrpc: wire::JSONRPC_VERSION.to_string(),
+                id: Some(json!(format!("test-{method}"))),
+                method: method.to_string(),
+                params: Some(params),
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{method} failed: {error}"))
+    })
 }

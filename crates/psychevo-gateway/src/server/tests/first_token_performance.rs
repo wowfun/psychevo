@@ -61,7 +61,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
             std::env::var("PATH").unwrap_or_default(),
         ),
     ]);
-    let runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let runtime = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
     let gateway = Gateway::with_backend(runtime, backend.clone());
     let state = WebState::new(GatewayWebServerConfig::new(
         gateway,
@@ -87,10 +87,14 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
             }],
         )
     };
+    let (caller, intent) = direct_turn(&state);
     state
         .inner
         .gateway
-        .run_turn(direct_turn(&state))
+        .start_turn(caller, intent)
+        .await
+        .expect("accept direct warmup")
+        .wait()
         .await
         .expect("direct warmup");
     let warm_thread = "gui-warmup";
@@ -107,16 +111,19 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
         .await
         .expect("GUI warmup contributions");
     let warm_lease = warm_contributions.lease_id.clone();
-    let mut warm_request = direct_turn(&state);
-    warm_request
+    let (mut warm_caller, mut warm_intent) = direct_turn(&state);
+    warm_intent
         .policy
         .selected_capability_roots
         .extend(warm_contributions.capability_roots);
-    warm_request.extend_runtime_tools(warm_contributions.runtime_tools);
+    warm_caller.extend_runtime_tools(warm_contributions.runtime_tools);
     state
         .inner
         .gateway
-        .run_turn(warm_request)
+        .start_turn(warm_caller, warm_intent)
+        .await
+        .expect("accept GUI warmup")
+        .wait()
         .await
         .expect("GUI warmup");
     if let Some(lease_id) = warm_lease.as_deref() {
@@ -134,10 +141,14 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     let mut gui_threads = Vec::new();
     for sample in 0..9 {
         let started = Instant::now();
+        let (caller, intent) = direct_turn(&state);
         state
             .inner
             .gateway
-            .run_turn(direct_turn(&state))
+            .start_turn(caller, intent)
+            .await
+            .expect("accept direct fake-provider turn")
+            .wait()
             .await
             .expect("direct fake-provider turn");
         let completed = started.elapsed();
@@ -168,16 +179,19 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
             .await
             .expect("GUI runtime contributions");
         let lease_id = contributions.lease_id.clone();
-        let mut request = direct_turn(&state);
-        request
+        let (mut caller, mut intent) = direct_turn(&state);
+        intent
             .policy
             .selected_capability_roots
             .extend(contributions.capability_roots);
-        request.extend_runtime_tools(contributions.runtime_tools);
+        caller.extend_runtime_tools(contributions.runtime_tools);
         state
             .inner
             .gateway
-            .run_turn(request)
+            .start_turn(caller, intent)
+            .await
+            .expect("accept GUI fake-provider turn")
+            .wait()
             .await
             .expect("GUI fake-provider turn");
         if let Some(lease_id) = lease_id.as_deref() {

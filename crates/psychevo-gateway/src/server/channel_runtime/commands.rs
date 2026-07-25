@@ -65,7 +65,8 @@ pub(super) async fn route_channel_command(
                 token,
                 PermissionDecision::AllowOnce,
                 "approve",
-            )?
+            )
+            .await?
         }
         "deny" => {
             let token = args.split_whitespace().next().unwrap_or("");
@@ -77,7 +78,8 @@ pub(super) async fn route_channel_command(
                 token,
                 PermissionDecision::Deny,
                 "deny",
-            )?
+            )
+            .await?
         }
         "answer" => {
             let (token, answer) = split_first_arg(args);
@@ -102,7 +104,9 @@ pub(super) async fn route_channel_command(
                     wire::ThreadInteractionResponse::Clarify {
                         answers: vec![vec![answer.to_string()]],
                     },
-                ) {
+                )
+                .await
+                {
                     Ok(true) => {
                         runtime.consume_interaction_token(
                             &connection.id,
@@ -136,7 +140,9 @@ pub(super) async fn route_channel_command(
                     &route,
                     GatewayActionKind::Clarify,
                     wire::ThreadInteractionResponse::CancelClarify,
-                ) {
+                )
+                .await
+                {
                     Ok(true) => {
                         runtime.consume_interaction_token(
                             &connection.id,
@@ -156,7 +162,7 @@ pub(super) async fn route_channel_command(
         }
         "agent" => channel_agent_reply(state, connection, source, args).await?,
         "profile" => channel_profile_reply(state, connection, source, args).await?,
-        "reset" => reset_channel_source_reply(state, source)?,
+        "reset" => reset_channel_source_reply(state, source).await?,
         "" => return Ok(None),
         _ => {
             return route_shared_channel_command(state, runtime, connection, source, text).await;
@@ -165,7 +171,7 @@ pub(super) async fn route_channel_command(
     Ok(Some(ChannelCommandAction::Reply(reply)))
 }
 
-fn channel_permission_reply(
+async fn channel_permission_reply(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
@@ -195,7 +201,9 @@ fn channel_permission_reply(
         &route,
         GatewayActionKind::Permission,
         response,
-    ) {
+    )
+    .await
+    {
         Ok(true) => {
             runtime.consume_interaction_token(
                 &connection.id,
@@ -215,7 +223,7 @@ fn channel_permission_reply(
     }
 }
 
-fn channel_interaction_thread_id(
+async fn channel_interaction_thread_id(
     state: &WebState,
     route: &super::state::ChannelInteractionRoute,
     source: &GatewaySource,
@@ -223,20 +231,20 @@ fn channel_interaction_thread_id(
     route
         .thread_id
         .clone()
-        .or(state.inner.gateway.resolve_source_thread(source)?)
+        .or(state.inner.gateway.resolve_source_thread(source).await?)
         .ok_or_else(|| {
             Error::Message("The interaction is not bound to a public Thread.".to_string())
         })
 }
 
-fn submit_channel_interaction(
+async fn submit_channel_interaction(
     state: &WebState,
     source: &GatewaySource,
     route: &super::state::ChannelInteractionRoute,
     expected_kind: GatewayActionKind,
     response: wire::ThreadInteractionResponse,
 ) -> psychevo_runtime::Result<bool> {
-    channel_interaction_thread_id(state, route, source)?;
+    channel_interaction_thread_id(state, route, source).await?;
     thread_routed_interaction_respond_for_selector(
         state,
         GatewayThreadSelector::source(source.source_key()),
@@ -244,6 +252,7 @@ fn submit_channel_interaction(
         expected_kind,
         response,
     )
+    .await
     .map(|result| result.accepted)
 }
 
@@ -254,7 +263,7 @@ async fn route_shared_channel_command(
     source: &GatewaySource,
     text: &str,
 ) -> psychevo_runtime::Result<Option<ChannelCommandAction>> {
-    let scope = channel_resolved_scope(state, connection, source)?;
+    let scope = channel_resolved_scope(state, connection, source).await?;
     let context = ChannelCommandContext {
         state,
         runtime,
@@ -263,8 +272,8 @@ async fn route_shared_channel_command(
         scope: &scope,
         raw: text,
     };
-    let thread_id = state.inner.gateway.resolve_source_thread(source)?;
-    let active_turn = state.activity(source, thread_id.as_deref()).running;
+    let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
+    let active_turn = state.activity(source, thread_id.as_deref()).await.running;
     let dynamic = dynamic_slash_commands(state, &scope)?;
     let action = match parse_slash_command_line(text) {
         SlashCommandParse::Known(invocation) => {
@@ -316,20 +325,23 @@ async fn channel_command_action_from_effect(
             SlashCommandAction::Help => {
                 ChannelCommandAction::Reply(channel_help_text(context).await?)
             }
-            SlashCommandAction::Status => ChannelCommandAction::Reply(channel_status_text(
-                context.state,
-                context.runtime,
-                context.connection,
-                context.source,
-            )?),
+            SlashCommandAction::Status => ChannelCommandAction::Reply(
+                channel_status_text(
+                    context.state,
+                    context.runtime,
+                    context.connection,
+                    context.source,
+                )
+                .await?,
+            ),
             _ => ChannelCommandAction::Reply(format!(
                 "{} is not available as channel text output yet.",
                 context.raw.split_whitespace().next().unwrap_or(context.raw)
             )),
         },
-        SlashCommandEffect::NewSession => {
-            ChannelCommandAction::Reply(reset_channel_source_reply(context.state, context.source)?)
-        }
+        SlashCommandEffect::NewSession => ChannelCommandAction::Reply(
+            reset_channel_source_reply(context.state, context.source).await?,
+        ),
         SlashCommandEffect::PassThroughPrompt(text)
         | SlashCommandEffect::SubmitPrompt(text)
         | SlashCommandEffect::Queue(text)
@@ -338,7 +350,7 @@ async fn channel_command_action_from_effect(
             thread_id: None,
         },
         SlashCommandEffect::Mission { prompt, team, goal } => {
-            let thread_id = ensure_channel_mission_thread(context)?;
+            let thread_id = ensure_channel_mission_thread(context).await?;
             record_gateway_mission_metadata_for_parent(
                 context.state,
                 context.scope,
@@ -346,7 +358,8 @@ async fn channel_command_action_from_effect(
                 team.as_deref(),
                 &goal,
                 "channel:/mission",
-            )?;
+            )
+            .await?;
             ChannelCommandAction::SubmitPrompt {
                 text: prompt,
                 thread_id: Some(thread_id),
@@ -364,9 +377,11 @@ async fn channel_command_action_from_effect(
                         .state
                         .inner
                         .gateway
-                        .resolve_source_thread(context.source)?
+                        .resolve_source_thread(context.source)
+                        .await?
                         .as_deref(),
                 )
+                .await
                 .active_turn_id;
             let accepted = if let Some(expected_turn_id) = expected_turn_id {
                 matches!(
@@ -422,7 +437,8 @@ async fn channel_command_action_from_effect(
                 .state
                 .inner
                 .gateway
-                .resolve_source_thread(context.source)?;
+                .resolve_source_thread(context.source)
+                .await?;
             let options = context
                 .state
                 .run_options(context.scope.cwd.clone(), thread_id);
@@ -635,13 +651,15 @@ async fn channel_runtime_context(
         context.scope,
         context.source,
         default_runtime_ref,
-    )?;
+    )
+    .await?;
     let runtime_ref = target.runtime_profile_ref.clone();
     let thread_id = context
         .state
         .inner
         .gateway
-        .resolve_source_thread(context.source)?;
+        .resolve_source_thread(context.source)
+        .await?;
     let runtime_context = thread_context_read_result_for_target_id(
         context.state,
         context.scope,
@@ -659,23 +677,20 @@ pub(super) async fn run_channel_thread_action(
     source: &GatewaySource,
     action: wire::ThreadActionInput,
 ) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
-    let thread_id = state
-        .inner
-        .gateway
-        .resolve_source_thread(source)?
-        .or_else(|| {
-            state
-                .activity(source, None)
-                .running
-                .then(|| runtime.observed_source_thread(&connection.id, &source.source_key()))
-                .flatten()
-        });
+    let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
+    let thread_id = if thread_id.is_some() {
+        thread_id
+    } else if state.activity(source, None).await.running {
+        runtime.observed_source_thread(&connection.id, &source.source_key())
+    } else {
+        None
+    };
     let Some(thread_id) = thread_id else {
         return Err(Error::Message(
             "No public Thread is bound to this channel source.".to_string(),
         ));
     };
-    let scope = channel_resolved_scope(state, connection, source)?;
+    let scope = channel_resolved_scope(state, connection, source).await?;
     let (out_tx, _out_rx) = mpsc::unbounded_channel();
     run_routed_thread_action(
         state,
@@ -710,25 +725,25 @@ fn channel_runtime_control_command_role_label(
     }
 }
 
-fn ensure_channel_mission_thread(
+async fn ensure_channel_mission_thread(
     context: &ChannelCommandContext<'_>,
 ) -> psychevo_runtime::Result<String> {
     if let Some(thread_id) = context
         .state
         .inner
         .gateway
-        .resolve_source_thread(context.source)?
+        .resolve_source_thread(context.source)
+        .await?
     {
         return Ok(thread_id);
     }
-    let thread_id = context.state.inner.state.create_session_with_metadata(
-        &context.scope.cwd,
-        "channel",
-        "pending",
-        "pending",
-        None,
-    )?;
-    bind_source_to_thread(context.state, context.scope, &thread_id)?;
+    let thread_id = context
+        .state
+        .inner
+        .state
+        .create_session_with_metadata(&context.scope.cwd, "channel", "pending", "pending", None)
+        .await?;
+    bind_source_to_thread(context.state, context.scope, &thread_id).await?;
     Ok(thread_id)
 }
 
@@ -768,10 +783,12 @@ async fn channel_help_text(
         .state
         .inner
         .gateway
-        .resolve_source_thread(context.source)?;
+        .resolve_source_thread(context.source)
+        .await?;
     let active_turn = context
         .state
         .activity(context.source, thread_id.as_deref())
+        .await
         .running;
     let dynamic = dynamic_slash_commands(context.state, context.scope)?;
     let available = available_slash_commands_for_surface(
@@ -834,12 +851,15 @@ async fn channel_help_text(
         "/cancel <token>",
     ]);
     lines.push(format!("Controls: {}.", controls.join(", ")));
-    lines.push(channel_status_text(
-        context.state,
-        context.runtime,
-        context.connection,
-        context.source,
-    )?);
+    lines.push(
+        channel_status_text(
+            context.state,
+            context.runtime,
+            context.connection,
+            context.source,
+        )
+        .await?,
+    );
     Ok(lines.join("\n"))
 }
 
@@ -895,15 +915,15 @@ fn channel_voice_reply(
     })
 }
 
-fn channel_status_text(
+async fn channel_status_text(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<String> {
     let runner = runtime.runner_view(&connection.id);
-    let thread = state.inner.gateway.resolve_source_thread(source)?;
-    let profile_ref = channel_effective_profile_ref(state, connection, source)?;
+    let thread = state.inner.gateway.resolve_source_thread(source).await?;
+    let profile_ref = channel_effective_profile_ref(state, connection, source).await?;
     let history = channel_history_status(state, thread.as_deref())?;
     Ok(format!(
         "Channel {} is {}{}; config {}; profile {}; thread {}; history {}.",
@@ -938,9 +958,9 @@ async fn channel_profile_reply(
     args: &str,
 ) -> psychevo_runtime::Result<String> {
     let (subcommand, rest) = split_first_arg(args);
-    let scope = channel_resolved_scope(state, connection, source)?;
+    let scope = channel_resolved_scope(state, connection, source).await?;
     match subcommand {
-        "" | "status" => channel_profile_status_text(state, connection, source, &scope),
+        "" | "status" => channel_profile_status_text(state, connection, source, &scope).await,
         "list" => channel_profile_list_text(state, &scope),
         "use" => {
             let requested = rest.split_whitespace().next().unwrap_or("");
@@ -955,7 +975,9 @@ async fn channel_profile_reply(
                 return Ok(format!("Runtime Profile `{requested}` is disabled."));
             }
             let target =
-                match runnable_target_for_source_profile(state, &scope, source, Some(requested)) {
+                match runnable_target_for_source_profile(state, &scope, source, Some(requested))
+                    .await
+                {
                     Ok(target) => target,
                     Err(_) if !matches!(profile.health.status.as_str(), "ready" | "unchecked") => {
                         return Ok(profile.health.summary.clone());
@@ -967,7 +989,7 @@ async fn channel_profile_reply(
                     format!("Agent target `{}` is unavailable.", target.label)
                 }));
             }
-            match channel_bind_target_draft(state, source, &target)? {
+            match channel_bind_target_draft(state, source, &target).await? {
                 Some(thread_id) => Ok(format!(
                     "Started a new channel thread ({thread_id}) with Runtime Profile `{requested}`. The previous thread is unchanged."
                 )),
@@ -984,13 +1006,14 @@ async fn channel_profile_reply(
                 .filter(|value| !value.is_empty())
                 .unwrap_or("native");
             let target =
-                runnable_target_for_source_profile(state, &scope, source, Some(runtime_ref))?;
+                runnable_target_for_source_profile(state, &scope, source, Some(runtime_ref))
+                    .await?;
             if !target.ready {
                 return Ok(target.unavailable_reason.unwrap_or_else(|| {
                     format!("Agent target `{}` is unavailable.", target.label)
                 }));
             }
-            match channel_bind_target_draft(state, source, &target)? {
+            match channel_bind_target_draft(state, source, &target).await? {
                 Some(thread_id) => Ok(format!(
                     "Started a new channel thread ({thread_id}) with the default Runtime Profile `{runtime_ref}`. The previous thread is unchanged."
                 )),
@@ -1009,16 +1032,17 @@ async fn channel_agent_reply(
     source: &GatewaySource,
     args: &str,
 ) -> psychevo_runtime::Result<String> {
-    let scope = channel_resolved_scope(state, connection, source)?;
+    let scope = channel_resolved_scope(state, connection, source).await?;
     let default_runtime_ref = connection
         .runtime_ref
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("native");
-    let selected_target = runnable_target_for_source(state, &scope, source, default_runtime_ref)?;
+    let selected_target =
+        runnable_target_for_source(state, &scope, source, default_runtime_ref).await?;
     let runtime_ref = selected_target.runtime_profile_ref.clone();
-    let thread_id = state.inner.gateway.resolve_source_thread(source)?;
+    let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
     let context = thread_context_read_result_for_target_id(
         state,
         &scope,
@@ -1037,7 +1061,7 @@ async fn channel_agent_reply(
             .binding
             .as_ref()
             .and_then(|binding| binding.agent_ref.clone())
-            .or(channel_draft_agent_ref(state, source)?)
+            .or(channel_draft_agent_ref(state, source).await?)
             .unwrap_or_else(|| "default".to_string());
         let mut lines = vec![format!(
             "Top-level Agent for Runtime Profile `{runtime_ref}`: `{selected}`."
@@ -1081,7 +1105,7 @@ async fn channel_agent_reply(
             .clone()
             .unwrap_or_else(|| format!("{} is unavailable.", target.label)));
     }
-    let new_thread = channel_bind_target_draft(state, source, target)?;
+    let new_thread = channel_bind_target_draft(state, source, target).await?;
     Ok(match new_thread {
         Some(thread_id) => format!(
             "Started a new channel thread ({thread_id}) with top-level Agent `{}` and Runtime Profile `{runtime_ref}`. The previous thread is unchanged.",
@@ -1094,13 +1118,13 @@ async fn channel_agent_reply(
     })
 }
 
-fn channel_profile_status_text(
+async fn channel_profile_status_text(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<String> {
-    let profile_ref = channel_effective_profile_ref(state, connection, source)?;
+    let profile_ref = channel_effective_profile_ref(state, connection, source).await?;
     let profiles = runtime_profile_list_result(state, scope)?.profiles;
     let Some(profile) = profiles.iter().find(|profile| profile.id == profile_ref) else {
         return Ok(format!(
@@ -1204,11 +1228,11 @@ fn channel_agents_text(
     Ok(lines.join("\n"))
 }
 
-fn reset_channel_source_reply(
+async fn reset_channel_source_reply(
     state: &WebState,
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<String> {
-    let previous = state.inner.gateway.reset_source_to_empty(source)?;
+    let previous = state.inner.gateway.reset_source_to_empty(source).await?;
     Ok(if previous.is_some() {
         "Started a new channel thread. The next message will use this channel's current default workspace.".to_string()
     } else {
@@ -1217,16 +1241,17 @@ fn reset_channel_source_reply(
     })
 }
 
-pub(super) fn channel_resolved_scope(
+pub(super) async fn channel_resolved_scope(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
 ) -> psychevo_runtime::Result<ResolvedScope> {
-    let cwd = match state.inner.gateway.resolve_source_thread(source)? {
+    let cwd = match state.inner.gateway.resolve_source_thread(source).await? {
         Some(thread_id) => state
             .inner
             .state
-            .session_summary(&thread_id)?
+            .session_summary(&thread_id)
+            .await?
             .map(|summary| PathBuf::from(summary.cwd))
             .unwrap_or_else(|| channel_cwd(&state.inner.cwd, connection)),
         None => channel_cwd(&state.inner.cwd, connection),

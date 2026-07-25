@@ -17,7 +17,7 @@ fn current_browser_session(
         .ok_or_else(|| Error::Message("browser session is no longer active".to_string()))
 }
 
-fn authorize_thread(
+async fn authorize_thread(
     state: &WebState,
     auth: &AuthContext,
     thread_id: &str,
@@ -29,7 +29,8 @@ fn authorize_thread(
         .inner
         .state
 
-        .session_summary(thread_id)?
+        .session_summary(thread_id)
+        .await?
         .is_none()
     {
         return Err(Error::Message(format!("session not found: {thread_id}")));

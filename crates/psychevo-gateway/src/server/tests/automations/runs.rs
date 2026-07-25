@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone());
+    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let created = handle_rpc(
@@ -53,7 +53,7 @@ async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
         .state
 
         .automation_runs_for_task(&automation_id, 10)
-        .expect("automation runs");
+        .await.expect("automation runs");
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].status, "completed");
     assert!(runs[0].thread_id.is_some());
@@ -85,7 +85,7 @@ async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
 #[tokio::test]
 async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone());
+    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
     let cwd = state.inner.cwd.to_string_lossy().to_string();
     let historical_thread = state
         .inner
@@ -98,7 +98,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
             "provider",
             None,
         )
-        .expect("historical session");
+        .await.expect("historical session");
     let automation_id = "stale-gateway-run";
     let source_key = "automation:stale-gateway-run";
     state
@@ -120,13 +120,13 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
             source_key: Some(source_key.to_string()),
             next_run_at_ms: Some(gateway_now_ms().saturating_sub(1_000)),
         })
-        .expect("automation task");
+        .await.expect("automation task");
     let stale_run = state
         .inner
         .state
 
         .claim_automation_run(automation_id, "scheduler")
-        .expect("claim")
+        .await.expect("claim")
         .expect("running claim");
     let stale_started_at = gateway_now_ms().saturating_sub(10 * 60 * 1_000);
     let conn = rusqlite::Connection::open(state.inner.state.db_path()).expect("db");
@@ -145,7 +145,7 @@ async fn automation_stale_running_run_recovers_and_preserves_history_thread() {
         .state
 
         .automation_task(automation_id)
-        .expect("automation task")
+        .await.expect("automation task")
         .expect("task");
     assert_eq!(recovered.last_status.as_deref(), Some("failed"));
     assert!(

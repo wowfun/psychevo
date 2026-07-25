@@ -358,14 +358,16 @@ fn spawn_bounded_rpc_response<F, T>(
 }
 
 fn spawn_gateway_live_event_tailer(state: WebState) {
-    let mut last_seq = state
-        .inner
-        .state
-
-        .latest_gateway_live_event_seq()
-        .unwrap_or_default();
     let weak_state = Arc::downgrade(&state.inner);
-    tokio::spawn(async move {
+    let gateway = state.inner.gateway.clone();
+    gateway.spawn_background("gateway-live-event-tailer", async move {
+        let mut last_seq = state
+            .inner
+            .state
+            .latest_gateway_live_event_seq()
+            .await
+            .unwrap_or_default();
+        drop(state);
         let mut snapshot_revisions: HashMap<String, i64> = HashMap::new();
         let mut last_cleanup_ms = gateway_now_ms();
         let mut tick = tokio::time::interval(Duration::from_millis(250));
@@ -380,6 +382,7 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                 .state
 
                 .list_gateway_live_events_after(last_seq, 100)
+                .await
             {
                 Ok(events) => events,
                 Err(_) => continue,
@@ -392,11 +395,11 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                 let Ok(event) = serde_json::from_value::<GatewayEvent>(record.event.clone()) else {
                     continue;
                 };
-                let context = state.pending_context_for_live_event(&record);
+                let context = state.pending_context_for_live_event(&record).await;
                 state.publish_gateway_event_with_context(event, context, None);
             }
             let now = gateway_now_ms();
-            let snapshots = match state.inner.state.list_gateway_live_snapshots(1000) {
+            let snapshots = match state.inner.state.list_gateway_live_snapshots(1000).await {
                 Ok(snapshots) => snapshots,
                 Err(_) => continue,
             };
@@ -412,7 +415,7 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                 }
                 if let Some(activity_id) = snapshot.activity_id.as_deref() {
                     let Ok(Some(activity)) =
-                        state.inner.state.gateway_activity(activity_id)
+                        state.inner.state.gateway_activity(activity_id).await
                     else {
                         continue;
                     };
@@ -438,12 +441,14 @@ fn spawn_gateway_live_event_tailer(state: WebState) {
                     .inner
                     .state
 
-                    .cleanup_gateway_live_events_before(now - 10 * 60_000);
+                    .cleanup_gateway_live_events_before(now - 10 * 60_000)
+                    .await;
                 let _ = state
                     .inner
                     .state
 
-                    .cleanup_gateway_live_snapshots_before(now - 10 * 60_000);
+                    .cleanup_gateway_live_snapshots_before(now - 10 * 60_000)
+                    .await;
                 last_cleanup_ms = now;
             }
         }

@@ -7,14 +7,14 @@ async fn download_session(
     let Some(auth) = state.auth_from_headers(&headers) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    if let Err(err) = authorize_thread(&state, &auth, &session_id) {
+    if let Err(err) = authorize_thread(&state, &auth, &session_id).await {
         return (
             StatusCode::FORBIDDEN,
             Json(json!({"error": {"message": err.to_string()}})),
         )
             .into_response();
     }
-    match render_download(&state, &session_id, &kind, &query) {
+    match render_download(&state, &session_id, &kind, &query).await {
         Ok(response) => response.into_response(),
         Err(err) => (
             StatusCode::BAD_REQUEST,
@@ -73,7 +73,7 @@ fn render_media_artifact(
     Ok(response)
 }
 
-fn render_download(
+async fn render_download(
     state: &WebState,
     session_id: &str,
     kind: &str,
@@ -116,7 +116,8 @@ fn render_download(
             include,
             artifact_kind,
         },
-    )?;
+    )
+    .await?;
     let filename = query
         .filename
         .as_deref()

@@ -1,11 +1,11 @@
-fn settings_read_value(
+async fn settings_read_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
     let normalized_cwd = psychevo_runtime::host_paths::normalized_native_path(cwd);
     let cwd = normalized_cwd.as_path();
-    let controls = workbench_controls_value(state, cwd, thread_id)?;
+    let controls = workbench_controls_value(state, cwd, thread_id).await?;
     let project = workbench_project_value(cwd);
     let channels = channel_list_result_for_cwd(state, cwd).unwrap_or_default();
     let web_search = web_search_settings_value(state, cwd)?;
@@ -76,19 +76,19 @@ fn web_search_settings_update_value(
     web_search_settings_value(state, cwd)
 }
 
-fn workbench_controls_value(
+async fn workbench_controls_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<wire::WorkbenchControlsView> {
     let options = state.run_options(cwd.to_path_buf(), None);
-    let agent = session_control_agent(state, thread_id)?;
+    let agent = session_control_agent(state, thread_id).await?;
     let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))?;
     let cwd_key = cwd.to_string_lossy().to_string();
-    let session_selection = thread_id
-        .map(|thread_id| session_model_state_selection(state, thread_id))
-        .transpose()?
-        .flatten();
+    let session_selection = match thread_id {
+        Some(thread_id) => session_model_state_selection(state, thread_id).await?,
+        None => None,
+    };
     let state_model = model_state.model_for(&cwd_key);
     let state_reasoning_effort = model_state.reasoning_effort_for(&cwd_key);
     let selected = selected_configured_model(&options);
@@ -131,11 +131,13 @@ fn workbench_controls_value(
         .iter()
         .map(|model| model.value.clone())
         .collect();
-    let runtime_ref = thread_id
-        .map(|thread_id| gateway_backend_info_for_thread(state, thread_id))
-        .transpose()?
-        .and_then(|backend| backend.runtime_ref)
-        .unwrap_or_else(|| "native".to_string());
+    let runtime_ref = match thread_id {
+        Some(thread_id) => gateway_backend_info_for_thread(state, thread_id)
+            .await?
+            .runtime_ref,
+        None => None,
+    }
+    .unwrap_or_else(|| "native".to_string());
     Ok(wire::WorkbenchControlsView {
         permission_mode: PermissionMode::Default.as_str().to_string(),
         mode: RunMode::Default.as_str().to_string(),
@@ -169,14 +171,14 @@ struct ComposerModelSelection {
     reasoning_effort: Option<String>,
 }
 
-fn session_model_state_selection(
+async fn session_model_state_selection(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Option<ComposerModelSelection>> {
-    let Some(summary) = state.inner.state.session_summary(thread_id)? else {
+    let Some(summary) = state.inner.state.session_summary(thread_id).await? else {
         return Ok(None);
     };
-    let metadata = state.inner.state.session_metadata(thread_id)?;
+    let metadata = state.inner.state.session_metadata(thread_id).await?;
     let reasoning_effort = metadata
         .as_ref()
         .and_then(|metadata| metadata.get(SESSION_COMPOSER_MODEL_METADATA_KEY))
@@ -214,21 +216,21 @@ fn native_runtime_mode_option() -> wire::RuntimeConfigOptionView {
     }
 }
 
-fn session_control_agent(
+async fn session_control_agent(
     state: &WebState,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Option<String>> {
     let Some(thread_id) = thread_id else {
         return Ok(None);
     };
-    let metadata = state.inner.state.session_metadata(thread_id)?;
+    let metadata = state.inner.state.session_metadata(thread_id).await?;
     Ok(match main_agent_from_session_metadata(metadata.as_ref()) {
         LoadedMainAgent::Agent(agent) => Some(agent),
         LoadedMainAgent::Default | LoadedMainAgent::Missing => None,
     })
 }
 
-fn update_session_agent_setting(
+async fn update_session_agent_setting(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
@@ -238,7 +240,8 @@ fn update_session_agent_setting(
         .inner
         .state
 
-        .session_summary(thread_id)?
+        .session_summary(thread_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
         return Err(Error::Message(format!(
@@ -247,11 +250,15 @@ fn update_session_agent_setting(
         )));
     }
     let Some(input) = input else {
-        state.inner.state.set_session_metadata_field(
-            thread_id,
-            SESSION_MAIN_AGENT_METADATA_KEY,
-            Some(main_agent_default_metadata()),
-        )?;
+        state
+            .inner
+            .state
+            .set_session_metadata_field(
+                thread_id,
+                SESSION_MAIN_AGENT_METADATA_KEY,
+                Some(main_agent_default_metadata()),
+            )
+            .await?;
         return Ok(());
     };
     let input = input.trim();
@@ -273,16 +280,20 @@ fn update_session_agent_setting(
     }
     let agent =
         resolve_agent_definition(&catalog, input, &scope.cwd, &state.inner.inherited_env)?;
-    state.inner.state.set_session_metadata_field(
-        thread_id,
-        SESSION_MAIN_AGENT_METADATA_KEY,
-        Some(main_agent_metadata(
-            input,
-            &agent.name,
-            agent.source,
-            agent.file_path.as_ref(),
-        )),
-    )?;
+    state
+        .inner
+        .state
+        .set_session_metadata_field(
+            thread_id,
+            SESSION_MAIN_AGENT_METADATA_KEY,
+            Some(main_agent_metadata(
+                input,
+                &agent.name,
+                agent.source,
+                agent.file_path.as_ref(),
+            )),
+        )
+        .await?;
     Ok(())
 }
 

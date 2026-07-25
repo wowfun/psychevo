@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn agent_and_backend_rpc_list_generated_peer_backend() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -182,7 +182,7 @@ command = "cursor-agent"
 
 #[tokio::test]
 async fn runtime_profile_rpc_omits_launch_fields_from_visible_profiles() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -288,7 +288,7 @@ command = "reviewer-agent"
 
 #[tokio::test]
 async fn managed_codex_target_is_runnable_only_after_verified_install() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     let paths = crate::managed_acp::managed_codex_acp_paths(
         &state.inner.home,
@@ -359,7 +359,7 @@ entrypoints = ["peer", "subagent"]
 
 #[tokio::test]
 async fn runtime_profile_registry_uses_public_shortcuts_without_duplicate_acp_rows() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -422,7 +422,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("bound-hidden-profile.jsonl");
@@ -430,15 +430,11 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     let wire_scope = scope.to_wire_scope();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("write-hidden-profile-backend")),
-            method: "backend/write".to_string(),
-            params: Some(json!({
+    rpc_test_request(
+        &state,
+        &tx,
+        "backend/write",
+        json!({
                 "id": "opencode",
                 "target": "project",
                 "command": python,
@@ -448,11 +444,10 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
                     "ACP_LIFECYCLE_MODE": "all"
                 },
                 "entrypoints": ["peer", "subagent"]
-            })),
-        },
+            }),
     )
     .await
-    .expect("backend/write");
+    ;
 
     let profiles = runtime_profile_list_result(&state, &scope).expect("profiles");
     assert!(profiles.profiles.iter().any(|profile| profile.id == "opencode"));
@@ -496,31 +491,28 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     let profile_json = serde_json::to_string(&profile).expect("Profile snapshot");
     let profile_fingerprint = crate::runtime_profile_config_fingerprint(&profile);
     let profile_revision = crate::runtime_profile_config_revision(&profile_fingerprint).to_string();
-    let parent_thread_id = state
-        .inner
-        .state
-
-        .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .expect("parent Thread");
-    let thread_id = state
-        .inner
-        .state
-
-        .create_child_session_with_metadata(
+    let parent_thread_id = Box::pin(state.inner.state.create_session_with_metadata(
+        &state.inner.cwd,
+        "web",
+        "model",
+        "provider",
+        None,
+    ))
+    .await
+    .expect("parent Thread");
+    let thread_id = Box::pin(state.inner.state.create_child_session_with_metadata(
             &parent_thread_id,
             &state.inner.cwd,
             "peer_agent",
             "opencode",
             "acp:opencode",
             None,
-        )
-        .expect("child Thread");
+        ))
+    .await
+    .expect("child Thread");
     let cwd = state.inner.cwd.display().to_string();
-    state
-        .inner
-        .state
-
-        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
+    Box::pin(state.inner.state.create_gateway_runtime_binding(
+        psychevo_runtime::state::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("opencode"),
             agent_fingerprint: &agent_fingerprint,
@@ -537,18 +529,16 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             adapter_revision: "test",
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: Some(&parent_thread_id),
-        })
-        .expect("captured child binding");
+        },
+    ))
+    .await
+    .expect("captured child binding");
 
-    handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("remove-current-peer-entrypoint")),
-            method: "backend/write".to_string(),
-            params: Some(json!({
+    rpc_test_request(
+        &state,
+        &tx,
+        "backend/write",
+        json!({
                 "id": "opencode",
                 "target": "project",
                 "command": python,
@@ -558,51 +548,37 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
                     "ACP_LIFECYCLE_MODE": "all"
                 },
                 "entrypoints": ["subagent"]
-            })),
-        },
+            }),
     )
-    .await
-    .expect("current Agent target no longer admits peer entrypoint");
+    .await;
 
-    let context = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx.clone(),
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-context")),
-            method: "thread/context/read".to_string(),
-            params: Some(json!({
+    let context = rpc_test_request(
+        &state,
+        &tx,
+        "thread/context/read",
+        json!({
                 "scope": wire_scope,
                 "threadId": thread_id
-            })),
-        },
+            }),
     )
-    .await
-    .expect("bound Thread Context");
+    .await;
     assert_eq!(context["runtimeProfileRef"], "acp:opencode");
     assert_eq!(context["sendability"]["allowed"], true);
 
-    let accepted = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        tx,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-follow-up")),
-            method: "turn/start".to_string(),
-            params: Some(json!({
+    let accepted = rpc_test_request(
+        &state,
+        &tx,
+        "turn/start",
+        json!({
                 "clientTurnId": "client-bound-hidden-follow-up",
                 "scope": wire_scope,
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": "follow up"}],
                 "expectedContextRevision": context["contextRevision"],
                 "expectedControlRevision": context["controlRevision"]
-            })),
-        },
+            }),
     )
-    .await
-    .expect("bound hidden Profile follow-up is accepted");
+    .await;
     assert_eq!(accepted["accepted"], true);
 
     let terminal = tokio::time::timeout(Duration::from_secs(3), async {
@@ -618,22 +594,17 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     assert!(terminal.contains("\"status\":\"completed\""), "{terminal}");
     assert!(!terminal.contains("unknown runtime profile"), "{terminal}");
 
-    let context = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        mpsc::unbounded_channel().0,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-context-after-turn")),
-            method: "thread/context/read".to_string(),
-            params: Some(json!({
+    let context_tx = mpsc::unbounded_channel().0;
+    let context = rpc_test_request(
+        &state,
+        &context_tx,
+        "thread/context/read",
+        json!({
                 "scope": wire_scope,
                 "threadId": thread_id
-            })),
-        },
+            }),
     )
-    .await
-    .expect("bound Thread Context after follow-up");
+    .await;
     assert!(context["actions"].as_array().is_some_and(|actions| {
         actions
             .iter()
@@ -645,15 +616,12 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
         .iter()
         .find(|control| control["id"] == "mode")
         .expect("bound mode control");
-    let control = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        mpsc::unbounded_channel().0,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-control")),
-            method: "thread/control/set".to_string(),
-            params: Some(json!({
+    let control_tx = mpsc::unbounded_channel().0;
+    let control = rpc_test_request(
+        &state,
+        &control_tx,
+        "thread/control/set",
+        json!({
                 "scope": wire_scope,
                 "threadId": thread_id,
                 "targetId": context["selectedTargetId"],
@@ -663,86 +631,61 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
                 "expectedBindingRevision": context["binding"]["bindingRevision"],
                 "expectedContextRevision": context["contextRevision"],
                 "expectedControlRevision": context["controlRevision"]
-            })),
-        },
+            }),
     )
-    .await
-    .expect("bound hidden Profile control");
+    .await;
     assert_eq!(control["control"]["effectiveValue"], "plan");
-    let forked = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        mpsc::unbounded_channel().0,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-fork")),
-            method: "thread/action/run".to_string(),
-            params: Some(json!({
+    let fork_tx = mpsc::unbounded_channel().0;
+    let forked = rpc_test_request(
+        &state,
+        &fork_tx,
+        "thread/action/run",
+        json!({
                 "scope": wire_scope,
                 "threadId": thread_id,
                 "action": {"kind": "fork"}
-            })),
-        },
+            }),
     )
-    .await
-    .expect("bound hidden Profile fork");
+    .await;
     assert_eq!(forked["kind"], "fork");
     assert_ne!(forked["snapshot"]["thread"]["id"], thread_id);
 
-    let archived = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        mpsc::unbounded_channel().0,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-archive")),
-            method: "thread/archive".to_string(),
-            params: Some(json!({"threadId": thread_id})),
-        },
+    let archive_tx = mpsc::unbounded_channel().0;
+    let archived = rpc_test_request(
+        &state,
+        &archive_tx,
+        "thread/archive",
+        json!({"threadId": thread_id}),
     )
-    .await
-    .expect("bound hidden Profile archive");
+    .await;
     assert_eq!(archived["session"]["id"], thread_id);
-    let restored = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        mpsc::unbounded_channel().0,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-restore")),
-            method: "thread/restore".to_string(),
-            params: Some(json!({"threadId": thread_id})),
-        },
+    let restore_tx = mpsc::unbounded_channel().0;
+    let restored = rpc_test_request(
+        &state,
+        &restore_tx,
+        "thread/restore",
+        json!({"threadId": thread_id}),
     )
-    .await
-    .expect("bound hidden Profile restore");
+    .await;
     assert_eq!(restored["session"]["id"], thread_id);
-    let deleted = handle_rpc(
-        state.clone(),
-        AuthContext::Bearer,
-        mpsc::unbounded_channel().0,
-        RpcRequest {
-            jsonrpc: wire::JSONRPC_VERSION.to_string(),
-            id: Some(json!("bound-hidden-delete")),
-            method: "thread/delete".to_string(),
-            params: Some(json!({"threadId": thread_id})),
-        },
+    let delete_tx = mpsc::unbounded_channel().0;
+    let deleted = rpc_test_request(
+        &state,
+        &delete_tx,
+        "thread/delete",
+        json!({"threadId": thread_id}),
     )
-    .await
-    .expect("bound hidden Profile delete");
+    .await;
     assert_eq!(deleted["deleted"], true);
 
-    state
-        .inner
-        .gateway
-        .shutdown_runtimes(false)
+    Box::pin(state.inner.gateway.shutdown_runtimes(false))
         .await
         .expect("shutdown fixture");
 }
 
 #[tokio::test]
 async fn thread_context_keeps_runtime_modes_out_of_agent_targets() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -795,7 +738,7 @@ default_agent = "build"
         &scope.source,
         "opencode-fixture",
     )
-    .expect("profile default target");
+    .await.expect("profile default target");
     assert_eq!(selected.agent_ref.as_deref(), Some("opencode-fixture"));
 
     let context = handle_rpc(
@@ -866,7 +809,7 @@ entrypoints = ["peer", "subagent"]
 
 #[tokio::test]
 async fn native_thread_context_reports_effective_permission_and_reasoning_values() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -970,7 +913,7 @@ reasoning_effort = "high"
 
 #[tokio::test]
 async fn thread_context_catalog_pairs_agent_definitions_with_runtime_profiles() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_runnable_target_catalog_fixture(&state);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -1033,7 +976,7 @@ async fn thread_context_catalog_pairs_agent_definitions_with_runtime_profiles() 
 
 #[tokio::test]
 async fn unbound_control_set_uses_the_exact_prospective_target_once() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_runnable_target_catalog_fixture(&state);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -1096,7 +1039,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
         .state
 
         .gateway_source_lane(&scope.source.source_key().0)
-        .expect("source lane read")
+        .await.expect("source lane read")
         .expect("source lane persisted");
     assert_eq!(lane.draft_agent_ref.as_deref(), Some("native-peer"));
     assert_eq!(lane.draft_profile_ref.as_deref(), Some("native"));
@@ -1106,7 +1049,7 @@ async fn unbound_control_set_uses_the_exact_prospective_target_once() {
 #[tokio::test]
 async fn unbound_control_receipt_can_start_turn_with_same_target() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone());
+    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
     write_runnable_target_catalog_fixture(&state);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let wire_scope = scope.to_wire_scope();
@@ -1202,14 +1145,14 @@ async fn unbound_control_receipt_can_start_turn_with_same_target() {
         .state
 
         .gateway_runtime_binding(thread_id)
-        .expect("binding read")
+        .await.expect("binding read")
         .expect("binding");
     assert_eq!(binding.thread_preferences.get("mode"), Some(&json!("plan")));
 }
 
 #[tokio::test]
 async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_catalog() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_runnable_target_catalog_fixture(&state);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -1247,7 +1190,7 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
             .state
 
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .expect("sessions")
+            .await.expect("sessions")
             .is_empty(),
         "target rejection must happen before thread creation or delivery"
     );
@@ -1255,7 +1198,7 @@ async fn turn_start_rejects_agent_profile_pairs_missing_from_thread_context_cata
 
 #[tokio::test]
 async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_creation() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_runnable_target_catalog_fixture(&state);
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -1335,7 +1278,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
             .state
 
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .expect("sessions")
+            .await.expect("sessions")
             .is_empty(),
         "revision rejection must precede public Thread creation and delivery"
     );
@@ -1343,7 +1286,7 @@ async fn turn_start_requires_fresh_context_and_control_revisions_before_thread_c
 
 #[tokio::test]
 async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_change() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_runnable_target_catalog_fixture(&state);
     let profile = super::runtime_profiles::generated_runtime_profiles()
         .into_iter()
@@ -1359,7 +1302,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
-        .expect("thread");
+        .await.expect("thread");
     let cwd = state.inner.cwd.display().to_string();
     state
         .inner
@@ -1383,7 +1326,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
-        .expect("binding");
+        .await.expect("binding");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1456,7 +1399,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         .state
 
         .gateway_runtime_binding(&thread_id)
-        .expect("binding read")
+        .await.expect("binding read")
         .expect("binding");
     assert_eq!(stored.thread_preferences["mode"], "plan");
     assert_eq!(
@@ -1470,7 +1413,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         Some(&thread_id),
         &mut resolved_turn_controls,
     )
-    .expect("resolve Thread preferences");
+    .await.expect("resolve Thread preferences");
     assert_eq!(resolved_turn_controls["mode"], "plan");
     resolved_turn_controls.insert("mode".to_string(), "default".to_string());
     assert_eq!(
@@ -1495,7 +1438,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("foreign activity");
+        .await.expect("foreign activity");
     let active_context = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
@@ -1570,7 +1513,7 @@ async fn backend_list_auto_creates_detected_local_acp_backends() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )]));
+    )])).await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let backends = handle_rpc(
@@ -1645,7 +1588,7 @@ async fn backend_list_hides_undetected_known_local_acp_backends_and_profiles() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )]));
+    )])).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -1725,7 +1668,7 @@ async fn backend_list_retains_existing_known_backend_when_cli_is_absent() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )]));
+    )])).await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -1788,7 +1731,7 @@ async fn backend_list_does_not_auto_create_over_existing_effective_backend() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PATH".to_string(),
         bin.path().display().to_string(),
-    )]));
+    )])).await;
     let project_config = state.inner.cwd.join(".psychevo").join("config.toml");
     std::fs::create_dir_all(project_config.parent().expect("project config parent"))
         .expect("project config dir");
@@ -1857,7 +1800,7 @@ fn write_command_shim(path: &Path) {
 
 #[tokio::test]
 async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let project_agents = state.inner.cwd.join(".psychevo/agents");
     let compatible_agents = state.inner.cwd.join(".agents/agents");
     let profile_agents = state.inner.home.join("agents");
@@ -2103,7 +2046,7 @@ async fn agent_rpc_manages_project_profile_disabled_and_raw_definitions() {
 
 #[tokio::test]
 async fn team_rpc_round_trips_native_and_acp_members() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -2212,7 +2155,7 @@ command = "codex-acp"
 
 #[tokio::test]
 async fn team_write_fails_closed_for_unknown_profiles_pairings_and_overrides() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -2392,7 +2335,7 @@ async fn backend_doctor_reports_generic_auth_unchecked_without_session_or_prompt
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("backend-doctor-auth.jsonl");
@@ -2494,7 +2437,7 @@ async fn backend_doctor_reports_protocol_incompatibility_without_auth_or_session
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("backend-doctor-protocol.jsonl");
@@ -2578,7 +2521,7 @@ async fn backend_profile_write_uses_explicit_config_when_set() {
     let (_state_temp, state) = web_state_with_env(BTreeMap::from([(
         "PSYCHEVO_CONFIG".to_string(),
         explicit_config.to_string_lossy().to_string(),
-    )]));
+    )])).await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let write = handle_rpc(
@@ -2641,7 +2584,7 @@ async fn thread_draft_prepare_preserves_explicit_values_for_opaque_acp_control_i
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -2954,7 +2897,7 @@ async fn thread_draft_prepare_failure_remains_blocking_on_the_source_lane() {
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
     let log = state.inner.cwd.join("draft-prepare-failure.jsonl");
@@ -3074,7 +3017,7 @@ async fn thread_draft_prepare_projects_and_applies_legacy_acp_models() {
             )
         })
         .expect("Python is required by the ACP fixture");
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),

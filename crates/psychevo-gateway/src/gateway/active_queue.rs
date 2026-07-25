@@ -1,4 +1,15 @@
 impl Gateway {
+    fn cancel_active_queue(&self) {
+        self.active
+            .lock()
+            .expect("gateway active map poisoned")
+            .clear();
+        self.active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned")
+            .clear();
+    }
+
     fn finish_activity_and_spawn_next(&self, queue_key: String) {
         let next = {
             let mut active = self.active.lock().expect("gateway active map poisoned");
@@ -25,21 +36,25 @@ impl Gateway {
             let run_key = queue_key.clone();
             match next {
                 PendingQueuedActivity::Turn(next) => {
-                    tokio::spawn(async move {
+                    gateway.clone().spawn_accepted_turn(
+                        format!("queued-turn:{}", next.turn_id),
+                        async move {
                         let result = gateway
                             .run_turn_now(&run_key, next.request, next.turn_id)
                             .await;
-                        let _ = next.responder.send(result);
                         gateway.finish_activity_and_spawn_next(run_key);
+                        let _ = next.responder.send(result);
                     });
                 }
                 PendingQueuedActivity::Shell(next) => {
-                    tokio::spawn(async move {
+                    gateway.clone().spawn_accepted_turn(
+                        format!("queued-shell:{}", next.shell_id),
+                        async move {
                         let result = gateway
                             .run_shell_now(&run_key, next.request, next.shell_id)
                             .await;
-                        let _ = next.responder.send(result);
                         gateway.finish_activity_and_spawn_next(run_key);
+                        let _ = next.responder.send(result);
                     });
                 }
                 PendingQueuedActivity::Compact(next) => {
@@ -51,33 +66,36 @@ impl Gateway {
 
     fn spawn_compact_activity(&self, run_key: String, next: Box<PendingQueuedCompact>) {
         let gateway = self.clone();
-        tokio::spawn(async move {
+        self.spawn_accepted_turn(format!("compact:{}", next.compact_id), async move {
             let event_sink = next.request.event_sink.clone();
-            let event_thread_id = gateway.compact_event_thread_id(&next.request);
+            let event_thread_id = gateway.compact_event_thread_id(&next.request).await;
             let result = gateway
                 .run_compact_now(&run_key, next.request, next.compact_id)
                 .await;
-            let _ = next.responder.send(result);
             gateway.finish_activity_and_spawn_next(run_key);
-            gateway.emit_activity_changed_for_thread(event_sink, event_thread_id);
+            gateway
+                .emit_activity_changed_for_thread(event_sink, event_thread_id)
+                .await;
+            let _ = next.responder.send(result);
         });
     }
 
-    fn compact_event_thread_id(&self, request: &SendCompactRequest) -> Option<String> {
-        request.thread_id.clone().or_else(|| {
-            request
-                .source
-                .as_ref()
-                .and_then(|source| self.lookup_source_thread(source).ok().flatten())
-        })
+    async fn compact_event_thread_id(&self, request: &SendCompactRequest) -> Option<String> {
+        if request.thread_id.is_some() {
+            return request.thread_id.clone();
+        }
+        if let Some(source) = request.source.as_ref() {
+            return self.lookup_source_thread(source).await.ok().flatten();
+        }
+        None
     }
 
-    fn non_native_compaction_runtime(
+    async fn non_native_compaction_runtime(
         &self,
         request: &SendCompactRequest,
         thread_id: &str,
     ) -> psychevo_runtime::Result<Option<String>> {
-        if let Some(binding) = self.state.gateway_runtime_binding(thread_id)? {
+        if let Some(binding) = self.state.gateway_runtime_binding(thread_id).await? {
             if binding.status == GatewayRuntimeBindingStatus::Resolved {
                 return Ok(binding
                     .runtime_ref
@@ -93,13 +111,15 @@ impl Gateway {
         let summary = self
             .state
 
-            .session_summary(thread_id)?
+            .session_summary(thread_id)
+            .await?
             .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
         if summary.source == "peer_agent" {
             let runtime_ref = self
                 .state
 
-                .session_metadata(thread_id)?
+                .session_metadata(thread_id)
+                .await?
                 .as_ref()
                 .and_then(|metadata| {
                     metadata
@@ -120,29 +140,34 @@ impl Gateway {
             .map(ToString::to_string))
     }
 
-    fn emit_activity_changed_for_thread(
+    async fn emit_activity_changed_for_thread(
         &self,
-        event_sink: Option<GatewayEventSink>,
+        event_sink: Option<GatewayEventEmitter>,
         thread_id: Option<String>,
     ) {
         let (Some(event_sink), Some(thread_id)) = (event_sink, thread_id) else {
             return;
         };
-        event_sink(GatewayEvent::ActivityChanged {
+        let _ = event_sink.emit(GatewayEvent::ActivityChanged {
             thread_id: Some(thread_id.clone()),
             activity: gateway_activity_view(
-                &self.activity_for_selector(GatewayThreadSelector::thread_id(&thread_id)),
+                &self
+                    .activity_for_selector(GatewayThreadSelector::thread_id(&thread_id))
+                    .await,
             ),
         });
     }
 
-    fn queue_key_for_request(&self, request: &SendTurnRequest) -> psychevo_runtime::Result<String> {
+    async fn queue_key_for_request(
+        &self,
+        request: &SendTurnRequest,
+    ) -> psychevo_runtime::Result<String> {
         if let Some(thread_id) = &request.thread_id {
             return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         if let Some(source) = &request.source {
             if !request.reset_source_binding
-                && let Some(thread_id) = self.lookup_source_thread(source)?
+                && let Some(thread_id) = self.lookup_source_thread(source).await?
             {
                 return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
             }
@@ -154,7 +179,7 @@ impl Gateway {
         Ok(format!("invocation:{}", Uuid::now_v7()))
     }
 
-    fn queue_key_for_shell_request(
+    async fn queue_key_for_shell_request(
         &self,
         request: &SendShellRequest,
     ) -> psychevo_runtime::Result<String> {
@@ -162,7 +187,7 @@ impl Gateway {
             return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         if let Some(source) = &request.source {
-            if let Some(thread_id) = self.lookup_source_thread(source)? {
+            if let Some(thread_id) = self.lookup_source_thread(source).await? {
                 return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
             }
             return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
@@ -173,7 +198,7 @@ impl Gateway {
         Ok(format!("shell:{}", Uuid::now_v7()))
     }
 
-    fn queue_key_for_compact_request(
+    async fn queue_key_for_compact_request(
         &self,
         request: &SendCompactRequest,
     ) -> psychevo_runtime::Result<String> {
@@ -181,7 +206,7 @@ impl Gateway {
             return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
         if let Some(source) = &request.source {
-            if let Some(thread_id) = self.lookup_source_thread(source)? {
+            if let Some(thread_id) = self.lookup_source_thread(source).await? {
                 return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
             }
             return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
@@ -189,7 +214,7 @@ impl Gateway {
         Ok(format!("compact:{}", Uuid::now_v7()))
     }
 
-    fn lookup_source_thread(
+    async fn lookup_source_thread(
         &self,
         source: &GatewaySource,
     ) -> psychevo_runtime::Result<Option<String>> {
@@ -204,9 +229,20 @@ impl Gateway {
             GatewaySourceLifetime::Persistent => Ok(self
                 .state
 
-                .gateway_source_lane(&source.source_key().0)?
+                .gateway_source_lane(&source.source_key().0)
+                .await?
                 .and_then(|lane| lane.thread_id)),
         }
+    }
+
+    fn active_thread_for_source(&self, source: &GatewaySource) -> Option<String> {
+        let source_key = source_key_key(&source.source_key());
+        self.active_aliases
+            .lock()
+            .expect("gateway active alias map poisoned")
+            .get(&source_key)
+            .and_then(|primary| primary.strip_prefix("thread:"))
+            .map(str::to_string)
     }
 
     fn source_generation(&self, source: &GatewaySource) -> u64 {
@@ -228,7 +264,7 @@ impl Gateway {
         *generation = generation.saturating_add(1);
     }
 
-    fn bind_source_to_result(
+    async fn bind_source_to_result(
         &self,
         source: &GatewaySource,
         result: &RunResult,
@@ -263,7 +299,8 @@ impl Gateway {
                         draft_profile_ref: None,
                         draft_control_values: &Default::default(),
                         lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
-                    })?;
+                    })
+                    .await?;
             }
         }
         if source.lifetime != GatewaySourceLifetime::Invocation {
@@ -379,11 +416,6 @@ impl Gateway {
                     .expect("gateway process binding map poisoned")
                     .get(&source_key.0)
                     .cloned()
-                {
-                    keys.push(thread_key(&thread_id));
-                }
-                if let Ok(Some(lane)) = self.state.gateway_source_lane(&source_key.0)
-                    && let Some(thread_id) = lane.thread_id
                 {
                     keys.push(thread_key(&thread_id));
                 }

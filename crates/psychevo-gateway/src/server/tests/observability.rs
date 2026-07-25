@@ -1,8 +1,8 @@
-    fn web_state() -> (tempfile::TempDir, WebState) {
-        web_state_with_env(BTreeMap::new())
+    async fn web_state() -> (tempfile::TempDir, WebState) {
+        web_state_with_env(BTreeMap::new()).await
     }
 
-    fn web_state_with_env(
+    async fn web_state_with_env(
         inherited_env: BTreeMap<String, String>,
     ) -> (tempfile::TempDir, WebState) {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -20,7 +20,7 @@
             ),
         ]);
         env.extend(inherited_env);
-        let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
         let gateway = Gateway::new(state);
         let config = GatewayWebServerConfig::new(
             gateway,
@@ -44,9 +44,9 @@
         path
     }
 
-    #[test]
-    fn peer_runtime_rejects_structured_self_agent_mention() {
-        let (_temp, state) = web_state();
+    #[tokio::test]
+    async fn peer_runtime_rejects_structured_self_agent_mention() {
+        let (_temp, state) = web_state().await;
         let mut options = state.run_options(state.inner.cwd.clone(), None);
         options.runtime_ref = Some("opencode".to_string());
         let err = apply_mentions_to_run_options(
@@ -66,17 +66,17 @@
         assert!(err.to_string().contains("already the current runtime"));
     }
 
-    #[test]
-    fn peer_runtime_allows_literal_agent_text_without_structured_mention() {
-        let (_temp, state) = web_state();
+    #[tokio::test]
+    async fn peer_runtime_allows_literal_agent_text_without_structured_mention() {
+        let (_temp, state) = web_state().await;
         let mut options = state.run_options(state.inner.cwd.clone(), None);
         options.runtime_ref = Some("opencode".to_string());
         apply_mentions_to_run_options(&mut options, &[]).expect("literal text is not inspected");
         assert!(options.skill_inputs.is_empty());
     }
 
-    fn web_state_with_static() -> (tempfile::TempDir, WebState) {
-        let (temp, state) = web_state();
+    async fn web_state_with_static() -> (tempfile::TempDir, WebState) {
+        let (temp, state) = web_state().await;
         let static_dir = temp.path().join("static");
         std::fs::create_dir_all(&static_dir).expect("static dir");
         std::fs::write(
@@ -87,7 +87,7 @@
         (temp, state)
     }
 
-    fn append_accounted_assistant(
+    async fn append_accounted_assistant(
         state: &WebState,
         session_id: &str,
         context_tokens: u64,
@@ -116,6 +116,7 @@
                 })),
                 None,
             )
+            .await
             .expect("assistant");
     }
 
@@ -148,7 +149,7 @@
         let static_dir = temp.path().join("static");
         std::fs::create_dir_all(&cwd).expect("cwd");
         std::fs::create_dir_all(&static_dir).expect("static dir");
-        let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+        let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
         let gateway = Gateway::new(state);
         let occupied = occupied_port_with_free_successor().await;
         let occupied_addr = occupied.local_addr().expect("occupied addr");
@@ -173,7 +174,7 @@
     async fn initialize_reports_current_profile() {
         let mut env = BTreeMap::new();
         env.insert("PSYCHEVO_PROFILE".to_string(), "coder".to_string());
-        let (temp, state) = web_state_with_env(env);
+        let (temp, state) = web_state_with_env(env).await;
         let home = temp.path().join("home").display().to_string();
         let expected_display_cwd = display_cwd(&state.inner.cwd);
         let (out_tx, _out_rx) = mpsc::unbounded_channel();
@@ -202,7 +203,7 @@
 
     #[tokio::test]
     async fn observability_read_returns_active_session_usage() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let session_id = state
             .inner
@@ -215,9 +216,9 @@
                 "fake-provider",
                 None,
             )
-            .expect("session");
-        append_accounted_assistant(&state, &session_id, 200, 50);
-        bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+            .await.expect("session");
+        append_accounted_assistant(&state, &session_id, 200, 50).await;
+        bind_source_to_thread(&state, &scope, &session_id).await.expect("bind");
         let (tx, _rx) = mpsc::unbounded_channel();
 
         let value = handle_rpc(
@@ -261,7 +262,7 @@
 
     #[tokio::test]
     async fn observability_read_keeps_acp_context_snapshot_out_of_session_totals() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let session_id = state
             .inner
@@ -287,8 +288,8 @@
                     }
                 })),
             )
-            .expect("session");
-        bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+            .await.expect("session");
+        bind_source_to_thread(&state, &scope, &session_id).await.expect("bind");
         let (tx, _rx) = mpsc::unbounded_channel();
 
         let value = handle_rpc(
@@ -319,7 +320,7 @@
 
     #[tokio::test]
     async fn observability_read_returns_explicit_thread_usage_without_active_binding() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let session_id = state
             .inner
@@ -332,8 +333,8 @@
                 "fake-provider",
                 None,
             )
-            .expect("session");
-        append_accounted_assistant(&state, &session_id, 90, 9);
+            .await.expect("session");
+        append_accounted_assistant(&state, &session_id, 90, 9).await;
         let (tx, _rx) = mpsc::unbounded_channel();
 
         let value = handle_rpc(
@@ -357,7 +358,7 @@
 
     #[tokio::test]
     async fn observability_read_clears_usage_when_no_active_session() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -382,7 +383,7 @@
 
     #[tokio::test]
     async fn browser_observability_read_authorizes_cross_cwd_thread() {
-        let (temp, state) = web_state();
+        let (temp, state) = web_state().await;
         let other_cwd = temp.path().join("other-work");
         std::fs::create_dir_all(&other_cwd).expect("other cwd");
         let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
@@ -397,8 +398,8 @@
                 "fake-provider",
                 None,
             )
-            .expect("session");
-        append_accounted_assistant(&state, &session_id, 300, 150);
+            .await.expect("session");
+        append_accounted_assistant(&state, &session_id, 300, 150).await;
         let browser_session_id = "browser-session".to_string();
         state
             .inner
@@ -441,12 +442,12 @@
         assert_eq!(value["usage"]["cacheReadPercent"], 50.0);
     }
 
-    #[test]
-    fn start_empty_source_returns_null_thread_and_creates_no_session() {
-        let (_temp, state) = web_state();
+    #[tokio::test]
+    async fn start_empty_source_returns_null_thread_and_creates_no_session() {
+        let (_temp, state) = web_state().await;
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
 
-        let snapshot = start_empty_source(&state, &scope).expect("snapshot");
+        let snapshot = start_empty_source(&state, &scope).await.expect("snapshot");
 
         assert!(snapshot.get("thread").is_some_and(Value::is_null));
         assert_eq!(
@@ -455,7 +456,7 @@
                 .state
 
                 .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-                .expect("sessions")
+                .await.expect("sessions")
                 .len(),
             0
         );
@@ -464,15 +465,15 @@
                 .inner
                 .gateway
                 .resolve_source_thread(&state.inner.source)
-                .expect("source lookup")
+                .await.expect("source lookup")
                 .as_deref(),
             None
         );
     }
 
-    #[test]
-    fn start_empty_source_clears_binding_without_archiving_previous_history() {
-        let (_temp, state) = web_state();
+    #[tokio::test]
+    async fn start_empty_source_clears_binding_without_archiving_previous_history() {
+        let (_temp, state) = web_state().await;
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let session_id = state
             .inner
@@ -485,10 +486,10 @@
                 "fake-provider",
                 None,
             )
-            .expect("session");
-        bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+            .await.expect("session");
+        bind_source_to_thread(&state, &scope, &session_id).await.expect("bind");
 
-        let snapshot = start_empty_source(&state, &scope).expect("snapshot");
+        let snapshot = start_empty_source(&state, &scope).await.expect("snapshot");
 
         assert!(snapshot.get("thread").is_some_and(Value::is_null));
         assert!(
@@ -496,7 +497,7 @@
                 .inner
                 .gateway
                 .resolve_source_thread(&state.inner.source)
-                .expect("source lookup")
+                .await.expect("source lookup")
                 .is_none()
         );
         let active_ids = state
@@ -504,7 +505,7 @@
             .state
 
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .expect("active sessions")
+            .await.expect("active sessions")
             .into_iter()
             .map(|session| session.id)
             .collect::<Vec<_>>();

@@ -1072,7 +1072,7 @@ impl CodexPluginAuthority {
         cwd: &std::path::Path,
         psychevo_thread_id: &str,
         turn_id: Option<String>,
-        event_sink: Option<super::GatewayEventSink>,
+        event_sink: Option<super::GatewayEventEmitter>,
     ) -> Result<CodexRuntimeContributions> {
         let Some(profile) = self.ready_runtime_profile(cwd).await else {
             log_codex_authority_event("inventory_not_ready", cwd, None);
@@ -2222,7 +2222,7 @@ struct CodexMcpTool {
     cwd: PathBuf,
     psychevo_thread_id: String,
     turn_id: Option<String>,
-    event_sink: Option<super::GatewayEventSink>,
+    event_sink: Option<super::GatewayEventEmitter>,
     name: String,
     server_name: String,
     remote_name: String,
@@ -2312,7 +2312,7 @@ struct CodexElicitationContext {
     state: super::WebState,
     psychevo_thread_id: String,
     turn_id: Option<String>,
-    event_sink: Option<super::GatewayEventSink>,
+    event_sink: Option<super::GatewayEventEmitter>,
 }
 
 impl CodexElicitationContext {
@@ -2339,7 +2339,7 @@ impl CodexElicitationContext {
                     responder,
                 },
             );
-        event_sink(super::GatewayEvent::ActionRequested {
+        let _ = event_sink.emit(super::GatewayEvent::ActionRequested {
             action: super::PendingActionView {
                 action_id: action_id.clone(),
                 kind: super::GatewayActionKind::Clarify,
@@ -2370,7 +2370,7 @@ impl CodexElicitationContext {
         match decision {
             Ok(Ok(result)) => result,
             _ => {
-                event_sink(super::GatewayEvent::ActionResolved {
+                let _ = event_sink.emit(super::GatewayEvent::ActionResolved {
                     action_id,
                     kind: super::GatewayActionKind::Clarify,
                     outcome: super::GatewayActionOutcome::TimedOut,
@@ -2406,7 +2406,7 @@ pub(super) struct PendingCodexElicitation {
     fields: Vec<ElicitationField>,
     mode: String,
     meta: Option<Value>,
-    event_sink: super::GatewayEventSink,
+    event_sink: super::GatewayEventEmitter,
     responder: oneshot::Sender<Value>,
 }
 
@@ -2624,12 +2624,14 @@ pub(super) fn respond_to_elicitation(
         ),
         _ => unreachable!("response kind checked before taking the pending elicitation"),
     };
-    (pending.event_sink)(super::GatewayEvent::ActionResolved {
-        action_id: interaction_id.to_string(),
-        kind: super::GatewayActionKind::Clarify,
-        outcome,
-        payload: json!({"owner":"codex_capability_broker"}),
-    });
+    let _ = pending
+        .event_sink
+        .emit(super::GatewayEvent::ActionResolved {
+            action_id: interaction_id.to_string(),
+            kind: super::GatewayActionKind::Clarify,
+            outcome,
+            payload: json!({"owner":"codex_capability_broker"}),
+        });
     let _ = pending.responder.send(result);
     Ok(Some(
         psychevo_gateway_protocol::ThreadInteractionRespondResult {
@@ -3453,6 +3455,7 @@ mod tests {
             Duration::from_secs(3),
         ));
         let runtime = psychevo_runtime::state::StateRuntime::open(temp.path().join("state.db"))
+            .await
             .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let state = super::super::WebState::new(super::super::GatewayWebServerConfig::new(
@@ -3464,7 +3467,7 @@ mod tests {
             temp.path().join("static"),
         ));
         let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel();
-        let event_sink: crate::GatewayEventSink = Arc::new(move |event| {
+        let event_sink = crate::GatewayEventEmitter::new(move |event| {
             if let crate::GatewayEvent::ActionRequested { action } = event {
                 let _ = action_tx.send(action.action_id);
             }
@@ -3638,6 +3641,7 @@ mod tests {
             ),
         ]);
         let runtime = psychevo_runtime::state::StateRuntime::open(temp.path().join("state.db"))
+            .await
             .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let config = super::super::GatewayWebServerConfig::new(
@@ -3715,7 +3719,7 @@ mod tests {
             .await
         });
         let completed_without_inventory =
-            tokio::time::timeout(Duration::from_millis(100), &mut draft_open).await;
+            tokio::time::timeout(Duration::from_secs(1), &mut draft_open).await;
         let draft_open_was_ready = completed_without_inventory.is_ok();
         fs::write(&release, "ready").expect("release inventory");
         match completed_without_inventory {
@@ -3817,6 +3821,7 @@ mod tests {
             Duration::from_secs(2),
         );
         let runtime = psychevo_runtime::state::StateRuntime::open(temp.path().join("state.db"))
+            .await
             .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let config = super::super::GatewayWebServerConfig::new(
@@ -4337,6 +4342,7 @@ mod tests {
             ),
         ]);
         let runtime = psychevo_runtime::state::StateRuntime::open(temp.path().join("state.db"))
+            .await
             .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let config = super::super::GatewayWebServerConfig::new(
@@ -4350,7 +4356,7 @@ mod tests {
         let state = super::super::WebState::new(config);
         let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let events_for_sink = events.clone();
-        let event_sink: crate::GatewayEventSink = std::sync::Arc::new(move |event| {
+        let event_sink = crate::GatewayEventEmitter::new(move |event| {
             events_for_sink.lock().expect("events").push(event);
         });
 

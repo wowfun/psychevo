@@ -8,15 +8,19 @@ pub(super) async fn resume(
 ) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
     let (thread_id, scope) = match params.thread_id {
         Some(thread_id) => {
-            authorize_thread(state, auth, &thread_id)?;
-            let scope = resolved_scope_for_thread(state, &thread_id)?;
-            bind_source_to_thread(state, &scope, &thread_id)?;
+            authorize_thread(state, auth, &thread_id).await?;
+            let scope = resolved_scope_for_thread(state, &thread_id).await?;
+            bind_source_to_thread(state, &scope, &thread_id).await?;
             grant_browser_session_scope(state, auth, &scope);
             (Some(thread_id), scope)
         }
         None => {
             let scope = resolve_optional_scope(state, auth, params.scope)?;
-            let thread_id = state.inner.gateway.resolve_source_thread(&scope.source)?;
+            let thread_id = state
+                .inner
+                .gateway
+                .resolve_source_thread(&scope.source)
+                .await?;
             (thread_id, scope)
         }
     };
@@ -31,8 +35,8 @@ pub(super) async fn read(
     auth: &AuthContext,
     params: wire::ThreadReadParams,
 ) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    let scope = resolved_scope_for_thread(state, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    let scope = resolved_scope_for_thread(state, &params.thread_id).await?;
     decode_result(
         thread_snapshot_live(state, &scope, Some(&params.thread_id)).await?,
         "thread/read",
@@ -44,7 +48,7 @@ pub(super) async fn trace(
     auth: &AuthContext,
     params: wire::ThreadTraceParams,
 ) -> psychevo_runtime::Result<wire::ThreadTraceResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
     let runtime_state = state.inner.state.clone();
     let result = tokio::task::spawn_blocking(move || {
         runtime_state.read_session_trace(
@@ -67,7 +71,7 @@ pub(super) async fn trace(
     })
 }
 
-pub(super) fn list(
+pub(super) async fn list(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadListParams,
@@ -75,12 +79,12 @@ pub(super) fn list(
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
     let cwd = resolve_session_cwd_filter(state, auth, params.cwd)?;
     let cwd = cwd.map(|cwd| cwd.to_string_lossy().into_owned());
-    let activity_snapshot = state.inner.gateway.session_activity_snapshot()?;
-    let sessions = state.inner.state.list_human_session_projections(
-        cwd.as_deref(),
-        params.archived.unwrap_or(false),
-        limit,
-    )?;
+    let activity_snapshot = state.inner.gateway.session_activity_snapshot().await?;
+    let sessions = state
+        .inner
+        .state
+        .list_human_session_projections(cwd.as_deref(), params.archived.unwrap_or(false), limit)
+        .await?;
     let sessions = sessions
         .into_iter()
         .map(|projection| {
@@ -94,7 +98,7 @@ pub(super) fn list(
     Ok(wire::ThreadListResult { sessions })
 }
 
-pub(super) fn browse(
+pub(super) async fn browse(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadBrowserParams,
@@ -104,22 +108,26 @@ pub(super) fn browse(
         .clone()
         .or_else(|| params.cursor.as_ref().map(|cursor| cursor.cwd.clone()));
     let cwd = resolve_session_cwd_filter(state, auth, requested_cwd)?;
-    decode_result(thread_browser_value(state, params, cwd)?, "thread/browser")
+    decode_result(
+        thread_browser_value(state, params, cwd).await?,
+        "thread/browser",
+    )
 }
 
-pub(super) fn rename(
+pub(super) async fn rename(
     state: &WebState,
     auth: &AuthContext,
     out_tx: &ConnectionSender,
     params: wire::ThreadRenameParams,
 ) -> psychevo_runtime::Result<wire::ThreadMutationResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
     state
         .inner
         .state
-        .set_session_title(&params.thread_id, &params.title)?;
+        .set_session_title(&params.thread_id, &params.title)
+        .await?;
     let session: wire::SessionSummaryView = decode_result(
-        session_summary_by_id(state, &params.thread_id)?,
+        session_summary_by_id(state, &params.thread_id).await?,
         "thread/rename",
     )?;
     let event = GatewayEvent::TitleChanged {
@@ -128,13 +136,11 @@ pub(super) fn rename(
         display_title: session.display_title.clone(),
     };
     if let Ok(event_value) = serde_json::to_value(&event) {
-        let _ = state.inner.state.append_gateway_live_event(
-            None,
-            None,
-            Some(&params.thread_id),
-            None,
-            &event_value,
-        );
+        let _ = state
+            .inner
+            .state
+            .append_gateway_live_event(None, None, Some(&params.thread_id), None, &event_value)
+            .await;
     }
     state.publish_gateway_event_for_connection(
         event,
@@ -150,8 +156,8 @@ pub(super) async fn archive(
     auth: &AuthContext,
     params: wire::ThreadIdParams,
 ) -> psychevo_runtime::Result<wire::ThreadMutationResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    guard_session_mutation(state, auth, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    guard_session_mutation(state, auth, &params.thread_id).await?;
     let session = decode_result(
         session_import_application::archive_thread(state, &params.thread_id).await?,
         "thread/archive",
@@ -164,8 +170,8 @@ pub(super) async fn restore(
     auth: &AuthContext,
     params: wire::ThreadIdParams,
 ) -> psychevo_runtime::Result<wire::ThreadMutationResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    guard_session_mutation(state, auth, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    guard_session_mutation(state, auth, &params.thread_id).await?;
     let session = decode_result(
         session_import_application::restore_thread(state, &params.thread_id).await?,
         "thread/restore",
@@ -178,18 +184,23 @@ pub(super) async fn delete(
     auth: &AuthContext,
     params: wire::ThreadIdParams,
 ) -> psychevo_runtime::Result<wire::ThreadDeleteResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
-    guard_session_mutation(state, auth, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
+    guard_session_mutation(state, auth, &params.thread_id).await?;
     let scope = default_resolved_scope(state, auth)?;
     let deleting_current = state
         .inner
         .gateway
-        .resolve_source_thread(&scope.source)?
+        .resolve_source_thread(&scope.source)
+        .await?
         .as_deref()
         == Some(params.thread_id.as_str());
     session_import_application::delete_thread(state, &params.thread_id).await?;
     if deleting_current {
-        state.inner.gateway.clear_source_binding(&scope.source)?;
+        state
+            .inner
+            .gateway
+            .clear_source_binding(&scope.source)
+            .await?;
     }
     Ok(wire::ThreadDeleteResult {
         deleted: true,

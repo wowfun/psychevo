@@ -126,7 +126,8 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
     let records = state
         .inner
         .state
-        .retryable_gateway_channel_outbox(&connection.id)?;
+        .retryable_gateway_channel_outbox(&connection.id)
+        .await?;
     let mut delivered = 0;
     let mut first_error = None;
     for record in records {
@@ -134,7 +135,11 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
         match deliver_channel_outbox_record(state, runtime, channel_gateway, record).await {
             Ok(()) => delivered += 1,
             Err(err) => {
-                let _ = state.inner.state.fail_gateway_channel_outbox(&delivery_id);
+                let _ = state
+                    .inner
+                    .state
+                    .fail_gateway_channel_outbox(&delivery_id)
+                    .await;
                 first_error.get_or_insert(err);
             }
         }
@@ -168,7 +173,8 @@ async fn deliver_channel_outbox_record(
     let lane = state
         .inner
         .state
-        .gateway_source_lane(&record.source_key)?
+        .gateway_source_lane(&record.source_key)
+        .await?
         .ok_or_else(|| {
             psychevo_runtime::Error::Message(format!(
                 "channel outbox `{}` source lane is unavailable",
@@ -186,7 +192,8 @@ async fn deliver_channel_outbox_record(
     state
         .inner
         .state
-        .acknowledge_gateway_channel_outbox(&record.delivery_id)?;
+        .acknowledge_gateway_channel_outbox(&record.delivery_id)
+        .await?;
     runtime.mark_outbound(&record.connection_id);
     Ok(())
 }
@@ -245,7 +252,7 @@ pub(super) async fn handle_channel_message(
                 channel_gateway
                     .send(ImOutboundMessage {
                         identity: message.identity,
-                        thread_id: channel_reply_thread_id(state, &source),
+                        thread_id: channel_reply_thread_id(state, &source).await,
                         text: reply,
                     })
                     .await?;
@@ -258,12 +265,13 @@ pub(super) async fn handle_channel_message(
             }
             ChannelCommandAction::Compact { instructions } => {
                 let pending =
-                    enqueue_channel_compaction(state, runtime, connection, &source, instructions)?;
+                    enqueue_channel_compaction(state, runtime, connection, &source, instructions)
+                        .await?;
                 let reply_runtime = runtime.clone();
                 let reply_connection = connection.clone();
                 let reply_gateway = channel_gateway.clone();
                 let reply_identity = message.identity;
-                let fallback_thread_id = channel_reply_thread_id(state, &source);
+                let fallback_thread_id = channel_reply_thread_id(state, &source).await;
                 let _handle = tokio::spawn(async move {
                     let (thread_id, text) = match pending.await {
                         Ok(wire::ThreadActionRunResult::Compact { thread_id, result }) => {
@@ -323,7 +331,7 @@ pub(super) async fn handle_channel_message(
     Ok(())
 }
 
-fn enqueue_channel_compaction(
+async fn enqueue_channel_compaction(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
@@ -332,38 +340,23 @@ fn enqueue_channel_compaction(
 ) -> psychevo_runtime::Result<
     BoxFuture<'static, psychevo_runtime::Result<wire::ThreadActionRunResult>>,
 > {
-    let thread_id = state
-        .inner
-        .gateway
-        .resolve_source_thread(source)?
-        .or_else(|| {
-            state
-                .activity(source, None)
-                .running
-                .then(|| runtime.observed_source_thread(&connection.id, &source.source_key()))
-                .flatten()
-        });
+    let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
+    let thread_id = if thread_id.is_some() {
+        thread_id
+    } else if state.activity(source, None).await.running {
+        runtime.observed_source_thread(&connection.id, &source.source_key())
+    } else {
+        None
+    };
     let Some(thread_id) = thread_id else {
         return Err(Error::Message(
             "Open a channel Thread before compacting context.".to_string(),
         ));
     };
-    let scope = super::commands::channel_resolved_scope(state, connection, source)?;
-    let state = state.clone();
+    let scope = super::commands::channel_resolved_scope(state, connection, source).await?;
     let (out_tx, _out_rx) = mpsc::unbounded_channel();
-    Ok(Box::pin(async move {
-        run_routed_thread_action(
-            &state,
-            &scope,
-            wire::ThreadActionRunParams {
-                scope: scope.to_wire_scope(),
-                thread_id,
-                action: wire::ThreadActionInput::Compact { instructions },
-            },
-            out_tx.into(),
-        )
+    enqueue_routed_thread_compact_action(state, &scope, thread_id, instructions, out_tx.into())
         .await
-    }))
 }
 
 fn channel_compaction_reply(result: &wire::ThreadCompactionResult) -> String {
@@ -385,14 +378,14 @@ async fn run_channel_inbound_turn(
     source: GatewaySource,
     thread_id: Option<String>,
 ) -> psychevo_runtime::Result<()> {
-    let scope = super::commands::channel_resolved_scope(&state, &connection, &source)?;
+    let scope = super::commands::channel_resolved_scope(&state, &connection, &source).await?;
     let default_runtime_ref = connection
         .runtime_ref
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("native");
-    let target = runnable_target_for_source(&state, &scope, &source, default_runtime_ref)?;
+    let target = runnable_target_for_source(&state, &scope, &source, default_runtime_ref).await?;
     let runtime_ref = target.runtime_profile_ref.clone();
     let turn_context = thread_context_read_result_for_target_id(
         &state,
@@ -429,7 +422,8 @@ async fn run_channel_inbound_turn(
     );
     let input = gateway_input_parts_for_im(&message)?;
     let mut control_values = BTreeMap::new();
-    apply_thread_control_precedence(&state, &scope, thread_id.as_deref(), &mut control_values)?;
+    apply_thread_control_precedence(&state, &scope, thread_id.as_deref(), &mut control_values)
+        .await?;
     let initial_thread_preferences = source_draft_control_values(&turn_context)?;
     control_values.extend(initial_thread_preferences.clone());
     let result = run_routed_thread_turn(
@@ -482,8 +476,10 @@ async fn run_channel_inbound_turn(
     );
     let delivery_id = format!("out_{digest:x}");
     let payload_hash = format!("{:x}", Sha256::digest(answer.as_bytes()));
-    let record = state.inner.state.upsert_gateway_channel_outbox(
-        psychevo_runtime::state::GatewayChannelOutboxInput {
+    let record = state
+        .inner
+        .state
+        .upsert_gateway_channel_outbox(psychevo_runtime::state::GatewayChannelOutboxInput {
             delivery_id: &delivery_id,
             thread_id: &result.thread.id,
             turn_id: &result.turn.id,
@@ -491,8 +487,8 @@ async fn run_channel_inbound_turn(
             source_key: &source.source_key().0,
             payload_text: &answer,
             payload_hash: &payload_hash,
-        },
-    )?;
+        })
+        .await?;
     if record.status == "acknowledged" {
         return Ok(());
     }
@@ -505,16 +501,21 @@ async fn run_channel_inbound_turn(
         .await;
     match send_result {
         Ok(()) => {
+            runtime.mark_outbound(&connection.id);
             state
                 .inner
                 .state
-                .acknowledge_gateway_channel_outbox(&delivery_id)?;
+                .acknowledge_gateway_channel_outbox(&delivery_id)
+                .await?;
         }
         Err(err) => {
-            let _ = state.inner.state.fail_gateway_channel_outbox(&delivery_id);
+            let _ = state
+                .inner
+                .state
+                .fail_gateway_channel_outbox(&delivery_id)
+                .await;
             return Err(err);
         }
     }
-    runtime.mark_outbound(&connection.id);
     Ok(())
 }

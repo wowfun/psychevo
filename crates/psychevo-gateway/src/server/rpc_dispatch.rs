@@ -1,16 +1,17 @@
 include!("rpc_dispatch/transport.rs");
 
-async fn handle_rpc<T>(
+fn handle_rpc<T>(
     state: WebState,
     auth: AuthContext,
     out_tx: T,
     request: RpcRequest,
-) -> psychevo_runtime::Result<Value>
+) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<Value>>
 where
     T: Into<ConnectionSender>,
 {
     let out_tx = out_tx.into();
-    match request.method.as_str() {
+    Box::pin(async move {
+        match request.method.as_str() {
         "initialize" => {
             let scope = default_resolved_scope(&state, &auth)?;
             prewarm_codex_runtime_inventory(&state, scope.cwd.clone());
@@ -65,13 +66,15 @@ where
             let params = request.params::<wire::ThreadListParams>()?;
             Ok(serde_json::to_value(session_application::list(
                 &state, &auth, params,
-            )?)?)
+            )
+            .await?)?)
         }
         "thread/browser" => {
             let params = request.params::<wire::ThreadBrowserParams>()?;
             Ok(serde_json::to_value(session_application::browse(
                 &state, &auth, params,
-            )?)?)
+            )
+            .await?)?)
         }
         "thread/import/list" => {
             let params = request.required_params::<wire::ThreadImportListParams>()?;
@@ -89,7 +92,8 @@ where
             let params = request.required_params::<wire::ThreadRenameParams>()?;
             Ok(serde_json::to_value(session_application::rename(
                 &state, &auth, &out_tx, params,
-            )?)?)
+            )
+            .await?)?)
         }
         "thread/archive" => {
             let params = request.required_params::<wire::ThreadIdParams>()?;
@@ -136,7 +140,7 @@ where
         "thread/interaction/respond" => {
             let params = request.required_params::<wire::ThreadInteractionRespondParams>()?;
             Ok(serde_json::to_value(
-                thread_application::respond_to_thread_interaction(&state, &auth, params)?,
+                thread_application::respond_to_thread_interaction(&state, &auth, params).await?,
             )?)
         }
         "thread/history/read" => {
@@ -187,7 +191,7 @@ where
         }
         "automation/list" => {
             let params = request.params::<wire::AutomationListParams>()?;
-            automation_list_result(&state, &auth, params)
+            automation_list_result(&state, &auth, params).await
         }
         "automation/draft" => {
             let params = request.required_params::<wire::AutomationDraftParams>()?;
@@ -195,23 +199,23 @@ where
         }
         "automation/write" => {
             let params = request.required_params::<wire::AutomationWriteParams>()?;
-            automation_write_result(&state, &auth, params)
+            automation_write_result(&state, &auth, params).await
         }
         "automation/pause" => {
             let params = request.required_params::<wire::AutomationIdParams>()?;
-            automation_set_enabled_result(&state, &auth, params, false)
+            automation_set_enabled_result(&state, &auth, params, false).await
         }
         "automation/resume" => {
             let params = request.required_params::<wire::AutomationIdParams>()?;
-            automation_set_enabled_result(&state, &auth, params, true)
+            automation_set_enabled_result(&state, &auth, params, true).await
         }
         "automation/delete" => {
             let params = request.required_params::<wire::AutomationIdParams>()?;
-            automation_delete_result(&state, &auth, params)
+            automation_delete_result(&state, &auth, params).await
         }
         "automation/run" => {
             let params = request.required_params::<wire::AutomationRunParams>()?;
-            automation_run_result(state, &auth, params, out_tx)
+            automation_run_result(state, &auth, params, out_tx).await
         }
         "turn/start" => {
             let params = request.required_params::<wire::TurnStartParams>()?;
@@ -229,11 +233,11 @@ where
         }
         "voice/policy/read" => {
             let params = request.params::<wire::VoicePolicyReadParams>()?;
-            voice_policy_read_value(&state, &auth, params)
+            voice_policy_read_value(&state, &auth, params).await
         }
         "voice/policy/update" => {
             let params = request.required_params::<wire::VoicePolicyUpdateParams>()?;
-            voice_policy_update_value(&state, &auth, params)
+            voice_policy_update_value(&state, &auth, params).await
         }
         "thread/realtime/start" => {
             let params = request.required_params::<wire::ThreadRealtimeStartParams>()?;
@@ -275,9 +279,9 @@ where
             let params = request.required_params::<wire::CompletionListParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
             if let Some(thread_id) = &params.thread_id {
-                authorize_thread(&state, &auth, thread_id)?;
+                authorize_thread(&state, &auth, thread_id).await?;
             }
-            completion_list_value(&state, &scope, params)
+            completion_list_value(&state, &scope, params).await
         }
         "workspace/files" => {
             let params = request.required_params::<wire::WorkspaceFilesParams>()?;
@@ -392,28 +396,28 @@ where
             let params = request.required_params::<wire::ContextReadParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
             if let Some(thread_id) = &params.thread_id {
-                authorize_thread(&state, &auth, thread_id)?;
+                authorize_thread(&state, &auth, thread_id).await?;
             }
-            context_read_value(&state, &scope, params.thread_id.as_deref())
+            context_read_value(&state, &scope, params.thread_id.as_deref()).await
         }
         "observability/read" => {
             let params = request.required_params::<wire::ObservabilityReadParams>()?;
             let requested_scope = resolve_required_scope(&state, &auth, params.scope)?;
             let (scope, thread_id) = match params.thread_id {
                 Some(thread_id) => {
-                    authorize_thread(&state, &auth, &thread_id)?;
+                    authorize_thread(&state, &auth, &thread_id).await?;
                     (
-                        resolved_scope_for_thread(&state, &thread_id)?,
+                        resolved_scope_for_thread(&state, &thread_id).await?,
                         Some(thread_id),
                     )
                 }
                 None => (requested_scope, None),
             };
-            observability_read_value(&state, &scope, thread_id.as_deref())
+            observability_read_value(&state, &scope, thread_id.as_deref()).await
         }
         "usage/read" => {
             let params = request.required_params::<wire::UsageReadParams>()?;
-            usage_read_value(&state, params)
+            usage_read_value(&state, params).await
         }
         "source/reset" => {
             let params = request.required_params::<wire::SourceResetParams>()?;
@@ -423,7 +427,7 @@ where
                 .gateway
                 .release_prepared_agent_session(&scope.source.source_key().0)
                 .await?;
-            reset_source_to_empty(&state, &scope)
+            reset_source_to_empty(&state, &scope).await
         }
         "agent/list" => {
             let params = request.params::<wire::AgentListParams>()?;
@@ -472,19 +476,26 @@ where
             let params = request.params::<wire::AgentStatusParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             if let Some(thread_id) = params.thread_id.as_deref() {
-                authorize_thread(&state, &auth, thread_id)?;
+                authorize_thread(&state, &auth, thread_id).await?;
             }
             let source_thread_id = if params.thread_id.is_some() || params.all.unwrap_or(false) {
                 None
             } else {
-                state.inner.gateway.resolve_source_thread(&scope.source)?
+                state
+                    .inner
+                    .gateway
+                    .resolve_source_thread(&scope.source)
+                    .await?
             };
             let thread_id = params.thread_id.as_deref().or(source_thread_id.as_deref());
-            Ok(serde_json::to_value(agent_status_result(
+            Ok(serde_json::to_value(
+                agent_status_result(
                 Some(&state.inner.state),
                 thread_id,
                 params.all.unwrap_or(false),
-            ))?)
+            )
+                .await,
+            )?)
         }
         "agent/control" => {
             let params = request.required_params::<wire::AgentControlParams>()?;
@@ -493,7 +504,8 @@ where
             Ok(serde_json::to_value(agent_control_result(
                 &state.inner.state,
                 params,
-            )?)?)
+            )
+            .await?)?)
         }
         "team/list" => {
             let params = request.params::<wire::TeamListParams>()?;
@@ -532,18 +544,23 @@ where
             let params = request.params::<wire::TeamStatusParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             if let Some(thread_id) = params.thread_id.as_deref() {
-                authorize_thread(&state, &auth, thread_id)?;
+                authorize_thread(&state, &auth, thread_id).await?;
             }
             let source_thread_id = if params.thread_id.is_some() {
                 None
             } else {
-                state.inner.gateway.resolve_source_thread(&scope.source)?
+                state
+                    .inner
+                    .gateway
+                    .resolve_source_thread(&scope.source)
+                    .await?
             };
             let thread_id = params.thread_id.as_deref().or(source_thread_id.as_deref());
             Ok(serde_json::to_value(team_status_result(
                 &state.inner.state,
                 thread_id,
-            )?)?)
+            )
+            .await?)?)
         }
         "backend/list" => {
             let params = request.params::<wire::BackendListParams>()?;
@@ -1193,7 +1210,8 @@ where
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             Ok(serde_json::to_value(channel_update_result(
                 &state, &scope, params,
-            )?)?)
+            )
+            .await?)?)
         }
         "channel/delete" => {
             let params = request.required_params::<wire::ChannelIdParams>()?;
@@ -1214,7 +1232,8 @@ where
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             Ok(serde_json::to_value(channel_source_list_result(
                 &state, &scope, params,
-            )?)?)
+            )
+            .await?)?)
         }
         "channel/wechat-qr/start" => {
             let params = request.params::<wire::ChannelWechatQrStartParams>()?;
@@ -1234,10 +1253,10 @@ where
             let params = request.params::<wire::CommandListParams>()?;
             let scope = resolve_optional_scope(&state, &auth, params.scope.clone())?;
             let active_turn = if let Some(thread_id) = params.thread_id.as_deref() {
-                authorize_thread(&state, &auth, thread_id)?;
-                state.activity(&scope.source, Some(thread_id)).running
+                authorize_thread(&state, &auth, thread_id).await?;
+                state.activity(&scope.source, Some(thread_id)).await.running
             } else {
-                state.activity(&scope.source, None).running
+                state.activity(&scope.source, None).await.running
             };
             command_list_value(&state, &scope, active_turn, params.thread_id.is_some())
         }
@@ -1245,7 +1264,7 @@ where
             let params = request.required_params::<wire::CommandExecuteParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope.clone())?;
             if let Some(thread_id) = &params.thread_id {
-                authorize_thread(&state, &auth, thread_id)?;
+                authorize_thread(&state, &auth, thread_id).await?;
             }
             command_execute_value(&state, &scope, params).await
         }
@@ -1276,20 +1295,27 @@ where
             }
             let thread_id = match params.thread_id.clone() {
                 Some(thread_id) => {
-                    authorize_thread(&state, &auth, &thread_id)?;
+                    authorize_thread(&state, &auth, &thread_id).await?;
                     Some(thread_id)
                 }
-                None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+                None => {
+                    state
+                        .inner
+                        .gateway
+                        .resolve_source_thread(&scope.source)
+                        .await?
+                }
             };
             if state
                 .inner
                 .gateway
-                .resolve_source_thread(&scope.source)?
+                .resolve_source_thread(&scope.source)
+                .await?
                 .as_deref()
                 != thread_id.as_deref()
                 && let Some(thread_id) = thread_id.as_deref()
             {
-                bind_source_to_thread(&state, &scope, thread_id)?;
+                bind_source_to_thread(&state, &scope, thread_id).await?;
             }
             let event_selector = thread_id
                 .as_ref()
@@ -1298,7 +1324,7 @@ where
             let event_thread_id = thread_id.clone();
             let event_state = state.clone();
             let event_tx = out_tx.clone();
-            let event_sink: GatewayEventSink = Arc::new(move |event| {
+            let event_sink = GatewayEventEmitter::new(move |event| {
                 let context = event_state
                     .pending_context_for_selector(&event_selector, event_thread_id.as_deref());
                 event_state.publish_gateway_event_for_connection(
@@ -1372,18 +1398,19 @@ where
         "settings/read" => {
             let params = request.params::<wire::SettingsReadParams>()?;
             let (cwd, thread_id) = if let Some(thread_id) = params.thread_id {
-                authorize_thread(&state, &auth, &thread_id)?;
+                authorize_thread(&state, &auth, &thread_id).await?;
                 let summary = state
                     .inner
                     .state
 
-                    .session_summary(&thread_id)?
+                    .session_summary(&thread_id)
+                    .await?
                     .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
                 (PathBuf::from(summary.cwd), Some(thread_id))
             } else {
                 (resolve_cwd_filter(&state, &auth, params.cwd)?, None)
             };
-            settings_read_value(&state, &cwd, thread_id.as_deref())
+            settings_read_value(&state, &cwd, thread_id.as_deref()).await
         }
         "web/search/settings/read" => {
             let params = request.params::<wire::WebSearchSettingsReadParams>()?;
@@ -1398,14 +1425,15 @@ where
         "settings/update" => {
             let params = request.required_params::<wire::SettingsUpdateParams>()?;
             let scope = resolve_required_scope(&state, &auth, params.scope)?;
-            authorize_thread(&state, &auth, &params.thread_id)?;
+            authorize_thread(&state, &auth, &params.thread_id).await?;
             update_session_agent_setting(
                 &state,
                 &scope,
                 &params.thread_id,
                 params.agent.as_deref(),
-            )?;
-            settings_read_value(&state, &scope.cwd, Some(&params.thread_id))
+            )
+            .await?;
+            settings_read_value(&state, &scope.cwd, Some(&params.thread_id)).await
         }
         "model/settings/read" => {
             let params = request.params::<wire::ModelSettingsReadParams>()?;
@@ -1425,8 +1453,9 @@ where
         "model/state/read" => {
             let params = request.params::<wire::ModelStateReadParams>()?;
             let (cwd, thread_id) =
-                resolve_model_state_request_scope(&state, &auth, params.cwd, params.thread_id)?;
-            model_state_read_value(&state, &cwd, thread_id.as_deref())
+                resolve_model_state_request_scope(&state, &auth, params.cwd, params.thread_id)
+                    .await?;
+            model_state_read_value(&state, &cwd, thread_id.as_deref()).await
         }
         "model/state/set" => {
             let params = request.required_params::<wire::ModelStateSetParams>()?;
@@ -1435,16 +1464,18 @@ where
                 &auth,
                 params.cwd.clone(),
                 params.thread_id.clone(),
-            )?;
-            model_state_set_value(&state, &cwd, thread_id.as_deref(), params)
+            )
+            .await?;
+            model_state_set_value(&state, &cwd, thread_id.as_deref(), params).await
         }
         "model/assignment/set" => {
             let params = request.required_params::<wire::ModelAssignmentSetParams>()?;
             let cwd = default_resolved_scope(&state, &auth)?.cwd;
             model_assignment_set_value(&state, &cwd, params)
         }
-        method => Err(Error::Message(format!("method not found: {method}"))),
-    }
+            method => Err(Error::Message(format!("method not found: {method}"))),
+        }
+    })
 }
 
 fn runtime_rpc_error(
@@ -1882,20 +1913,42 @@ async fn thread_compact_result_for_thread(
     runtime_ref: String,
     out_tx: ConnectionSender,
 ) -> psychevo_runtime::Result<wire::ThreadCompactionResult> {
+    enqueue_thread_compact_result_for_thread(
+        state,
+        scope,
+        thread_id,
+        instructions,
+        runtime_ref,
+        out_tx,
+    )
+    .await?
+    .await
+}
+
+async fn enqueue_thread_compact_result_for_thread(
+    state: &WebState,
+    scope: &ResolvedScope,
+    thread_id: String,
+    instructions: Option<String>,
+    runtime_ref: String,
+    out_tx: ConnectionSender,
+) -> psychevo_runtime::Result<
+    BoxFuture<'static, psychevo_runtime::Result<wire::ThreadCompactionResult>>,
+> {
     let options = state.run_options(scope.cwd.clone(), Some(thread_id.clone()));
     let event_selector = GatewayThreadSelector::thread_id(&thread_id);
     let event_thread_id = thread_id.clone();
     let event_state = state.clone();
     let event_tx = out_tx.clone();
-    let event_sink: GatewayEventSink = Arc::new(move |event| {
+    let event_sink = GatewayEventEmitter::new(move |event| {
         let context =
             event_state.pending_context_for_selector(&event_selector, Some(&event_thread_id));
         event_state.publish_gateway_event_for_connection(event, context, None, Some(&event_tx));
     });
-    let result = state
+    let completion = state
         .inner
         .gateway
-        .compact_session(SendCompactRequest {
+        .enqueue_compact_session(SendCompactRequest {
             thread_id: Some(thread_id.clone()),
             source: Some(scope.source.clone()),
             runtime_ref: Some(runtime_ref),
@@ -1911,28 +1964,31 @@ async fn thread_compact_result_for_thread(
             inherited_env: options.inherited_env,
             event_sink: Some(event_sink),
         })
-        .await;
-    let response = match result {
-        Ok(result) => thread_compact_result(state, result)?,
-        Err(err) => wire::ThreadCompactionResult {
-            accepted: false,
-            thread_id: Some(thread_id),
-            compacted: false,
-            reason: "error".to_string(),
-            message: err.to_string(),
-            checkpoint: None,
-            tokens_before: None,
-            tokens_after: None,
-            summary_provider: None,
-            summary_model: None,
-            unavailable: false,
-            error: Some(err.to_string()),
-        },
-    };
-    Ok(response)
+        .await?;
+    let state = state.clone();
+    Ok(Box::pin(async move {
+        let response = match completion.await {
+            Ok(result) => thread_compact_result(&state, result).await?,
+            Err(err) => wire::ThreadCompactionResult {
+                accepted: false,
+                thread_id: Some(thread_id),
+                compacted: false,
+                reason: "error".to_string(),
+                message: err.to_string(),
+                checkpoint: None,
+                tokens_before: None,
+                tokens_after: None,
+                summary_provider: None,
+                summary_model: None,
+                unavailable: false,
+                error: Some(err.to_string()),
+            },
+        };
+        Ok(response)
+    }))
 }
 
-fn thread_compact_result(
+async fn thread_compact_result(
     state: &WebState,
     result: psychevo_runtime::compaction::CompactionResult,
 ) -> psychevo_runtime::Result<wire::ThreadCompactionResult> {
@@ -1941,7 +1997,8 @@ fn thread_compact_result(
             .inner
             .state
 
-            .session_compaction(checkpoint_id)?
+            .session_compaction(checkpoint_id)
+            .await?
             .map(|record| wire::ThreadCompactionCheckpointView {
                 checkpoint_id: record.id,
                 reason: record.reason,

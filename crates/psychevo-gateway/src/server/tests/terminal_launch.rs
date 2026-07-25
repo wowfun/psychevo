@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn terminal_start_rejects_cwd_outside_workspace() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let outside = temp.path().join("outside");
     std::fs::create_dir_all(&outside).expect("outside dir");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -34,7 +34,7 @@ async fn terminal_start_rejects_cwd_outside_workspace() {
 async fn terminal_rpc_streams_output_and_exit_notifications() {
     let shell = if cfg!(windows) { "cmd.exe" } else { "/bin/sh" };
     let (_temp, state) =
-        web_state_with_env(BTreeMap::from([("SHELL".to_string(), shell.to_string())]));
+        web_state_with_env(BTreeMap::from([("SHELL".to_string(), shell.to_string())])).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -133,7 +133,7 @@ async fn terminal_rpc_streams_output_and_exit_notifications() {
 
 #[tokio::test]
 async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -219,7 +219,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     let (tx, _rx) = mpsc::unbounded_channel();
     let list = handle_rpc(
         state.clone(),
@@ -275,7 +275,7 @@ async fn command_list_and_completion_use_web_desktop_presentation_catalog() {
 
 #[tokio::test]
 async fn command_catalog_completion_and_execute_use_effective_slash_aliases() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -405,7 +405,7 @@ async fn command_catalog_completion_and_execute_use_effective_slash_aliases() {
 
 #[tokio::test]
 async fn command_execute_alias_to_unsupported_target_is_not_prompt_passthrough() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -453,7 +453,7 @@ async fn command_execute_alias_to_unsupported_target_is_not_prompt_passthrough()
 
 #[tokio::test]
 async fn command_execute_export_share_invalid_args_return_known_guidance() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -492,7 +492,7 @@ async fn command_execute_export_share_invalid_args_return_known_guidance() {
 
 #[tokio::test]
 async fn command_list_and_execute_include_dynamic_skill_commands() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_project_skill(&state, "x-daily", "Fetch X daily posts.");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -586,7 +586,7 @@ async fn command_list_and_execute_include_dynamic_skill_commands() {
 
 #[tokio::test]
 async fn command_execute_known_unsupported_returns_guidance_without_passthrough() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -627,7 +627,7 @@ async fn command_execute_known_unsupported_returns_guidance_without_passthrough(
 
 #[tokio::test]
 async fn command_execute_unknown_slash_returns_prompt_passthrough() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -663,7 +663,7 @@ async fn command_execute_unknown_slash_returns_prompt_passthrough() {
 
 #[tokio::test]
 async fn shell_start_empty_command_returns_bounded_help_without_spawning() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -696,7 +696,7 @@ async fn shell_start_empty_command_returns_bounded_help_without_spawning() {
 
 #[tokio::test]
 async fn turn_start_empty_input_rejects_before_creating_session() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -728,7 +728,7 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
             .state
 
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .expect("sessions")
+            .await.expect("sessions")
             .len(),
         0
     );
@@ -737,14 +737,14 @@ async fn turn_start_empty_input_rejects_before_creating_session() {
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .expect("source lookup")
+            .await.expect("source lookup")
             .is_none()
     );
 }
 
 #[tokio::test]
 async fn shell_start_first_request_can_be_accepted_without_thread_id() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -774,7 +774,7 @@ async fn shell_start_first_request_can_be_accepted_without_thread_id() {
 
 #[tokio::test]
 async fn agent_write_rpc_creates_project_backend_ref_shadow() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -805,7 +805,7 @@ async fn agent_write_rpc_creates_project_backend_ref_shadow() {
 
 #[tokio::test]
 async fn static_shell_without_browser_session_returns_launch_required_page() {
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
 
     let response = static_asset(
         State(state),
@@ -831,7 +831,7 @@ async fn static_shell_without_browser_session_returns_launch_required_page() {
 
 #[tokio::test]
 async fn static_shell_with_browser_session_serves_workbench_index() {
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
     let session_id = "session-test".to_string();
     state
         .inner
@@ -894,7 +894,7 @@ async fn static_shell_with_browser_session_serves_workbench_index() {
 
 #[tokio::test]
 async fn fingerprinted_static_asset_is_immutable_cacheable() {
-    let (temp, state) = web_state_with_static();
+    let (temp, state) = web_state_with_static().await;
     let assets = temp.path().join("static/assets");
     std::fs::create_dir_all(&assets).expect("assets dir");
     std::fs::write(
@@ -930,7 +930,7 @@ async fn fingerprinted_static_asset_is_immutable_cacheable() {
 
 #[tokio::test]
 async fn module_worker_static_asset_uses_javascript_content_type() {
-    let (temp, state) = web_state_with_static();
+    let (temp, state) = web_state_with_static().await;
     let worker = temp
         .path()
         .join("static/file-viewer/vendor/pdf/pdf.worker.mjs");
@@ -957,7 +957,7 @@ async fn module_worker_static_asset_uses_javascript_content_type() {
 
 #[tokio::test]
 async fn static_asset_rejects_traversal_before_spa_fallback() {
-    let (temp, state) = web_state_with_static();
+    let (temp, state) = web_state_with_static().await;
     std::fs::write(temp.path().join("outside.txt"), "outside-secret").expect("outside file");
 
     for uri in [
@@ -979,7 +979,7 @@ async fn static_asset_rejects_traversal_before_spa_fallback() {
 #[cfg(unix)]
 #[tokio::test]
 async fn static_asset_rejects_symlink_escape() {
-    let (temp, state) = web_state_with_static();
+    let (temp, state) = web_state_with_static().await;
     let outside = temp.path().join("outside.txt");
     std::fs::write(&outside, "outside-secret").expect("outside file");
     std::os::unix::fs::symlink(&outside, temp.path().join("static/escape.txt"))
@@ -1001,19 +1001,19 @@ async fn static_asset_rejects_symlink_escape() {
 
 #[tokio::test]
 async fn download_session_honors_export_query_options() {
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     state
         .inner
         .state
 
         .append_message(&session_id, &runtime_user_message("hello export", 1))
-        .expect("message");
+        .await.expect("message");
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -1054,19 +1054,19 @@ async fn download_session_honors_export_query_options() {
 
 #[tokio::test]
 async fn download_session_defaults_to_markdown_artifact() {
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     state
         .inner
         .state
 
         .append_message(&session_id, &runtime_user_message("hello markdown", 1))
-        .expect("message");
+        .await.expect("message");
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
@@ -1105,7 +1105,7 @@ async fn download_session_defaults_to_markdown_artifact() {
 async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
     use base64::Engine as _;
 
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(psychevo_ai::DEFAULT_FAKE_IMAGE_BASE64)
         .expect("png fixture");
@@ -1147,7 +1147,7 @@ async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
 
 #[tokio::test]
 async fn consumed_launch_without_browser_session_returns_recovery_page() {
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
 
     let response = consume_launch(
         State(state),
@@ -1208,7 +1208,7 @@ fn expired_launch_pruning_preserves_live_entries() {
 
 #[tokio::test]
 async fn consumed_launch_with_browser_session_redirects_to_clean_shell() {
-    let (_temp, state) = web_state_with_static();
+    let (_temp, state) = web_state_with_static().await;
     let session_id = "session-test".to_string();
     state
         .inner

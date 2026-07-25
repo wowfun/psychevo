@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn default_draft_open_returns_one_exact_authoritative_context() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let browser_session_id = "draft-open-browser".to_string();
     state
         .inner
@@ -54,7 +54,7 @@ async fn default_draft_open_returns_one_exact_authoritative_context() {
 
 #[tokio::test]
 async fn unavailable_exact_target_returns_atomic_context_and_problem() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -116,9 +116,9 @@ entrypoints = ["peer"]
     assert_eq!(result["problem"]["retryClass"], "userAction");
     assert_eq!(result["context"]["sendability"]["allowed"], false);
 }
-#[test]
-fn detached_draft_keeps_the_canonical_source_mutation_lane() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn detached_draft_keeps_the_canonical_source_mutation_lane() {
+    let (_temp, state) = web_state().await;
     let origin = default_resolved_scope(&state, &AuthContext::Bearer).expect("origin");
     let detached = detached_draft_scope(
         &origin,

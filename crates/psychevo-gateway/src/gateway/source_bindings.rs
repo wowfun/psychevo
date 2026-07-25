@@ -1,5 +1,5 @@
 impl Gateway {
-    pub fn reset_source(
+    pub async fn reset_source(
         &self,
         source: &GatewaySource,
         new_thread_id: &str,
@@ -12,7 +12,7 @@ impl Gateway {
                 ));
             }
             GatewaySourceLifetime::Process => {
-                self.state.resume_session(new_thread_id)?;
+                self.state.resume_session(new_thread_id).await?;
                 let previous = self
                     .process_bindings
                     .lock()
@@ -20,19 +20,19 @@ impl Gateway {
                     .insert(source_key.0.clone(), new_thread_id.to_string());
                 if let Some(previous) = previous {
                     self.state
-
-                        .mark_session_ended_with_reason(&previous, "gateway_reset")?;
-                    self.state.archive_session(&previous)?;
+                        .mark_session_ended_with_reason(&previous, "gateway_reset")
+                        .await?;
+                    self.state.archive_session(&previous).await?;
                 }
             }
             GatewaySourceLifetime::Persistent => {
-                if let Some(previous) = self.state.gateway_source_lane(&source_key.0)?
+                if let Some(previous) = self.state.gateway_source_lane(&source_key.0).await?
                     && let Some(previous_thread_id) = previous.thread_id
                 {
                     self.state
-
-                        .mark_session_ended_with_reason(&previous_thread_id, "gateway_reset")?;
-                    self.state.archive_session(&previous_thread_id)?;
+                        .mark_session_ended_with_reason(&previous_thread_id, "gateway_reset")
+                        .await?;
+                    self.state.archive_session(&previous_thread_id).await?;
                 }
                 self.state
 
@@ -46,14 +46,15 @@ impl Gateway {
                         draft_profile_ref: None,
                         draft_control_values: &Default::default(),
                         lineage: Some(json!({"reason": "gateway_reset"})),
-                    })?;
+                    })
+                    .await?;
             }
         }
         self.bump_source_generation_key(&source_key);
         Ok(())
     }
 
-    pub fn clear_source_binding(
+    pub async fn clear_source_binding(
         &self,
         source: &GatewaySource,
     ) -> psychevo_runtime::Result<Option<String>> {
@@ -68,12 +69,12 @@ impl Gateway {
             GatewaySourceLifetime::Persistent => {
                 let previous = self
                     .state
-
-                    .gateway_source_lane(&source_key.0)?
+                    .gateway_source_lane(&source_key.0)
+                    .await?
                     .and_then(|lane| lane.thread_id);
                 self.state
-
-                    .delete_gateway_source_binding(&source_key.0)?;
+                    .delete_gateway_source_binding(&source_key.0)
+                    .await?;
                 previous
             }
         };
@@ -81,35 +82,35 @@ impl Gateway {
         Ok(previous)
     }
 
-    pub fn reset_source_to_empty(
+    pub async fn reset_source_to_empty(
         &self,
         source: &GatewaySource,
     ) -> psychevo_runtime::Result<Option<String>> {
-        let previous = self.clear_source_binding(source)?;
+        let previous = self.clear_source_binding(source).await?;
         if let Some(previous) = previous.as_deref() {
             self.state
-
-                .mark_session_ended_with_reason(previous, "gateway_reset")?;
-            self.state.archive_session(previous)?;
+                .mark_session_ended_with_reason(previous, "gateway_reset")
+                .await?;
+            self.state.archive_session(previous).await?;
         }
         Ok(previous)
     }
 
-    pub fn rotate_channel_connection_sources(
+    pub async fn rotate_channel_connection_sources(
         &self,
         connection_id: &str,
     ) -> psychevo_runtime::Result<usize> {
         let bindings = self
             .state
-
-            .gateway_source_bindings_for_connection_id(connection_id)?;
+            .gateway_source_bindings_for_connection_id(connection_id)
+            .await?;
         let mut rotated = 0usize;
         let mut archived_threads = HashSet::new();
         for binding in bindings {
             if !self
                 .state
-
-                .delete_gateway_source_binding(&binding.source_key)?
+                .delete_gateway_source_binding(&binding.source_key)
+                .await?
             {
                 continue;
             }
@@ -126,14 +127,15 @@ impl Gateway {
                 self.state.mark_session_ended_with_reason(
                     &binding.thread_id,
                     "channel_workspace_changed",
-                )?;
-                self.state.archive_session(&binding.thread_id)?;
+                )
+                .await?;
+                self.state.archive_session(&binding.thread_id).await?;
             }
         }
         Ok(rotated)
     }
 
-    pub fn bind_source_thread(
+    pub async fn bind_source_thread(
         &self,
         source: &GatewaySource,
         thread_id: &str,
@@ -148,7 +150,7 @@ impl Gateway {
                 ));
             }
             GatewaySourceLifetime::Process => {
-                self.state.resume_session(thread_id)?;
+                self.state.resume_session(thread_id).await?;
                 self.process_bindings
                     .lock()
                     .expect("gateway process binding map poisoned")
@@ -167,7 +169,8 @@ impl Gateway {
                         draft_profile_ref: None,
                         draft_control_values: &Default::default(),
                         lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
-                    })?;
+                    })
+                    .await?;
             }
         }
         self.bump_source_generation_key(&source_key);

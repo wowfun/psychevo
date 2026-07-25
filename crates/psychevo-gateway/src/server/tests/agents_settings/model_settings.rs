@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn model_settings_rpc_saves_zen_no_auth_and_auxiliary_assignment() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -126,7 +126,7 @@ async fn model_provider_catalog_rpc_fetches_fake_catalog() {
         axum::serve(listener, router).await.expect("serve");
     });
 
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -229,7 +229,7 @@ no_auth = true
 
 #[tokio::test]
 async fn model_settings_read_includes_image_generation_config() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -266,7 +266,7 @@ format = "webp"
 
 #[tokio::test]
 async fn model_settings_global_scope_ignores_project_model_override() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::create_dir_all(state.inner.cwd.join(".psychevo")).expect("project config dir");
     std::fs::write(

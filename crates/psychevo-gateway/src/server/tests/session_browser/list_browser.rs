@@ -1,13 +1,13 @@
 #[tokio::test]
 async fn thread_list_returns_global_top_level_sessions_without_source_partition() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
     let store = &state.inner.state;
     let top_level = store
         .create_session_with_metadata(&other_cwd, "web", "fake-model", "fake-provider", None)
-        .expect("top level");
+        .await.expect("top level");
     store
         .append_message(
             &top_level,
@@ -20,7 +20,7 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
                 timestamp_ms: gateway_now_ms(),
             },
         )
-        .expect("fallback title message");
+        .await.expect("fallback title message");
     let internal = store
         .create_session_with_metadata(
             &state.inner.cwd,
@@ -29,7 +29,7 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
             "fake-provider",
             None,
         )
-        .expect("internal");
+        .await.expect("internal");
     let child = store
         .create_child_session_with_metadata(
             &top_level,
@@ -39,7 +39,7 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
             "fake-provider",
             None,
         )
-        .expect("child");
+        .await.expect("child");
     let (out_tx, _out_rx) = mpsc::unbounded_channel();
 
     let value = handle_rpc(
@@ -83,7 +83,7 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
 
 #[tokio::test]
 async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_counts() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("large-other-work");
     std::fs::create_dir_all(&other_cwd).expect("other cwd");
     let other_cwd = canonicalize_cwd(&other_cwd).expect("other canonical");
@@ -102,7 +102,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
                 "fake-provider",
                 None,
             )
-            .expect("large candidate session");
+            .await.expect("large candidate session");
     }
     let internal = store
         .create_session_with_metadata(
@@ -112,7 +112,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
             "fake-provider",
             None,
         )
-        .expect("internal session");
+        .await.expect("internal session");
     let reserved = store
         .create_session_with_metadata(
             &state.inner.cwd,
@@ -121,7 +121,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
             "fake-provider",
             Some(json!({ "agentSessionImportState": { "phase": "reserved" } })),
         )
-        .expect("import reserved session");
+        .await.expect("import reserved session");
     let (tx, _rx) = mpsc::unbounded_channel();
     let mut samples = Vec::new();
     let mut value = None;
@@ -170,7 +170,7 @@ async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_c
 
 #[tokio::test]
 async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let cwd_string = state.inner.cwd.display().to_string();
     let store = &state.inner.state;
     let mut ids = Vec::new();
@@ -183,7 +183,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
                 "fake-provider",
                 None,
             )
-            .expect("session");
+            .await.expect("session");
         ids.push(id);
     }
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -281,7 +281,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("running browser activity");
+        .await.expect("running browser activity");
     let running = handle_rpc(
         state,
         AuthContext::Bearer,

@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn settings_read_and_channel_rpc_expose_secret_free_channels() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -99,7 +99,7 @@ allow_users = ["12345"]
 
 #[tokio::test]
 async fn channel_update_and_delete_rpc_refresh_settings_without_exposing_secrets() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -131,7 +131,7 @@ allow_users = ["12345"]
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
-        .expect("bound thread");
+        .await.expect("bound thread");
     state
         .inner
         .state
@@ -149,7 +149,7 @@ allow_users = ["12345"]
             backend_native_id: Some(&bound_thread),
             lineage: None,
         })
-        .expect("source binding");
+        .await.expect("source binding");
 
     let updated = handle_rpc(
         state.clone(),
@@ -199,7 +199,7 @@ allow_users = ["12345"]
             .state
 
             .gateway_source_binding("im.telegram:release-lane")
-            .expect("rotated binding lookup")
+            .await.expect("rotated binding lookup")
             .is_none()
     );
     let bound_summary = state
@@ -207,7 +207,7 @@ allow_users = ["12345"]
         .state
 
         .session_summary(&bound_thread)
-        .expect("bound summary")
+        .await.expect("bound summary")
         .expect("bound session");
     assert_eq!(
         bound_summary.end_reason.as_deref(),
@@ -220,7 +220,7 @@ allow_users = ["12345"]
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
-        .expect("same cwd thread");
+        .await.expect("same cwd thread");
     state
         .inner
         .state
@@ -238,7 +238,7 @@ allow_users = ["12345"]
             backend_native_id: Some(&same_cwd_thread),
             lineage: None,
         })
-        .expect("same cwd binding");
+        .await.expect("same cwd binding");
     handle_rpc(
         state.clone(),
         AuthContext::Bearer,
@@ -262,7 +262,7 @@ allow_users = ["12345"]
             .state
 
             .gateway_source_binding("im.telegram:same-cwd-lane")
-            .expect("same cwd binding lookup")
+            .await.expect("same cwd binding lookup")
             .expect("same cwd binding")
             .thread_id,
         same_cwd_thread
@@ -293,7 +293,7 @@ allow_users = ["12345"]
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "channel", "model", "provider", None)
-        .expect("source list thread");
+        .await.expect("source list thread");
     state
         .inner
         .state
@@ -315,7 +315,7 @@ allow_users = ["12345"]
             backend_native_id: Some(&source_list_thread),
             lineage: None,
         })
-        .expect("source list binding");
+        .await.expect("source list binding");
     let sources = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
@@ -429,7 +429,7 @@ async fn channel_wechat_qr_rpc_connects_and_writes_secret_free_config() {
         axum::serve(listener, router).await.expect("serve");
     });
 
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -534,7 +534,7 @@ async fn channel_wechat_qr_rpc_persists_confirmed_token_without_health_gate() {
         axum::serve(listener, router).await.expect("serve");
     });
 
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),

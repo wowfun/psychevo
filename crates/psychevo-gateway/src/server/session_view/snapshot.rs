@@ -1,57 +1,56 @@
-fn thread_snapshot(
+async fn thread_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
     let store = &state.inner.state;
-    let thread = thread_id
-        .map(|thread_id| {
-            let forked_from_thread_id = store
-                .session_metadata(thread_id)?
-                .and_then(|metadata| {
-                    metadata
-                        .get("forkedFromThreadId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                });
-            Ok::<GatewayThread, Error>(GatewayThread {
+    let thread = if let Some(thread_id) = thread_id {
+        let forked_from_thread_id = store
+            .session_metadata(thread_id)
+            .await?
+            .and_then(|metadata| {
+                metadata
+                    .get("forkedFromThreadId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+        Some(GatewayThread {
                 id: thread_id.to_string(),
-                backend: gateway_backend_info_for_thread(state, thread_id)?,
+                backend: gateway_backend_info_for_thread(state, thread_id).await?,
                 source_key: Some(scope.source.source_key()),
                 forked_from_thread_id,
             })
-        })
-        .transpose()?;
+    } else {
+        None
+    };
     let selector = thread_id
         .map(GatewayThreadSelector::thread_id)
         .unwrap_or_else(|| GatewayThreadSelector::source(scope.source.source_key()));
-    let pending_actions = prune_pending_actions(state, &selector, thread_id)?;
-    let activity = snapshot_activity(state, &scope.source, thread_id)?;
-    let turn_start_receipts = thread_id
-        .map(|thread_id| {
-            store
-                .gateway_turn_start_receipts(thread_id)
-                .map(|receipts| {
-                    receipts
-                        .into_iter()
-                        .map(|receipt| wire::TurnStartReceipt {
-                            client_turn_id: receipt.client_turn_id,
-                            turn_id: receipt.turn_id,
-                        })
-                        .collect::<Vec<_>>()
-                })
-        })
-        .transpose()?
-        .unwrap_or_default();
-    let entries = thread_id
-        .map(|thread_id| authoritative_history_projection(state, scope, thread_id))
-        .transpose()?
-        .unwrap_or_default();
-    let history = authoritative_history_view(state, thread_id)?;
-    let history_editing = thread_id
-        .map(|thread_id| thread_history_editing_value(store, thread_id))
-        .transpose()?
-        .flatten();
+    let pending_actions = prune_pending_actions(state, &selector, thread_id).await?;
+    let activity = snapshot_activity(state, &scope.source, thread_id).await?;
+    let turn_start_receipts = if let Some(thread_id) = thread_id {
+        store
+            .gateway_turn_start_receipts(thread_id)
+            .await?
+            .into_iter()
+            .map(|receipt| wire::TurnStartReceipt {
+                client_turn_id: receipt.client_turn_id,
+                turn_id: receipt.turn_id,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let entries = match thread_id {
+        Some(thread_id) => authoritative_history_projection(state, scope, thread_id).await?,
+        None => Vec::new(),
+    };
+    let history = authoritative_history_view(state, thread_id).await?;
+    let history_editing = if let Some(thread_id) = thread_id {
+        thread_history_editing_value(store, thread_id).await?
+    } else {
+        None
+    };
     Ok(json!({
         "source": scope.source,
         "scope": scope.to_wire_scope(),
@@ -65,14 +64,16 @@ fn thread_snapshot(
     }))
 }
 
-fn thread_history_editing_value(
+async fn thread_history_editing_value(
     store: &psychevo_runtime::state::StateRuntime,
     thread_id: &str,
 ) -> psychevo_runtime::Result<Option<Value>> {
-    let Some(revert) = store.session_revert_state(thread_id)? else {
+    let Some(revert) = store.session_revert_state(thread_id).await? else {
         return Ok(None);
     };
-    let hidden_entry_count = store.messages_from_count(thread_id, revert.start_seq)?;
+    let hidden_entry_count = store
+        .messages_from_count(thread_id, revert.start_seq)
+        .await?;
     Ok(Some(match revert.kind {
         SessionRevertKind::WorkspaceUndo { .. } => json!({
             "kind": "workspaceUndo",
@@ -113,15 +114,15 @@ async fn thread_snapshot_live(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
-    thread_snapshot(state, scope, thread_id)
+    thread_snapshot(state, scope, thread_id).await
 }
 
-fn snapshot_activity(
+async fn snapshot_activity(
     state: &WebState,
     source: &GatewaySource,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<GatewayActivity> {
-    let activity = state.activity(source, thread_id);
+    let activity = state.activity(source, thread_id).await;
     let Some(thread_id) = thread_id else {
         return Ok(activity);
     };
@@ -133,13 +134,14 @@ fn snapshot_activity(
         .inner
         .state
 
-        .gateway_runtime_binding(thread_id)?
+        .gateway_runtime_binding(thread_id)
+        .await?
         .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"))
     {
         return Ok(activity);
     }
 
-    let Some(edge) = state.inner.state.find_agent_edge(thread_id)? else {
+    let Some(edge) = state.inner.state.find_agent_edge(thread_id).await? else {
         return Ok(activity);
     };
     if edge.child_session_id != thread_id || edge.status != psychevo_runtime::state::AgentEdgeStatus::Open
@@ -151,21 +153,22 @@ fn snapshot_activity(
         .inner
         .state
 
-        .active_gateway_activity_for_thread(&edge.parent_session_id)?
+        .active_gateway_activity_for_thread(&edge.parent_session_id)
+        .await?
     else {
         return Ok(activity);
     };
     if parent_record.lease_expires_at_ms < gateway_now_ms() {
         return Ok(activity);
     }
-    let parent_activity = state.activity(source, Some(&edge.parent_session_id));
+    let parent_activity = state.activity(source, Some(&edge.parent_session_id)).await;
     if parent_activity.running {
         return Ok(parent_activity);
     }
     Ok(activity)
 }
 
-fn replay_running_live_transcript_overlay(
+async fn replay_running_live_transcript_overlay(
     state: &WebState,
     thread_id: &str,
     activity: &GatewayActivity,
@@ -182,7 +185,8 @@ fn replay_running_live_transcript_overlay(
         .inner
         .state
 
-        .list_gateway_live_snapshots_for_thread(thread_id, Some(active_turn_id), 1000)?;
+        .list_gateway_live_snapshots_for_thread(thread_id, Some(active_turn_id), 1000)
+        .await?;
     for snapshot in snapshots {
         let Ok(event) = serde_json::from_value::<GatewayEvent>(snapshot.event) else {
             continue;
@@ -192,7 +196,7 @@ fn replay_running_live_transcript_overlay(
     Ok(())
 }
 
-fn active_turn_projection_window(
+async fn active_turn_projection_window(
     state: &WebState,
     thread_id: &str,
     activity: &GatewayActivity,
@@ -207,7 +211,8 @@ fn active_turn_projection_window(
         .inner
         .state
 
-        .active_gateway_activity_for_thread(thread_id)?
+        .active_gateway_activity_for_thread(thread_id)
+        .await?
     else {
         return Ok(None);
     };

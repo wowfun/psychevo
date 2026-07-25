@@ -23,7 +23,11 @@ struct AcpPeerTurnContext {
 }
 
 type AcpBeforePromptCallback = Arc<
-    dyn Fn(&AcpHistoryReplayProjection) -> psychevo_runtime::Result<()> + Send + Sync,
+    dyn Fn(
+            AcpHistoryReplayProjection,
+        ) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<()>>
+        + Send
+        + Sync,
 >;
 
 pub(crate) fn resolve_peer_mcp_server_handoffs(
@@ -349,7 +353,7 @@ async fn execute_resident_acp_turn(
     if let Ok(mut slot) = turn.native_session_slot.lock() {
         *slot = Some(native_session_id.clone());
     }
-    session_ready(&native_session_id).map_err(|error| {
+    session_ready(native_session_id.clone()).await.map_err(|error| {
         crate::agent_session_error(
             "acp_session_binding_failed",
             crate::AgentErrorStage::Binding,
@@ -359,7 +363,9 @@ async fn execute_resident_acp_turn(
             Some(format!("acp-session:{}", turn.local_session_id)),
         )
     })?;
-    (turn.before_prompt)(&state.history_replay).map_err(|error| {
+    (turn.before_prompt)(state.history_replay.clone())
+        .await
+        .map_err(|error| {
         acp_not_delivered_error(
             "acp_before_prompt_commit_failed",
             format!(
@@ -401,7 +407,7 @@ async fn execute_resident_acp_turn(
         .await
         .map_err(|error| acp_not_delivered_error("acp_input_rejected", error.to_string()))?;
 
-    turn.delivery_observer.mark_unknown().map_err(|error| {
+    turn.delivery_observer.mark_unknown().await.map_err(|error| {
         acp_not_delivered_error(
             "delivery_intent_persistence_failed",
             format!("Failed to persist ACP delivery intent before dispatch: {error}"),
@@ -445,7 +451,7 @@ async fn execute_resident_acp_turn(
                         "ACP prompt delivery is unknown after a connection error: {}",
                         safe_acp_error(&error)
                     )))?;
-                turn.delivery_observer.confirm().map_err(|error| {
+                turn.delivery_observer.confirm().await.map_err(|error| {
                     acp_unknown_delivery_error(format!(
                         "ACP prompt response was observed but delivery confirmation could not be persisted: {error}"
                     ))
@@ -484,7 +490,7 @@ async fn execute_resident_acp_turn(
                         )
                     };
                         if reduction.active_session_observed {
-                            turn.delivery_observer.confirm().map_err(|error| {
+                            turn.delivery_observer.confirm().await.map_err(|error| {
                                 acp_unknown_delivery_error(format!(
                                     "ACP delivery was observed but could not be persisted: {error}"
                                 ))
@@ -543,6 +549,7 @@ async fn execute_resident_acp_turn(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 async fn inspect_resident_acp_session(
     cx: &ConnectionTo<Agent>,
     initialized: &InitializeResponse,

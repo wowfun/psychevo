@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn slash_settings_read_update_writes_profile_config_and_preserves_project_overrides() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::create_dir_all(state.inner.cwd.join(".psychevo")).expect("project config dir");
     std::fs::write(
@@ -95,7 +95,7 @@ label = "Keep Provider"
 
 #[tokio::test]
 async fn slash_settings_update_rejects_invalid_rows_and_conflicts() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
     let cases = [
         (

@@ -1,11 +1,12 @@
 use super::state::{ChannelInteractionKind, ChannelInteractionTokenInput};
 use super::*;
 
-pub(super) fn channel_reply_thread_id(state: &WebState, source: &GatewaySource) -> String {
+pub(super) async fn channel_reply_thread_id(state: &WebState, source: &GatewaySource) -> String {
     state
         .inner
         .gateway
         .resolve_source_thread(source)
+        .await
         .ok()
         .flatten()
         .unwrap_or_else(|| source.source_key().0)
@@ -17,8 +18,8 @@ pub(super) fn channel_event_sink(
     channel_gateway: ChannelGateway,
     identity: ImIdentity,
     fallback_source_key: SourceKey,
-) -> GatewayEventSink {
-    Arc::new(move |event| {
+) -> GatewayEventEmitter {
+    GatewayEventEmitter::new(move |event| {
         if let Some(thread_id) = channel_event_public_thread_id(&event) {
             runtime.observe_source_thread(&connection_id, &fallback_source_key, thread_id);
         }

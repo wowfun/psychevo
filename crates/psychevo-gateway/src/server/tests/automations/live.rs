@@ -3,7 +3,7 @@
 async fn live_xiaomi_token_plan_automation_manual_run_completes() {
     const PROVIDER: &str = "xiaomi-token-plan";
     const MODEL: &str = "xiaomi-token-plan/mimo-v2.5-pro";
-    let (_temp, state) = live_xiaomi_token_plan_web_state();
+    let (_temp, state) = live_xiaomi_token_plan_web_state().await;
     if live_xiaomi_token_plan_unavailable(&state) {
         return;
     }
@@ -61,7 +61,7 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
         .state
 
         .automation_runs_for_task(&automation_id, 5)
-        .expect("automation runs");
+        .await.expect("automation runs");
     assert_eq!(runs[0].status, "completed");
     assert!(runs[0].thread_id.is_some());
     let summary = state
@@ -69,7 +69,7 @@ async fn live_xiaomi_token_plan_automation_manual_run_completes() {
         .state
 
         .session_summary(runs[0].thread_id.as_deref().expect("thread id"))
-        .expect("session summary")
+        .await.expect("session summary")
         .expect("session");
     assert_eq!(summary.provider, PROVIDER);
 }

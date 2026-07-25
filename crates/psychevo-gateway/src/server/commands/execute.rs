@@ -15,10 +15,7 @@ pub(super) async fn command_execute_value(
     let slash_config = effective_slash_config(state, scope)?;
     let expanded = slash_config.expand_alias_line(&raw);
     let parse_line = expanded.as_deref().unwrap_or(&raw);
-    let active_turn = thread_id
-        .as_deref()
-        .map(|thread_id| state.activity(&scope.source, Some(thread_id)).running)
-        .unwrap_or_else(|| state.activity(&scope.source, None).running);
+    let active_turn = state.activity(&scope.source, thread_id.as_deref()).await.running;
     let dynamic = dynamic_slash_commands(state, scope)?;
     let result = match parse_slash_command_line(parse_line) {
         SlashCommandParse::Known(invocation) => {
@@ -191,8 +188,14 @@ async fn command_result_from_effect(
             json!({"type": "submitPrompt", "text": prompt, "displayText": raw}),
         )),
         SlashCommandEffect::Mission { prompt, team, goal } => {
-            let mission_thread_id =
-                record_gateway_mission_metadata(state, scope, thread_id.clone(), team.as_deref(), &goal)?;
+            let mission_thread_id = record_gateway_mission_metadata(
+                state,
+                scope,
+                thread_id.clone(),
+                team.as_deref(),
+                &goal,
+            )
+            .await?;
             Ok(command_action(
                 raw,
                 action,
@@ -232,8 +235,12 @@ async fn command_result_from_effect(
             action,
             &mode,
         )),
-        SlashCommandEffect::Undo => Ok(command_session_undo(state, scope, raw, action, thread_id)),
-        SlashCommandEffect::Redo => Ok(command_session_redo(state, scope, raw, action, thread_id)),
+        SlashCommandEffect::Undo => {
+            Ok(command_session_undo(state, scope, raw, action, thread_id).await)
+        }
+        SlashCommandEffect::Redo => {
+            Ok(command_session_redo(state, scope, raw, action, thread_id).await)
+        }
         SlashCommandEffect::Unsupported(message) => Ok(command_unsupported(raw, action, message)),
         SlashCommandEffect::ShowModel
         | SlashCommandEffect::SetModel { .. }
@@ -255,16 +262,18 @@ async fn command_result_from_effect(
     }
 }
 
-fn record_gateway_mission_metadata(
+async fn record_gateway_mission_metadata(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<String>,
     team: Option<&str>,
     goal: &str,
 ) -> psychevo_runtime::Result<String> {
-    let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id)?.ok_or_else(|| {
+    let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id)
+        .await?
+        .ok_or_else(|| {
         Error::Message("mission requires a thread context".to_string())
-    })?;
+        })?;
     record_gateway_mission_metadata_for_parent(
         state,
         scope,
@@ -272,11 +281,12 @@ fn record_gateway_mission_metadata(
         team,
         goal,
         "web:/mission",
-    )?;
+    )
+    .await?;
     Ok(parent_thread_id)
 }
 
-pub(crate) fn record_gateway_mission_metadata_for_parent(
+pub(crate) async fn record_gateway_mission_metadata_for_parent(
     state: &WebState,
     scope: &ResolvedScope,
     parent_thread_id: &str,
@@ -325,7 +335,8 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
                 max_parallel_agents: team.max_parallel_agents,
                 status: "running",
                 metadata: metadata.clone(),
-            })?;
+            })
+            .await?;
         state
             .inner
             .state
@@ -339,9 +350,11 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
                 lead_agent_name: &team.leader,
                 status: "running",
                 metadata,
-            })?;
+            })
+            .await?;
     } else {
-        let lead_agent = session_control_agent(state, Some(parent_thread_id))?
+        let lead_agent = session_control_agent(state, Some(parent_thread_id))
+            .await?
             .unwrap_or_else(|| "general".to_string());
         state
             .inner
@@ -356,7 +369,8 @@ pub(crate) fn record_gateway_mission_metadata_for_parent(
                 lead_agent_name: &lead_agent,
                 status: "running",
                 metadata,
-            })?;
+            })
+            .await?;
     }
     Ok(())
 }
@@ -496,18 +510,18 @@ fn filename_with_format_extension(filename: &str, format: SessionExportFormat) -
     format!("{stem}.{extension}")
 }
 
-fn command_session_undo(
+async fn command_session_undo(
     state: &WebState,
     scope: &ResolvedScope,
     raw: &str,
     action: SlashCommandAction,
     thread_id: Option<String>,
 ) -> wire::CommandExecuteResult {
-    let options = match command_session_undo_options(state, scope, thread_id, "undo") {
+    let options = match command_session_undo_options(state, scope, thread_id, "undo").await {
         Ok(options) => options,
         Err(message) => return command_unsupported(raw, action, message),
     };
-    match undo_session(options) {
+    match undo_session(options).await {
         Ok(result) => command_known_result(
             raw,
             action,
@@ -527,18 +541,18 @@ fn command_session_undo(
     }
 }
 
-fn command_session_redo(
+async fn command_session_redo(
     state: &WebState,
     scope: &ResolvedScope,
     raw: &str,
     action: SlashCommandAction,
     thread_id: Option<String>,
 ) -> wire::CommandExecuteResult {
-    let options = match command_session_undo_options(state, scope, thread_id, "redo") {
+    let options = match command_session_undo_options(state, scope, thread_id, "redo").await {
         Ok(options) => options,
         Err(message) => return command_unsupported(raw, action, message),
     };
-    match redo_session(options) {
+    match redo_session(options).await {
         Ok(result) => {
             let suffix = if result.complete {
                 "complete"
@@ -565,7 +579,7 @@ fn command_session_redo(
     }
 }
 
-fn command_session_undo_options(
+async fn command_session_undo_options(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<String>,
@@ -579,6 +593,7 @@ fn command_session_undo_options(
         .state
 
         .session_summary(&thread_id)
+        .await
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("session not found: {thread_id}"))?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
@@ -719,7 +734,8 @@ async fn command_side_conversation_start(
         .inner
         .state
 
-        .session_summary(&parent_thread_id)?
+        .session_summary(&parent_thread_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {parent_thread_id}")))?;
     if Path::new(&summary.cwd) != scope.cwd.as_path() {
         return Ok(command_unsupported(
@@ -735,7 +751,8 @@ async fn command_side_conversation_start(
         .inner
         .state
 
-        .gateway_runtime_binding(&parent_thread_id)?;
+        .gateway_runtime_binding(&parent_thread_id)
+        .await?;
     if !parent_binding.is_some_and(|binding| {
         binding.status == GatewayRuntimeBindingStatus::Resolved
             && binding.ownership == GatewayRuntimeBindingOwnership::ReadWrite
@@ -792,7 +809,8 @@ async fn command_side_conversation_start(
                 }
             }),
             boundary_text: side_conversation_boundary_prompt(),
-        })?;
+        })
+        .await?;
     state
         .inner
         .state
@@ -801,7 +819,8 @@ async fn command_side_conversation_start(
             &parent_thread_id,
             &side_thread_id,
             &effective_controls,
-        )?;
+        )
+        .await?;
     Ok(command_action(
         raw,
         action,

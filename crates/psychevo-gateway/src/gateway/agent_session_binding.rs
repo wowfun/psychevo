@@ -156,18 +156,19 @@ pub(super) fn resolve_gateway_agent_binding_snapshot(
     })
 }
 
-pub(crate) fn resolve_bound_gateway_agent_target(
+pub(crate) async fn resolve_bound_gateway_agent_target(
     options: &RunOptions,
     requested_runtime_ref: Option<&str>,
 ) -> psychevo_runtime::Result<Option<BoundGatewayAgentTarget>> {
     let Some(thread_id) = options.session.as_deref() else {
         return Ok(None);
     };
-    let Some(binding) = options.state.gateway_runtime_binding(thread_id)? else {
+    let Some(binding) = options.state.gateway_runtime_binding(thread_id).await? else {
         return Ok(None);
     };
     let bound =
-        resolve_bound_gateway_runtime_profile(&options.state, thread_id, requested_runtime_ref)?
+        resolve_bound_gateway_runtime_profile(&options.state, thread_id, requested_runtime_ref)
+            .await?
             .ok_or_else(|| {
                 agent_session_error(
                     "bound_profile_snapshot_missing",
@@ -314,7 +315,7 @@ fn resolve_captured_bound_peer(
     }))
 }
 
-pub(super) fn resolve_gateway_runtime_profile(
+pub(super) async fn resolve_gateway_runtime_profile(
     options: &RunOptions,
 ) -> psychevo_runtime::Result<(RuntimeProfileConfig, u64, String)> {
     if let Some(thread_id) = options.session.as_deref()
@@ -322,7 +323,8 @@ pub(super) fn resolve_gateway_runtime_profile(
             &options.state,
             thread_id,
             options.runtime_ref.as_deref(),
-        )?
+        )
+        .await?
     {
         return Ok((bound.profile, bound.revision, bound.fingerprint));
     }
@@ -399,12 +401,12 @@ pub(super) fn resolve_gateway_runtime_profile(
     Ok((profile, revision, fingerprint))
 }
 
-pub(super) fn resolve_bound_gateway_runtime_profile(
+pub(super) async fn resolve_bound_gateway_runtime_profile(
     state: &StateRuntime,
     thread_id: &str,
     requested_runtime_ref: Option<&str>,
 ) -> psychevo_runtime::Result<Option<BoundGatewayRuntimeProfile>> {
-    let Some(binding) = state.gateway_runtime_binding(thread_id)? else {
+    let Some(binding) = state.gateway_runtime_binding(thread_id).await? else {
         return Ok(None);
     };
     if binding.status != GatewayRuntimeBindingStatus::Resolved {
@@ -521,7 +523,7 @@ pub(crate) fn runtime_profile_config_revision(fingerprint: &str) -> u64 {
     u64::from_be_bytes(bytes)
 }
 
-pub(super) fn ensure_gateway_runtime_binding(
+pub(super) async fn ensure_gateway_runtime_binding(
     state: &StateRuntime,
     thread_id: &str,
     agent: &GatewayAgentBindingSnapshot,
@@ -529,7 +531,7 @@ pub(super) fn ensure_gateway_runtime_binding(
     revision: u64,
     fingerprint: &str,
 ) -> psychevo_runtime::Result<GatewayRuntimeBindingRecord> {
-    if let Some(existing) = state.gateway_runtime_binding(thread_id)? {
+    if let Some(existing) = state.gateway_runtime_binding(thread_id).await? {
         if existing.status != GatewayRuntimeBindingStatus::Resolved {
             return Err(agent_session_configuration_error(
                 existing.unresolved_reason.unwrap_or_else(|| {
@@ -565,7 +567,8 @@ pub(super) fn ensure_gateway_runtime_binding(
         return Ok(existing);
     }
     let summary = state
-        .session_summary(thread_id)?
+        .session_summary(thread_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     let backend_kind = match profile.runtime {
         RuntimeProfileKind::Native => "native",
@@ -573,24 +576,26 @@ pub(super) fn ensure_gateway_runtime_binding(
     };
     let native_session_id = (profile.runtime == RuntimeProfileKind::Native).then_some(thread_id);
     let profile_config_json = serde_json::to_string(profile)?;
-    state.create_gateway_runtime_binding(GatewayRuntimeBindingInput {
-        thread_id,
-        agent_ref: agent.agent_ref.as_deref(),
-        agent_fingerprint: &agent.fingerprint,
-        agent_definition_json: &agent.definition_json,
-        runtime_ref: &profile.id,
-        backend_kind,
-        native_kind: profile.runtime.as_str(),
-        native_session_id,
-        cwd: &summary.cwd,
-        profile_fingerprint: fingerprint,
-        profile_revision: &revision.to_string(),
-        profile_config_json: &profile_config_json,
-        adapter_kind: profile.runtime.as_str(),
-        adapter_revision: env!("CARGO_PKG_VERSION"),
-        ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-        parent_thread_id: summary.parent_session_id.as_deref(),
-    })
+    state
+        .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
+            thread_id,
+            agent_ref: agent.agent_ref.as_deref(),
+            agent_fingerprint: &agent.fingerprint,
+            agent_definition_json: &agent.definition_json,
+            runtime_ref: &profile.id,
+            backend_kind,
+            native_kind: profile.runtime.as_str(),
+            native_session_id,
+            cwd: &summary.cwd,
+            profile_fingerprint: fingerprint,
+            profile_revision: &revision.to_string(),
+            profile_config_json: &profile_config_json,
+            adapter_kind: profile.runtime.as_str(),
+            adapter_revision: env!("CARGO_PKG_VERSION"),
+            ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+            parent_thread_id: summary.parent_session_id.as_deref(),
+        })
+        .await
 }
 
 pub(crate) fn runtime_session_handle(

@@ -170,7 +170,8 @@ async fn shutdown_runtimes_with_deadlines(
     graceful_timeout: Duration,
     force_timeout: Duration,
 ) -> psychevo_runtime::Result<()> {
-    let graceful = tokio::time::timeout(graceful_timeout, gateway.shutdown_runtimes(false)).await;
+    let graceful =
+        tokio::time::timeout(graceful_timeout, gateway.shutdown_application(false)).await;
     let graceful_failure = match graceful {
         Ok(Ok(())) => return Ok(()),
         Ok(Err(error)) => format!("graceful runtime shutdown failed: {error}"),
@@ -179,7 +180,7 @@ async fn shutdown_runtimes_with_deadlines(
             graceful_timeout.as_millis()
         ),
     };
-    match tokio::time::timeout(force_timeout, gateway.shutdown_runtimes(true)).await {
+    match tokio::time::timeout(force_timeout, gateway.shutdown_application(true)).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(Error::Message(format!(
             "{graceful_failure}; forced runtime shutdown failed: {error}"
@@ -565,7 +566,11 @@ impl WebState {
         };
         channel_runtime::reconcile(web_state.clone());
         automations::reconcile(web_state.clone());
-        reconcile_acknowledged_session_deletes(&web_state);
+        let delete_reconcile_state = web_state.clone();
+        let delete_reconcile_gateway = web_state.inner.gateway.clone();
+        delete_reconcile_gateway.spawn_background("session-delete-reconcile", async move {
+            reconcile_acknowledged_session_deletes(&delete_reconcile_state).await;
+        });
         web_state
     }
 
@@ -591,16 +596,18 @@ impl WebState {
         GatewayThreadSelector::source(source.source_key())
     }
 
-    fn activity(&self, source: &GatewaySource, thread_id: Option<&str>) -> GatewayActivity {
+    async fn activity(&self, source: &GatewaySource, thread_id: Option<&str>) -> GatewayActivity {
         match thread_id {
             Some(thread_id) => self
                 .inner
                 .gateway
-                .activity_for_selector(GatewayThreadSelector::thread_id(thread_id)),
+                .activity_for_selector(GatewayThreadSelector::thread_id(thread_id))
+                .await,
             None => self
                 .inner
                 .gateway
-                .activity_for_selector(self.selector(source)),
+                .activity_for_selector(self.selector(source))
+                .await,
         }
     }
 
@@ -656,25 +663,26 @@ impl WebState {
         cwd: PathBuf,
         thread_id: Option<String>,
         input: Vec<GatewayInputPart>,
-    ) -> crate::ThreadTurnRequest {
+    ) -> (crate::ThreadCallerContext, crate::ThreadTurnIntent) {
         let mut inherited_env = self.inner.inherited_env.clone();
         inherited_env
             .entry("PSYCHEVO_HOME".to_string())
             .or_insert_with(|| self.inner.home.to_string_lossy().into_owned());
-        let mut request = crate::ThreadTurnRequest::new(cwd.clone(), input);
-        request.thread_id = thread_id.clone();
-        request.policy.snapshot_root = Some(self.inner.home.join("snapshots"));
-        request.policy.extract_prompt_image_sources = true;
-        request.policy.config_path = self.inner.config_path.clone();
-        request.policy.permission_mode = Some(PermissionMode::Default);
-        request.policy.clarify_enabled = true;
-        request.policy.inherited_env = Some(inherited_env);
-        request.set_runtime_tools(automations::automation_runtime_tools(
+        let mut caller = crate::ThreadCallerContext::new(crate::ThreadSurface::Web, cwd.clone());
+        caller.set_runtime_tools(automations::automation_runtime_tools(
             self.clone(),
             cwd,
-            thread_id,
+            thread_id.clone(),
         ));
-        request
+        let mut intent = crate::ThreadTurnIntent::new(input);
+        intent.thread_id = thread_id;
+        intent.policy.snapshot_root = Some(self.inner.home.join("snapshots"));
+        intent.policy.extract_prompt_image_sources = true;
+        intent.policy.config_path = self.inner.config_path.clone();
+        intent.policy.permission_mode = Some(PermissionMode::Default);
+        intent.policy.clarify_enabled = true;
+        intent.policy.inherited_env = Some(inherited_env);
+        (caller, intent)
     }
 
     #[cfg(test)]
@@ -738,7 +746,7 @@ impl WebState {
         self.inner.event_hub.publish(&display_event);
     }
 
-    fn pending_context_for_live_event(
+    async fn pending_context_for_live_event(
         &self,
         record: &psychevo_runtime::state::GatewayLiveEventRecord,
     ) -> PendingInteractionContext {
@@ -751,7 +759,7 @@ impl WebState {
             lease_expires_at_ms: None,
         };
         if let Some(activity_id) = &record.activity_id
-            && let Ok(Some(activity)) = self.inner.state.gateway_activity(activity_id)
+            && let Ok(Some(activity)) = self.inner.state.gateway_activity(activity_id).await
         {
             if context.thread_id.is_none() {
                 context.thread_id = activity.thread_id;
@@ -775,7 +783,7 @@ impl WebState {
         selector: &GatewayThreadSelector,
         thread_id: Option<&str>,
     ) -> PendingInteractionContext {
-        let activity = self.inner.gateway.activity_for_selector(selector.clone());
+        let activity = self.inner.gateway.local_activity_for_selector(selector);
         let source_key = match selector {
             GatewayThreadSelector::Source { source_key } => Some(source_key.0.clone()),
             GatewayThreadSelector::ThreadId { .. } => None,

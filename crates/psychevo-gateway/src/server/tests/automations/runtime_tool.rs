@@ -1,6 +1,6 @@
-#[test]
-fn gateway_turns_expose_model_facing_automation_tool() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn gateway_turns_expose_model_facing_automation_tool() {
+    let (_temp, state) = web_state().await;
 
     let options = state.run_options(state.inner.cwd.clone(), Some("thread-1".to_string()));
 
@@ -12,9 +12,9 @@ fn gateway_turns_expose_model_facing_automation_tool() {
     );
 }
 
-#[test]
-fn automation_declaration_is_concise_and_product_facing() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn automation_declaration_is_concise_and_product_facing() {
+    let (_temp, state) = web_state().await;
     let (description, parameters) = automations::automation_tool_declaration_for_test(
         state.clone(),
         state.inner.cwd.clone(),
@@ -101,15 +101,15 @@ fn collect_missing_automation_schema_descriptions(
     }
 }
 
-#[test]
-fn automation_tool_create_defaults_to_current_thread() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn automation_tool_create_defaults_to_current_thread() {
+    let (_temp, state) = web_state().await;
     let thread_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .expect("session");
+        .await.expect("session");
     let value = automations::automation_tool_execute_for_test(
         state.clone(),
         state.inner.cwd.clone(),
@@ -121,6 +121,7 @@ fn automation_tool_create_defaults_to_current_thread() {
             "schedule": { "kind": "interval", "everyMinutes": 30 }
         }),
     )
+    .await
     .expect("automation tool");
 
     assert_eq!(value["success"], true);
@@ -139,7 +140,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
         "prompt": "Send one useful software engineering tip.",
         "schedule": { "kind": "interval", "everyMinutes": 1 }
     }));
-    let (_temp, state) = web_state_with_automation_backend(backend.clone());
+    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -148,7 +149,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .expect("source")
+            .await.expect("source")
             .is_none()
     );
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -199,7 +200,7 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
     let accepted_turn_id = accepted["turnId"].as_str().expect("accepted turn id");
     let resumed_scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let resumed = thread_snapshot(&state, &resumed_scope, Some(&accepted_thread_id))
-        .expect("accepted Thread snapshot");
+        .await.expect("accepted Thread snapshot");
     assert_eq!(
         resumed["turnStartReceipts"],
         json!([{
@@ -262,23 +263,28 @@ async fn turn_start_first_prompt_materializes_current_thread_for_automation_tool
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .expect("source binding")
+            .await.expect("source binding")
             .as_deref(),
         Some(target_thread_id.as_str())
     );
 
-    let mut saw_terminal = false;
-    while let Ok(message) = rx.try_recv() {
-        saw_terminal |= message.contains("\"type\":\"turnCompleted\"");
-        assert!(!message.contains("current thread is not available"));
-    }
-    assert!(saw_terminal);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(message) = rx.recv().await {
+            assert!(!message.contains("current thread is not available"));
+            if message.contains("\"type\":\"turnCompleted\"") {
+                return;
+            }
+        }
+        panic!("gateway event stream closed before turn terminal");
+    })
+    .await
+    .expect("turn terminal event");
 }
 
 #[tokio::test]
 async fn draft_open_remains_empty_without_creating_session() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend);
+    let (_temp, state) = web_state_with_automation_backend(backend).await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -306,7 +312,7 @@ async fn draft_open_remains_empty_without_creating_session() {
             .state
 
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .expect("sessions")
+            .await.expect("sessions")
             .len(),
         0
     );
@@ -315,7 +321,7 @@ async fn draft_open_remains_empty_without_creating_session() {
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .expect("source lookup")
+            .await.expect("source lookup")
             .is_none()
     );
 }
@@ -323,7 +329,7 @@ async fn draft_open_remains_empty_without_creating_session() {
 #[tokio::test]
 async fn automation_tool_manages_project_lifecycle_actions() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone());
+    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
     let cwd = state.inner.cwd.clone();
 
     let created = automations::automation_tool_execute_for_test(
@@ -338,6 +344,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
             "schedule": { "kind": "interval", "everyMinutes": 30 }
         }),
     )
+    .await
     .expect("create");
     let automation_id = created["automation"]["id"]
         .as_str()
@@ -352,6 +359,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
         None,
         json!({ "action": "list" }),
     )
+    .await
     .expect("list");
     assert_eq!(listed["action"], "list");
     assert_eq!(listed["automations"][0]["id"], automation_id);
@@ -366,6 +374,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
             "title": "Updated lifecycle"
         }),
     )
+    .await
     .expect("update");
     assert_eq!(updated["action"], "update");
     assert_eq!(updated["automation"]["title"], "Updated lifecycle");
@@ -376,6 +385,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
         None,
         json!({ "action": "pause", "automationId": automation_id }),
     )
+    .await
     .expect("pause");
     assert_eq!(paused["action"], "pause");
     assert_eq!(paused["automation"]["enabled"], false);
@@ -387,6 +397,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
         None,
         json!({ "action": "resume", "automationId": automation_id }),
     )
+    .await
     .expect("resume");
     assert_eq!(resumed["action"], "resume");
     assert_eq!(resumed["automation"]["enabled"], true);
@@ -398,6 +409,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
         None,
         json!({ "action": "run", "automationId": automation_id }),
     )
+    .await
     .expect("run");
     assert_eq!(run["action"], "run");
     assert_eq!(run["accepted"], true);
@@ -415,6 +427,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
         None,
         json!({ "action": "remove", "automationId": automation_id }),
     )
+    .await
     .expect("remove");
     assert_eq!(removed["action"], "remove");
     assert_eq!(removed["deleted"], true);
@@ -425,6 +438,7 @@ async fn automation_tool_manages_project_lifecycle_actions() {
         None,
         json!({ "action": "list" }),
     )
+    .await
     .expect("list empty");
     assert!(
         listed["automations"]

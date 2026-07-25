@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn settings_read_returns_workbench_project_and_controls() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -74,7 +74,7 @@ fn settings_workbench_display_cwd_preserves_home_relative_display_after_normaliz
 
 #[tokio::test]
 async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     let (tx, _rx) = mpsc::unbounded_channel();
     let cwd = state.inner.cwd.display().to_string();
@@ -149,14 +149,14 @@ async fn model_state_rpc_saves_cwd_selection_and_controls_recent_models() {
 
 #[tokio::test]
 async fn model_state_rpc_with_thread_updates_session_model_metadata() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "old-model", "old", None)
-        .expect("session");
+        .await.expect("session");
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let saved = handle_rpc(
@@ -185,7 +185,7 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
         .state
 
         .session_summary(&session_id)
-        .expect("summary")
+        .await.expect("summary")
         .expect("session");
     assert_eq!(summary.provider, "mock");
     assert_eq!(summary.model, "model-b");
@@ -194,7 +194,7 @@ async fn model_state_rpc_with_thread_updates_session_model_metadata() {
         .state
 
         .session_metadata(&session_id)
-        .expect("metadata")
+        .await.expect("metadata")
         .expect("metadata");
     assert_eq!(
         metadata[SESSION_COMPOSER_MODEL_METADATA_KEY]["reasoningEffort"],

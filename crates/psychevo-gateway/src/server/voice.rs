@@ -121,7 +121,7 @@ pub(super) async fn voice_tts_synthesize_value(
     })?)
 }
 
-pub(super) fn voice_policy_read_value(
+pub(super) async fn voice_policy_read_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::VoicePolicyReadParams,
@@ -132,7 +132,8 @@ pub(super) fn voice_policy_read_value(
         params.scope,
         params.source_key,
         params.thread_id,
-    )?;
+    )
+    .await?;
     let mode = state
         .inner
         .voice_policies
@@ -147,7 +148,7 @@ pub(super) fn voice_policy_read_value(
     })?)
 }
 
-pub(super) fn voice_policy_update_value(
+pub(super) async fn voice_policy_update_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::VoicePolicyUpdateParams,
@@ -158,7 +159,8 @@ pub(super) fn voice_policy_update_value(
         params.scope,
         params.source_key,
         params.thread_id,
-    )?;
+    )
+    .await?;
     let mut policies = state
         .inner
         .voice_policies
@@ -181,7 +183,7 @@ pub(super) async fn start_realtime(
     out_tx: ConnectionSender,
     params: wire::ThreadRealtimeStartParams,
 ) -> psychevo_runtime::Result<wire::ThreadRealtimeStartResult> {
-    authorize_thread(state, auth, &params.thread_id)?;
+    authorize_thread(state, auth, &params.thread_id).await?;
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     let mut options = state.run_options(scope.cwd, Some(params.thread_id.clone()));
     options.config_path = Some(state.inner.home.join("config.toml"));
@@ -364,7 +366,7 @@ pub(super) fn update_voice_policy_for_source(
     wire::VoicePolicyResult { mode, target }
 }
 
-fn voice_policy_target(
+async fn voice_policy_target(
     state: &WebState,
     auth: &AuthContext,
     scope: Option<wire::GatewayRequestScope>,
@@ -372,7 +374,7 @@ fn voice_policy_target(
     thread_id: Option<String>,
 ) -> psychevo_runtime::Result<String> {
     if let Some(thread_id) = thread_id {
-        authorize_thread(state, auth, &thread_id)?;
+        authorize_thread(state, auth, &thread_id).await?;
         return Ok(format!("thread:{thread_id}"));
     }
     if let Some(source_key) = source_key {

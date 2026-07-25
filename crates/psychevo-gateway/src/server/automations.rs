@@ -15,8 +15,9 @@ pub(super) fn reconcile(state: WebState) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
-    let _handle = tokio::spawn(async move {
-        if let Err(err) = recover_stale_automation_runs(&state) {
+    let gateway = state.inner.gateway.clone();
+    gateway.spawn_background("automation-scheduler", async move {
+        if let Err(err) = recover_stale_automation_runs(&state).await {
             eprintln!("automation stale-run recovery failed: {err}");
         }
         let mut tick = tokio::time::interval(Duration::from_millis(AUTOMATION_SCHEDULER_TICK_MS));

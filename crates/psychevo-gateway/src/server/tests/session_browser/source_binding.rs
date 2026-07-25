@@ -1,6 +1,6 @@
-#[test]
-fn bind_source_to_thread_keeps_previous_history_active() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn bind_source_to_thread_keeps_previous_history_active() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let first = state
         .inner
@@ -13,7 +13,7 @@ fn bind_source_to_thread_keeps_previous_history_active() {
             "fake-provider",
             None,
         )
-        .expect("first");
+        .await.expect("first");
     let second = state
         .inner
         .state
@@ -25,10 +25,10 @@ fn bind_source_to_thread_keeps_previous_history_active() {
             "fake-provider",
             None,
         )
-        .expect("second");
+        .await.expect("second");
 
-    bind_source_to_thread(&state, &scope, &first).expect("bind first");
-    bind_source_to_thread(&state, &scope, &second).expect("bind second");
+    bind_source_to_thread(&state, &scope, &first).await.expect("bind first");
+    bind_source_to_thread(&state, &scope, &second).await.expect("bind second");
 
     assert!(
         state
@@ -36,15 +36,15 @@ fn bind_source_to_thread_keeps_previous_history_active() {
             .state
 
             .session_summary(&first)
-            .expect("first summary")
+            .await.expect("first summary")
             .expect("first exists")
             .archived_at_ms
             .is_none()
     );
 }
 
-#[test]
-fn active_completion_token_keeps_at_paths_with_slashes() {
+#[tokio::test]
+async fn active_completion_token_keeps_at_paths_with_slashes() {
     let token = active_completion_token("@src/ma", 7).expect("token");
 
     assert_eq!(token.sigil, '@');

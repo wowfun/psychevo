@@ -9,7 +9,7 @@ async fn wait_for_automation_status(
             .state
 
             .automation_task(automation_id)
-            .expect("automation task")
+            .await.expect("automation task")
             .expect("task");
         if task.last_status.as_deref() == Some(status) {
             return task;
@@ -32,7 +32,7 @@ async fn wait_for_automation_status_with_timeout(
             .state
 
             .automation_task(automation_id)
-            .expect("automation task")
+            .await.expect("automation task")
             .expect("task");
         if task.last_status.as_deref() == Some(status) {
             return task;
@@ -49,7 +49,7 @@ async fn wait_for_automation_status_with_timeout(
     panic!("automation did not reach {status} within {timeout:?}");
 }
 
-fn live_xiaomi_token_plan_web_state() -> (tempfile::TempDir, WebState) {
+async fn live_xiaomi_token_plan_web_state() -> (tempfile::TempDir, WebState) {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path().join("work");
     let home = temp.path().join("home");
@@ -90,7 +90,7 @@ api = "{base_url}"
         ),
     )
     .expect("live automation config");
-    let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
     let gateway = Gateway::new(state);
     let config = GatewayWebServerConfig::new(
         gateway,
@@ -190,8 +190,8 @@ struct AutomationFakeBackend {
     runs: Mutex<Vec<AutomationFakeRun>>,
     dispatch_times: Mutex<Vec<std::time::Instant>>,
     model_tool_args: Mutex<Option<Value>>,
-    model_tool_results: Mutex<Vec<Value>>,
-    model_tool_errors: Mutex<Vec<String>>,
+    model_tool_results: Arc<Mutex<Vec<Value>>>,
+    model_tool_errors: Arc<Mutex<Vec<String>>>,
     web_state: Mutex<Option<WebState>>,
     notify: tokio::sync::Notify,
 }
@@ -223,38 +223,14 @@ impl crate::GatewayBackend for AutomationFakeBackend {
             .map(|tool| tool.name().to_string())
             .collect();
         let session = request.options.session.clone();
-        if let Some(args) = self.model_tool_args.lock().expect("tool args").clone() {
-            let result = self
-                .web_state
-                .lock()
-                .expect("web state")
-                .clone()
-                .ok_or_else(|| Error::Message("test web state was not installed".to_string()))
-                .and_then(|state| {
-                    automations::automation_tool_execute_for_test(
-                        state,
-                        request.options.cwd.clone(),
-                        session.clone(),
-                        args,
-                    )
-                });
-            match result {
-                Ok(value) => self
-                    .model_tool_results
-                    .lock()
-                    .expect("tool results")
-                    .push(value),
-                Err(err) => self
-                    .model_tool_errors
-                    .lock()
-                    .expect("tool errors")
-                    .push(err.to_string()),
-            }
-        }
+        let model_tool_args = self.model_tool_args.lock().expect("tool args").clone();
+        let model_tool_state = self.web_state.lock().expect("web state").clone();
+        let model_tool_results = Arc::clone(&self.model_tool_results);
+        let model_tool_errors = Arc::clone(&self.model_tool_errors);
         self.runs.lock().expect("runs").push(AutomationFakeRun {
             runtime_source: request.runtime_source.clone(),
             prompt: request.options.prompt.clone(),
-            session,
+            session: session.clone(),
             runtime_tools,
             mode: request.options.mode,
             permission_mode: request.options.permission_mode,
@@ -262,17 +238,47 @@ impl crate::GatewayBackend for AutomationFakeBackend {
         });
         self.notify.notify_one();
         Box::pin(async move {
+            if let Some(args) = model_tool_args {
+                let result = match model_tool_state {
+                    Some(state) => {
+                        automations::automation_tool_execute_for_test(
+                            state,
+                            request.options.cwd.clone(),
+                            session,
+                            args,
+                        )
+                        .await
+                    }
+                    None => Err(Error::Message(
+                        "test web state was not installed".to_string(),
+                    )),
+                };
+                match result {
+                    Ok(value) => model_tool_results
+                        .lock()
+                        .expect("tool results")
+                        .push(value),
+                    Err(err) => model_tool_errors
+                        .lock()
+                        .expect("tool errors")
+                        .push(err.to_string()),
+                }
+            }
             let session_id = if let Some(session_id) = request.options.session.clone() {
-                request.options.state.resume_session(&session_id)?;
+                request.options.state.resume_session(&session_id).await?;
                 session_id
             } else {
-                request.options.state.create_session_with_metadata(
-                    &request.options.cwd,
-                    &request.runtime_source,
-                    "fake-model",
-                    "fake-provider",
-                    None,
-                )?
+                request
+                    .options
+                    .state
+                    .create_session_with_metadata(
+                        &request.options.cwd,
+                        &request.runtime_source,
+                        "fake-model",
+                        "fake-provider",
+                        None,
+                    )
+                    .await?
             };
             let final_answer = if request.runtime_source == "automation-draft" {
                 r#"{
@@ -313,7 +319,7 @@ impl crate::GatewayBackend for AutomationFakeBackend {
     }
 }
 
-fn web_state_with_automation_backend(
+async fn web_state_with_automation_backend(
     backend: Arc<AutomationFakeBackend>,
 ) -> (tempfile::TempDir, WebState) {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -330,7 +336,7 @@ fn web_state_with_automation_backend(
             home.to_string_lossy().to_string(),
         ),
     ]);
-    let state = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
     let gateway = Gateway::with_backend(state, backend.clone());
     let config = GatewayWebServerConfig::new(
         gateway,

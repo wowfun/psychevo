@@ -1,7 +1,10 @@
-fn managed_test_config(temp: &tempfile::TempDir, instance_id: Option<&str>) -> GatewayWebServerConfig {
+async fn managed_test_config(
+    temp: &tempfile::TempDir,
+    instance_id: Option<&str>,
+) -> GatewayWebServerConfig {
     let cwd = temp.path().join("work");
     std::fs::create_dir_all(&cwd).expect("cwd");
-    let runtime = StateRuntime::open(temp.path().join("state.db")).expect("state");
+    let runtime = StateRuntime::open(temp.path().join("state.db")).await.expect("state");
     let mut config = GatewayWebServerConfig::headless(
         Gateway::new(runtime),
         temp.path().join("home"),
@@ -17,7 +20,7 @@ fn managed_test_config(temp: &tempfile::TempDir, instance_id: Option<&str>) -> G
 #[tokio::test]
 async fn managed_identity_and_shutdown_require_auth_and_matching_instance() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let bound = bind_gateway_web_server(managed_test_config(&temp, Some("instance-a")))
+    let bound = bind_gateway_web_server(managed_test_config(&temp, Some("instance-a")).await)
         .await
         .expect("bind");
     let base_url = bound.url();
@@ -71,7 +74,7 @@ async fn managed_identity_and_shutdown_require_auth_and_matching_instance() {
 #[tokio::test]
 async fn non_managed_server_does_not_expose_managed_routes() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let bound = bind_gateway_web_server(managed_test_config(&temp, None))
+    let bound = bind_gateway_web_server(managed_test_config(&temp, None).await)
         .await
         .expect("bind");
     let base_url = bound.url();

@@ -15,6 +15,8 @@ struct PendingGatewayLiveSnapshot {
 pub struct ThreadApplication {
     state: StateRuntime,
     agent_sessions: AgentSessionHost,
+    event_ingress: GatewayEventIngress,
+    supervisor: GatewaySupervisor,
     active: Arc<Mutex<HashMap<String, ActiveThreadState>>>,
     active_aliases: Arc<Mutex<HashMap<String, String>>>,
     process_bindings: Arc<Mutex<HashMap<String, String>>>,
@@ -35,6 +37,7 @@ impl fmt::Debug for ThreadApplication {
             .debug_struct("ThreadApplication")
             .field("state", &self.state)
             .field("agent_sessions", &self.agent_sessions)
+            .field("event_ingress", &self.event_ingress)
             .finish_non_exhaustive()
     }
 }

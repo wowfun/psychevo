@@ -14,7 +14,7 @@ async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
         axum::serve(listener, router).await.expect("serve");
     });
 
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -51,7 +51,7 @@ async fn channel_wechat_qr_start_generates_svg_for_url_payload() {
 
 #[tokio::test]
 async fn settings_read_exposes_resolved_model_without_variant_override() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -128,7 +128,7 @@ reasoning = false
 
 #[tokio::test]
 async fn web_search_settings_store_secrets_in_profile_env_and_only_return_status() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope").to_wire_scope();
@@ -157,7 +157,7 @@ async fn web_search_settings_store_secrets_in_profile_env_and_only_return_status
 
 #[tokio::test]
 async fn settings_read_projects_web_search_with_protocol_field_names() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let (tx, _rx) = mpsc::unbounded_channel();
     let result = handle_rpc(
         state,
@@ -185,7 +185,7 @@ async fn settings_read_projects_web_search_with_protocol_field_names() {
 
 #[tokio::test]
 async fn settings_read_reports_model_resolution_errors_without_failing() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -223,7 +223,7 @@ async fn settings_read_reports_model_resolution_errors_without_failing() {
 
 #[tokio::test]
 async fn settings_read_exposes_session_agent() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session = state
         .inner
         .state
@@ -242,7 +242,7 @@ async fn settings_read_exposes_session_agent() {
                 )
             })),
         )
-        .expect("session");
+        .await.expect("session");
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -264,7 +264,7 @@ async fn settings_read_exposes_session_agent() {
 
 #[tokio::test]
 async fn settings_update_persists_session_agent_and_default() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_agent_definition(
         &state.inner.cwd.join(".psychevo/agents"),
         "translate",
@@ -275,7 +275,7 @@ async fn settings_update_persists_session_agent_and_default() {
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .expect("session");
+        .await.expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();
@@ -305,7 +305,7 @@ async fn settings_update_persists_session_agent_and_default() {
         .state
 
         .session_metadata(&session)
-        .expect("metadata")
+        .await.expect("metadata")
         .expect("metadata value");
     assert_eq!(metadata["main_agent"]["mode"], "agent");
     assert_eq!(metadata["main_agent"]["name"], "translate");
@@ -339,14 +339,14 @@ async fn settings_update_persists_session_agent_and_default() {
         .state
 
         .session_metadata(&session)
-        .expect("metadata")
+        .await.expect("metadata")
         .expect("metadata value");
     assert_eq!(metadata["main_agent"]["mode"], "default");
 }
 
 #[tokio::test]
 async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let project_agents = state.inner.cwd.join(".psychevo/agents");
     let home_agents = state.inner.home.join("agents");
     write_agent_definition(&project_agents, "review", "Project review");
@@ -356,7 +356,7 @@ async fn settings_update_rejects_unknown_or_shadowed_session_agent() {
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .expect("session");
+        .await.expect("session");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
         .to_wire_scope();

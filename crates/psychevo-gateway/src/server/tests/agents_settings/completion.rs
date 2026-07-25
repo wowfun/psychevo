@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn completion_list_returns_cwd_files() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let src = state.inner.cwd.join("src");
     std::fs::create_dir_all(&src).expect("src");
     std::fs::write(src.join("main.rs"), "fn main() {}\n").expect("main");
@@ -47,7 +47,7 @@ async fn completion_list_returns_cwd_files() {
 
 #[tokio::test]
 async fn completion_list_returns_agent_mentions_for_at_prefix() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     write_agent_definition(
         &state.inner.cwd.join(".psychevo/agents"),
         "review",

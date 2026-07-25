@@ -35,7 +35,7 @@ struct GatewayExternalAgentDelegate {
     gateway: Gateway,
     base_options: RunOptions,
     stream: Option<RunStreamSink>,
-    event_sink: Option<GatewayEventSink>,
+    event_sink: Option<GatewayEventEmitter>,
 }
 
 impl fmt::Debug for GatewayExternalAgentDelegate {
@@ -84,7 +84,8 @@ impl GatewayExternalAgentDelegate {
         let child = options
             .state
 
-            .session_summary(&child_session_id)?
+            .session_summary(&child_session_id)
+            .await?
             .ok_or_else(|| Error::Message(format!("session not found: {child_session_id}")))?;
         if child.parent_session_id.as_deref() != Some(request.parent_session_id.as_str()) {
             return Err(agent_session_configuration_error(format!(
@@ -108,7 +109,8 @@ impl GatewayExternalAgentDelegate {
                     "parentThreadId": request.parent_session_id,
                 })),
             },
-        )?;
+        )
+        .await?;
         let child_heartbeat = self
             .gateway
             .spawn_durable_activity_heartbeat(child_activity.clone());
@@ -133,7 +135,7 @@ impl GatewayExternalAgentDelegate {
         });
         let result = async move {
             let (profile_config, profile_revision, profile_fingerprint) =
-                resolve_gateway_runtime_profile(&options)?;
+                resolve_gateway_runtime_profile(&options).await?;
             if request
                 .expected_runtime_profile_revision
                 .is_some_and(|expected| expected != profile_revision)
@@ -173,7 +175,8 @@ impl GatewayExternalAgentDelegate {
                     let existing_binding = options
                         .state
 
-                        .gateway_runtime_binding(&child_session_id)?;
+                        .gateway_runtime_binding(&child_session_id)
+                        .await?;
                     let agent_binding = resolve_gateway_agent_binding_snapshot(
                         &options,
                         &profile_config,
@@ -187,7 +190,8 @@ impl GatewayExternalAgentDelegate {
                         &profile_config,
                         profile_revision,
                         &profile_fingerprint,
-                    )?;
+                    )
+                    .await?;
                     options.runtime_ref = Some(expected_backend.to_string());
                     let peer = resolve_peer_delegate(&options, &request, &profile_fingerprint)?;
                     let captured_binding = binding.clone();
@@ -231,7 +235,8 @@ impl GatewayExternalAgentDelegate {
             .set_agent_edge_status(
                 &terminal_child_session_id,
                 psychevo_runtime::state::AgentEdgeStatus::Closed,
-            )?;
+            )
+            .await?;
         match &result {
             Ok(result) => terminal_gateway.record_external_delegate_terminal(
                 &terminal_child_session_id,
@@ -239,30 +244,33 @@ impl GatewayExternalAgentDelegate {
                 result,
                 Some(&child_activity),
                 terminal_event_sink.as_ref(),
-            )?,
+            )
+            .await?,
             Err(error) => terminal_gateway.ensure_failed_terminal_after_turn_error(
                 &child_turn_id,
                 Some(&terminal_child_session_id),
                 terminal_event_sink.as_ref(),
                 error,
-            )?,
+            )
+            .await?,
         }
         result
     }
 }
 
 impl Gateway {
-    fn record_external_delegate_terminal(
+    async fn record_external_delegate_terminal(
         &self,
         child_session_id: &str,
         turn_id: &str,
         result: &ExternalAgentDelegateResult,
         durable_activity: Option<&DurableGatewayActivity>,
-        event_sink: Option<&GatewayEventSink>,
+        event_sink: Option<&GatewayEventEmitter>,
     ) -> psychevo_runtime::Result<()> {
-        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id)? {
+        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id).await? {
             self.mark_active_turn_terminal(turn_id);
-            self.finish_durable_gateway_activity(durable_activity, &terminal.status);
+            self.finish_durable_gateway_activity(durable_activity, &terminal.status)
+                .await;
             return Ok(());
         }
         let status = gateway_turn_status_for_outcome(result.outcome);
@@ -284,14 +292,16 @@ impl Gateway {
             first_committed_seq: None,
             last_committed_seq: None,
             durable_activity,
-        })?;
-        let committed_entries = self.project_terminal_entry_for_turn(turn_id);
+        })
+        .await?;
+        let committed_entries = self.project_terminal_entry_for_turn(turn_id).await;
         self.finish_durable_gateway_activity(
             durable_activity,
             durable_activity_status_for_turn(status),
-        );
+        )
+        .await;
         if let Some(event_sink) = event_sink {
-            event_sink(GatewayEvent::TurnCompleted {
+            let _ = event_sink.emit(GatewayEvent::TurnCompleted {
                 thread_id: Some(child_session_id.to_string()),
                 turn_id: turn_id.to_string(),
                 turn,

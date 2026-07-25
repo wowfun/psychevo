@@ -6,7 +6,8 @@ pub(in crate::server) fn reconcile(state: WebState) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
-    let _handle = tokio::spawn(async move {
+    let gateway = state.inner.gateway.clone();
+    gateway.spawn_background("channel-reconcile", async move {
         if let Err(err) = reconcile_inner(state.clone()).await {
             eprintln!(
                 "channel runtime reconcile failed: {}",
@@ -58,7 +59,8 @@ async fn reconcile_inner(state: WebState) -> psychevo_runtime::Result<()> {
                 let runtime = state.inner.channel_runtime.clone();
                 let worker_state = state.clone();
                 let worker_connection = connection.clone();
-                let _handle = tokio::spawn(async move {
+                let gateway = state.inner.gateway.clone();
+                gateway.spawn_background(format!("channel:{}", worker_connection.id), async move {
                     run_channel_loop(
                         worker_state,
                         runtime,

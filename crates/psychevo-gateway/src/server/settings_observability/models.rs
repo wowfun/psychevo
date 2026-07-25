@@ -285,17 +285,17 @@ fn catalog_model_option_view(
     }
 }
 
-fn model_state_read_value(
+async fn model_state_read_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
-    Ok(serde_json::to_value(model_state_result(
-        state, cwd, thread_id,
-    )?)?)
+    Ok(serde_json::to_value(
+        model_state_result(state, cwd, thread_id).await?,
+    )?)
 }
 
-fn model_state_set_value(
+async fn model_state_set_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
@@ -310,7 +310,9 @@ fn model_state_set_value(
     model_state.save(&path)?;
     if let Some(thread_id) = thread_id {
         let store = &state.inner.state;
-        store.set_session_model(thread_id, &provider, &model_id)?;
+        store
+            .set_session_model(thread_id, &provider, &model_id)
+            .await?;
         let mut metadata = serde_json::Map::new();
         metadata.insert("model".to_string(), Value::String(model_spec));
         if let Some(reasoning_effort) = reasoning_effort {
@@ -319,28 +321,30 @@ fn model_state_set_value(
                 Value::String(reasoning_effort),
             );
         }
-        store.set_session_metadata_field(
-            thread_id,
-            SESSION_COMPOSER_MODEL_METADATA_KEY,
-            Some(Value::Object(metadata)),
-        )?;
+        store
+            .set_session_metadata_field(
+                thread_id,
+                SESSION_COMPOSER_MODEL_METADATA_KEY,
+                Some(Value::Object(metadata)),
+            )
+            .await?;
     }
-    Ok(serde_json::to_value(model_state_result(
-        state, cwd, thread_id,
-    )?)?)
+    Ok(serde_json::to_value(
+        model_state_result(state, cwd, thread_id).await?,
+    )?)
 }
 
-fn model_state_result(
+async fn model_state_result(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<wire::ModelStateResult> {
     let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))?;
     let cwd_key = cwd.to_string_lossy().to_string();
-    let session_selection = thread_id
-        .map(|thread_id| session_model_state_selection(state, thread_id))
-        .transpose()?
-        .flatten();
+    let session_selection = match thread_id {
+        Some(thread_id) => session_model_state_selection(state, thread_id).await?,
+        None => None,
+    };
     Ok(wire::ModelStateResult {
         cwd: cwd.display().to_string(),
         thread_id: thread_id.map(str::to_string),

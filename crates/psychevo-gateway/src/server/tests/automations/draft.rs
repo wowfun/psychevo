@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn automation_draft_returns_model_draft_without_persisting_task() {
     let backend = Arc::new(AutomationFakeBackend::default());
-    let (_temp, state) = web_state_with_automation_backend(backend.clone());
+    let (_temp, state) = web_state_with_automation_backend(backend.clone()).await;
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let drafted = handle_rpc(

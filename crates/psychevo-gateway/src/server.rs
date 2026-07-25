@@ -18,7 +18,7 @@ use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
 #[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, future::BoxFuture};
 use psychevo_agent_core::{Message as RuntimeMessage, UserContentBlock};
 use psychevo_gateway_protocol as wire;
 use psychevo_runtime::command_registry::{
@@ -111,7 +111,7 @@ use uuid::Uuid;
 
 use crate::{
     ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActionKind, GatewayActionOutcome,
-    GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventSink, GatewayInputPart,
+    GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventEmitter, GatewayInputPart,
     GatewayProfileFields, GatewayShellResult, GatewaySource, GatewaySourceLifetime, GatewayThread,
     GatewayThreadSelector, GatewayTurnResult, PendingActionView, PermissionDecision,
     SendCompactRequest, SendShellRequest, SourceKey, TranscriptBlock, TranscriptBlockKind,
@@ -191,6 +191,7 @@ use terminal::TerminalManager;
 use thread_application::{
     RoutedThreadTurn, action_descriptors as thread_action_descriptors,
     authoritative_history_projection, authoritative_history_view,
+    enqueue_routed_compact_action as enqueue_routed_thread_compact_action,
     pending_interactions as thread_pending_interactions, prewarm_codex_runtime_inventory,
     respond_to_routed_interaction_for_selector as thread_routed_interaction_respond_for_selector,
     run_routed_action as run_routed_thread_action, run_routed_turn as run_routed_thread_turn,

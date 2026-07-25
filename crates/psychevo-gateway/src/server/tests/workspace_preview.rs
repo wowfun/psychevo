@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn workspace_preview_open_returns_text_metadata_and_an_opaque_media_lease() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::write(state.inner.cwd.join("report.pdf"), b"%PDF-1.7\nfixture\n")
         .expect("pdf fixture");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -55,7 +55,7 @@ async fn workspace_preview_open_returns_text_metadata_and_an_opaque_media_lease(
 
 #[tokio::test]
 async fn workspace_preview_http_get_serves_one_closed_byte_range_with_security_headers() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::write(state.inner.cwd.join("clip.mp4"), b"0123456789").expect("media fixture");
     let resource_id = open_workspace_preview(&state, "clip.mp4").await;
     let mut headers = HeaderMap::new();
@@ -90,7 +90,7 @@ async fn workspace_preview_cors_allows_only_configured_workbench_origins() {
     let (_temp, state) = web_state_with_env(BTreeMap::from([(
         "PSYCHEVO_WORKBENCH_ORIGINS".to_string(),
         "https://app.example, https://preview.example".to_string(),
-    )]));
+    )])).await;
     std::fs::write(state.inner.cwd.join("table.csv"), b"name,value\nAda,1\n").expect("csv fixture");
     let resource_id = open_workspace_preview(&state, "table.csv").await;
 
@@ -157,7 +157,7 @@ async fn workspace_preview_cors_allows_only_configured_workbench_origins() {
 
 #[tokio::test]
 async fn workspace_preview_cors_allows_product_owned_desktop_origins_without_env() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::write(state.inner.cwd.join("manual.pdf"), b"%PDF-1.7\n").expect("pdf fixture");
     let resource_id = open_workspace_preview(&state, "manual.pdf").await;
 
@@ -212,7 +212,7 @@ async fn workspace_preview_cors_allows_product_owned_desktop_origins_without_env
 
 #[tokio::test]
 async fn workspace_preview_http_supports_full_head_open_suffix_and_unsatisfied_ranges() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::write(state.inner.cwd.join("sound.mp3"), b"0123456789").expect("audio fixture");
     let resource_id = open_workspace_preview(&state, "sound.mp3").await;
 
@@ -288,7 +288,7 @@ async fn workspace_preview_http_supports_full_head_open_suffix_and_unsatisfied_r
 
 #[tokio::test]
 async fn workspace_preview_release_and_file_changes_invalidate_the_capability() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let path = state.inner.cwd.join("image.png");
     std::fs::write(&path, b"first-png").expect("image fixture");
     let changed_resource_id = open_workspace_preview(&state, "image.png").await;
@@ -344,7 +344,7 @@ async fn workspace_preview_release_and_file_changes_invalidate_the_capability() 
 async fn workspace_preview_rejects_large_same_size_tail_changes_with_restored_mtime() {
     use std::io::{Seek, SeekFrom, Write};
 
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let path = state.inner.cwd.join("large.pdf");
     let fixture = vec![b'a'; 1024 * 1024 + 64];
     std::fs::write(&path, &fixture).expect("large preview fixture");
@@ -406,7 +406,7 @@ async fn workspace_preview_rejects_large_same_size_tail_changes_with_restored_mt
 #[cfg(unix)]
 #[tokio::test]
 async fn workspace_preview_rejects_a_symlink_swap_after_open() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let path = state.inner.cwd.join("slides.pptx");
     std::fs::write(&path, b"inside").expect("inside fixture");
     let resource_id = open_workspace_preview(&state, "slides.pptx").await;
@@ -460,7 +460,7 @@ fn workspace_preview_read_projection_stays_on_opened_handle_after_path_swap() {
 #[cfg(unix)]
 #[tokio::test]
 async fn workspace_preview_rejects_same_metadata_symlink_swap_between_lookup_and_file_open() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let path = state.inner.cwd.join("same-metadata.pdf");
     let outside = temp.path().join("outside-same-metadata.pdf");
     let mut inside_bytes = vec![b'a'; 1024 * 1024 + 2];
@@ -524,7 +524,7 @@ async fn workspace_preview_rejects_same_metadata_symlink_swap_between_lookup_and
 
 #[tokio::test]
 async fn workspace_preview_successful_access_refreshes_idle_but_not_absolute_expiry() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let now = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(10_000));
     state
         .inner
@@ -562,7 +562,7 @@ async fn workspace_preview_successful_access_refreshes_idle_but_not_absolute_exp
     .await;
     assert_eq!(idle_expired.status(), StatusCode::GONE);
 
-    let (_temp, absolute_state) = web_state();
+    let (_temp, absolute_state) = web_state().await;
     let absolute_now = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
     absolute_state
         .inner
@@ -603,7 +603,7 @@ async fn workspace_preview_successful_access_refreshes_idle_but_not_absolute_exp
 
 #[tokio::test]
 async fn workspace_preview_open_rejects_traversal_and_a_browser_scope_pivot() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     let outside = temp.path().join("outside");
     std::fs::create_dir_all(&outside).expect("outside workspace");
     std::fs::write(outside.join("secret.pdf"), b"secret").expect("outside fixture");
@@ -671,7 +671,7 @@ async fn workspace_preview_open_rejects_traversal_and_a_browser_scope_pivot() {
 
 #[tokio::test]
 async fn workspace_preview_options_and_invalid_ranges_do_not_refresh_idle_expiry() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let now = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
     state
         .inner

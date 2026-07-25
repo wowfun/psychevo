@@ -1,13 +1,13 @@
-#[test]
-fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     state
         .inner
         .state
@@ -19,7 +19,7 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
                 timestamp_ms: 1,
             },
         )
-        .expect("append user");
+        .await.expect("append user");
     state
         .inner
         .state
@@ -37,17 +37,17 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
                 provider: Some("fake-provider".to_string()),
             },
         )
-        .expect("append assistant");
+        .await.expect("append assistant");
     let summary = state
         .inner
         .state
 
         .session_summary(&session_id)
-        .expect("summary")
+        .await.expect("summary")
         .expect("session exists");
     assert!(summary.message_count > 0);
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries array");
 
     assert_eq!(entries.len(), 2, "{snapshot:#}");
@@ -57,14 +57,14 @@ fn thread_snapshot_projects_visible_entries_for_history_session_with_messages() 
 
 #[tokio::test]
 async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     for (timestamp_ms, text) in [(1, "first"), (2, "second")] {
         state
             .inner
@@ -77,7 +77,7 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
                     timestamp_ms,
                 },
             )
-            .expect("append history message");
+            .await.expect("append history message");
     }
     let (tx, _rx) = mpsc::unbounded_channel();
     let first = handle_rpc(
@@ -146,14 +146,14 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
     assert!(unknown.to_string().contains("cursor"), "{unknown}");
 }
 
-#[test]
-fn thread_snapshot_replays_running_exec_live_overlay() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_replays_running_exec_live_overlay() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     store
         .append_message(
             &session_id,
@@ -176,7 +176,7 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
                 provider: Some("fake-provider".to_string()),
             },
         )
-        .expect("append assistant tool call");
+        .await.expect("append assistant tool call");
     store
         .append_message(
             &session_id,
@@ -189,7 +189,7 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
                 timestamp_ms: 20,
             },
         )
-        .expect("append yielded exec result");
+        .await.expect("append yielded exec result");
 
     let turn_id = "turn-running";
     let activity = store
@@ -206,7 +206,7 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim running activity");
+        .await.expect("claim running activity");
 
     append_exec_live_update(
         &state,
@@ -214,16 +214,16 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
         &session_id,
         turn_id,
         "first\nsecond\n",
-    );
+    ).await;
     append_exec_live_update(
         &state,
         &activity.activity_id,
         &session_id,
         turn_id,
         "first\nsecond\npoll\n",
-    );
+    ).await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
     assert_eq!(
         snapshot["activity"]["startedAtMs"],
         json!(activity.started_at_ms),
@@ -246,14 +246,14 @@ fn thread_snapshot_replays_running_exec_live_overlay() {
     assert_eq!(exec["metadata"]["result"]["session_id"], 7);
 }
 
-#[test]
-fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     let command = "sqlite3 /home/kevin/Projects/feedgarden/feeds/.cache/hn.db \"SELECT id, title FROM stories;\"";
     store
         .append_message(
@@ -277,7 +277,7 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
                 provider: Some("fake-provider".to_string()),
             },
         )
-        .expect("append assistant tool call");
+        .await.expect("append assistant tool call");
     store
         .append_message(
             &session_id,
@@ -289,7 +289,7 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
                 timestamp_ms: 20,
             },
         )
-        .expect("append completed exec result");
+        .await.expect("append completed exec result");
 
     let turn_id = "turn-running";
     let activity = store
@@ -306,7 +306,7 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
             superseded_activity_id: None,
             intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
         })
-        .expect("claim running activity");
+        .await.expect("claim running activity");
 
     append_stale_exec_live_snapshot(
         &state,
@@ -314,9 +314,9 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
         &session_id,
         turn_id,
         TranscriptBlockStatus::Running,
-    );
+    ).await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries");
     let exec = entries
         .iter()
@@ -334,14 +334,14 @@ fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overlay() {
     );
 }
 
-#[test]
-fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     store
         .append_message(
             &session_id,
@@ -356,7 +356,7 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
                 provider: Some("fake-provider".to_string()),
             },
         )
-        .expect("append committed assistant");
+        .await.expect("append committed assistant");
 
     let turn_id = "turn-running";
     let activity = store
@@ -373,7 +373,7 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
             superseded_activity_id: None,
             intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
         })
-        .expect("claim running activity");
+        .await.expect("claim running activity");
 
     append_assistant_live_text_update(
         &state,
@@ -381,9 +381,9 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
         &session_id,
         turn_id,
         "Committed answer.",
-    );
+    ).await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries");
     assert_eq!(entries.len(), 1, "{snapshot:#}");
     assert_eq!(entries[0]["source"], "runtime.message");
@@ -392,14 +392,14 @@ fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() {
     assert_eq!(entries[0]["blocks"][0]["body"], "Committed **answer**.");
 }
 
-#[test]
-fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     let child_session_id = store
         .create_session_with_metadata(
             &state.inner.cwd,
@@ -408,7 +408,7 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
             "fake-provider",
             None,
         )
-        .expect("child session");
+        .await.expect("child session");
     store
         .append_message(
             &parent_session_id,
@@ -423,7 +423,7 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
                 provider: Some("fake-provider".to_string()),
             },
         )
-        .expect("append committed assistant");
+        .await.expect("append committed assistant");
 
     let turn_id = "turn-running";
     let activity = store
@@ -440,7 +440,7 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
             superseded_activity_id: None,
             intent: Some(json!({"kind": "turn", "firstCommittedSeq": 1})),
         })
-        .expect("claim running activity");
+        .await.expect("claim running activity");
     store
         .update_gateway_activity_thread(
             &activity.activity_id,
@@ -449,7 +449,7 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
             &child_session_id,
             gateway_now_ms() + 30_000,
         )
-        .expect("scoped child turn started");
+        .await.expect("scoped child turn started");
 
     append_assistant_live_text_update(
         &state,
@@ -457,9 +457,9 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
         &parent_session_id,
         turn_id,
         "Committed prefix.",
-    );
+    ).await;
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&parent_session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&parent_session_id)).await.expect("snapshot");
     let entries = snapshot["entries"].as_array().expect("entries");
     assert_eq!(snapshot["activity"]["running"], true, "{snapshot:#}");
     assert_eq!(entries.len(), 1, "{snapshot:#}");
@@ -469,14 +469,14 @@ fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started() {
     assert_eq!(entries[0]["blocks"][0]["body"], "Committed **prefix**.");
 }
 
-#[test]
-fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     let child_session_id = store
         .create_session_with_metadata(
             &state.inner.cwd,
@@ -485,7 +485,7 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
             "fake-provider",
             None,
         )
-        .expect("child session");
+        .await.expect("child session");
     store
         .upsert_agent_edge(
             &parent_session_id,
@@ -493,7 +493,7 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
-        .expect("open child edge");
+        .await.expect("open child edge");
 
     let turn_id = "turn-parent-running";
     let activity = store
@@ -510,17 +510,17 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim parent activity");
+        .await.expect("claim parent activity");
     append_assistant_live_text_update(
         &state,
         &activity.activity_id,
         &child_session_id,
         turn_id,
         "Streaming child answer.",
-    );
+    ).await;
 
     let child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("child snapshot");
+        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("child snapshot");
     assert_eq!(
         child_snapshot["activity"]["running"], true,
         "{child_snapshot:#}"
@@ -537,7 +537,7 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
     );
 
     let parent_snapshot =
-        thread_snapshot(&state, &scope, Some(&parent_session_id)).expect("parent snapshot");
+        thread_snapshot(&state, &scope, Some(&parent_session_id)).await.expect("parent snapshot");
     assert_eq!(
         parent_snapshot["activity"]["running"], true,
         "{parent_snapshot:#}"
@@ -549,9 +549,9 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
 
     store
         .set_agent_edge_status(&child_session_id, psychevo_runtime::state::AgentEdgeStatus::Closed)
-        .expect("close child edge");
+        .await.expect("close child edge");
     let closed_child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("closed child snapshot");
+        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("closed child snapshot");
     assert_eq!(
         closed_child_snapshot["activity"]["running"], false,
         "{closed_child_snapshot:#}"
@@ -563,14 +563,14 @@ fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity() {
     );
 }
 
-#[test]
-fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_activity() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_activity() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     let child_session_id = store
         .create_session_with_metadata(
             &state.inner.cwd,
@@ -579,7 +579,7 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
             "fake-provider",
             None,
         )
-        .expect("child session");
+        .await.expect("child session");
     store
         .upsert_agent_edge(
             &parent_session_id,
@@ -587,7 +587,7 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
-        .expect("open child edge");
+        .await.expect("open child edge");
 
     let turn_id = "turn-parent-stale";
     let activity = store
@@ -604,17 +604,17 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim stale parent activity");
+        .await.expect("claim stale parent activity");
     append_assistant_live_text_update(
         &state,
         &activity.activity_id,
         &child_session_id,
         turn_id,
         "Stale child answer.",
-    );
+    ).await;
 
     let stale_child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("stale child snapshot");
+        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("stale child snapshot");
     assert_eq!(
         stale_child_snapshot["activity"]["running"], false,
         "{stale_child_snapshot:#}"
@@ -632,9 +632,9 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
             activity.generation,
             "completed",
         )
-        .expect("finish parent activity");
+        .await.expect("finish parent activity");
     let terminal_child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("terminal child snapshot");
+        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("terminal child snapshot");
     assert_eq!(
         terminal_child_snapshot["activity"]["running"], false,
         "{terminal_child_snapshot:#}"
@@ -646,14 +646,14 @@ fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_parent_a
     );
 }
 
-#[test]
-fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activity() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activity() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let store = &state.inner.state;
     let parent_session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "model", "provider", None)
-        .expect("parent session");
+        .await.expect("parent session");
     let child_session_id = store
         .create_child_session_with_metadata(
             &parent_session_id,
@@ -663,7 +663,7 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
             "acp:opencode",
             None,
         )
-        .expect("child session");
+        .await.expect("child session");
     store
         .upsert_agent_edge(
             &parent_session_id,
@@ -671,7 +671,7 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
-        .expect("open child edge");
+        .await.expect("open child edge");
     let profile = RuntimeProfileConfig {
         id: "acp:opencode".to_string(),
         runtime: RuntimeProfileKind::Acp,
@@ -711,7 +711,7 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: Some(&parent_session_id),
         })
-        .expect("ACP child binding");
+        .await.expect("ACP child binding");
     store
         .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
             activity_id: "turn-parent-running",
@@ -726,15 +726,15 @@ fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child_activ
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("parent activity");
+        .await.expect("parent activity");
 
     let child_snapshot =
-        thread_snapshot(&state, &scope, Some(&child_session_id)).expect("child snapshot");
+        thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("child snapshot");
     assert_eq!(child_snapshot["activity"]["running"], false, "{child_snapshot:#}");
     assert_eq!(child_snapshot["activity"]["activeTurnId"], Value::Null);
 }
 
-fn append_exec_live_update(
+async fn append_exec_live_update(
     state: &WebState,
     activity_id: &str,
     session_id: &str,
@@ -813,10 +813,10 @@ fn append_exec_live_update(
             event_kind: "entryUpdated",
             event: serde_json::to_value(event).expect("event value"),
         })
-        .expect("upsert live snapshot");
+        .await.expect("upsert live snapshot");
 }
 
-fn append_stale_exec_live_snapshot(
+async fn append_stale_exec_live_snapshot(
     state: &WebState,
     activity_id: &str,
     session_id: &str,
@@ -875,10 +875,10 @@ fn append_stale_exec_live_snapshot(
             event_kind: "entryUpdated",
             event: serde_json::to_value(event).expect("event value"),
         })
-        .expect("upsert stale live snapshot");
+        .await.expect("upsert stale live snapshot");
 }
 
-fn append_assistant_live_text_update(
+async fn append_assistant_live_text_update(
     state: &WebState,
     activity_id: &str,
     session_id: &str,
@@ -933,5 +933,5 @@ fn append_assistant_live_text_update(
             event_kind: "entryUpdated",
             event: serde_json::to_value(event).expect("event value"),
         })
-        .expect("upsert live snapshot");
+        .await.expect("upsert live snapshot");
 }

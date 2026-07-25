@@ -1,21 +1,28 @@
-fn context_read_value(
+async fn context_read_value(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
     Ok(serde_json::to_value(context_read_result(
         state, scope, thread_id,
-    )?)?)
+    )
+    .await?)?)
 }
 
-fn context_read_result(
+async fn context_read_result(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<wire::ContextReadResult> {
     let thread_id = match thread_id {
         Some(thread_id) => Some(thread_id.to_string()),
-        None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+        None => {
+            state
+                .inner
+                .gateway
+                .resolve_source_thread(&scope.source)
+                .await?
+        }
     };
     let Some(thread_id) = thread_id else {
         return Ok(context_unavailable("No active session"));
@@ -24,14 +31,16 @@ fn context_read_result(
         .inner
         .state
 
-        .gateway_runtime_binding(&thread_id)?
+        .gateway_runtime_binding(&thread_id)
+        .await?
         .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"));
     if acp {
         let usage = state
             .inner
             .state
 
-            .session_metadata(&thread_id)?
+            .session_metadata(&thread_id)
+            .await?
             .as_ref()
             .and_then(acp_peer_usage_update)
             .and_then(acp_peer_context_read_result);
@@ -43,7 +52,9 @@ fn context_read_result(
         session: thread_id,
         config_path: state.inner.config_path.clone(),
         inherited_env: Some(state.inner.inherited_env.clone()),
-    }) {
+    })
+    .await
+    {
         Ok(snapshot) => snapshot,
         Err(err) => {
             return Ok(context_unavailable(&err.to_string()));
@@ -98,30 +109,39 @@ fn context_read_result_from_snapshot(
     }
 }
 
-fn observability_read_value(
+async fn observability_read_value(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
 ) -> psychevo_runtime::Result<Value> {
     let resolved_thread_id = match thread_id {
         Some(thread_id) => Some(thread_id.to_string()),
-        None => state.inner.gateway.resolve_source_thread(&scope.source)?,
+        None => {
+            state
+                .inner
+                .gateway
+                .resolve_source_thread(&scope.source)
+                .await?
+        }
     };
     let metadata = match resolved_thread_id.as_deref() {
-        Some(session_id) => state.inner.state.session_metadata(session_id)?,
+        Some(session_id) => state.inner.state.session_metadata(session_id).await?,
         None => None,
     };
     let peer_usage = metadata.as_ref().and_then(acp_peer_usage_update);
     let context = match peer_usage.and_then(acp_peer_context_read_result) {
         Some(context) => context,
-        None => context_read_result(state, scope, resolved_thread_id.as_deref())?,
+        None => {
+            context_read_result(state, scope, resolved_thread_id.as_deref()).await?
+        }
     };
     let usage = match resolved_thread_id {
         Some(session_id) => {
             let summary = session_usage_summary(SessionUsageOptions {
                 state: state.inner.state.clone(),
                 session_id,
-            })?;
+            })
+            .await?;
             let mut view = wire::SessionUsageSummaryView {
                 available: true,
                 session_id: Some(summary.session_id),
@@ -270,14 +290,15 @@ fn usage_unavailable() -> wire::SessionUsageSummaryView {
     }
 }
 
-fn usage_read_value(
+async fn usage_read_value(
     state: &WebState,
     params: wire::UsageReadParams,
 ) -> psychevo_runtime::Result<Value> {
     let result = usage_read(UsageReadOptions {
         state: state.inner.state.clone(),
         activity_days: params.activity_days.unwrap_or(365) as usize,
-    })?;
+    })
+    .await?;
     Ok(serde_json::to_value(wire::UsageReadResult {
         generated_at_ms: result.generated_at_ms,
         windows: result

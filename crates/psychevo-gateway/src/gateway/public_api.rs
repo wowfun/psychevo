@@ -36,14 +36,13 @@ impl Gateway {
                 profile,
                 Some(peer),
             ))?
-            .transact(AgentSessionCommand::LoadSession(AgentSessionRef {
+            .load_session(AgentSessionRef {
                 cwd: options.cwd,
                 local_session_id,
                 native_session_id,
                 mcp_servers,
-            }))
+            })
             .await
-            .and_then(AgentSessionResponse::into_loaded)
     }
 
     pub(crate) async fn release_imported_agent_session(
@@ -76,14 +75,13 @@ impl Gateway {
                 profile,
                 Some(peer),
             )?)?
-            .transact(AgentSessionCommand::ResumeSession(AgentSessionRef {
+            .resume_session(AgentSessionRef {
                 cwd: options.cwd,
                 local_session_id: binding.thread_id,
                 native_session_id,
                 mcp_servers,
-            }))
-            .await
-            .and_then(AgentSessionResponse::into_resumed)?
+            })
+            .await?
             .into_acp()
     }
 
@@ -108,17 +106,16 @@ impl Gateway {
                 profile,
                 Some(peer),
             )?)?
-            .transact(AgentSessionCommand::ForkSession {
-                source: AgentSessionRef {
+            .fork_session(
+                AgentSessionRef {
                     cwd: options.cwd,
                     local_session_id: binding.thread_id,
                     native_session_id,
                     mcp_servers,
                 },
                 fork_local_session_id,
-            })
-            .await
-            .and_then(AgentSessionResponse::into_forked)?
+            )
+            .await?
             .into_acp()
     }
 
@@ -141,14 +138,13 @@ impl Gateway {
                 profile,
                 Some(peer),
             )?)?
-            .transact(AgentSessionCommand::CloseSession(AgentSessionRef {
+            .close_session(AgentSessionRef {
                 cwd: options.cwd,
                 local_session_id: binding.thread_id,
                 native_session_id,
                 mcp_servers: Vec::new(),
-            }))
+            })
             .await
-            .and_then(AgentSessionResponse::into_closed)
     }
 
     pub(crate) async fn delete_bound_agent_session(
@@ -170,14 +166,13 @@ impl Gateway {
                 profile,
                 Some(peer),
             )?)?
-            .transact(AgentSessionCommand::DeleteSession(AgentSessionRef {
+            .delete_session(AgentSessionRef {
                 cwd: options.cwd,
                 local_session_id: binding.thread_id,
                 native_session_id,
                 mcp_servers: Vec::new(),
-            }))
+            })
             .await
-            .and_then(AgentSessionResponse::into_deleted)
     }
 
     pub(crate) async fn lock_source_mutation(
@@ -199,9 +194,12 @@ impl Gateway {
     }
 
     pub fn with_backend(state: StateRuntime, backend: Arc<dyn GatewayBackend>) -> Self {
+        let supervisor = GatewaySupervisor::default();
         Self {
             state,
             agent_sessions: AgentSessionHost::new(backend),
+            event_ingress: GatewayEventIngress::new(supervisor.clone()),
+            supervisor,
             active: Arc::new(Mutex::new(HashMap::new())),
             active_aliases: Arc::new(Mutex::new(HashMap::new())),
             process_bindings: Arc::new(Mutex::new(HashMap::new())),
@@ -219,6 +217,49 @@ impl Gateway {
 
     pub async fn shutdown_runtimes(&self, force: bool) -> psychevo_runtime::Result<()> {
         self.agent_sessions.shutdown(force).await
+    }
+
+    pub(crate) async fn shutdown_application(
+        &self,
+        force: bool,
+    ) -> psychevo_runtime::Result<()> {
+        self.supervisor.close_turn_admission();
+        self.supervisor.stop_producers();
+        self.supervisor.wait_for_producers().await;
+        if force {
+            self.supervisor.force_cancel_turns();
+            self.cancel_active_queue();
+        } else {
+            self.supervisor.close_turns();
+        }
+        self.supervisor.wait_for_turns().await;
+        self.event_ingress.close();
+        if force {
+            self.supervisor.force_cancel_infrastructure();
+        } else {
+            self.supervisor.close_infrastructure();
+        }
+        self.supervisor.wait_for_infrastructure().await;
+        self.agent_sessions.shutdown(force).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_gateway_events(&self) {
+        self.event_ingress.wait_until_drained().await;
+    }
+
+    pub(crate) fn spawn_background<F>(&self, name: impl Into<Arc<str>>, future: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.supervisor.spawn_producer(name, future);
+    }
+
+    pub(crate) fn spawn_accepted_turn<F>(&self, name: impl Into<Arc<str>>, future: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.supervisor.spawn_turn(name, future);
     }
 
     pub(crate) async fn inspect_cached_bound_agent_session(
@@ -240,7 +281,7 @@ impl Gateway {
         agent_ref: Option<String>,
     ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
         let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
-        let (profile, _, _) = resolve_gateway_runtime_profile(&options)?;
+        let (profile, _, _) = resolve_gateway_runtime_profile(&options).await?;
         self.agent_sessions
             .prepare(
                 CapturedAgentSessionTarget::invocation(
@@ -296,11 +337,12 @@ impl Gateway {
         value: Value,
     ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
         let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
-        let (profile, _, _) = resolve_gateway_runtime_profile(&options)?;
+        let (profile, _, _) = resolve_gateway_runtime_profile(&options).await?;
         let binding = self
             .state
 
-            .gateway_runtime_binding(&local_session_id)?
+            .gateway_runtime_binding(&local_session_id)
+            .await?
             .ok_or_else(|| {
                 agent_session_configuration_error(format!(
                     "Agent binding not found for thread `{local_session_id}`."
@@ -317,8 +359,8 @@ impl Gateway {
                 profile,
                 Some(peer),
             )?)?
-            .transact(AgentSessionCommand::SetControl {
-                session: AgentSessionRef {
+            .set_control(
+                AgentSessionRef {
                     cwd: options.cwd,
                     local_session_id,
                     native_session_id,
@@ -326,9 +368,8 @@ impl Gateway {
                 },
                 control_id,
                 value,
-            })
-            .await
-            .and_then(AgentSessionResponse::into_control)?
+            )
+            .await?
             .into_acp()
     }
 
@@ -367,13 +408,8 @@ impl Gateway {
         };
         self.agent_sessions
             .attach(target)?
-            .transact(AgentSessionCommand::SubmitTurn {
-                request: Box::new(request),
-                turn_id,
-                session_ready,
-            })
+            .run_turn(request, turn_id, session_ready)
             .await
-            .and_then(AgentSessionResponse::into_turn)
             .map(|output| output.run)
     }
 
@@ -381,25 +417,26 @@ impl Gateway {
         self.owner_id.as_str()
     }
 
-    pub fn resolve_source_thread(
+    pub async fn resolve_source_thread(
         &self,
         source: &GatewaySource,
     ) -> psychevo_runtime::Result<Option<String>> {
-        self.lookup_source_thread(source)
+        self.lookup_source_thread(source).await
     }
 
-    pub fn thread_transcript(
+    pub async fn thread_transcript(
         &self,
         thread_id: &str,
     ) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
-        let summaries = self.state.load_tui_message_summaries(thread_id)?;
+        let summaries = self.state.load_tui_message_summaries(thread_id).await?;
         let mut entries = transcript::project_transcript_entries(thread_id, &summaries);
-        let agent_edges = self.state.list_agent_edges_for_parent(thread_id)?;
+        let agent_edges = self.state.list_agent_edges_for_parent(thread_id).await?;
         transcript::enrich_agent_blocks_from_edges(&mut entries, &agent_edges);
         let compactions = self
             .state
 
-            .list_valid_session_compactions(thread_id)?;
+            .list_valid_session_compactions(thread_id)
+            .await?;
         let mut synthetic_entries = compactions
             .iter()
             .zip(transcript::project_compaction_entries(
@@ -411,7 +448,8 @@ impl Gateway {
         let terminals = self
             .state
 
-            .list_gateway_turn_terminals_for_thread(thread_id)?;
+            .list_gateway_turn_terminals_for_thread(thread_id)
+            .await?;
         transcript::reconcile_terminal_bounded_running_blocks(&mut entries, &terminals);
         synthetic_entries.extend(terminals.iter().filter_map(|terminal| {
             transcript::project_turn_terminal_entry(terminal)
@@ -423,8 +461,11 @@ impl Gateway {
         ))
     }
 
-    pub fn activity_for_selector(&self, selector: GatewayThreadSelector) -> GatewayActivity {
-        let selector_keys = self.selector_keys(&selector);
+    pub fn local_activity_for_selector(
+        &self,
+        selector: &GatewayThreadSelector,
+    ) -> GatewayActivity {
+        let selector_keys = self.selector_keys(selector);
         let active = self.active.lock().expect("gateway active map poisoned");
         let aliases = self
             .active_aliases
@@ -438,45 +479,71 @@ impl Gateway {
                 continue;
             }
             if let Some(state) = active.get(&key) {
-                activity.running |= state.running;
+                activity.running |= state.running && state.active_turn_id.is_some();
                 if activity.active_turn_id.is_none() {
                     activity.active_turn_id = state.active_turn_id.clone();
                 }
                 activity.queued_turns += state.queued.len();
             }
-            if let Ok(Some(record)) = self.durable_activity_for_key(&key) {
+        }
+        activity
+    }
+
+    pub async fn activity_for_selector(&self, selector: GatewayThreadSelector) -> GatewayActivity {
+        let selector_keys = self.selector_keys(&selector);
+        let mut activity = self.local_activity_for_selector(&selector);
+        let mut durable_keys = Vec::new();
+        let mut seen = HashSet::new();
+        for key in selector_keys {
+            let key = self
+                .active_aliases
+                .lock()
+                .expect("gateway active alias map poisoned")
+                .get(&key)
+                .cloned()
+                .unwrap_or(key);
+            if seen.insert(key.clone()) {
+                durable_keys.push(key);
+            }
+        }
+        for key in durable_keys {
+            if let Ok(Some(record)) = self.durable_activity_for_key(&key).await {
                 self.merge_durable_activity(&mut activity, record);
             }
         }
         activity
     }
 
-    pub fn session_activity_snapshot(
+    pub async fn session_activity_snapshot(
         &self,
     ) -> psychevo_runtime::Result<BTreeMap<String, GatewayActivity>> {
-        let active = self.active.lock().expect("gateway active map poisoned");
-        let aliases = self
-            .active_aliases
-            .lock()
-            .expect("gateway active alias map poisoned");
-        let mut snapshot = BTreeMap::new();
-        for (key, state) in active.iter() {
-            if let Some(thread_id) = key.strip_prefix("thread:") {
+        let mut snapshot = {
+            let active = self.active.lock().expect("gateway active map poisoned");
+            let aliases = self
+                .active_aliases
+                .lock()
+                .expect("gateway active alias map poisoned");
+            let mut snapshot = BTreeMap::new();
+            for (key, state) in active.iter() {
+                if let Some(thread_id) = key.strip_prefix("thread:") {
+                    merge_in_memory_activity(
+                        snapshot.entry(thread_id.to_string()).or_default(),
+                        state,
+                    );
+                }
+            }
+            for (alias, primary) in aliases.iter() {
+                let Some(thread_id) = alias.strip_prefix("thread:") else {
+                    continue;
+                };
+                let Some(state) = active.get(primary) else {
+                    continue;
+                };
                 merge_in_memory_activity(snapshot.entry(thread_id.to_string()).or_default(), state);
             }
-        }
-        for (alias, primary) in aliases.iter() {
-            let Some(thread_id) = alias.strip_prefix("thread:") else {
-                continue;
-            };
-            let Some(state) = active.get(primary) else {
-                continue;
-            };
-            merge_in_memory_activity(snapshot.entry(thread_id.to_string()).or_default(), state);
-        }
-        drop(aliases);
-        drop(active);
-        for record in self.state.active_gateway_activities()? {
+            snapshot
+        };
+        for record in self.state.active_gateway_activities().await? {
             let Some(thread_id) = record.thread_id.clone() else {
                 continue;
             };
@@ -485,7 +552,7 @@ impl Gateway {
         Ok(snapshot)
     }
 
-    fn durable_activity_for_key(
+    async fn durable_activity_for_key(
         &self,
         key: &str,
     ) -> psychevo_runtime::Result<Option<GatewayActivityRecord>> {
@@ -493,13 +560,15 @@ impl Gateway {
             return self
                 .state
 
-                .active_gateway_activity_for_thread(thread_id);
+                .active_gateway_activity_for_thread(thread_id)
+                .await;
         }
         if let Some(source_key) = key.strip_prefix("source:") {
             return self
                 .state
 
-                .active_gateway_activity_for_source(source_key);
+                .active_gateway_activity_for_source(source_key)
+                .await;
         }
         Ok(None)
     }
@@ -541,35 +610,136 @@ impl Gateway {
         }
     }
 
-    /// Executes one caller turn through the complete Thread Application policy
-    /// boundary. Surface Adapters provide typed intent; Gateway owns runtime
-    /// lowering, queueing, binding, and Agent Adapter selection.
-    pub async fn run_turn(
+    /// Accepts one caller turn through the complete Thread Application policy
+    /// boundary. Gateway supervision owns the accepted work independently of
+    /// the returned completion handle.
+    pub async fn start_turn(
         &self,
-        mut request: ThreadTurnRequest,
-    ) -> psychevo_runtime::Result<GatewayTurnResult> {
-        let turn_id = request
+        mut caller: ThreadCallerContext,
+        mut intent: ThreadTurnIntent,
+    ) -> psychevo_runtime::Result<AcceptedTurn> {
+        let admission = self
+            .supervisor
+            .acquire_activity_admission()
+            .map_err(|error| Error::Message(error.to_string()))?;
+        let turn_id = intent
             .turn_id
             .take()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
+        let client_turn_id = intent
+            .client_turn_id
+            .take()
+            .filter(|value| !value.trim().is_empty());
+        let explicit_thread = intent
+            .thread_id
+            .as_deref()
+            .is_some_and(|thread_id| !thread_id.trim().is_empty());
+        let thread_id = self
+            .materialize_accepted_thread(&caller, &intent)
+            .await?;
+        intent.thread_id = Some(thread_id.clone());
+        intent.policy.continue_latest = false;
         gateway_profile_mark(
-            "gateway_run_turn_entered",
+            "gateway_start_turn_entered",
             Some(&turn_id),
-            request.thread_id.as_deref(),
+            Some(&thread_id),
             GatewayProfileFields {
-                runtime_source: request.runtime_source.as_deref(),
+                runtime_source: Some(&caller.runtime_source),
                 ..GatewayProfileFields::default()
             },
         );
-        let request = request.into_queue_request(self.state.clone());
-        self.send_turn_with_id(request, turn_id).await
+        if let Some(client_turn_id) = client_turn_id.as_deref() {
+            self.state
+                .record_gateway_turn_start_receipt(&thread_id, client_turn_id, &turn_id)
+                .await?;
+        }
+        if caller.continue_sources.is_empty() {
+            caller.continue_sources.push(caller.runtime_source.clone());
+        }
+        let request = intent.into_queue_request(caller, self.state.clone(), explicit_thread);
+        let (completion_tx, completion_rx) = oneshot::channel();
+        let gateway = self.clone();
+        let supervised_turn_id = turn_id.clone();
+        self.supervisor.spawn_permitted_activity(
+            format!("turn:{turn_id}"),
+            admission,
+            async move {
+                let result = gateway
+                    .send_turn_with_id(request, supervised_turn_id)
+                    .await;
+                let _ = completion_tx.send(result);
+            },
+        );
+        Ok(AcceptedTurn {
+            receipt: AcceptedTurnReceipt {
+                accepted: true,
+                thread_id,
+                turn_id,
+                client_turn_id,
+            },
+            completion: AcceptedTurnCompletion {
+                receiver: completion_rx,
+            },
+        })
+    }
+
+    async fn materialize_accepted_thread(
+        &self,
+        caller: &ThreadCallerContext,
+        intent: &ThreadTurnIntent,
+    ) -> psychevo_runtime::Result<String> {
+        if let Some(thread_id) = intent
+            .thread_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            self.thread_cwd(thread_id).await?;
+            return Ok(thread_id.to_string());
+        }
+        if !intent.reset_source_binding && let Some(source) = intent.source.as_ref() {
+            if let Some(thread_id) = self.active_thread_for_source(source) {
+                return Ok(thread_id);
+            }
+            if let Some(thread_id) = self.lookup_source_thread(source).await? {
+                return Ok(thread_id);
+            }
+        }
+        let cwd = psychevo_runtime::paths::canonicalize_cwd(&caller.cwd)?;
+        if intent.policy.continue_latest {
+            let continue_sources = if caller.continue_sources.is_empty() {
+                vec![caller.runtime_source.as_str()]
+            } else {
+                caller
+                    .continue_sources
+                    .iter()
+                    .map(String::as_str)
+                    .collect()
+            };
+            if let Some(thread_id) = self
+                .state
+                .latest_session_for_cwd_with_sources(&cwd, &continue_sources)
+                .await?
+            {
+                return Ok(thread_id);
+            }
+        }
+        self.state
+            .create_session_with_metadata(
+                &cwd,
+                &caller.runtime_source,
+                "pending",
+                "pending",
+                intent.lineage.clone(),
+            )
+            .await
     }
 
     #[cfg(test)]
     pub(crate) async fn send_turn(
         &self,
-        request: SendTurnRequest,
+        mut request: SendTurnRequest,
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
+        request.explicit_thread = request.thread_id.is_some();
         let turn_id = Uuid::now_v7().to_string();
         self.send_turn_with_id(request, turn_id).await
     }
@@ -579,7 +749,7 @@ impl Gateway {
         request: SendTurnRequest,
         turn_id: String,
     ) -> psychevo_runtime::Result<GatewayTurnResult> {
-        let queue_key = self.queue_key_for_request(&request)?;
+        let queue_key = self.queue_key_for_request(&request).await?;
         let mut request = Some(request);
         let queued = {
             let mut active = self.active.lock().expect("gateway active map poisoned");
@@ -635,10 +805,11 @@ impl Gateway {
                 let _ = self
                     .state
 
-                    .set_gateway_activity_queued_turns(&active_activity_id, queue_position);
+                    .set_gateway_activity_queued_turns(&active_activity_id, queue_position)
+                    .await;
             }
             if let Some(event_sink) = event_sink {
-                event_sink(GatewayEvent::TurnQueued {
+                let _ = event_sink.emit(GatewayEvent::TurnQueued {
                     thread_id,
                     turn_id,
                     queue_position,
@@ -664,7 +835,11 @@ impl Gateway {
         &self,
         request: SendShellRequest,
     ) -> psychevo_runtime::Result<GatewayShellResult> {
-        let queue_key = self.queue_key_for_shell_request(&request)?;
+        let _admission = self
+            .supervisor
+            .acquire_activity_admission()
+            .map_err(|error| Error::Message(error.to_string()))?;
+        let queue_key = self.queue_key_for_shell_request(&request).await?;
         let shell_id = Uuid::now_v7().to_string();
         let mut request = Some(request);
         let active = {
@@ -686,13 +861,11 @@ impl Gateway {
                             request: request.take().expect("gateway shell request missing"),
                             responder,
                         })));
-                    if let Some(active_activity_id) = active_activity_id {
-                        let _ = self
-                            .state
-
-                            .set_gateway_activity_queued_turns(&active_activity_id, queue_position);
+                    ShellStartState::Queued {
+                        receiver,
+                        active_activity_id,
+                        queue_position,
                     }
-                    ShellStartState::Queued(receiver)
                 }
             } else {
                 state.running = true;
@@ -701,43 +874,76 @@ impl Gateway {
         };
 
         match active {
-            ShellStartState::Queued(receiver) => receiver
-                .await
-                .map_err(|_| Error::Message("gateway shell queue closed".to_string()))?,
+            ShellStartState::Queued {
+                receiver,
+                active_activity_id,
+                queue_position,
+            } => {
+                if let Some(active_activity_id) = active_activity_id {
+                    let _ = self
+                        .state
+                        .set_gateway_activity_queued_turns(&active_activity_id, queue_position)
+                        .await;
+                }
+                receiver
+                    .await
+                    .map_err(|_| Error::Message("gateway shell queue closed".to_string()))?
+            }
             ShellStartState::Auxiliary(inject_into) => {
-                self.run_shell_auxiliary(
-                    request.take().expect("gateway shell request missing"),
-                    shell_id,
-                    inject_into,
-                )
-                .await
+                let (responder, receiver) = oneshot::channel();
+                let gateway = self.clone();
+                self.spawn_accepted_turn(format!("auxiliary-shell:{shell_id}"), async move {
+                    let result = gateway
+                        .run_shell_auxiliary(
+                            request.take().expect("gateway shell request missing"),
+                            shell_id,
+                            inject_into,
+                        )
+                        .await;
+                    let _ = responder.send(result);
+                });
+                receiver
+                    .await
+                    .map_err(|_| Error::Message("gateway auxiliary shell cancelled".to_string()))?
             }
             ShellStartState::Standalone => {
-                let result = self
-                    .run_shell_now(
-                        &queue_key,
-                        request.take().expect("gateway shell request missing"),
-                        shell_id,
-                    )
-                    .await;
-                self.finish_activity_and_spawn_next(queue_key);
-                result
+                let (responder, receiver) = oneshot::channel();
+                let gateway = self.clone();
+                self.spawn_accepted_turn(format!("shell:{shell_id}"), async move {
+                    let result = gateway
+                        .run_shell_now(
+                            &queue_key,
+                            request.take().expect("gateway shell request missing"),
+                            shell_id,
+                        )
+                        .await;
+                    gateway.finish_activity_and_spawn_next(queue_key);
+                    let _ = responder.send(result);
+                });
+                receiver
+                    .await
+                    .map_err(|_| Error::Message("gateway shell cancelled".to_string()))?
             }
         }
     }
 
-    pub fn enqueue_compact_session(
+    pub async fn enqueue_compact_session(
         &self,
         request: SendCompactRequest,
     ) -> psychevo_runtime::Result<
         BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult>>,
     > {
-        let queue_key = self.queue_key_for_compact_request(&request)?;
+        let admission = self
+            .supervisor
+            .acquire_activity_admission()
+            .map_err(|error| Error::Message(error.to_string()))?;
+        let queue_key = self.queue_key_for_compact_request(&request).await?;
         let compact_id = Uuid::now_v7().to_string();
         let event_sink = request.event_sink.clone();
-        let event_thread_id = self.compact_event_thread_id(&request);
+        let event_thread_id = self.compact_event_thread_id(&request).await;
         let (responder, receiver) = oneshot::channel();
         let mut pending = Some(Box::new(PendingQueuedCompact {
+            _admission: admission,
             compact_id,
             request,
             responder,
@@ -757,7 +963,8 @@ impl Gateway {
         };
 
         if queued {
-            self.emit_activity_changed_for_thread(event_sink, event_thread_id);
+            self.emit_activity_changed_for_thread(event_sink, event_thread_id)
+                .await;
         } else {
             self.spawn_compact_activity(
                 queue_key,
@@ -776,30 +983,33 @@ impl Gateway {
         &self,
         request: SendCompactRequest,
     ) -> psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult> {
-        self.enqueue_compact_session(request)?.await
+        self.enqueue_compact_session(request).await?.await
     }
 
-    pub fn steer_turn(
+    pub async fn steer_turn(
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
         message: psychevo_agent_core::Message,
     ) -> Option<psychevo_agent_core::PendingInputId> {
-        if self.expected_turn_is_terminal(expected_turn_id) {
+        if self.expected_turn_is_terminal(expected_turn_id).await {
             return None;
         }
-        if !self.agent_supports_steer_for_selector(&selector) {
+        if !self.agent_supports_steer_for_selector(&selector).await {
             return None;
         }
         self.control_for_selector(&selector, expected_turn_id)
             .and_then(|control| control.steer_user_message(message))
     }
 
-    fn agent_supports_steer_for_selector(&self, selector: &GatewayThreadSelector) -> bool {
+    async fn agent_supports_steer_for_selector(
+        &self,
+        selector: &GatewayThreadSelector,
+    ) -> bool {
         let thread_id = match selector {
             GatewayThreadSelector::ThreadId { thread_id } => Some(thread_id.clone()),
             GatewayThreadSelector::Source { source_key } => {
-                match self.state.gateway_source_lane(&source_key.0) {
+                match self.state.gateway_source_lane(&source_key.0).await {
                     Ok(lane) => lane.and_then(|lane| lane.thread_id),
                     Err(_) => return false,
                 }
@@ -808,23 +1018,23 @@ impl Gateway {
         let Some(thread_id) = thread_id else {
             return true;
         };
-        match self.state.gateway_runtime_binding(&thread_id) {
+        match self.state.gateway_runtime_binding(&thread_id).await {
             Ok(Some(binding)) => binding.backend_kind.as_deref() == Some("native"),
             Ok(None) => true,
             Err(_) => false,
         }
     }
 
-    pub fn steer_foreign_turn(
+    pub async fn steer_foreign_turn(
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
         message: psychevo_agent_core::Message,
     ) -> bool {
-        if self.expected_turn_is_terminal(expected_turn_id) {
+        if self.expected_turn_is_terminal(expected_turn_id).await {
             return false;
         }
-        if !self.agent_supports_steer_for_selector(&selector) {
+        if !self.agent_supports_steer_for_selector(&selector).await {
             return false;
         }
         let Ok(message) = serde_json::to_value(message) else {
@@ -838,16 +1048,18 @@ impl Gateway {
                 "message": message,
             }),
         )
+        .await
     }
 
-    fn expected_turn_is_terminal(&self, expected_turn_id: Option<&str>) -> bool {
-        expected_turn_id.is_some_and(|turn_id| {
-            self.state
-
-                .gateway_turn_terminal(turn_id)
-                .map(|terminal| terminal.is_some())
-                .unwrap_or(true)
-        })
+    async fn expected_turn_is_terminal(&self, expected_turn_id: Option<&str>) -> bool {
+        let Some(turn_id) = expected_turn_id else {
+            return false;
+        };
+        self.state
+            .gateway_turn_terminal(turn_id)
+            .await
+            .map(|terminal| terminal.is_some())
+            .unwrap_or(true)
     }
 
     pub fn cancel_steer(
@@ -871,16 +1083,17 @@ impl Gateway {
             .is_some_and(|control| control.update_pending_user_message(input_id, message))
     }
 
-    pub fn interrupt_turn(&self, selector: GatewayThreadSelector) -> bool {
+    pub async fn interrupt_turn(&self, selector: GatewayThreadSelector) -> bool {
         if let Some(control) = self.control_for_selector(&selector, None) {
             control.abort();
             true
         } else {
             self.enqueue_foreign_control_command(&selector, "interrupt", json!({}))
+                .await
         }
     }
 
-    pub fn submit_clarify(
+    pub async fn submit_clarify(
         &self,
         selector: GatewayThreadSelector,
         call_id: &str,
@@ -907,9 +1120,10 @@ impl Gateway {
             }),
         };
         self.enqueue_foreign_control_command(&selector, "clarify", payload)
+            .await
     }
 
-    pub fn submit_permission(
+    pub async fn submit_permission(
         &self,
         selector: GatewayThreadSelector,
         request_id: &str,
@@ -948,6 +1162,7 @@ impl Gateway {
                 "filesystemScope": decision.filesystem_scope,
             }),
         )
+        .await
     }
 
     pub(crate) fn has_pending_permission_for_selector(

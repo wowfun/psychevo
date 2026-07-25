@@ -4,20 +4,22 @@ struct LocalPeerSession {
     created: bool,
 }
 
-fn ensure_local_session(
+async fn ensure_local_session(
     peer: &ResolvedPeerTurn,
     options: &psychevo_runtime::types::RunOptions,
 ) -> psychevo_runtime::Result<LocalPeerSession> {
     let store = &options.state;
     if let Some(session_id) = &options.session {
-        store.resume_session(session_id)?;
+        store.resume_session(session_id).await?;
         let metadata_native = store
-            .session_metadata(session_id)?
+            .session_metadata(session_id)
+            .await?
             .and_then(|metadata| peer_native_session_id(&metadata, &peer.backend.id));
         let native = match metadata_native {
             Some(native) => Some(native),
             None => store
-                .gateway_runtime_binding(session_id)?
+                .gateway_runtime_binding(session_id)
+                .await?
                 .filter(|binding| {
                     binding.status == psychevo_runtime::state::GatewayRuntimeBindingStatus::Resolved
                         && binding.native_kind.as_deref()
@@ -26,9 +28,11 @@ fn ensure_local_session(
                 .and_then(|binding| binding.native_session_id),
         };
         let top_level = store
-            .session_summary(session_id)?
+            .session_summary(session_id)
+            .await?
             .is_some_and(|summary| summary.parent_session_id.is_none());
-        let created = native.is_none() && top_level && store.load_messages(session_id)?.is_empty();
+        let created =
+            native.is_none() && top_level && store.load_messages(session_id).await?.is_empty();
         return Ok(LocalPeerSession {
             session_id: session_id.clone(),
             native_session_id: native,
@@ -38,13 +42,15 @@ fn ensure_local_session(
             created,
         });
     }
-    let session_id = store.create_session_with_metadata(
-        &options.cwd,
-        "peer_agent",
-        &peer.agent.name,
-        &format!("acp:{}", peer.backend.id),
-        Some(peer_root_metadata(peer, None)),
-    )?;
+    let session_id = store
+        .create_session_with_metadata(
+            &options.cwd,
+            "peer_agent",
+            &peer.agent.name,
+            &format!("acp:{}", peer.backend.id),
+            Some(peer_root_metadata(peer, None)),
+        )
+        .await?;
     Ok(LocalPeerSession {
         session_id,
         native_session_id: None,

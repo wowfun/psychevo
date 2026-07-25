@@ -1,12 +1,12 @@
 #[tokio::test]
 async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contract() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake", None)
-        .expect("session");
+        .await.expect("session");
     let profile = generated_runtime_profiles()
         .into_iter()
         .find(|profile| profile.id == "native")
@@ -38,7 +38,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
             ownership: GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
-        .expect("binding");
+        .await.expect("binding");
     let message = RuntimeMessage::User {
         content: vec![
             UserContentBlock::text("visible plus injected context"),
@@ -66,7 +66,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
             Some("visible".to_string()),
             &[],
         )
-        .expect("message");
+        .await.expect("message");
     let message_id = format!("message:{message_seq}");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -136,7 +136,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
                 timestamp_ms: 2,
             },
         )
-        .expect("legacy message");
+        .await.expect("legacy message");
     let legacy = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
@@ -181,7 +181,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
             None,
             &[],
         )
-        .expect("synthetic-only message");
+        .await.expect("synthetic-only message");
     let synthetic = handle_rpc(
         state.clone(),
         AuthContext::Bearer,
@@ -228,7 +228,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
             .state
 
             .session_revert_state(&session_id)
-            .expect("revert state")
+            .await.expect("revert state")
             .is_none()
     );
 

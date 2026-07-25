@@ -1,4 +1,4 @@
-fn prune_pending_actions(
+async fn prune_pending_actions(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
@@ -14,7 +14,7 @@ fn prune_pending_actions(
     let mut visible = Vec::new();
     let mut stale_action_ids = Vec::new();
     for action in pending {
-        match pending_action_state(state, selector, thread_id, &action)? {
+        match pending_action_state(state, selector, thread_id, &action).await? {
             PendingInteractionState::Visible => visible.push(action),
             PendingInteractionState::Hidden => {}
             PendingInteractionState::Stale => {
@@ -47,7 +47,7 @@ enum PendingInteractionState {
     Stale,
 }
 
-fn pending_action_state(
+async fn pending_action_state(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
@@ -78,6 +78,7 @@ fn pending_action_state(
             lease_expires_at_ms: action.lease_expires_at_ms,
         },
     )
+    .await
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,7 +90,7 @@ struct PendingInteractionRoute<'a> {
     lease_expires_at_ms: Option<i64>,
 }
 
-fn pending_interaction_context_state(
+async fn pending_interaction_context_state(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
@@ -111,7 +112,7 @@ fn pending_interaction_context_state(
     let Some(activity_id) = request.activity_id else {
         return Ok(PendingInteractionState::Visible);
     };
-    let Some(activity) = state.inner.state.gateway_activity(activity_id)? else {
+    let Some(activity) = state.inner.state.gateway_activity(activity_id).await? else {
         return Ok(PendingInteractionState::Stale);
     };
     if !matches!(activity.status.as_str(), "running" | "queued") {

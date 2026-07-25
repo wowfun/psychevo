@@ -1,12 +1,12 @@
 #[tokio::test]
 async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     state
         .inner
         .pending_actions
@@ -41,7 +41,7 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
         source: state.inner.source.clone(),
     };
 
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
 
     assert_eq!(
         snapshot["pendingActions"]
@@ -62,11 +62,11 @@ async fn thread_snapshot_prunes_pending_permission_without_live_activity() {
 
 #[tokio::test]
 async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let store = &state.inner.state;
     let session_id = store
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     let owner_id = "gateway:foreign";
     let activity = store
         .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
@@ -82,7 +82,7 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim activity");
+        .await.expect("claim activity");
     state
         .inner
         .pending_actions
@@ -117,7 +117,7 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
         source: state.inner.source.clone(),
     };
 
-    let running = thread_snapshot(&state, &scope, Some(&session_id)).expect("running snapshot");
+    let running = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("running snapshot");
     assert_eq!(
         running["pendingActions"]
             .as_array()
@@ -133,8 +133,8 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
             activity.generation,
             "failed",
         )
-        .expect("finish activity");
-    let finished = thread_snapshot(&state, &scope, Some(&session_id)).expect("finished snapshot");
+        .await.expect("finish activity");
+    let finished = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("finished snapshot");
 
     assert_eq!(
         finished["pendingActions"]
@@ -155,13 +155,13 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
 
 #[tokio::test]
 async fn turn_completed_event_removes_pending_permission_panel() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let session_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
-        .expect("session");
+        .await.expect("session");
     state.record_event_with_context(
         &GatewayEvent::ActionRequested {
             action: PendingActionView {
@@ -222,7 +222,7 @@ async fn turn_completed_event_removes_pending_permission_panel() {
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).expect("snapshot");
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id)).await.expect("snapshot");
 
     assert_eq!(
         snapshot["pendingActions"]
@@ -243,7 +243,7 @@ async fn turn_completed_event_removes_pending_permission_panel() {
 
 #[tokio::test]
 async fn source_started_pending_permission_survives_unbound_canonical_snapshot() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let draft_source = GatewaySource::new("web", "cwd:test:draft:1").persistent();
     let draft_source_key = draft_source.source_key().0;
     let owner_id = "gateway:foreign";
@@ -264,7 +264,7 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim activity");
+        .await.expect("claim activity");
     state
         .inner
         .pending_actions
@@ -299,7 +299,7 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    let canonical = thread_snapshot(&state, &canonical_scope, None).expect("canonical snapshot");
+    let canonical = thread_snapshot(&state, &canonical_scope, None).await.expect("canonical snapshot");
     assert_eq!(
         canonical["pendingActions"]
             .as_array()
@@ -320,7 +320,7 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
         cwd: state.inner.cwd.clone(),
         source: draft_source,
     };
-    let draft = thread_snapshot(&state, &draft_scope, None).expect("draft snapshot");
+    let draft = thread_snapshot(&state, &draft_scope, None).await.expect("draft snapshot");
     assert_eq!(draft["pendingActions"][0]["actionId"], "permission-draft");
     assert_eq!(draft["pendingActions"][0]["sourceKey"], draft_source_key);
     assert_eq!(draft["pendingActions"][0]["payload"]["allowAlways"], true);
@@ -332,7 +332,7 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
 
 #[tokio::test]
 async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let draft_source = GatewaySource::new("web", "cwd:test:draft:clarify").persistent();
     let draft_source_key = draft_source.source_key().0;
     let owner_id = "gateway:foreign";
@@ -353,7 +353,7 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim activity");
+        .await.expect("claim activity");
     state
         .inner
         .pending_actions
@@ -390,7 +390,7 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         cwd: state.inner.cwd.clone(),
         source: state.inner.source.clone(),
     };
-    let canonical = thread_snapshot(&state, &canonical_scope, None).expect("canonical snapshot");
+    let canonical = thread_snapshot(&state, &canonical_scope, None).await.expect("canonical snapshot");
     assert_eq!(
         canonical["pendingActions"]
             .as_array()
@@ -411,20 +411,20 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         cwd: state.inner.cwd.clone(),
         source: draft_source,
     };
-    let draft = thread_snapshot(&state, &draft_scope, None).expect("draft snapshot");
+    let draft = thread_snapshot(&state, &draft_scope, None).await.expect("draft snapshot");
     assert_eq!(draft["pendingActions"][0]["actionId"], "clarify-draft");
     assert_eq!(draft["pendingActions"][0]["sourceKey"], draft_source_key);
 }
 
 #[tokio::test]
 async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let thread_id = state
         .inner
         .state
 
         .create_session_with_metadata(&state.inner.cwd, "web", "pending", "pending", None)
-        .expect("thread");
+        .await.expect("thread");
     let source_key = state.inner.source.source_key().0;
     let owner_id = "gateway:foreign";
     let activity = state
@@ -444,7 +444,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
             superseded_activity_id: None,
             intent: None,
         })
-        .expect("claim activity");
+        .await.expect("claim activity");
     for (action_id, kind) in [
         ("permission-draft", GatewayActionKind::Permission),
         ("clarify-draft", GatewayActionKind::Clarify),
@@ -552,7 +552,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
         .state
 
         .pending_gateway_control_commands(owner_id, 10)
-        .expect("pending control commands");
+        .await.expect("pending control commands");
     assert_eq!(commands.len(), 2);
     assert_eq!(commands[0].activity_id, "activity-draft-route");
     assert_eq!(commands[0].command_kind, "permission");

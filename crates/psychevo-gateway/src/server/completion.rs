@@ -32,7 +32,7 @@ pub(super) struct CompletionToken {
     pub(super) end: usize,
 }
 
-pub(super) fn completion_list_value(
+pub(super) async fn completion_list_value(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::CompletionListParams,
@@ -45,7 +45,7 @@ pub(super) fn completion_list_value(
     };
     let query = token.query.to_ascii_lowercase();
     let mut items = match token.sigil {
-        '/' => slash_completion_items(state, scope, params.thread_id.as_deref(), &query)?,
+        '/' => slash_completion_items(state, scope, params.thread_id.as_deref(), &query).await?,
         '$' => dollar_completion_items(state, scope, &query)?,
         '@' => at_completion_items(state, scope, &query)?,
         _ => Vec::new(),
@@ -90,15 +90,16 @@ pub(super) fn active_completion_token(text: &str, cursor: usize) -> Option<Compl
     None
 }
 
-fn slash_completion_items(
+async fn slash_completion_items(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
     query: &str,
 ) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
-    let active_turn = thread_id
-        .map(|thread_id| state.activity(&scope.source, Some(thread_id)).running)
-        .unwrap_or_else(|| state.activity(&scope.source, None).running);
+    let active_turn = match thread_id {
+        Some(thread_id) => state.activity(&scope.source, Some(thread_id)).await.running,
+        None => state.activity(&scope.source, None).await.running,
+    };
     let mut commands = command_list_result(
         state,
         scope,

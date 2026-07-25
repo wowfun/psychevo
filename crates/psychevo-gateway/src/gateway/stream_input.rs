@@ -8,7 +8,7 @@ fn source_key_key(source_key: &SourceKey) -> String {
 
 fn wrap_stream(
     stream: Option<RunStreamSink>,
-    event_sink: Option<GatewayEventSink>,
+    event_sink: Option<GatewayEventEmitter>,
     turn_id: String,
     thread_id: Option<String>,
 ) -> Option<RunStreamSink> {
@@ -45,7 +45,7 @@ fn wrap_stream(
                         },
                         fields,
                     );
-                    event_sink(event);
+                    let _ = event_sink.emit(event);
                 }
                 if let Some(stream) = &stream {
                     stream(event);

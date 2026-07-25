@@ -1,5 +1,5 @@
-#[test]
-fn workspace_dir_name_rejects_path_components() {
+#[tokio::test]
+async fn workspace_dir_name_rejects_path_components() {
     assert_eq!(workspace_dir_name(" notes ").expect("trimmed"), "notes");
     let err = workspace_dir_name("../notes").expect_err("parent path rejected");
     assert!(
@@ -8,9 +8,9 @@ fn workspace_dir_name_rejects_path_components() {
     );
 }
 
-#[test]
-fn reset_source_to_empty_archives_previous_binding_without_replacement() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn reset_source_to_empty_archives_previous_binding_without_replacement() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let first_id = state
         .inner
@@ -23,10 +23,10 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
             "fake-provider",
             None,
         )
-        .expect("session");
-    bind_source_to_thread(&state, &scope, &first_id).expect("bind");
+        .await.expect("session");
+    bind_source_to_thread(&state, &scope, &first_id).await.expect("bind");
 
-    let snapshot = reset_source_to_empty(&state, &scope).expect("reset");
+    let snapshot = reset_source_to_empty(&state, &scope).await.expect("reset");
 
     assert!(snapshot.get("thread").is_some_and(Value::is_null));
     assert!(
@@ -34,7 +34,7 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .expect("source lookup")
+            .await.expect("source lookup")
             .is_none()
     );
     assert!(
@@ -43,7 +43,7 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
             .state
 
             .session_summary(&first_id)
-            .expect("first summary")
+            .await.expect("first summary")
             .expect("first exists")
             .archived_at_ms
             .is_some()
@@ -54,15 +54,15 @@ fn reset_source_to_empty_archives_previous_binding_without_replacement() {
             .state
 
             .list_sessions_for_cwd_with_sources(&state.inner.cwd, &[])
-            .expect("active sessions")
+            .await.expect("active sessions")
             .len(),
         0
     );
 }
 
-#[test]
-fn bind_source_to_thread_rebinds_existing_session() {
-    let (_temp, state) = web_state();
+#[tokio::test]
+async fn bind_source_to_thread_rebinds_existing_session() {
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let session_id = state
         .inner
@@ -75,16 +75,16 @@ fn bind_source_to_thread_rebinds_existing_session() {
             "fake-provider",
             None,
         )
-        .expect("session");
+        .await.expect("session");
 
-    bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+    bind_source_to_thread(&state, &scope, &session_id).await.expect("bind");
 
     assert_eq!(
         state
             .inner
             .gateway
             .resolve_source_thread(&state.inner.source)
-            .expect("source lookup")
+            .await.expect("source lookup")
             .as_deref(),
         Some(session_id.as_str())
     );
@@ -92,7 +92,7 @@ fn bind_source_to_thread_rebinds_existing_session() {
 
 #[tokio::test]
 async fn deleting_the_idle_current_thread_clears_its_source_binding() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
     let session_id = state
         .inner
@@ -105,8 +105,8 @@ async fn deleting_the_idle_current_thread_clears_its_source_binding() {
             "fake-provider",
             None,
         )
-        .expect("session");
-    bind_source_to_thread(&state, &scope, &session_id).expect("bind");
+        .await.expect("session");
+    bind_source_to_thread(&state, &scope, &session_id).await.expect("bind");
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let result = handle_rpc(
@@ -130,7 +130,7 @@ async fn deleting_the_idle_current_thread_clears_its_source_binding() {
             .state
 
             .session_summary(&session_id)
-            .expect("session lookup")
+            .await.expect("session lookup")
             .is_none()
     );
     assert!(
@@ -138,7 +138,7 @@ async fn deleting_the_idle_current_thread_clears_its_source_binding() {
             .inner
             .gateway
             .resolve_source_thread(&scope.source)
-            .expect("source lookup")
+            .await.expect("source lookup")
             .is_none()
     );
 }

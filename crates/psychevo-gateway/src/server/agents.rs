@@ -918,13 +918,14 @@ fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticV
     }
 }
 
-pub(super) fn agent_status_result(
+pub(super) async fn agent_status_result(
     store: Option<&psychevo_runtime::state::StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> wire::AgentStatusResult {
     wire::AgentStatusResult {
         agents: agent_status_records(store, parent_session_id, all)
+            .await
             .iter()
             .map(agent_run_view)
             .collect(),
@@ -932,38 +933,39 @@ pub(super) fn agent_status_result(
     }
 }
 
-pub(super) fn team_status_result(
+pub(super) async fn team_status_result(
     store: &psychevo_runtime::state::StateRuntime,
     parent_session_id: Option<&str>,
 ) -> psychevo_runtime::Result<wire::TeamStatusResult> {
-    let team = parent_session_id
-        .map(|thread| store.find_active_agent_team_run(thread))
-        .transpose()?
-        .flatten()
-        .or_else(|| {
-            parent_session_id.and_then(|thread| {
-                store
-                    .list_agent_team_runs_for_parent(thread)
-                    .ok()
-                    .and_then(|runs| runs.into_iter().next())
-            })
-        });
-    let mission = parent_session_id
-        .map(|thread| store.find_active_agent_mission_run(thread))
-        .transpose()?
-        .flatten()
-        .or_else(|| {
-            parent_session_id.and_then(|thread| {
-                store
-                    .list_agent_mission_runs_for_parent(thread)
-                    .ok()
-                    .and_then(|runs| runs.into_iter().next())
-            })
-        });
+    let team = if let Some(thread) = parent_session_id {
+        match store.find_active_agent_team_run(thread).await? {
+            Some(team) => Some(team),
+            None => store
+                .list_agent_team_runs_for_parent(thread)
+                .await
+                .ok()
+                .and_then(|runs| runs.into_iter().next()),
+        }
+    } else {
+        None
+    };
+    let mission = if let Some(thread) = parent_session_id {
+        match store.find_active_agent_mission_run(thread).await? {
+            Some(mission) => Some(mission),
+            None => store
+                .list_agent_mission_runs_for_parent(thread)
+                .await
+                .ok()
+                .and_then(|runs| runs.into_iter().next()),
+        }
+    } else {
+        None
+    };
     Ok(wire::TeamStatusResult {
         team: team.as_ref().map(team_run_view),
         mission: mission.as_ref().map(mission_run_view),
         agents: agent_status_records(Some(store), parent_session_id, false)
+            .await
             .iter()
             .map(agent_run_view)
             .collect(),
@@ -971,7 +973,7 @@ pub(super) fn team_status_result(
     })
 }
 
-pub(super) fn agent_control_result(
+pub(super) async fn agent_control_result(
     store: &psychevo_runtime::state::StateRuntime,
     params: wire::AgentControlParams,
 ) -> psychevo_runtime::Result<wire::AgentControlResult> {
@@ -979,11 +981,12 @@ pub(super) fn agent_control_result(
     let agent = match action {
         "stop" => {
             let target = required_control_target(&params)?;
-            stop_agent_id_with_grace(target, Some(store), std::time::Duration::from_millis(250))?
+            stop_agent_id_with_grace(target, Some(store), std::time::Duration::from_millis(250))
+                .await?
         }
         "resume" => {
             let target = required_control_target(&params)?;
-            resume_agent_id(target, Some(store))?
+            resume_agent_id(target, Some(store)).await?
         }
         "send" => {
             let target = required_control_target(&params)?;
@@ -993,7 +996,7 @@ pub(super) fn agent_control_result(
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| Error::Message("agent/control send requires message".to_string()))?;
-            send_agent_message(target, message, Some(store))?
+            send_agent_message(target, message, Some(store)).await?
         }
         "pauseSpawning" => {
             set_agent_spawn_paused(true);

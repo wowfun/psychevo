@@ -1,7 +1,7 @@
     #[tokio::test]
     async fn invocation_source_does_not_bind_or_reuse() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("cli", "run-1").invocation();
 
         let first = harness
@@ -21,7 +21,7 @@
                 .state
 
                 .gateway_source_binding(&source.source_key().0)
-                .expect("binding lookup")
+                .await.expect("binding lookup")
                 .is_none()
         );
         assert_eq!(
@@ -34,7 +34,7 @@
     #[tokio::test]
     async fn invocation_source_continue_latest_reuses_matching_public_thread() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
 
         let mut initial = request(
             &harness,
@@ -69,7 +69,7 @@
                 .state
 
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
-                .expect("sessions")
+                .await.expect("sessions")
                 .len(),
             1
         );
@@ -78,7 +78,7 @@
     #[tokio::test]
     async fn process_source_reuses_only_within_gateway_instance() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("tui", "cwd").process();
 
         let first = harness
@@ -108,14 +108,14 @@
                 .state
 
                 .gateway_source_binding(&source.source_key().0)
-                .expect("binding lookup")
+                .await.expect("binding lookup")
                 .is_none()
         );
     }
     #[tokio::test]
     async fn persistent_source_round_trips_through_store() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("acp", "client-session").persistent();
 
         assert_eq!(
@@ -123,7 +123,7 @@
                 .state
 
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
-                .expect("initial sessions")
+                .await.expect("initial sessions")
                 .len(),
             0
         );
@@ -154,7 +154,7 @@
                 .state
 
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["test"])
-                .expect("sessions")
+                .await.expect("sessions")
                 .len(),
             1
         );
@@ -162,14 +162,14 @@
             .state
 
             .gateway_source_lane(&source.source_key().0)
-            .expect("lane lookup")
+            .await.expect("lane lookup")
             .expect("lane");
         assert_eq!(lane.thread_id.as_deref(), Some(first.result.session_id.as_str()));
         let legacy_projection = harness
             .state
 
             .gateway_source_binding(&source.source_key().0)
-            .expect("legacy binding lookup")
+            .await.expect("legacy binding lookup")
             .expect("legacy binding projection");
         assert_eq!(legacy_projection.backend_kind, "unresolved");
         assert_eq!(legacy_projection.backend_native_id, None);
@@ -178,7 +178,7 @@
     #[tokio::test]
     async fn bound_thread_uses_stored_cwd_over_request_default() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("im.wechat", "remote-lane").persistent();
         let changed_default = harness
             .cwd
@@ -211,7 +211,7 @@
     #[tokio::test]
     async fn channel_connection_rotation_starts_next_turn_in_changed_default_cwd() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("im.wechat", "remote-lane")
             .persistent()
             .with_raw_identity(json!({
@@ -246,7 +246,7 @@
             harness
                 .gateway
                 .rotate_channel_connection_sources("wechat")
-                .expect("rotate wechat"),
+                .await.expect("rotate wechat"),
             1
         );
         assert!(
@@ -254,7 +254,7 @@
                 .state
 
                 .gateway_source_binding(&source.source_key().0)
-                .expect("binding lookup")
+                .await.expect("binding lookup")
                 .is_none()
         );
         assert_eq!(
@@ -262,7 +262,7 @@
                 .state
 
                 .gateway_source_binding(&other_source.source_key().0)
-                .expect("other binding lookup")
+                .await.expect("other binding lookup")
                 .expect("other binding")
                 .thread_id,
             other.result.session_id
@@ -271,7 +271,7 @@
             .state
 
             .session_summary(&first.result.session_id)
-            .expect("old summary")
+            .await.expect("old summary")
             .expect("old session");
         assert_eq!(
             old_summary.end_reason.as_deref(),
@@ -294,7 +294,7 @@
                 .state
 
                 .gateway_source_binding(&source.source_key().0)
-                .expect("new binding lookup")
+                .await.expect("new binding lookup")
                 .expect("new binding")
                 .thread_id,
             second.result.session_id
@@ -304,7 +304,7 @@
     #[tokio::test]
     async fn channel_connection_rotation_waits_for_running_bound_turn() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("im.wechat", "remote-lane")
             .persistent()
             .with_raw_identity(json!({
@@ -334,7 +334,7 @@
             harness
                 .gateway
                 .rotate_channel_connection_sources("wechat")
-                .expect("rotate wechat"),
+                .await.expect("rotate wechat"),
             1
         );
 
@@ -367,7 +367,7 @@
                 .state
 
                 .gateway_source_binding(&source.source_key().0)
-                .expect("new binding lookup")
+                .await.expect("new binding lookup")
                 .expect("new binding")
                 .thread_id,
             third.result.session_id
@@ -377,7 +377,7 @@
     #[tokio::test]
     async fn first_shell_without_bound_source_creates_and_binds_runtime_session() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let source = GatewaySource::new("web", "cwd").persistent();
         let root = harness.cwd.parent().expect("temp root");
         let home = root.join("home");
@@ -433,7 +433,7 @@ model = "lmstudio/test-model"
                 .state
 
                 .gateway_source_binding(&source.source_key().0)
-                .expect("binding lookup")
+                .await.expect("binding lookup")
                 .expect("binding")
                 .thread_id,
             session_id
@@ -443,7 +443,7 @@ model = "lmstudio/test-model"
                 .state
 
                 .list_sessions_for_cwd_with_sources(&harness.cwd, &["web"])
-                .expect("sessions")
+                .await.expect("sessions")
                 .len(),
             1
         );
@@ -453,7 +453,7 @@ model = "lmstudio/test-model"
     async fn send_turn_serializes_same_source_fifo() {
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("tui", "cwd").process();
 
         let first_gateway = harness.gateway.clone();
@@ -493,7 +493,7 @@ model = "lmstudio/test-model"
     async fn draft_source_lane_runs_while_previous_unbound_source_turn_finishes_later() {
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
-        let harness = harness(backend.clone());
+        let harness = harness(backend.clone()).await;
         let canonical = GatewaySource::new("web", "cwd").persistent();
         let draft = GatewaySource::new("web", "cwd:draft:test").persistent();
 
@@ -505,7 +505,7 @@ model = "lmstudio/test-model"
         harness
             .gateway
             .clear_source_binding(&canonical)
-            .expect("draft open clears canonical binding");
+            .await.expect("draft open clears canonical binding");
 
         let mut second_request = request(&harness, draft, "second");
         second_request.bind_source = Some(canonical.clone());
@@ -528,7 +528,7 @@ model = "lmstudio/test-model"
                 .state
 
                 .gateway_source_binding(&canonical.source_key().0)
-                .expect("binding lookup")
+                .await.expect("binding lookup")
                 .expect("canonical binding after draft")
                 .thread_id,
             second.result.session_id
@@ -543,7 +543,7 @@ model = "lmstudio/test-model"
                 .state
 
                 .gateway_source_binding(&canonical.source_key().0)
-                .expect("binding lookup")
+                .await.expect("binding lookup")
                 .expect("canonical binding after stale completion")
                 .thread_id,
             second.result.session_id
@@ -554,18 +554,18 @@ model = "lmstudio/test-model"
     async fn explicit_thread_turn_allows_source_rebind_while_running() {
         let backend = Arc::new(FakeBackend::default());
         let wait = backend.wait_on_first_run();
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let source = GatewaySource::new("web", "cwd").persistent();
         let first = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-            .expect("first session");
+            .await.expect("first session");
         let second = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-            .expect("second session");
+            .await.expect("second session");
         harness
             .gateway
             .bind_source_thread(
@@ -578,10 +578,11 @@ model = "lmstudio/test-model"
                 },
                 None,
             )
-            .expect("bind first");
+            .await.expect("bind first");
 
         let mut first_request = request(&harness, source.clone(), "first");
         first_request.thread_id = Some(first.clone());
+        first_request.explicit_thread = true;
         let gateway = harness.gateway.clone();
         let running = tokio::spawn(async move { gateway.send_turn(first_request).await });
         wait.started.notified().await;
@@ -598,18 +599,18 @@ model = "lmstudio/test-model"
                 },
                 None,
             )
-            .expect("bind second");
+            .await.expect("bind second");
 
         assert!(
             harness
                 .gateway
-                .activity_for_selector(GatewayThreadSelector::thread_id(&first))
+                .local_activity_for_selector(&GatewayThreadSelector::thread_id(&first))
                 .running
         );
         assert!(
             !harness
                 .gateway
-                .activity_for_selector(GatewayThreadSelector::source(source.source_key()))
+                .local_activity_for_selector(&GatewayThreadSelector::source(source.source_key()))
                 .running
         );
 
@@ -623,18 +624,18 @@ model = "lmstudio/test-model"
     #[tokio::test]
     async fn durable_activity_does_not_rebind_parent_turn_to_scoped_child_turn_started() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let turn_id = "turn-parent";
         let parent_thread = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-            .expect("parent session");
+            .await.expect("parent session");
         let child_thread = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
-            .expect("child session");
+            .await.expect("child session");
 
         let activity = harness
             .gateway
@@ -651,7 +652,7 @@ model = "lmstudio/test-model"
                     "threadId": parent_thread.clone(),
                 })),
             })
-            .expect("claim activity");
+            .await.expect("claim activity");
         assert!(
             harness
                 .state
@@ -663,7 +664,7 @@ model = "lmstudio/test-model"
                     &parent_thread,
                     gateway_now_ms() + 30_000,
                 )
-                .expect("parent turn started")
+                .await.expect("parent turn started")
         );
         assert!(
             !harness
@@ -676,14 +677,14 @@ model = "lmstudio/test-model"
                     &child_thread,
                     gateway_now_ms() + 30_000,
                 )
-                .expect("scoped child turn started")
+                .await.expect("scoped child turn started")
         );
 
         let record = harness
             .state
 
             .gateway_activity(turn_id)
-            .expect("activity lookup")
+            .await.expect("activity lookup")
             .expect("activity");
         assert_eq!(record.thread_id.as_deref(), Some(parent_thread.as_str()));
     }
@@ -691,19 +692,19 @@ model = "lmstudio/test-model"
     #[tokio::test]
     async fn gateway_event_sink_does_not_alias_scoped_child_thread_to_parent_activity() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let turn_id = "turn-parent";
         let queue_key = "source:web:test";
         let parent_thread = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-            .expect("parent session");
+            .await.expect("parent session");
         let child_thread = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
-            .expect("child session");
+            .await.expect("child session");
 
         harness.gateway.register_active(
             queue_key,
@@ -726,7 +727,7 @@ model = "lmstudio/test-model"
                     "threadId": parent_thread.clone(),
                 })),
             })
-            .expect("claim activity");
+            .await.expect("claim activity");
         let sink = harness
             .gateway
             .wrap_gateway_event_sink(
@@ -737,45 +738,50 @@ model = "lmstudio/test-model"
             )
             .expect("event sink");
 
-        sink(GatewayEvent::TurnStarted {
+        sink.emit(GatewayEvent::TurnStarted {
             thread_id: Some(parent_thread.clone()),
             turn_id: turn_id.to_string(),
             selected_skills: Vec::new(),
-        });
-        sink(GatewayEvent::TurnStarted {
+        })
+        .expect("parent turn event");
+        sink.emit(GatewayEvent::TurnStarted {
             thread_id: Some(child_thread.clone()),
             turn_id: turn_id.to_string(),
             selected_skills: Vec::new(),
-        });
+        })
+        .expect("child turn event");
+        harness.gateway.wait_for_gateway_events().await;
 
         assert!(
             harness
                 .gateway
                 .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread))
+                .await
                 .running
         );
         assert!(
             !harness
                 .gateway
                 .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread))
+                .await
                 .running
         );
     }
 
-    #[test]
-    fn gateway_event_sink_attributes_child_interaction_to_child_activity() {
+    #[tokio::test]
+    async fn gateway_event_ingress_attributes_child_interaction_before_durable_publish() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let parent_thread = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-            .expect("parent session");
+            .await.expect("parent session");
         let child_thread = harness
             .state
 
             .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
-            .expect("child session");
+            .await.expect("child session");
         let parent_activity = harness
             .gateway
             .claim_durable_gateway_activity(DurableGatewayActivityClaim {
@@ -788,7 +794,7 @@ model = "lmstudio/test-model"
                 queued_turns: 0,
                 intent: None,
             })
-            .expect("parent activity");
+            .await.expect("parent activity");
         harness
             .gateway
             .claim_durable_gateway_activity(DurableGatewayActivityClaim {
@@ -801,10 +807,10 @@ model = "lmstudio/test-model"
                 queued_turns: 0,
                 intent: None,
             })
-            .expect("child activity");
+            .await.expect("child activity");
         let observed = Arc::new(Mutex::new(None));
         let observed_for_sink = Arc::clone(&observed);
-        let downstream: GatewayEventSink = Arc::new(move |event| {
+        let downstream = GatewayEventEmitter::new(move |event| {
             *observed_for_sink.lock().expect("observed event") = Some(event);
         });
         let sink = harness
@@ -817,7 +823,7 @@ model = "lmstudio/test-model"
             )
             .expect("wrapped sink");
 
-        sink(GatewayEvent::ActionRequested {
+        sink.emit(GatewayEvent::ActionRequested {
             action: PendingActionView {
                 action_id: "permission-child".to_string(),
                 kind: GatewayActionKind::Permission,
@@ -831,7 +837,9 @@ model = "lmstudio/test-model"
                 owner_id: None,
                 lease_expires_at_ms: None,
             },
-        });
+        })
+        .expect("child action event");
+        harness.gateway.wait_for_gateway_events().await;
 
         let event = observed
             .lock()
@@ -841,12 +849,34 @@ model = "lmstudio/test-model"
         let GatewayEvent::ActionRequested { action } = event else {
             panic!("expected child action");
         };
+        assert_eq!(
+            action.activity_id, None,
+            "local-first delivery must not block on durable provenance lookup"
+        );
+        assert_eq!(action.turn_id.as_deref(), Some("turn-child"));
+
+        let persisted = harness
+            .state
+            .list_gateway_live_events_after(0, 10)
+            .await
+            .expect("persisted gateway events");
+        let persisted_event: GatewayEvent = serde_json::from_value(
+            persisted
+                .last()
+                .expect("persisted child action")
+                .event
+                .clone(),
+        )
+        .expect("persisted child action event");
+        let GatewayEvent::ActionRequested { action } = persisted_event else {
+            panic!("expected persisted child action");
+        };
         assert_eq!(action.activity_id.as_deref(), Some("turn-child"));
         assert_eq!(action.turn_id.as_deref(), Some("turn-child"));
     }
     #[tokio::test]
     async fn draft_mutation_guard_serializes_only_the_same_source() {
-        let harness = harness(Arc::new(FakeBackend::default()));
+        let harness = harness(Arc::new(FakeBackend::default())).await;
         let source = GatewaySource::new("web", "same-source").persistent();
         let other = GatewaySource::new("web", "other-source").persistent();
         let first_guard = harness

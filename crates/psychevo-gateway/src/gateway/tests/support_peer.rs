@@ -110,19 +110,19 @@
             let inner = Arc::clone(&self.inner);
             Box::pin(async move {
                 let run_number = inner.next_run.fetch_add(1, Ordering::SeqCst) + 1;
-                let binding_before_run = request
-                    .options
-                    .session
-                    .as_deref()
-                    .and_then(|thread_id| {
-                        request
-                            .options
-                            .state
-
-                            .gateway_runtime_binding(thread_id)
-                            .ok()
-                            .flatten()
-                    })
+                let binding_before_run = if let Some(thread_id) =
+                    request.options.session.as_deref()
+                {
+                    request
+                        .options
+                        .state
+                        .gateway_runtime_binding(thread_id)
+                        .await
+                        .ok()
+                        .flatten()
+                } else {
+                    None
+                }
                     .is_some_and(|binding| {
                         binding.status == GatewayRuntimeBindingStatus::Resolved
                             && binding.runtime_ref.as_deref() == Some("native")
@@ -192,16 +192,20 @@
                 }
 
                 let session_id = if let Some(session_id) = request.options.session.clone() {
-                    request.options.state.resume_session(&session_id)?;
+                    request.options.state.resume_session(&session_id).await?;
                     session_id
                 } else {
-                    request.options.state.create_session_with_metadata(
-                        &request.options.cwd,
-                        &request.runtime_source,
-                        "fake-model",
-                        "fake-provider",
-                        None,
-                    )?
+                    request
+                        .options
+                        .state
+                        .create_session_with_metadata(
+                            &request.options.cwd,
+                            &request.runtime_source,
+                            "fake-model",
+                            "fake-provider",
+                            None,
+                        )
+                        .await?
                 };
                 let outcome = if aborted {
                     Outcome::Aborted
@@ -211,26 +215,36 @@
                 let final_answer = format!("answer {run_number}");
                 if outcome == Outcome::Normal && inner.persist_history.load(Ordering::SeqCst) {
                     let timestamp_ms = crate::gateway_now_ms();
-                    request.options.state.append_message(
-                        &session_id,
-                        &Message::User {
-                            content: vec![UserContentBlock::text(request.options.prompt.clone())],
-                            timestamp_ms,
-                        },
-                    )?;
-                    request.options.state.append_message(
-                        &session_id,
-                        &Message::Assistant {
-                            content: vec![AssistantBlock::Text {
-                                text: final_answer.clone(),
-                            }],
-                            timestamp_ms: timestamp_ms.saturating_add(1),
-                            finish_reason: Some("stop".to_string()),
-                            outcome,
-                            model: Some("fake-model".to_string()),
-                            provider: Some("fake-provider".to_string()),
-                        },
-                    )?;
+                    request
+                        .options
+                        .state
+                        .append_message(
+                            &session_id,
+                            &Message::User {
+                                content: vec![UserContentBlock::text(
+                                    request.options.prompt.clone(),
+                                )],
+                                timestamp_ms,
+                            },
+                        )
+                        .await?;
+                    request
+                        .options
+                        .state
+                        .append_message(
+                            &session_id,
+                            &Message::Assistant {
+                                content: vec![AssistantBlock::Text {
+                                    text: final_answer.clone(),
+                                }],
+                                timestamp_ms: timestamp_ms.saturating_add(1),
+                                finish_reason: Some("stop".to_string()),
+                                outcome,
+                                model: Some("fake-model".to_string()),
+                                provider: Some("fake-provider".to_string()),
+                            },
+                        )
+                        .await?;
                 }
                 if inner.emit_stream_terminal.load(Ordering::SeqCst)
                     && let Some(stream) = request.stream.as_ref()
@@ -279,11 +293,11 @@
         gateway: Gateway,
     }
 
-    fn harness(backend: Arc<FakeBackend>) -> Harness {
+    async fn harness(backend: Arc<FakeBackend>) -> Harness {
         let temp = tempfile::tempdir().expect("tempdir");
         let cwd = temp.path().join("work");
         std::fs::create_dir_all(&cwd).expect("cwd");
-        let state = StateRuntime::open(temp.path().join("state.db")).expect("state runtime");
+        let state = StateRuntime::open(temp.path().join("state.db")).await.expect("state runtime");
         let gateway = Gateway::with_backend(state.clone(), backend);
         Harness {
             _temp: temp,
@@ -349,6 +363,7 @@
     fn request(harness: &Harness, source: GatewaySource, prompt: &str) -> SendTurnRequest {
         SendTurnRequest {
             thread_id: None,
+            explicit_thread: false,
             source: Some(source),
             bind_source: None,
             reset_source_binding: false,
@@ -365,10 +380,10 @@
         }
     }
 
-    #[test]
-    fn peer_delegate_resolver_accepts_subagent_only_backend_agent() {
+    #[tokio::test]
+    async fn peer_delegate_resolver_accepts_subagent_only_backend_agent() {
         let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend);
+        let harness = harness(backend).await;
         let home = harness._temp.path().join("home");
         std::fs::create_dir_all(&home).expect("home");
         std::fs::write(

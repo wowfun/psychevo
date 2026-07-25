@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let input = vec![GatewayInputPart::Text {
         text: "private native prompt".to_string(),
     }];
@@ -23,7 +23,7 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
         .state
 
         .gateway_turn_delivery(&result.turn.id)
-        .expect("delivery lookup")
+        .await.expect("delivery lookup")
         .expect("delivery record");
     assert_eq!(delivery.status, "terminal");
     assert_eq!(delivery.runtime_ref, "native");
@@ -35,7 +35,7 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
         .state
 
         .gateway_activity(&result.turn.id)
-        .expect("activity lookup")
+        .await.expect("activity lookup")
         .expect("activity");
     assert!(
         activity
@@ -49,24 +49,26 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
 #[tokio::test]
 async fn public_turn_terminal_observes_completed_thread_activity() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let observed_status = Arc::new(Mutex::new(None));
     let status_for_event = Arc::clone(&observed_status);
-    let state_for_event = harness.state.clone();
+    let gateway_for_event = harness.gateway.clone();
     let mut turn_request = request(
         &harness,
         GatewaySource::new("web", "terminal-activity-order").persistent(),
         "finish activity before terminal",
     );
-    turn_request.event_sink = Some(Arc::new(move |event| {
-        if let GatewayEvent::TurnCompleted { turn_id, .. } = event {
-            let status = state_for_event
-
-                .gateway_activity(&turn_id)
-                .expect("activity read at terminal")
-                .expect("activity at terminal")
-                .status;
-            *status_for_event.lock().expect("terminal status lock") = Some(status);
+    turn_request.event_sink = Some(GatewayEventEmitter::new(move |event| {
+        if let GatewayEvent::TurnCompleted {
+            thread_id: Some(thread_id),
+            ..
+        } = event
+        {
+            let activity = gateway_for_event.local_activity_for_selector(
+                &GatewayThreadSelector::thread_id(thread_id),
+            );
+            *status_for_event.lock().expect("terminal status lock") =
+                Some((activity.running, activity.active_turn_id));
         }
     }));
 
@@ -77,15 +79,15 @@ async fn public_turn_terminal_observes_completed_thread_activity() {
         .expect("native turn");
 
     assert_eq!(
-        observed_status.lock().expect("observed status").as_deref(),
-        Some("completed")
+        observed_status.lock().expect("observed status").as_ref(),
+        Some(&(false, None))
     );
 }
 
 #[tokio::test]
 async fn delegated_acp_child_owns_activity_turn_identity_and_terminal_order() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_acp_lifecycle.py");
@@ -133,7 +135,7 @@ Use the captured child session.
         .state
 
         .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-        .expect("parent Thread");
+        .await.expect("parent Thread");
     let child_thread_id = harness
         .state
 
@@ -145,7 +147,7 @@ Use the captured child session.
             "acp:fake",
             None,
         )
-        .expect("child Thread");
+        .await.expect("child Thread");
     harness
         .state
 
@@ -155,7 +157,7 @@ Use the captured child session.
             psychevo_runtime::state::AgentEdgeStatus::Open,
             None,
         )
-        .expect("open child edge");
+        .await.expect("open child edge");
     let parent_activity = harness
         .gateway
         .claim_durable_gateway_activity(DurableGatewayActivityClaim {
@@ -168,7 +170,7 @@ Use the captured child session.
             queued_turns: 0,
             intent: None,
         })
-        .expect("parent activity");
+        .await.expect("parent activity");
 
     let projected = Arc::new(Mutex::new(Vec::<GatewayEvent>::new()));
     let projected_for_stream = Arc::clone(&projected);
@@ -188,19 +190,12 @@ Use the captured child session.
     let terminal_observation = Arc::new(Mutex::new(None));
     let terminal_for_sink = Arc::clone(&terminal_observation);
     let gateway_for_sink = harness.gateway.clone();
-    let state_for_sink = harness.state.clone();
     let child_for_sink = child_thread_id.clone();
-    let event_sink: GatewayEventSink = Arc::new(move |event| {
+    let event_sink = GatewayEventEmitter::new(move |event| {
         if matches!(event, GatewayEvent::TurnCompleted { .. }) {
             let activity = gateway_for_sink
-                .activity_for_selector(GatewayThreadSelector::thread_id(&child_for_sink));
-            let edge = state_for_sink
-
-                .find_agent_edge(&child_for_sink)
-                .expect("edge at terminal")
-                .expect("child edge at terminal");
-            *terminal_for_sink.lock().expect("terminal observation") =
-                Some((activity, edge.status));
+                .local_activity_for_selector(&GatewayThreadSelector::thread_id(&child_for_sink));
+            *terminal_for_sink.lock().expect("terminal observation") = Some(activity);
         }
     });
     let mut options = run_options(&harness, "delegated child");
@@ -252,10 +247,12 @@ Use the captured child session.
 
     let parent = harness
         .gateway
-        .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread_id));
+        .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread_id))
+        .await;
     let child = harness
         .gateway
-        .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread_id));
+        .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread_id))
+        .await;
     assert!(parent.running);
     assert!(child.running);
     assert_eq!(child.active_turn_id.as_deref(), Some(child_turn_id.as_str()));
@@ -282,22 +279,35 @@ Use the captured child session.
     assert!(!child_entries.is_empty());
     assert!(child_entries.iter().all(|turn_id| turn_id == &child_turn_id));
 
-    let (terminal_activity, terminal_edge) = terminal_observation
+    let terminal_activity = terminal_observation
         .lock()
         .expect("terminal observation")
         .clone()
         .expect("terminal observed");
     assert!(!terminal_activity.running);
     assert_eq!(terminal_activity.active_turn_id, None);
-    assert_eq!(terminal_edge, psychevo_runtime::state::AgentEdgeStatus::Closed);
+    let terminal_edge = harness
+        .state
+        .find_agent_edge(&child_thread_id)
+        .await
+        .expect("edge after terminal")
+        .expect("child edge after terminal");
+    assert_eq!(
+        terminal_edge.status,
+        psychevo_runtime::state::AgentEdgeStatus::Closed
+    );
     assert!(
         harness
             .gateway
             .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread_id))
+            .await
             .running
     );
 
-    harness.gateway.finish_durable_gateway_activity(Some(&parent_activity), "completed");
+    harness
+        .gateway
+        .finish_durable_gateway_activity(Some(&parent_activity), "completed")
+        .await;
     harness
         .gateway
         .shutdown_runtimes(false)
@@ -308,7 +318,7 @@ Use the captured child session.
 #[tokio::test]
 async fn acp_peer_agent_turn_routes_to_backend_and_persists_native_session() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend.clone());
+    let harness = harness(backend.clone()).await;
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp.py");
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -395,7 +405,7 @@ Peer instructions.
         .state
 
         .gateway_source_binding(&source.source_key().0)
-        .expect("binding lookup")
+        .await.expect("binding lookup")
         .expect("binding");
     assert_eq!(binding.backend_kind, "unresolved");
     assert_eq!(binding.backend_native_id, None);
@@ -403,7 +413,7 @@ Peer instructions.
         .state
 
         .gateway_runtime_binding(&first.result.session_id)
-        .expect("runtime binding lookup")
+        .await.expect("runtime binding lookup")
         .expect("runtime binding");
     assert_eq!(runtime_binding.backend_kind.as_deref(), Some("acp"));
     assert_eq!(
@@ -414,7 +424,7 @@ Peer instructions.
         .state
 
         .gateway_turn_delivery(&first.turn.id)
-        .expect("ACP delivery lookup")
+        .await.expect("ACP delivery lookup")
         .expect("ACP delivery record");
     assert_eq!(delivery.status, "terminal");
     assert_eq!(delivery.runtime_ref, "acp:fake");
@@ -424,13 +434,13 @@ Peer instructions.
         .state
 
         .session_metadata(&first.result.session_id)
-        .expect("metadata")
+        .await.expect("metadata")
         .expect("metadata value");
     assert_eq!(metadata["peer_agent"]["nativeSessionId"], "native-1");
     let transcript = harness
         .gateway
         .thread_transcript(&first.result.session_id)
-        .expect("transcript");
+        .await.expect("transcript");
     assert_eq!(transcript.len(), 2);
     assert_eq!(transcript[0].role, TranscriptEntryRole::User);
     assert_eq!(transcript[1].role, TranscriptEntryRole::Assistant);
@@ -438,7 +448,7 @@ Peer instructions.
         .state
 
         .session_summary(&first.result.session_id)
-        .expect("session summary")
+        .await.expect("session summary")
         .expect("summary");
     assert_eq!(summary.title.as_deref(), Some("hello"));
 
@@ -484,9 +494,10 @@ Peer instructions.
             "acp:fake",
             None,
         )
-        .expect("child peer session");
+        .await.expect("child peer session");
     let mut child_request = request(&harness, source, "child prompt");
     child_request.thread_id = Some(child_session.clone());
+    child_request.explicit_thread = true;
     child_request.options.agent = Some("reviewer".to_string());
     child_request.options.runtime_ref = Some("acp:fake".to_string());
     child_request.options.inherited_env = Some(env);
@@ -500,14 +511,14 @@ Peer instructions.
         .state
 
         .session_summary(&child.result.session_id)
-        .expect("child summary")
+        .await.expect("child summary")
         .expect("child");
     assert_eq!(child_summary.title, None);
 }
 #[tokio::test]
 async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_session() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend.clone());
+    let harness = harness(backend.clone()).await;
     let session_id = harness
         .state
 
@@ -530,13 +541,14 @@ async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_se
                 }
             })),
         )
-        .expect("session");
+        .await.expect("session");
     let mut request = request(
         &harness,
         GatewaySource::new("web", "default-after-peer").persistent(),
         "continue with default",
     );
     request.thread_id = Some(session_id.clone());
+    request.explicit_thread = true;
 
     let result = harness.gateway.send_turn(request).await.expect("turn");
 
@@ -549,7 +561,7 @@ async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_se
         .state
 
         .session_metadata(&session_id)
-        .expect("metadata")
+        .await.expect("metadata")
         .expect("metadata value");
     let peer = metadata
         .get("peer_agent")
@@ -564,7 +576,7 @@ async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_se
 #[tokio::test]
 async fn acp_peer_agent_streams_standard_session_updates_to_gateway_events() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend.clone());
+    let harness = harness(backend.clone()).await;
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_stream.py");
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -619,7 +631,7 @@ tools: [read]
     first_request.options.agent = Some("reviewer".to_string());
     first_request.options.runtime_ref = Some("acp:fake".to_string());
     first_request.options.inherited_env = Some(env.clone());
-    first_request.event_sink = Some(Arc::new(move |event| {
+    first_request.event_sink = Some(GatewayEventEmitter::new(move |event| {
         gateway_events_for_sink
             .lock()
             .expect("gateway events lock")
@@ -749,13 +761,13 @@ tools: [read]
         .state
 
         .session_summary(&result.result.session_id)
-        .expect("session summary")
+        .await.expect("session summary")
         .expect("summary");
     assert_eq!(summary.title.as_deref(), Some("ACP streamed title"));
     let transcript = harness
         .gateway
         .thread_transcript(&result.result.session_id)
-        .expect("transcript");
+        .await.expect("transcript");
     let persisted_blocks = transcript
         .iter()
         .flat_map(|entry| entry.blocks.iter())
@@ -790,7 +802,7 @@ tools: [read]
         .state
 
         .load_tui_message_summaries(&result.result.session_id)
-        .expect("stored messages");
+        .await.expect("stored messages");
     let stored_assistant = summaries
         .iter()
         .find(|summary| matches!(summary.message, psychevo_agent_core::Message::Assistant { .. }))
@@ -811,7 +823,7 @@ tools: [read]
             session_id: result.result.session_id.clone(),
         },
     )
-    .expect("session usage");
+    .await.expect("session usage");
     assert_eq!(usage_summary.effective_total_tokens, Some(144));
     assert_eq!(usage_summary.total_status, "reported");
     let psychevo_agent_core::Message::Assistant { content, .. } = &stored_assistant.message else {
@@ -861,7 +873,7 @@ tools: [read]
         .state
 
         .load_tui_message_summaries(&result.result.session_id)
-        .expect("stored messages after second turn");
+        .await.expect("stored messages after second turn");
     let stored_assistants = summaries
         .iter()
         .filter(|summary| {
@@ -898,7 +910,7 @@ tools: [read]
             session_id: result.result.session_id.clone(),
         },
     )
-    .expect("session usage after cumulative ACP update");
+    .await.expect("session usage after cumulative ACP update");
     assert_eq!(usage_summary.effective_total_tokens, Some(200));
     assert_eq!(usage_summary.reported_total_tokens, 200);
     assert_eq!(usage_summary.total_status, "reported");

@@ -1,7 +1,7 @@
 #[tokio::test]
 async fn acp_peer_rejects_non_v1_protocol_without_fallback() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_wrong_version.py");
     let log = harness._temp.path().join("wrong-version.jsonl");
@@ -95,7 +95,7 @@ async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     use base64::Engine as _;
 
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_v1_contract.py");
     let log = harness._temp.path().join("v1-contract.jsonl");
@@ -282,7 +282,7 @@ Peer instructions from markdown.
 #[tokio::test]
 async fn acp_peer_abort_sends_session_cancel_before_process_cleanup() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_cancel.py");
     let log = harness._temp.path().join("cancel.jsonl");
@@ -369,7 +369,7 @@ entrypoints: [peer]
         .state
 
         .gateway_runtime_binding(&result.result.session_id)
-        .expect("runtime binding")
+        .await.expect("runtime binding")
         .expect("binding after abort");
     assert_eq!(binding.native_session_id.as_deref(), Some("native-cancel"));
 }
@@ -377,7 +377,7 @@ entrypoints: [peer]
 #[tokio::test]
 async fn acp_unknown_delivery_retains_input_without_automatic_retry() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_unknown.py");
     let log = harness._temp.path().join("unknown-delivery.log");
@@ -459,7 +459,7 @@ entrypoints: [peer]
         .state
 
         .gateway_turn_delivery(turn_id)
-        .expect("delivery lookup")
+        .await.expect("delivery lookup")
         .expect("delivery record");
     assert_eq!(delivery.status, "unknown");
     assert!(
@@ -474,7 +474,7 @@ entrypoints: [peer]
         .state
 
         .gateway_activity(turn_id)
-        .expect("activity lookup")
+        .await.expect("activity lookup")
         .expect("activity");
     assert!(
         activity
@@ -491,7 +491,7 @@ entrypoints: [peer]
 #[tokio::test]
 async fn acp_next_turn_load_reconciles_unknown_delivery_before_new_input() {
     let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let home = harness._temp.path().join("home-reconcile");
     let script = harness._temp.path().join("fake_acp_reconcile.py");
     let log = harness._temp.path().join("reconcile.jsonl");
@@ -566,7 +566,7 @@ entrypoints: [peer]
         .state
 
         .gateway_turn_delivery(first_turn_id)
-        .expect("first delivery")
+        .await.expect("first delivery")
         .expect("first delivery record");
     assert_eq!(first_delivery.status, "unknown");
     assert!(first_delivery.input_json.is_some());
@@ -575,7 +575,7 @@ entrypoints: [peer]
         .state
 
         .gateway_turn_terminal(first_turn_id)
-        .expect("first terminal")
+        .await.expect("first terminal")
         .expect("first terminal record");
     assert_eq!(first_terminal.status, "failed");
     assert_eq!(
@@ -583,7 +583,7 @@ entrypoints: [peer]
             .state
 
             .load_tui_message_summaries(&thread_id)
-            .expect("messages after unknown delivery")
+            .await.expect("messages after unknown delivery")
             .len(),
         1,
         "transport failure belongs to the terminal fact, not an assistant message"
@@ -597,6 +597,7 @@ entrypoints: [peer]
     let second_turn_id = "turn-acp-reconcile-second";
     let mut second_request = request_for("new input after reconciliation");
     second_request.thread_id = Some(thread_id.clone());
+    second_request.explicit_thread = true;
     let second = harness
         .gateway
         .send_turn_with_id(second_request, second_turn_id.to_string())
@@ -608,7 +609,7 @@ entrypoints: [peer]
         .state
 
         .gateway_turn_delivery(first_turn_id)
-        .expect("reconciled delivery")
+        .await.expect("reconciled delivery")
         .expect("reconciled delivery record");
     assert_eq!(reconciled_delivery.status, "terminal");
     assert_eq!(reconciled_delivery.input_json, None);
@@ -618,7 +619,7 @@ entrypoints: [peer]
         .state
 
         .gateway_turn_terminal(first_turn_id)
-        .expect("reconciled terminal")
+        .await.expect("reconciled terminal")
         .expect("reconciled terminal record");
     assert_eq!(reconciled_terminal.status, "completed");
     assert_eq!(reconciled_terminal.outcome.as_deref(), Some("normal"));
@@ -636,7 +637,7 @@ entrypoints: [peer]
         .state
 
         .load_tui_message_summaries(&thread_id)
-        .expect("reconciled messages");
+        .await.expect("reconciled messages");
     assert_eq!(
         messages
             .iter()
@@ -679,6 +680,7 @@ entrypoints: [peer]
         .expect("settle second ACP generation");
     let mut third_request = request_for("third input after a second load");
     third_request.thread_id = Some(thread_id.clone());
+    third_request.explicit_thread = true;
     let third = harness
         .gateway
         .send_turn_with_id(third_request, "turn-acp-reconcile-third".to_string())
@@ -689,7 +691,7 @@ entrypoints: [peer]
         .state
 
         .load_tui_message_summaries(&thread_id)
-        .expect("deduplicated messages");
+        .await.expect("deduplicated messages");
     assert_eq!(deduplicated.len(), 8);
     let encoded_messages = deduplicated
         .iter()
@@ -781,11 +783,11 @@ entrypoints: [peer]
 async fn submit_permission_resolves_gateway_permission_request() {
     let backend = Arc::new(FakeBackend::default());
     backend.request_permission();
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let source = GatewaySource::new("tui", "cwd").process();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut request = request(&harness, source.clone(), "permission");
-    request.event_sink = Some(Arc::new(move |event| {
+    request.event_sink = Some(GatewayEventEmitter::new(move |event| {
         let _ = event_tx.send(event);
     }));
 
@@ -802,11 +804,16 @@ async fn submit_permission_resolves_gateway_permission_request() {
         }
     }
 
-    assert!(harness.gateway.submit_permission(
-        GatewayThreadSelector::source(source.source_key()),
-        "permission-1",
-        PermissionApprovalDecision::allow_once(),
-    ));
+    assert!(
+        harness
+            .gateway
+            .submit_permission(
+                GatewayThreadSelector::source(source.source_key()),
+                "permission-1",
+                PermissionApprovalDecision::allow_once(),
+            )
+            .await
+    );
     turn.await.expect("turn task").expect("turn");
 
     let resolved = event_rx.recv().await.expect("permission resolved event");
@@ -825,12 +832,12 @@ async fn submit_permission_resolves_gateway_permission_request() {
 async fn submit_permission_accepts_thread_alias_for_source_started_request() {
     let backend = Arc::new(FakeBackend::default());
     backend.request_permission();
-    let harness = harness(backend);
+    let harness = harness(backend).await;
     let source = GatewaySource::new("tui", "cwd").process();
     let source_queue_key = source_key_key(&source.source_key());
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut request = request(&harness, source.clone(), "permission");
-    request.event_sink = Some(Arc::new(move |event| {
+    request.event_sink = Some(GatewayEventEmitter::new(move |event| {
         let _ = event_tx.send(event);
     }));
 
@@ -850,10 +857,15 @@ async fn submit_permission_accepts_thread_alias_for_source_started_request() {
     harness
         .gateway
         .register_active_thread_alias(&source_queue_key, "thread-materialized");
-    assert!(harness.gateway.submit_permission(
-        GatewayThreadSelector::thread_id("thread-materialized"),
-        "permission-1",
-        PermissionApprovalDecision::allow_once(),
-    ));
+    assert!(
+        harness
+            .gateway
+            .submit_permission(
+                GatewayThreadSelector::thread_id("thread-materialized"),
+                "permission-1",
+                PermissionApprovalDecision::allow_once(),
+            )
+            .await
+    );
     turn.await.expect("turn task").expect("turn");
 }

@@ -6,7 +6,7 @@ const ACP_AUTH_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const ACP_AUTH_STATUS_DETAIL_MAX_CHARS: usize = 1_024;
 
 pub(crate) type AcpSessionReadyCallback =
-    Arc<dyn Fn(&str) -> psychevo_runtime::Result<()> + Send + Sync>;
+    Arc<dyn Fn(String) -> BoxFuture<'static, psychevo_runtime::Result<()>> + Send + Sync>;
 
 pub(crate) struct AcpSetControlInput {
     pub(crate) peer: ResolvedPeerTurn,
@@ -267,6 +267,7 @@ impl AcpProcessPool {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) async fn inspect(
         &self,
         peer: ResolvedPeerTurn,
@@ -885,6 +886,7 @@ enum AcpProcessCommand {
         native_session_id: String,
         reply: tokio_oneshot::Sender<psychevo_runtime::Result<()>>,
     },
+    #[cfg(test)]
     Inspect {
         local_session_id: String,
         native_session_id: String,
@@ -1633,6 +1635,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
                                     let _ = reply.send(result);
                                 });
                             }
+                            #[cfg(test)]
                             AcpProcessCommand::Inspect { local_session_id, native_session_id, cwd, mcp_servers, reply } => {
                                 let session_lock = match acp_session_lock(&session_locks, &local_session_id) {
                                     Ok(lock) => lock,

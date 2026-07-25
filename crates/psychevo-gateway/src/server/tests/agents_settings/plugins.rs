@@ -1,6 +1,6 @@
 #[tokio::test]
 async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("display-plugin");
@@ -169,7 +169,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
             "PATH".to_string(),
             std::env::var("PATH").unwrap_or_default(),
         ),
-    ]));
+    ])).await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -284,7 +284,7 @@ async fn codex_plugin_rpcs_preserve_authority_and_delegate_catalog_mutation() {
 
 #[tokio::test]
 async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     let source = temp.path().join("source-skills");
     write_capability_package_skill(&source, "review-flow", "Review workflow", "fresh body");
@@ -407,7 +407,7 @@ async fn capability_skill_rpcs_install_toggle_and_uninstall_project_skill() {
 
 #[tokio::test]
 async fn capability_skill_read_and_uninstall_accept_path_selector_for_collisions() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     write_capability_package_skill(
         &state.inner.cwd.join(".psychevo").join("skills"),
@@ -506,7 +506,7 @@ async fn capability_skill_read_and_uninstall_accept_path_selector_for_collisions
 
 #[tokio::test]
 async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     write_capability_package_skill(
         &state.inner.cwd.join(".psychevo").join("skills"),
@@ -591,7 +591,7 @@ async fn capability_skill_write_updates_project_and_profile_skill_markdown() {
 
 #[tokio::test]
 async fn capability_skill_write_rejects_configured_external_skill() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::create_dir_all(state.inner.home.join("skills")).expect("profile skills root");
     let external = temp.path().join("external-skills");
@@ -644,7 +644,7 @@ async fn capability_skill_write_rejects_configured_external_skill() {
 
 #[tokio::test]
 async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -770,7 +770,7 @@ async fn capability_plugin_rpcs_project_builtin_browser_plugin() {
 
 #[tokio::test]
 async fn capability_plugin_builtin_browser_projects_effective_project_policy_scope() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(
         state.inner.home.join("config.toml"),
@@ -831,7 +831,7 @@ async fn capability_plugin_builtin_browser_projects_effective_project_policy_sco
 
 #[tokio::test]
 async fn capability_plugin_builtin_browser_selector_and_policy_do_not_capture_browser_package() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("browser-package");
@@ -976,7 +976,7 @@ async fn capability_plugin_builtin_browser_selector_and_policy_do_not_capture_br
 
 #[tokio::test]
 async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("managed-plugin");
@@ -1102,7 +1102,7 @@ async fn capability_plugin_rpcs_project_selector_and_mutate_at_package_scope() {
 
 #[tokio::test]
 async fn capability_plugin_scoped_selectors_disambiguate_duplicate_installations() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("dual-scope-plugin");
@@ -1300,7 +1300,7 @@ async fn capability_plugin_scoped_selectors_disambiguate_duplicate_installations
 
 #[tokio::test]
 async fn foreign_plugin_rpc_is_inspection_only_and_install_does_not_persist() {
-    let (temp, state) = web_state();
+    let (temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let source = temp.path().join("hermes-plugin");
@@ -1361,7 +1361,7 @@ async fn foreign_plugin_rpc_is_inspection_only_and_install_does_not_persist() {
 
 #[tokio::test]
 async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secrets() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
         .expect("scope")
@@ -1521,7 +1521,7 @@ async fn capability_tool_and_mcp_rpcs_write_profile_config_without_inline_secret
 
 #[tokio::test]
 async fn capability_tool_rpcs_reject_coding_core_configuration() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -1606,7 +1606,7 @@ async fn capability_tool_rpcs_reject_coding_core_configuration() {
 
 #[tokio::test]
 async fn codex_authority_is_default_off_and_policy_is_profile_dominant() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)
@@ -1687,7 +1687,7 @@ async fn codex_authority_is_default_off_and_policy_is_profile_dominant() {
 
 #[tokio::test]
 async fn codex_authority_write_is_profile_scoped_and_preserves_private_home() {
-    let (_temp, state) = web_state();
+    let (_temp, state) = web_state().await;
     std::fs::create_dir_all(&state.inner.home).expect("home");
     std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     let scope = default_resolved_scope(&state, &AuthContext::Bearer)

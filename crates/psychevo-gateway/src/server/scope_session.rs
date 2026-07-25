@@ -78,25 +78,40 @@ fn canonical_source_mutation_key(source: &GatewaySource) -> SourceKey {
 }
 
 #[cfg(test)]
-fn start_empty_source(state: &WebState, scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
-    state.inner.gateway.clear_source_binding(&scope.source)?;
-    thread_snapshot(state, scope, None)
-}
-
-fn reset_source_to_empty(
+async fn start_empty_source(
     state: &WebState,
     scope: &ResolvedScope,
 ) -> psychevo_runtime::Result<Value> {
-    state.inner.gateway.reset_source_to_empty(&scope.source)?;
-    thread_snapshot(state, scope, None)
+    state
+        .inner
+        .gateway
+        .clear_source_binding(&scope.source)
+        .await?;
+    thread_snapshot(state, scope, None).await
 }
 
-fn bind_source_to_thread(
+async fn reset_source_to_empty(
+    state: &WebState,
+    scope: &ResolvedScope,
+) -> psychevo_runtime::Result<Value> {
+    state
+        .inner
+        .gateway
+        .reset_source_to_empty(&scope.source)
+        .await?;
+    thread_snapshot(state, scope, None).await
+}
+
+async fn bind_source_to_thread(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
 ) -> psychevo_runtime::Result<()> {
-    if let Some(bound) = state.inner.gateway.resolve_source_thread(&scope.source)?
+    if let Some(bound) = state
+        .inner
+        .gateway
+        .resolve_source_thread(&scope.source)
+        .await?
         && bound == thread_id
     {
         return Ok(());
@@ -104,22 +119,28 @@ fn bind_source_to_thread(
     state.inner.gateway.bind_source_thread(
         &scope.source,
         thread_id,
-        &gateway_backend_info_for_thread(state, thread_id)?,
+        &gateway_backend_info_for_thread(state, thread_id).await?,
         Some(json!({"reason": "thread_resume"})),
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
-fn ensure_turn_start_thread(
+async fn ensure_turn_start_thread(
     state: &WebState,
     scope: &ResolvedScope,
     requested_thread_id: Option<String>,
 ) -> psychevo_runtime::Result<Option<String>> {
     if let Some(thread_id) = requested_thread_id {
-        bind_source_to_thread(state, scope, &thread_id)?;
+        bind_source_to_thread(state, scope, &thread_id).await?;
         return Ok(Some(thread_id));
     }
-    if let Some(thread_id) = state.inner.gateway.resolve_source_thread(&scope.source)? {
+    if let Some(thread_id) = state
+        .inner
+        .gateway
+        .resolve_source_thread(&scope.source)
+        .await?
+    {
         return Ok(Some(thread_id));
     }
 
@@ -129,8 +150,9 @@ fn ensure_turn_start_thread(
         "pending",
         "pending",
         None,
-    )?;
-    bind_source_to_thread(state, scope, &thread_id)?;
+    )
+    .await?;
+    bind_source_to_thread(state, scope, &thread_id).await?;
     Ok(Some(thread_id))
 }
 
@@ -153,12 +175,12 @@ fn user_shell_context_options(
     }
 }
 
-fn gateway_backend_info_for_thread(
+async fn gateway_backend_info_for_thread(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<GatewayBackendInfo> {
     let store = &state.inner.state;
-    if let Some(binding) = store.gateway_runtime_binding(thread_id)? {
+    if let Some(binding) = store.gateway_runtime_binding(thread_id).await? {
         if binding.status != GatewayRuntimeBindingStatus::Resolved {
             let message = binding.unresolved_reason.unwrap_or_else(|| {
                 format!("Thread `{thread_id}` has an unresolved runtime binding.")
@@ -220,7 +242,8 @@ fn gateway_backend_info_for_thread(
     }
 
     store
-        .session_summary(thread_id)?
+        .session_summary(thread_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     Ok(GatewayBackendInfo {
         kind: BackendKind::Native,
@@ -361,7 +384,7 @@ fn resolve_session_cwd_filter(
     Ok(Some(cwd))
 }
 
-fn resolved_scope_for_thread(
+async fn resolved_scope_for_thread(
     state: &WebState,
     thread_id: &str,
 ) -> psychevo_runtime::Result<ResolvedScope> {
@@ -369,7 +392,8 @@ fn resolved_scope_for_thread(
         .inner
         .state
 
-        .session_summary(thread_id)?
+        .session_summary(thread_id)
+        .await?
         .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
     let cwd = PathBuf::from(summary.cwd);
     Ok(ResolvedScope {
@@ -420,7 +444,7 @@ fn grant_browser_session_scope(state: &WebState, auth: &AuthContext, scope: &Res
     }
 }
 
-fn update_browser_session_for_draft_scope(
+async fn update_browser_session_for_draft_scope(
     state: &WebState,
     auth: &AuthContext,
     scope: &ResolvedScope,
@@ -435,7 +459,8 @@ fn update_browser_session_for_draft_scope(
         .inner
         .state
 
-        .list_sessions_for_cwd_with_sources(&scope.cwd, &[])?
+        .list_sessions_for_cwd_with_sources(&scope.cwd, &[])
+        .await?
         .is_empty();
     if already_granted || adopts_stored_session {
         grant_browser_session_scope(state, auth, scope);

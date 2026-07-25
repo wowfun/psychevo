@@ -14,7 +14,7 @@
 
     #[tokio::test]
     async fn voice_fake_asr_and_tts_rpc_use_deterministic_providers() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         write_minimal_home_config(&state);
         let (out_tx, _out_rx) = mpsc::unbounded_channel();
         let asr = handle_rpc(
@@ -65,7 +65,7 @@
 
     #[tokio::test]
     async fn voice_policy_rpc_round_trips_source_policy() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         let (out_tx, _out_rx) = mpsc::unbounded_channel();
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let source_key = scope.source.source_key().0;
@@ -105,7 +105,7 @@
 
     #[tokio::test]
     async fn model_settings_read_includes_voice_status_without_credentials() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         write_minimal_home_config(&state);
         let (out_tx, _out_rx) = mpsc::unbounded_channel();
         let value = handle_rpc(
@@ -129,7 +129,7 @@
 
     #[tokio::test]
     async fn voice_fake_realtime_starts_and_stops_session() {
-        let (_temp, state) = web_state();
+        let (_temp, state) = web_state().await;
         write_minimal_home_config(&state);
         let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
         let thread_id = state
@@ -137,7 +137,7 @@
             .state
 
             .create_session(&scope.cwd)
-            .expect("session");
+            .await.expect("session");
         let (out_tx, mut out_rx) = mpsc::unbounded_channel();
         let started = handle_rpc(
             state.clone(),

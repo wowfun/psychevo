@@ -94,7 +94,7 @@ impl ToolBinding for AutomationTool {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match tool.execute_automation_action(args) {
+            match tool.execute_automation_action(args).await {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -103,17 +103,17 @@ impl ToolBinding for AutomationTool {
 }
 
 impl AutomationTool {
-    fn execute_automation_action(&self, args: Value) -> psychevo_runtime::Result<Value> {
+    async fn execute_automation_action(&self, args: Value) -> psychevo_runtime::Result<Value> {
         let action = tool_string(&args, "action")?;
         match action.as_str() {
-            "list" => self.list(),
-            "create" => self.create_or_update(args, None),
+            "list" => self.list().await,
+            "create" => self.create_or_update(args, None).await,
             "update" => {
                 let automation_id = tool_string(&args, "automationId")?;
-                self.create_or_update(args, Some(automation_id))
+                self.create_or_update(args, Some(automation_id)).await
             }
-            "pause" => self.set_enabled(args, false),
-            "resume" => self.set_enabled(args, true),
+            "pause" => self.set_enabled(args, false).await,
+            "resume" => self.set_enabled(args, true).await,
             "run" => {
                 let automation_id = tool_string(&args, "automationId")?;
                 let (tx, _rx) = mpsc::unbounded_channel();
@@ -125,7 +125,8 @@ impl AutomationTool {
                         trigger: Some("tool".to_string()),
                     },
                     tx.into(),
-                )?;
+                )
+                .await?;
                 Ok(tool_result(action, value))
             }
             "remove" => {
@@ -134,7 +135,8 @@ impl AutomationTool {
                     &self.state,
                     &AuthContext::Bearer,
                     wire::AutomationIdParams { automation_id },
-                )?;
+                )
+                .await?;
                 Ok(tool_result(action, value))
             }
             other => Err(Error::Message(format!(
@@ -143,28 +145,31 @@ impl AutomationTool {
         }
     }
 
-    fn list(&self) -> psychevo_runtime::Result<Value> {
+    async fn list(&self) -> psychevo_runtime::Result<Value> {
         let value = automation_list_result(
             &self.state,
             &AuthContext::Bearer,
             wire::AutomationListParams {
                 cwd: Some(self.cwd.display().to_string()),
             },
-        )?;
+        )
+        .await?;
         Ok(tool_result("list", value))
     }
 
-    fn create_or_update(
+    async fn create_or_update(
         &self,
         args: Value,
         automation_id: Option<String>,
     ) -> psychevo_runtime::Result<Value> {
-        let existing = automation_id
-            .as_deref()
-            .map(|id| automation_task_for_request(&self.state, &AuthContext::Bearer, id))
-            .transpose()?;
+        let existing = match automation_id.as_deref() {
+            Some(id) => Some(
+                automation_task_for_request(&self.state, &AuthContext::Bearer, id).await?,
+            ),
+            None => None,
+        };
         let params = self.write_params_from_args(&args, automation_id, existing.as_ref())?;
-        let value = automation_write_result(&self.state, &AuthContext::Bearer, params)?;
+        let value = automation_write_result(&self.state, &AuthContext::Bearer, params).await?;
         Ok(tool_result(
             if existing.is_some() {
                 "update"
@@ -175,14 +180,15 @@ impl AutomationTool {
         ))
     }
 
-    fn set_enabled(&self, args: Value, enabled: bool) -> psychevo_runtime::Result<Value> {
+    async fn set_enabled(&self, args: Value, enabled: bool) -> psychevo_runtime::Result<Value> {
         let automation_id = tool_string(&args, "automationId")?;
         let value = automation_set_enabled_result(
             &self.state,
             &AuthContext::Bearer,
             wire::AutomationIdParams { automation_id },
             enabled,
-        )?;
+        )
+        .await?;
         Ok(tool_result(if enabled { "resume" } else { "pause" }, value))
     }
 
@@ -284,7 +290,7 @@ impl AutomationTool {
 }
 
 #[cfg(test)]
-pub(super) fn automation_tool_execute_for_test(
+pub(super) async fn automation_tool_execute_for_test(
     state: WebState,
     cwd: PathBuf,
     current_thread_id: Option<String>,
@@ -296,6 +302,7 @@ pub(super) fn automation_tool_execute_for_test(
         current_thread_id,
     }
     .execute_automation_action(args)
+    .await
 }
 
 #[cfg(test)]
