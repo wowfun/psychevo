@@ -20,8 +20,51 @@ Out of scope:
 - full-text search, trigram search, vector search, indexes beyond implementation need, pagination, sorting, or query language design
 - branch trees, fork UI, retry UI, undo UI, merge behavior, or transcript search
 - artifact storage engines, external blob stores, checkpoint stores, or provider credential stores
-- migration framework design beyond a minimal schema version boundary
+- migration framework design beyond the SQLx baseline and schema version
+  boundary defined below
 - Rust APIs, payload schemas, public identifiers, CLI behavior, SDK behavior, or transport behavior
+
+## Runtime Interface
+
+Production persistence is owned by the asynchronous
+`psychevo_runtime::state::StateRuntime` Module. It owns one SQLx SQLite pool for
+the one Psychevo state database. Callers await semantic operations and cannot
+borrow connections, select pool members, or implement retry. The migration does
+not add a repository family, read pool, actor, second database, or compatibility
+facade.
+
+File-backed pools use at most five connections. In-memory test databases use
+one connection so every operation observes the same database. Every connection
+enables foreign keys, WAL journal mode, NORMAL synchronous mode, and a
+five-second busy timeout. Compound semantic writes acquire an explicit
+`BEGIN IMMEDIATE` transaction and commit or roll back atomically. A passive WAL
+checkpoint remains due after each fifty successful writes.
+
+Opening and closing `StateRuntime` are asynchronous. Every database-backed
+semantic operation is asynchronous; purely in-memory filesystem-grant state may
+remain synchronous. Closing the runtime rejects new work, waits for checked-out
+connections, and closes the pool only after Gateway has stopped all state
+consumers.
+
+The runtime exposes a content-free diagnostic snapshot for tests and local
+diagnostics: pool size, idle and in-flight operations, completed and failed
+operations, busy/locked outcomes, acquire and execute latency, and checkpoint
+count. This snapshot is not a new public Gateway protocol or product UI.
+
+## Schema Migration
+
+SQLx migrations are the canonical schema entry point. The first migration is an
+idempotent v28 baseline: it can create a fresh database or register an existing
+valid v28 database without rewriting semantic data. `PRAGMA user_version`
+remains the compatibility marker. A fresh version-zero database is initialized
+to v28; an existing nonzero version other than v28 is rejected before ordinary
+queries.
+
+Concurrent first open is serialized by SQLite and must produce one valid
+migration history. Production runtime code does not retain a rusqlite execution
+path. Test fixtures may use a rusqlite version linked against the same
+`libsqlite3-sys` generation, but they cannot become a second production
+implementation.
 
 ## Schema Shape
 
@@ -462,6 +505,10 @@ Storage failures that affect session or message persistence must be observable t
 The current implementation uses `PRAGMA user_version = 28`, WAL, foreign keys,
 short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
 periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
+The supported `:memory:` mode owns exactly one pool connection and disables
+idle timeout and maximum connection lifetime for that pool. The connection
+must remain alive for the full `StateRuntime` lifetime so recycling cannot
+replace the database and schema with a new empty in-memory database.
 
 Long-running processes should open SQLite state once through the cloneable
 `StateRuntime` handle and reuse that handle across high-level runtime calls.

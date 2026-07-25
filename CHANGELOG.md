@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-25
+
+- Hardened Client and Gateway lifecycle, event durability, admission,
+  queued-activity shutdown, and in-memory SQLite cleanup.
+- Consolidated asynchronous SQLx state access and typed Thread and Capabilities
+  application boundaries across Gateway, Client, Workbench, Floating, CLI, and TUI.
+
 ## 2026-07-24
 
 - Consolidated Runtime, Gateway, ACP, and CLI boundaries around owning

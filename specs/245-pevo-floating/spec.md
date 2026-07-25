@@ -198,16 +198,21 @@ must not show a dedicated drag-grip icon; blank toolbar regions initiate native
 window drag on primary-button pointer down when the Desktop host supports it,
 while action buttons and other interactive controls remain clickable.
 
-Floating answer rendering and thread lifecycle reuse the shared Thread and
-Transcript pipeline used by Workbench. Floating may apply compact scoped
-styles, but submit, accepted-thread binding, live Gateway events, `turn/result`
-completion reconciliation, Markdown, code, reasoning, tool evidence, copy
-actions, and final transcript ordering must come from shared client transcript
-helpers and shared Transcript components rather than a Floating-only
-projection. Floating turn requests must use the same selected model, runtime,
-reasoning effort, permission mode, work mode, and runtime options semantics as
-the Workbench submit path when Desktop supplies those controls. Floating must
-not mask missing cross-surface updates with local fake assistant messages.
+Floating answer rendering and thread lifecycle reuse the same
+`@psychevo/client` `ThreadSession` Module and shared Transcript pipeline as
+Workbench. Floating may apply compact scoped styles, but submit,
+accepted-thread binding, optimistic delivery, receipt recovery, live Gateway
+events, completion reconciliation, Markdown, code, reasoning, tool evidence,
+copy actions, and final transcript ordering come from that shared Module and
+shared Transcript components rather than a Floating-only projection. Floating
+host effect replay may detach and reattach the same shared Module owner; this
+must restore live Gateway delivery and Send recovery rather than permanently
+disposing the reused instance.
+Floating
+turn requests use the same selected model, runtime, reasoning effort,
+permission mode, work mode, and runtime options semantics as Workbench when
+Desktop supplies those controls. Floating must not mask missing cross-surface
+updates with local fake assistant messages.
 Floating must not render a separate Floating-only answer copy button; copy
 affordances come from the shared Transcript component rules.
 Floating must not render a separate Floating-only `Working` transcript row;

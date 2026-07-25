@@ -383,6 +383,29 @@ Gateway exposes domain RPCs instead of a capability aggregate:
 All responses are secret-free. RPCs that accept secret-bearing environment
 variable names may echo the variable name but never the resolved secret value.
 
+## Client Application Module
+
+Workbench consumes those domain RPCs through one scope-keyed
+`CapabilitiesApplication` Module. Its Interface exposes immutable snapshots,
+subscription, explicit refresh, and typed capability commands. Each snapshot
+has a monotonic local revision and contains the effective rows, detail state,
+loading or mutation state, operation receipt, and current selection for one
+canonical scope.
+
+The Module deduplicates concurrent reads for the same scope, owns OAuth and
+plugin-connect polling, ignores stale results from an abandoned scope, and
+performs the authoritative post-mutation refresh before committing a receipt.
+Host lifecycle replay may dispose and reattach the same Module owner; a later
+attachment reactivates reads and subscriptions while results from the disposed
+generation remain stale.
+React owns form drafts, rendering, and explicit confirmation only; it does not
+call capability RPCs directly or own refresh tokens, polling loops, mutation
+receipts, or post-write selection repair.
+
+This client Module uses the existing domain RPCs. It does not introduce a
+Gateway capability aggregate, dynamic registry, process-global singleton, or
+new product feature gate.
+
 ## Runtime Profiles And Thread Application
 
 The Runtime Profiles subsection uses structured fields and shows Native or ACP

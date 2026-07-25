@@ -82,6 +82,13 @@ module interface. SQLite connections, schema helpers, and transaction helpers
 remain implementation details; no public store handle, repository family, or
 pass-through state facade is added.
 
+The production `StateRuntime` Interface is asynchronous and backed by one
+runtime-owned SQLite connection pool. Callers await semantic state operations;
+they never borrow a connection, hold a database lock, select a pool member, or
+implement busy retry. In-memory runtime state that performs no database I/O may
+remain synchronous behind the same Module. The pool does not create a second
+database, read repository, actor, or storage ownership layer.
+
 `psychevo-cli` should keep process and terminal concerns in transport-owned
 modules. CLI argument parsing, environment/path setup, command handlers, and
 TUI rendering or event handling may be split into internal modules, but agent
@@ -157,6 +164,10 @@ Owns:
   runtime-internal `RunOptions`; caller Adapters never construct `RunOptions`
   or the application queue envelope
 - the `AgentSessionHost` Module and its Native and outbound ACP Adapters
+- the process-level `GatewaySupervisor` that closes admission, owns long-lived
+  application tasks, drains accepted work, and closes runtime state last
+- the bounded `GatewayEventIngress` Module between synchronous runtime
+  observations, local product delivery, and asynchronous durable projection
 - transport-neutral Thread/Turn orchestration over Native and ACP Agents
 - source identity normalization and source-to-thread mapping
 - active-turn queue, steer, interrupt, and reset coordination
@@ -190,11 +201,19 @@ Owns:
 outbound ACP Agent Adapter; the latter lives behind Gateway's Agent Session
 seam and has the opposite protocol role.
 
-Inbound ACP, CLI, TUI, Web/Desktop, and Channels submit turns through the same
-`ThreadApplication.run_turn` Interface. Surface-specific environment,
-presentation, and interaction choices are typed caller intent on that request;
-runtime state handles, native session ids, internal delegates, and queue
-delivery policy remain private to Gateway.
+Inbound ACP, CLI, TUI, Web/Desktop, Channels, and Automations submit turns
+through the same `ThreadApplication.start_turn` Interface. The Interface accepts
+one `ThreadCallerContext` plus one `ThreadTurnIntent`. Surface identity,
+environment facts, presentation, and interaction choices are typed caller
+intent; runtime state handles, native session ids, internal delegates,
+`RunOptions`, event emitters, and queue delivery policy remain private to
+Gateway.
+
+`start_turn` returns an accepted public Thread/Turn identity plus a completion
+handle. Gateway supervision, not ownership of that handle, owns the accepted
+Turn. Web may return acceptance without awaiting completion, while synchronous
+callers may await the same handle. Dropping a handle never cancels accepted
+work.
 
 Must not own:
 - agent loop behavior

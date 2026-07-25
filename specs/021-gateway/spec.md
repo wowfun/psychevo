@@ -45,10 +45,14 @@ TUI, inbound ACP, Web/Desktop, and Channels call one `ThreadApplication`
 Interface instead of assembling turns, controls, interactions, or history
 themselves.
 
-The concrete turn Interface accepts typed input plus caller intent and lowers
-it inside `ThreadApplication` to runtime-internal `RunOptions` and a private
-queue envelope. CLI, TUI, inbound ACP, Web/Desktop, Channels, and automation
-ingress must not construct either internal type or call a lower send primitive.
+The concrete turn Interface accepts a `ThreadCallerContext` plus a
+`ThreadTurnIntent` and lowers them inside `ThreadApplication` to
+runtime-internal `RunOptions` and a private queue envelope. The context contains
+surface identity and immutable host facts required for policy resolution. The
+intent contains only caller-visible Thread, input, target, control, preference,
+mention, and continuation choices. CLI, TUI, inbound ACP, Web/Desktop,
+Channels, and automation ingress must not construct internal state handles,
+runtime delegates, event sinks, or a lower send primitive.
 
 Gateway owns the `AgentSessionHost` seam with two production Adapters: Native
 Psychevo runtime and outbound ACP Agents. `psychevo-runtime` remains the Native
@@ -57,6 +61,51 @@ durable-evidence semantics. Gateway owns public thread identity, immutable
 binding, queueing, delivery classification, interactions, and product
 projection. ACP is external at the Adapter seam and is not Gateway's internal
 application Interface.
+
+`ThreadApplication.start_turn` returns `AcceptedTurn`: the public Thread and
+Turn identity, the accepted client receipt, and an opaque completion handle.
+The accepted Turn is owned by Gateway supervision. Dropping the completion
+handle cannot cancel it; Web returns the acceptance immediately, while CLI,
+TUI, Channels, and Automations may await completion when their transport
+contract requires it.
+
+Acceptance may materialize a public Thread before the private queue request is
+lowered, but it must preserve whether the caller supplied an explicit Thread or
+started from a source. A source-started Turn registers its source-to-active-
+Thread alias and durable activity source key immediately even though the queue
+envelope now carries the materialized Thread id. Source-scoped interrupt,
+steer, permission response, and queued action routing must therefore work
+before the final durable source binding is committed.
+
+## Application Lifecycle
+
+One process-level `GatewaySupervisor` owns admission and every long-lived
+application task whose lifetime extends beyond a single transport handler.
+Live-event tailing, Automation scheduling, Channel reconciliation, prewarming,
+accepted Turns, and comparable background work register with that supervisor.
+Connection-local request tasks remain in the connection's local task set; they
+are not moved into a global registry merely for uniformity.
+Admission acquires a supervised activity permit before its first asynchronous
+operation. Closing admission and acquiring that permit share one atomic
+boundary, so shutdown cannot observe an empty closed tracker while an admitted
+request is still materializing its Thread or receipt. Queue workers for Turn,
+Shell, and Compact activities are supervisor-owned; queue advancement never
+creates a detached runtime task.
+
+Shutdown is idempotent and ordered:
+
+1. close listener, connection, and Turn admission;
+2. cancel schedulers, Channel ingress, tailers, and other new-work producers;
+3. drain already accepted Turns;
+4. flush and close `GatewayEventIngress`;
+5. close `AgentSessionHost` and its Native/ACP Adapters;
+6. close `StateRuntime` after all state consumers have stopped;
+7. abort and report tasks that exceed the explicit graceful and force
+   deadlines.
+
+A task panic or timeout is observable in the shutdown report and cannot be
+silently detached. A child task remains local to the narrowest owner that can
+cancel and await it.
 
 ## Internal Journey Profiling
 
@@ -100,11 +149,23 @@ in committed Transcript metadata rather than delaying or repeating lifecycle.
 authorization, or binding failures before acceptance are JSON-RPC errors. Once
 accepted, success, failure, interruption, and cancellation all terminate
 through `TurnCompleted.turn`; the Web/Desktop protocol has no parallel
-`turn/result` or `turn/error` terminal notification. A local event-delivery
-lane preserves Turn order and may coalesce replaceable entry updates, but it
-never drops or reorders lifecycle, action, entry-completed, or terminal events.
-Runtime callbacks enqueue into this lane in bounded constant work and never run
-filesystem, Git, Review, or auxiliary projection reads before local delivery.
+`turn/result` or `turn/error` terminal notification. A process-level
+`GatewayEventIngress` owns a local ordered lane for each accepted Turn.
+`GatewayEventEmitter.try_emit` performs bounded in-memory admission and returns
+a typed overload result; it never performs database, filesystem, Git, Review,
+network, or auxiliary projection I/O. Its internal application event carries
+the Thread, Turn, activity, pending-interaction, and Review context required by
+downstream projection, so consumers do not rediscover that context from state.
+
+The lane reduces the in-memory projection, publishes to the local Event Hub,
+and then performs asynchronous durable writes. It may coalesce only replaceable
+entry updates and never drops or reorders lifecycle, action, entry-completed,
+or terminal events. Admission saturation cancels the affected Turn with an
+explicit overload failure. The application-owned terminal path awaits capacity,
+emits exactly one terminal, and waits for that exact terminal envelope to be
+durably processed before completion is reported. A lifecycle emitter records
+and propagates ingress rejection even when an Adapter callback cannot return
+the error directly; the Turn cannot subsequently report successful completion.
 The Web server owns one process-level Event Hub per `WebState`, not one durable
 store tailer per WebSocket. Locally produced `gateway/event` notifications are
 recorded into pending-interaction and Review projections and published to that
@@ -398,11 +459,12 @@ Close/error and completed request tasks; a saturated connection therefore
 disconnects promptly without waiting for one of its requests to finish.
 
 The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
-calling the owning Application Module, and serializing its typed result. It
-does not authorize, resolve request scope, acquire application locks, access
-the store, mutate source bindings, publish events, or assemble responses for
-Thread and Turn requests. Those responsibilities belong to these static
-Application Modules:
+conversion of transport values into caller context and intent, calling the
+owning Application Module, and serializing its typed result. It does not
+authorize, resolve request scope, acquire application locks, access the store,
+mutate source bindings, publish events, or assemble responses for Thread and
+Turn requests. Those responsibilities belong to these static Application
+Modules:
 
 - the core Thread Application owns `thread/draft/open`,
   `thread/context/read`, `thread/draft/prepare`, `thread/control/set`,
@@ -415,10 +477,10 @@ Application Modules:
   `thread/import`;
 - the Voice Application owns `thread/realtime/*`.
 
-Each Application Module accepts protocol-typed params and returns the result
-type registered for that method. Connection output is passed only to methods
-that emit connection-private output or initiate event delivery. Existing
-session view, lifecycle, runtime-profile, and Adapter helpers remain private
+Transport Adapters map protocol params and registered result types to the
+domain-owned Interface. Connection-private output is represented as typed
+caller interaction intent rather than a raw transport sender. Existing session
+view, lifecycle, runtime-profile, and Adapter helpers remain private
 implementation details behind these Interfaces. This is a static module seam,
 not a dynamic handler registry, generic handler trait, parallel request enum,
 or a new crate; plugin method dispatch remains unchanged.
@@ -771,6 +833,12 @@ Gateway owns public thread identity and crosses one `AgentSessionHost` seam
 through Native and outbound ACP Adapters as defined by [052 Agent
 Runtimes](../052-agent-runtimes/spec.md). It does not expose an Adapter command
 bus or runtime-name-specific methods.
+
+The Host exposes typed Gateway-native operations and typed Gateway-native
+snapshots. A generic command/response union, runtime downcast, or ACP protocol
+type is not part of its Interface. ACP request and result types remain private
+to the outbound ACP Adapter; Native runtime types remain private to the Native
+Adapter.
 
 `AgentSessionHost.attach` captures the public thread id, binding revision, and
 immutable binding fingerprints. Reattaching the same capture is idempotent;

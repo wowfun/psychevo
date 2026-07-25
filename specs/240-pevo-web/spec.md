@@ -54,10 +54,11 @@ packages in the first slice:
   grow past maintainable source-file limits, the Rust protocol generator must
   split them into finer domain modules or generated `$ref` companions while
   preserving the public `gatewaySchemas` lookup surface.
-- `@psychevo/client`: typed Gateway WebSocket client, event store, host runtime
-  reconnect handling, and request/notification orchestration. It does not own
-  endpoint discovery, host storage, browser download/open helpers, clipboard,
-  file pickers, notifications, or native shell lifecycle.
+- `@psychevo/client`: typed Gateway WebSocket client, event store,
+  host-runtime-neutral `ThreadSession`, transcript reducer, reconnect handling,
+  and request/notification orchestration. It does not own endpoint discovery,
+  host storage, browser download/open helpers, clipboard, file pickers,
+  notifications, or native shell lifecycle.
 - `@psychevo/host`: host capability contract and first browser/managed-Web
   implementation. It owns endpoint discovery, download/open helpers, host
   storage, clipboard, file and image picking, notification requests, theme
@@ -244,8 +245,10 @@ Sessions, Workspace, Automations, Settings, and Capabilities.
 Composer obtains one atomic draft snapshot/context and presents one Agent
 Definition entry point before the first turn. `ComposerSessionCoordinator`
 owns only the draft-open/prepare readiness epoch and the one pending first-turn
-waiter. `ThreadController` remains the sole owner of Thread context, transcript,
-activity, admission, and turn acceptance. The compact target control
+waiter. `ThreadSession` remains the sole owner of Thread context, transcript,
+activity, admission, optimistic delivery, receipt reconciliation, reconnect
+hydration, and turn acceptance. Its reducer is private to that Module. The
+compact target control
 renders one visible Agent identity per compatible target: Native uses
 `agentLabel`, while ACP appends `(ACP)` to that same Agent label without
 repeating Runtime Profile provenance. After binding, the selector becomes
@@ -695,12 +698,28 @@ reviving provisional activity. Only a coordinator-owned draft open or target
 preparation may enable this pending submission path; unrelated context or
 control mutations keep Send disabled until their authoritative result applies.
 
-`ThreadController` is the only Thread reducer. Its batch application reduces
-replaceable observations and publishes one snapshot notification. The
-Workbench-local `useGatewayLiveEvents` hook owns the one scheduling queue: the
-first non-empty assistant text bypasses frame pacing, later replaceable updates
-coalesce per entry, and terminal observations flush same-Turn output before
-completion. The hook does not own session, resource, or selector state.
+`ThreadSession` is the only caller-facing Thread Module. It exposes snapshot
+read/subscription plus `openDraft`, `load`, `send`, `setControl`, `interrupt`,
+`respond`, and `dispose`. Its private reducer batch-applies replaceable
+observations and publishes one snapshot notification. The Module owns the
+scheduling queue: the first non-empty assistant text bypasses frame pacing,
+later replaceable updates coalesce per entry, and terminal observations flush
+same-Turn output before completion. Workbench hooks do not own session,
+resource, selector, delivery, or reconciliation state. Host lifecycle replay
+may dispose and then reattach the same Module owner; reattachment must restore
+Gateway subscriptions and cannot leave the reused owner permanently inert.
+
+`send` returns a typed `accepted`, `reconciled`, `cancelled`, or `not_sent`
+outcome. A successful `turn/start` response is always `accepted`; when the
+caller has moved to another view before that response arrives, the outcome is
+marked detached and the old optimistic projection is not applied to the new
+view. Unknown delivery uses the existing authoritative receipt recovery and is
+never automatically replayed. Reset, load, draft open, or owner disposal
+settles an invalidated recovery waiter with an explicit cancelled/unknown
+outcome instead of leaving the Send promise pending. Gateway failures preserve
+transport/server/protocol kind, JSON-RPC numeric code and data, and
+`not_sent`/`unknown` delivery state. Workbench renders those results but does
+not recreate their state machine.
 
 Session rows patch only fields carried authoritatively by acceptance,
 `activityChanged`, `titleChanged`, or `turnCompleted`. A bound Native
@@ -787,7 +806,11 @@ program bodies in multiline string literals.
 
 Live provider browser validation is opt-in only. It may reuse the user's real
 Psychevo config and credentials, but must still use an isolated cwd and
-repo-local test state unless the caller explicitly chooses otherwise.
+repo-local test state unless the caller explicitly chooses otherwise. A live
+case that declares a provider-qualified model must select that exact model
+through the same Workbench control path available to the user and confirm the
+resulting turn used it; an unconsumed URL hint or runner-only environment label
+is not evidence that the selected provider/model was exercised.
 
 Targeted desktop and narrow-viewport proofs cover the import surface, grouped
 partial results, target selection, refresh, fork/delete capability differences,
