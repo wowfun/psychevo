@@ -977,12 +977,31 @@ impl ClarifyControl {
     }
 
     pub(crate) fn submit(&self, call_id: &str, result: ClarifyResult) -> bool {
-        let sender = self
-            .pending
+        let sender = self.take(call_id);
+        sender.is_some_and(|sender| sender.send(result).is_ok())
+    }
+
+    pub(crate) fn take(&self, call_id: &str) -> Option<oneshot::Sender<ClarifyResult>> {
+        self.pending
             .lock()
             .expect("clarify pending map poisoned")
-            .remove(call_id);
-        sender.is_some_and(|sender| sender.send(result).is_ok())
+            .remove(call_id)
+    }
+
+    pub(crate) fn restore(
+        &self,
+        call_id: String,
+        sender: oneshot::Sender<ClarifyResult>,
+    ) -> bool {
+        if sender.is_closed() {
+            return false;
+        }
+        let mut pending = self.pending.lock().expect("clarify pending map poisoned");
+        if pending.contains_key(&call_id) {
+            return false;
+        }
+        pending.insert(call_id, sender);
+        true
     }
 
     pub(crate) fn remove(&self, call_id: &str) -> bool {
@@ -1027,6 +1046,21 @@ impl RunControlHandle {
 
     pub fn submit_clarify_result(&self, call_id: &str, result: ClarifyResult) -> bool {
         self.clarify.submit(call_id, result)
+    }
+
+    pub(crate) fn take_clarify_waiter(
+        &self,
+        call_id: &str,
+    ) -> Option<oneshot::Sender<ClarifyResult>> {
+        self.clarify.take(call_id)
+    }
+
+    pub(crate) fn restore_clarify_waiter(
+        &self,
+        call_id: String,
+        sender: oneshot::Sender<ClarifyResult>,
+    ) -> bool {
+        self.clarify.restore(call_id, sender)
     }
 
     /// Runs a product clarification through the same pending-interaction broker

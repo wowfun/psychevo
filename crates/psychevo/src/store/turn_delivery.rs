@@ -7,13 +7,48 @@ use crate::error::{Error, Result};
 use super::{
     GatewayChannelOutboxInput, GatewayChannelOutboxRecord, GatewayTurnDeliveryInput,
     GatewayTurnDeliveryRecord, StateRuntime,
+    store_gateway_activity::record_gateway_turn_start_receipt_in_tx,
 };
 
 impl StateRuntime {
+    #[cfg(test)]
+    pub(crate) fn set_gateway_turn_acceptance_barrier_for_test(
+        &self,
+        entered: std::sync::Arc<tokio::sync::Notify>,
+        release: std::sync::Arc<tokio::sync::Notify>,
+    ) {
+        *self
+            .inner
+            .gateway_turn_acceptance_barrier
+            .lock()
+            .expect("Gateway Turn acceptance barrier poisoned") = Some((entered, release));
+    }
+
     pub async fn insert_gateway_turn_delivery(
         &self,
         input: GatewayTurnDeliveryInput<'_>,
     ) -> Result<GatewayTurnDeliveryRecord> {
+        self.accept_gateway_turn(input, None).await
+    }
+
+    pub(crate) async fn accept_gateway_turn(
+        &self,
+        input: GatewayTurnDeliveryInput<'_>,
+        client_turn_id: Option<&str>,
+    ) -> Result<GatewayTurnDeliveryRecord> {
+        #[cfg(test)]
+        {
+            let barrier = self
+                .inner
+                .gateway_turn_acceptance_barrier
+                .lock()
+                .expect("Gateway Turn acceptance barrier poisoned")
+                .take();
+            if let Some((entered, release)) = barrier {
+                entered.notify_one();
+                release.notified().await;
+            }
+        }
         let now = now_ms();
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
@@ -34,6 +69,15 @@ impl StateRuntime {
             .bind(now)
             .execute(&mut *tx)
             .await?;
+            if let Some(client_turn_id) = client_turn_id {
+                record_gateway_turn_start_receipt_in_tx(
+                    &mut tx,
+                    input.thread_id,
+                    client_turn_id,
+                    input.turn_id,
+                )
+                .await?;
+            }
             tx.commit().await?;
             Ok(())
         })

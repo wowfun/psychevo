@@ -196,6 +196,82 @@ impl StateRuntime {
         result
     }
 
+    pub async fn load_tui_message_summaries_before(
+        &self,
+        session_id: &str,
+        before_session_seq: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<TuiMessageSummary>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let revert_boundary = self
+            .session_revert_state(session_id)
+            .await?
+            .map(|revert| revert.start_seq)
+            .unwrap_or(i64::MAX);
+        let boundary = before_session_seq
+            .unwrap_or(i64::MAX)
+            .min(revert_boundary);
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT session_seq, message_json, usage_json, metadata_json,
+                       context_input_tokens, billable_input_tokens, billable_output_tokens,
+                       reasoning_tokens, cache_read_tokens, cache_write_tokens,
+                       reported_total_tokens, estimated_cost_nanodollars,
+                       pricing_source, pricing_tier, cost_status,
+                       pricing_missing_reason, pricing_version
+                FROM messages
+                WHERE session_id = ?1 AND session_seq < ?2
+                ORDER BY session_seq DESC
+                LIMIT ?3
+                "#,
+            )
+            .bind(session_id)
+            .bind(boundary)
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(&mut *conn)
+            .await?;
+            let mut summaries = rows
+                .into_iter()
+                .map(|row| {
+                    let message_json: String = row.try_get(1)?;
+                    let message = serde_json::from_str::<Message>(&message_json)?;
+                    Ok(TuiMessageSummary {
+                        session_seq: row.try_get(0)?,
+                        message: sanitize_message_for_tui_history(&message),
+                        usage: parse_optional_json(row.try_get(2)?)?,
+                        metadata: parse_optional_json(row.try_get(3)?)?,
+                        accounting: accounting_json_from_row(&row, 4)?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            summaries.reverse();
+            Ok(summaries)
+        }
+        .await;
+        operation.finish(&result);
+        result
+    }
+
+    pub async fn tui_message_exists(&self, session_id: &str, session_seq: i64) -> Result<bool> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            Ok(sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM messages WHERE session_id = ?1 AND session_seq = ?2",
+            )
+            .bind(session_id)
+            .bind(session_seq)
+            .fetch_optional(&mut *conn)
+            .await?
+            .is_some())
+        })
+        .await
+    }
+
     pub async fn append_message(&self, session_id: &str, message: &Message) -> Result<()> {
         self.append_message_with_metrics(session_id, message, None, None)
             .await

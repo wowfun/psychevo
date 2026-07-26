@@ -1,5 +1,5 @@
 #![allow(clippy::module_inception)]
-#![cfg_attr(not(feature = "internal"), allow(dead_code, unused_imports))]
+#![cfg_attr(not(feature = "product"), allow(dead_code, unused_imports))]
 
 macro_rules! framework_internal_modules {
     ($visibility:vis) => {
@@ -44,10 +44,82 @@ macro_rules! framework_internal_modules {
     };
 }
 
-#[cfg(feature = "internal")]
-framework_internal_modules!(pub);
-#[cfg(not(feature = "internal"))]
 framework_internal_modules!(pub(crate));
+
+#[cfg(feature = "product")]
+/// First-party product assembly facade.
+///
+/// Raw implementation modules remain private even when this feature is
+/// enabled:
+///
+/// ```compile_fail
+/// use psychevo::state::StateRuntime;
+/// ```
+#[doc(hidden)]
+pub mod __product {
+    pub mod capabilities {
+        pub use crate::agents::*;
+        pub use crate::extensions::*;
+        pub use crate::hooks::*;
+        pub use crate::plugins::*;
+        pub use crate::skills::*;
+    }
+
+    pub mod commands {
+        pub use crate::command_registry::*;
+    }
+
+    pub mod configuration {
+        pub use crate::config::*;
+    }
+
+    pub mod integrations {
+        pub use crate::mcp::*;
+    }
+
+    pub mod persistence {
+        pub use crate::state::*;
+    }
+
+    pub mod platform {
+        pub use crate::host_paths::*;
+        pub use crate::host_process::*;
+        pub use crate::media::*;
+        pub use crate::paths::*;
+        pub use crate::process_env::*;
+        pub use crate::sandbox::*;
+    }
+
+    pub mod presentation {
+        pub use crate::prompt_image::*;
+        pub use crate::prompt_templates::*;
+        pub use crate::tool_argument_display::*;
+        pub use crate::tool_result_display::*;
+        pub use crate::user_shell::*;
+    }
+
+    pub mod runtime {
+        pub use crate::model_state::*;
+        pub use crate::run::*;
+        pub use crate::types::*;
+    }
+
+    pub mod sessions {
+        pub use crate::automations::*;
+        pub use crate::compaction::*;
+        pub use crate::session_export::*;
+        pub use crate::session_trace::*;
+        pub use crate::thread_lineage::*;
+        pub use crate::undo::*;
+        pub use crate::workspace_diff::*;
+    }
+
+    pub mod usage {
+        pub use crate::accounting::*;
+        pub use crate::context_usage::*;
+        pub use crate::stats::*;
+    }
+}
 
 mod application;
 pub(crate) mod contribution_projection;
@@ -65,15 +137,16 @@ pub(crate) mod tool_surface;
 #[cfg(test)]
 pub(crate) mod tests;
 
-#[cfg(feature = "internal")]
+#[cfg(feature = "product")]
 #[doc(hidden)]
 pub use application::AdapterTurnOptions;
 pub use application::{
     AgentSessionAdapter, AgentTurnRequest, Application, ApplicationBuilder, Client,
-    CompactThreadRequest, ForkThreadRequest, InteractionResponse, ItemStage, PendingInteraction,
-    StartThreadRequest, Thread, ThreadItem, ThreadListQuery, ThreadSnapshot, ThreadSummary,
-    TurnControl, TurnEvent, TurnEventSender, TurnEventStream, TurnHandle, TurnOutcome, TurnReceipt,
-    TurnRequest, TurnResult,
+    CompactThreadRequest, ForkThreadRequest, HistoryPage, HistoryReader, InteractionResponse,
+    ItemStage, PendingInteraction, PendingTerminalFailure, ShutdownAdapterStatus, ShutdownReport,
+    StartThreadRequest, Thread, ThreadExecutionContext, ThreadItem, ThreadListQuery,
+    ThreadSnapshot, ThreadSummary, TurnControl, TurnEvent, TurnEventSender, TurnEventStream,
+    TurnHandle, TurnOutcome, TurnReceipt, TurnRequest, TurnResult,
 };
 pub use compaction::CompactionResult;
 pub use context_usage::ContextSnapshot;

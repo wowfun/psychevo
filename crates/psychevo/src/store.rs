@@ -686,6 +686,11 @@ pub(crate) struct StateRuntimeInner {
     pub(crate) acquire_latency_micros: AtomicU64,
     pub(crate) execute_latency_micros: AtomicU64,
     pub(crate) filesystem_grants: Mutex<HashMap<String, crate::sandbox::SandboxWriteGrants>>,
+    #[cfg(test)]
+    pub(crate) fail_next_framework_terminal: AtomicU64,
+    #[cfg(test)]
+    pub(crate) gateway_turn_acceptance_barrier:
+        Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

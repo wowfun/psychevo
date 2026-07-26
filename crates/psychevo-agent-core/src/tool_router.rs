@@ -12,21 +12,37 @@ pub struct ToolRouter {
 
 const TOOL_SEARCH_NAME: &str = "tool_search";
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ToolRouterError {
+    #[error("duplicate tool display name: {0}")]
+    DuplicateDisplayName(String),
+    #[error("duplicate canonical tool name: {0}")]
+    DuplicateCanonicalName(String),
+}
+
 impl ToolRouter {
-    pub fn from_tools(tools: impl IntoIterator<Item = Arc<dyn ToolBinding>>) -> Self {
+    pub fn from_tools(
+        tools: impl IntoIterator<Item = Arc<dyn ToolBinding>>,
+    ) -> std::result::Result<Self, ToolRouterError> {
         let mut router = Self::default();
         for tool in tools {
             let name = tool.name().to_string();
             if router.by_name.contains_key(&name) {
-                continue;
+                return Err(ToolRouterError::DuplicateDisplayName(name));
+            }
+            let canonical_name = tool.canonical_tool_name();
+            if router.by_canonical_name.contains_key(&canonical_name) {
+                return Err(ToolRouterError::DuplicateCanonicalName(
+                    canonical_name.provider_fallback_name(),
+                ));
             }
             router.by_name.insert(name, Arc::clone(&tool));
             router
                 .by_canonical_name
-                .insert(tool.canonical_tool_name(), Arc::clone(&tool));
+                .insert(canonical_name, Arc::clone(&tool));
             router.tools.push(tool);
         }
-        router
+        Ok(router)
     }
 
     pub fn with_tool_search(mut self, options: ToolSearchOptions) -> Self {

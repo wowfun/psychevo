@@ -136,7 +136,13 @@ pub(crate) async fn run_live_internal(
         additional_roots: extension_assembly.skill_inputs.clone(),
         no_skills: options.no_skills,
     };
-    let skill_catalog = discover_skills(&skill_options)?;
+    let skill_settings = load_skill_settings(
+        &skill_options.home,
+        &skill_options.cwd,
+        skill_options.config_path.as_deref(),
+        &skill_options.env,
+    )?;
+    let skill_catalog = discover_skills_with_settings(&skill_options, &skill_settings)?;
     let selected_skills = selected_skills_for_run(
         &skill_catalog,
         &options.prompt,
@@ -158,8 +164,6 @@ pub(crate) async fn run_live_internal(
         agent_catalog_for_selected_policy(&agent_catalog.agents, selected_agent.as_ref())
     };
     let required_agent_mentions = required_agent_mentions(&options.prompt, &required_agent_catalog);
-    let skill_context_fragments = skill_context_fragments(&selected_skills, &skill_catalog)?;
-    let selected_skill_context_message_count = skill_context_fragments.len();
     let session_metadata = || {
         let mut metadata = json!({
             "provider_label": resolved.display_label.clone(),
@@ -233,6 +237,13 @@ pub(crate) async fn run_live_internal(
         )
         .await?;
     }
+    let skill_context_fragments = skill_context_fragments(
+        &selected_skills,
+        &skill_catalog,
+        &session_id,
+        &skill_settings,
+    )?;
+    let selected_skill_context_message_count = skill_context_fragments.len();
     let invocation_started = Instant::now();
     let trace_warning_emitted = Arc::new(Mutex::new(false));
     let invocation_id = uuid::Uuid::now_v7().to_string();

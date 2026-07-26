@@ -5,15 +5,17 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex, Weak};
 
 use futures::FutureExt;
-use futures::future::{BoxFuture, Shared};
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::sync::{Mutex as AsyncMutex, Notify, RwLock as AsyncRwLock, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Notify, RwLock as AsyncRwLock, mpsc, oneshot};
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
@@ -33,6 +35,67 @@ use crate::types::{
 use crate::{Error, Result};
 
 const DEFAULT_EVENT_CAPACITY: usize = 256;
+#[cfg(not(test))]
+const FORCE_SHUTDOWN_TOTAL: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+const FORCE_SHUTDOWN_TOTAL: std::time::Duration = std::time::Duration::from_millis(250);
+#[cfg(not(test))]
+const FORCE_ADAPTER_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(test)]
+const FORCE_ADAPTER_BUDGET: std::time::Duration = std::time::Duration::from_millis(25);
+#[cfg(not(test))]
+const FORCE_COOPERATIVE_JOIN_BUDGET: std::time::Duration = std::time::Duration::from_secs(6);
+#[cfg(test)]
+const FORCE_COOPERATIVE_JOIN_BUDGET: std::time::Duration = std::time::Duration::from_millis(100);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShutdownReport {
+    pub forced: bool,
+    pub adapter: ShutdownAdapterStatus,
+    pub task_panics: u64,
+    pub aborted_tasks: usize,
+    pub pending_terminal_failures: Vec<PendingTerminalFailure>,
+}
+
+impl ShutdownReport {
+    pub fn is_clean(&self) -> bool {
+        matches!(self.adapter, ShutdownAdapterStatus::Completed)
+            && self.task_panics == 0
+            && self.aborted_tasks == 0
+            && self.pending_terminal_failures.is_empty()
+    }
+
+    pub fn require_clean(self) -> Result<Self> {
+        if self.is_clean() {
+            return Ok(self);
+        }
+        let details = serde_json::to_string(&self).unwrap_or_else(|_| format!("{self:?}"));
+        Err(Error::Message(format!(
+            "Application shutdown was not clean: {details}"
+        )))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ShutdownAdapterStatus {
+    Completed,
+    Failed { message: String },
+    TimedOut,
+    ContractViolation { message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingTerminalFailure {
+    pub turn_id: String,
+    pub message: String,
+}
 
 #[derive(Clone)]
 pub struct Application {
@@ -46,16 +109,381 @@ struct ApplicationInner {
     config_path: Option<PathBuf>,
     event_capacity: usize,
     admission: Mutex<bool>,
-    admission_gate: AsyncRwLock<()>,
-    force_shutdown_requested: Mutex<bool>,
-    shutdown_complete: Mutex<bool>,
+    admission_gate: Arc<AsyncRwLock<()>>,
+    force_shutdown_requested: AtomicBool,
+    force_shutdown_notify: Notify,
+    shutdown_complete: Mutex<Option<ShutdownReport>>,
     shutdown_finalizer: AsyncMutex<()>,
+    runtime: Arc<ApplicationRuntime>,
+}
+
+struct ApplicationRuntime {
     tasks: TaskTracker,
-    lanes: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
-    controls: Mutex<HashMap<String, crate::types::RunControlHandle>>,
-    active_turns: Mutex<HashMap<String, TurnHandle>>,
-    active_by_thread: Mutex<HashMap<String, VecDeque<String>>>,
-    active_operations_by_thread: Mutex<HashMap<String, usize>>,
+    state: Mutex<ApplicationRuntimeState>,
+    task_aborts: Mutex<HashMap<u64, tokio::task::AbortHandle>>,
+    next_task_id: AtomicU64,
+    next_operation_id: AtomicU64,
+    task_panics: AtomicU64,
+}
+
+#[derive(Default)]
+struct ApplicationRuntimeState {
+    threads: HashMap<String, ThreadCell>,
+    turns: HashMap<String, TurnSlot>,
+}
+
+#[derive(Default)]
+struct ThreadCell {
+    operations: VecDeque<ThreadOperation>,
+}
+
+struct ThreadOperation {
+    kind: ThreadOperationKind,
+    ready: Option<oneshot::Sender<()>>,
+}
+
+enum ThreadOperationKind {
+    Turn(String),
+    Mutation(u64),
+}
+
+struct TurnSlot {
+    handle: TurnHandle,
+    abort: Option<tokio::task::AbortHandle>,
+    phase: TurnPhase,
+    pending_terminal: Option<PendingTerminal>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TurnPhase {
+    Active,
+    PendingTerminal,
+}
+
+impl ApplicationRuntime {
+    fn new() -> Self {
+        Self {
+            tasks: TaskTracker::new(),
+            state: Mutex::new(ApplicationRuntimeState::default()),
+            task_aborts: Mutex::new(HashMap::new()),
+            next_task_id: AtomicU64::new(1),
+            next_operation_id: AtomicU64::new(1),
+            task_panics: AtomicU64::new(0),
+        }
+    }
+
+    fn spawn<F>(self: &Arc<Self>, future: F) -> tokio::task::AbortHandle
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        let task_id = self.next_task_id.fetch_add(1, AtomicOrdering::Relaxed);
+        let (start_tx, start_rx) = oneshot::channel();
+        let runtime = Arc::downgrade(self);
+        let panic_runtime = Arc::downgrade(self);
+        let task = self.tasks.spawn(async move {
+            let _guard = TrackedTaskGuard { runtime, task_id };
+            if start_rx.await.is_err() {
+                return;
+            }
+            let panicked = std::panic::AssertUnwindSafe(future)
+                .catch_unwind()
+                .await
+                .is_err();
+            if panicked {
+                let Some(runtime) = panic_runtime.upgrade() else {
+                    return;
+                };
+                runtime.task_panics.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+        });
+        let abort = task.abort_handle();
+        self.task_aborts
+            .lock()
+            .expect("Application task registry poisoned")
+            .insert(task_id, abort.clone());
+        let _ = start_tx.send(());
+        abort
+    }
+
+    fn abort_all_tasks(&self) -> usize {
+        let aborts = self
+            .task_aborts
+            .lock()
+            .expect("Application task registry poisoned")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let count = aborts.len();
+        for abort in aborts {
+            abort.abort();
+        }
+        count
+    }
+
+    fn reserve_turn(&self, thread_id: &str, turn_id: &str) -> oneshot::Receiver<()> {
+        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let cell = state.threads.entry(thread_id.to_string()).or_default();
+        cell.reserve(ThreadOperationKind::Turn(turn_id.to_string()))
+    }
+
+    fn register_turn(&self, turn_id: &str, handle: TurnHandle) {
+        self.state
+            .lock()
+            .expect("Application runtime poisoned")
+            .turns
+            .insert(
+                turn_id.to_string(),
+                TurnSlot {
+                    handle,
+                    abort: None,
+                    phase: TurnPhase::Active,
+                    pending_terminal: None,
+                },
+            );
+    }
+
+    fn set_turn_abort(&self, turn_id: &str, abort: tokio::task::AbortHandle) {
+        if let Some(slot) = self
+            .state
+            .lock()
+            .expect("Application runtime poisoned")
+            .turns
+            .get_mut(turn_id)
+        {
+            slot.abort = Some(abort);
+        }
+    }
+
+    fn settle_turn(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+        pending_terminal: Option<PendingTerminal>,
+    ) {
+        let mut state = self.state.lock().expect("Application runtime poisoned");
+        Self::remove_thread_turn(&mut state, thread_id, turn_id);
+        if let Some(pending_terminal) = pending_terminal {
+            if let Some(slot) = state.turns.get_mut(turn_id) {
+                slot.abort = None;
+                slot.phase = TurnPhase::PendingTerminal;
+                slot.pending_terminal = Some(pending_terminal);
+            }
+        } else {
+            state.turns.remove(turn_id);
+        }
+    }
+
+    fn remove_thread_turn(state: &mut ApplicationRuntimeState, thread_id: &str, turn_id: &str) {
+        let remove = if let Some(cell) = state.threads.get_mut(thread_id) {
+            cell.release(
+                |kind| matches!(kind, ThreadOperationKind::Turn(queued) if queued == turn_id),
+            );
+            cell.operations.is_empty()
+        } else {
+            false
+        };
+        if remove {
+            state.threads.remove(thread_id);
+        }
+    }
+
+    fn turn_handle(&self, turn_id: &str) -> Option<TurnHandle> {
+        self.state
+            .lock()
+            .expect("Application runtime poisoned")
+            .turns
+            .get(turn_id)
+            .map(|slot| slot.handle.clone())
+    }
+
+    fn pending_terminal(&self, turn_id: &str) -> Option<PendingTerminal> {
+        self.state
+            .lock()
+            .expect("Application runtime poisoned")
+            .turns
+            .get(turn_id)
+            .and_then(|slot| slot.pending_terminal.clone())
+    }
+
+    fn remove_pending_terminal(&self, turn_id: &str) {
+        self.state
+            .lock()
+            .expect("Application runtime poisoned")
+            .turns
+            .remove(turn_id);
+    }
+
+    fn thread_activity(&self, thread_id: &str) -> (bool, Option<String>, usize) {
+        self.state
+            .lock()
+            .expect("Application runtime poisoned")
+            .threads
+            .get(thread_id)
+            .map(|cell| {
+                let active_turn_id = cell
+                    .operations
+                    .front()
+                    .and_then(|operation| match &operation.kind {
+                        ThreadOperationKind::Turn(turn_id) => Some(turn_id.clone()),
+                        ThreadOperationKind::Mutation(_) => None,
+                    });
+                let running = !cell.operations.is_empty();
+                let queued = cell
+                    .operations
+                    .iter()
+                    .filter(|operation| matches!(&operation.kind, ThreadOperationKind::Turn(_)))
+                    .count()
+                    .saturating_sub(usize::from(active_turn_id.is_some()));
+                (running, active_turn_id, queued)
+            })
+            .unwrap_or((false, None, 0))
+    }
+
+    fn thread_turn_handles(&self, thread_id: &str) -> Vec<TurnHandle> {
+        let state = self.state.lock().expect("Application runtime poisoned");
+        let Some(cell) = state.threads.get(thread_id) else {
+            return Vec::new();
+        };
+        cell.operations
+            .iter()
+            .filter_map(|operation| match &operation.kind {
+                ThreadOperationKind::Turn(turn_id) => state.turns.get(turn_id),
+                ThreadOperationKind::Mutation(_) => None,
+            })
+            .map(|slot| slot.handle.clone())
+            .collect()
+    }
+
+    fn active_controls(&self) -> Vec<crate::types::RunControlHandle> {
+        self.state
+            .lock()
+            .expect("Application runtime poisoned")
+            .turns
+            .values()
+            .filter(|slot| slot.phase == TurnPhase::Active)
+            .map(|slot| slot.handle.control.clone())
+            .collect()
+    }
+
+    fn reserve_mutation(self: &Arc<Self>, thread_id: &str) -> ThreadMutationReservation {
+        let operation_id = self.next_operation_id.fetch_add(1, AtomicOrdering::Relaxed);
+        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let cell = state.threads.entry(thread_id.to_string()).or_default();
+        let ready = cell.reserve(ThreadOperationKind::Mutation(operation_id));
+        ThreadMutationReservation {
+            runtime: Arc::clone(self),
+            thread_id: thread_id.to_string(),
+            operation_id,
+            ready: Some(ready),
+        }
+    }
+
+    fn finish_mutation(&self, thread_id: &str, operation_id: u64) {
+        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let remove = if let Some(cell) = state.threads.get_mut(thread_id) {
+            cell.release(
+                |kind| matches!(kind, ThreadOperationKind::Mutation(id) if *id == operation_id),
+            );
+            cell.operations.is_empty()
+        } else {
+            false
+        };
+        if remove {
+            state.threads.remove(thread_id);
+        }
+    }
+
+    fn take_turn_slots(&self) -> Vec<TurnSlot> {
+        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let slots = state
+            .turns
+            .drain()
+            .map(|(_, slot)| slot)
+            .collect::<Vec<_>>();
+        state.threads.clear();
+        slots
+    }
+}
+
+impl ThreadCell {
+    fn reserve(&mut self, kind: ThreadOperationKind) -> oneshot::Receiver<()> {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        self.operations.push_back(ThreadOperation {
+            kind,
+            ready: Some(ready_tx),
+        });
+        if self.operations.len() == 1 {
+            Self::release_front_waiter(&mut self.operations);
+        }
+        ready_rx
+    }
+
+    fn release(&mut self, mut matches: impl FnMut(&ThreadOperationKind) -> bool) {
+        let Some(index) = self
+            .operations
+            .iter()
+            .position(|operation| matches(&operation.kind))
+        else {
+            return;
+        };
+        let released_front = index == 0;
+        self.operations.remove(index);
+        if released_front {
+            Self::release_front_waiter(&mut self.operations);
+        }
+    }
+
+    fn release_front_waiter(operations: &mut VecDeque<ThreadOperation>) {
+        if let Some(ready) = operations
+            .front_mut()
+            .and_then(|operation| operation.ready.take())
+        {
+            let _ = ready.send(());
+        }
+    }
+}
+
+struct TrackedTaskGuard {
+    runtime: Weak<ApplicationRuntime>,
+    task_id: u64,
+}
+
+impl Drop for TrackedTaskGuard {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.upgrade() {
+            runtime
+                .task_aborts
+                .lock()
+                .expect("Application task registry poisoned")
+                .remove(&self.task_id);
+        }
+    }
+}
+
+struct ThreadMutationReservation {
+    runtime: Arc<ApplicationRuntime>,
+    thread_id: String,
+    operation_id: u64,
+    ready: Option<oneshot::Receiver<()>>,
+}
+
+impl ThreadMutationReservation {
+    async fn acquire(mut self) -> Result<Self> {
+        self.ready
+            .take()
+            .expect("Thread mutation reservation already acquired")
+            .await
+            .map_err(|_| Error::Message("Thread mutation reservation was cancelled".to_string()))?;
+        Ok(self)
+    }
+}
+
+impl Drop for ThreadMutationReservation {
+    fn drop(&mut self) {
+        self.runtime
+            .finish_mutation(&self.thread_id, self.operation_id);
+    }
 }
 
 impl fmt::Debug for Application {
@@ -79,16 +507,16 @@ impl Application {
         }
     }
 
-    pub async fn shutdown(&self) -> Result<()> {
+    pub async fn shutdown(&self) -> Result<ShutdownReport> {
         self.shutdown_inner(false).await
     }
 
-    pub async fn shutdown_force(&self) -> Result<()> {
+    pub async fn shutdown_force(&self) -> Result<ShutdownReport> {
         self.shutdown_inner(true).await
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __from_open_state(
         home: PathBuf,
         config_path: Option<PathBuf>,
@@ -103,28 +531,25 @@ impl Application {
                 config_path,
                 event_capacity: DEFAULT_EVENT_CAPACITY,
                 admission: Mutex::new(true),
-                admission_gate: AsyncRwLock::new(()),
-                force_shutdown_requested: Mutex::new(false),
-                shutdown_complete: Mutex::new(false),
+                admission_gate: Arc::new(AsyncRwLock::new(())),
+                force_shutdown_requested: AtomicBool::new(false),
+                force_shutdown_notify: Notify::new(),
+                shutdown_complete: Mutex::new(None),
                 shutdown_finalizer: AsyncMutex::new(()),
-                tasks: TaskTracker::new(),
-                lanes: Mutex::new(HashMap::new()),
-                controls: Mutex::new(HashMap::new()),
-                active_turns: Mutex::new(HashMap::new()),
-                active_by_thread: Mutex::new(HashMap::new()),
-                active_operations_by_thread: Mutex::new(HashMap::new()),
+                runtime: Arc::new(ApplicationRuntime::new()),
             }),
         }
     }
 
-    async fn shutdown_inner(&self, force: bool) -> Result<()> {
-        if *self
+    async fn shutdown_inner(&self, force: bool) -> Result<ShutdownReport> {
+        if let Some(report) = self
             .inner
             .shutdown_complete
             .lock()
             .expect("application shutdown state poisoned")
+            .clone()
         {
-            return Ok(());
+            return Ok(report);
         }
         {
             let _admission_gate = self.inner.admission_gate.write().await;
@@ -135,65 +560,180 @@ impl Application {
                 .expect("application admission poisoned");
             if *open {
                 *open = false;
-                self.inner.tasks.close();
+                self.inner.runtime.tasks.close();
             }
         }
         if force {
-            *self
-                .inner
+            self.inner
                 .force_shutdown_requested
-                .lock()
-                .expect("application shutdown mode poisoned") = true;
+                .store(true, AtomicOrdering::Release);
+            self.inner.force_shutdown_notify.notify_one();
         }
-        let controls = self
-            .inner
-            .controls
-            .lock()
-            .expect("application control map poisoned")
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        if *self
-            .inner
-            .force_shutdown_requested
-            .lock()
-            .expect("application shutdown mode poisoned")
-        {
-            for control in controls {
-                control.abort();
-            }
-        }
-        self.inner.tasks.wait().await;
-
-        // A graceful shutdown future may be cancelled by an outer deadline.
-        // Serializing only finalization lets a subsequent forced shutdown
-        // escalate the already-closed Application instead of returning early.
         let _finalizer = self.inner.shutdown_finalizer.lock().await;
-        if *self
+        if let Some(report) = self
             .inner
             .shutdown_complete
             .lock()
             .expect("application shutdown state poisoned")
+            .clone()
         {
-            return Ok(());
+            return Ok(report);
         }
-        let force = *self
+        let force = self
             .inner
             .force_shutdown_requested
-            .lock()
-            .expect("application shutdown mode poisoned");
-        self.inner.agent_sessions.shutdown(force).await?;
-        self.inner.state.close().await;
+            .load(AtomicOrdering::Acquire);
+        let mut report = ShutdownReport {
+            forced: force,
+            adapter: ShutdownAdapterStatus::Completed,
+            task_panics: 0,
+            aborted_tasks: 0,
+            pending_terminal_failures: Vec::new(),
+        };
+
+        if force {
+            self.shutdown_force_owned(&mut report).await;
+        } else {
+            tokio::select! {
+                biased;
+                _ = self.inner.force_shutdown_notify.notified() => {
+                    report.forced = true;
+                    self.shutdown_force_owned(&mut report).await;
+                }
+                _ = self.shutdown_graceful_owned(&mut report) => {}
+            }
+        }
+        report.task_panics = self.inner.runtime.task_panics.load(AtomicOrdering::Relaxed);
         *self
             .inner
             .shutdown_complete
             .lock()
-            .expect("application shutdown state poisoned") = true;
-        Ok(())
+            .expect("application shutdown state poisoned") = Some(report.clone());
+        Ok(report)
+    }
+
+    async fn shutdown_graceful_owned(&self, report: &mut ShutdownReport) {
+        self.inner.runtime.tasks.wait().await;
+        if let Err(error) = self.inner.agent_sessions.shutdown(false).await {
+            report.adapter = ShutdownAdapterStatus::Failed {
+                message: error.to_string(),
+            };
+        }
+        self.retry_and_settle_terminal_slots(report, None).await;
+        self.inner.state.close().await;
+    }
+
+    async fn shutdown_force_owned(&self, report: &mut ShutdownReport) {
+        let deadline = tokio::time::Instant::now() + FORCE_SHUTDOWN_TOTAL;
+        for control in self.inner.runtime.active_controls() {
+            control.abort();
+        }
+
+        let adapter_deadline =
+            std::cmp::min(deadline, tokio::time::Instant::now() + FORCE_ADAPTER_BUDGET);
+        report.adapter = match tokio::time::timeout_at(
+            adapter_deadline,
+            self.inner.agent_sessions.shutdown(true),
+        )
+        .await
+        {
+            Ok(Ok(())) => ShutdownAdapterStatus::Completed,
+            Ok(Err(error)) => ShutdownAdapterStatus::Failed {
+                message: error.to_string(),
+            },
+            Err(_) => ShutdownAdapterStatus::TimedOut,
+        };
+
+        let join_deadline = std::cmp::min(
+            deadline,
+            tokio::time::Instant::now() + FORCE_COOPERATIVE_JOIN_BUDGET,
+        );
+        if tokio::time::timeout_at(join_deadline, self.inner.runtime.tasks.wait())
+            .await
+            .is_err()
+        {
+            report.aborted_tasks = self.inner.runtime.abort_all_tasks();
+            if tokio::time::timeout_at(deadline, self.inner.runtime.tasks.wait())
+                .await
+                .is_err()
+            {
+                report.adapter = ShutdownAdapterStatus::ContractViolation {
+                    message: "tracked tasks remained live after forced abort".to_string(),
+                };
+            }
+        }
+
+        self.retry_and_settle_terminal_slots(report, Some(deadline))
+            .await;
+        if tokio::time::timeout_at(deadline, self.inner.state.close())
+            .await
+            .is_err()
+        {
+            report.adapter = ShutdownAdapterStatus::ContractViolation {
+                message: "State close exceeded the force-shutdown deadline".to_string(),
+            };
+        }
+    }
+
+    async fn retry_and_settle_terminal_slots(
+        &self,
+        report: &mut ShutdownReport,
+        deadline: Option<tokio::time::Instant>,
+    ) {
+        for slot in self.inner.runtime.take_turn_slots() {
+            let terminal = slot
+                .pending_terminal
+                .unwrap_or_else(|| PendingTerminal::interrupted(slot.handle.receipt.clone()));
+            let result = match deadline {
+                Some(deadline) => {
+                    match tokio::time::timeout_at(deadline, terminal.persist(&self.inner.state))
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(_) => Err(Error::TerminalPersistence {
+                            turn_id: terminal.receipt.turn_id.clone(),
+                            message: "force-shutdown deadline elapsed".to_string(),
+                        }),
+                    }
+                }
+                None => terminal.persist(&self.inner.state).await,
+            };
+            match result {
+                Ok(()) => {
+                    if slot.phase == TurnPhase::Active {
+                        slot.handle.events.push(terminal.terminal_event.clone());
+                        slot.handle.completion.settle(terminal.completion.clone());
+                    }
+                }
+                Err(error) => {
+                    report
+                        .pending_terminal_failures
+                        .push(PendingTerminalFailure {
+                            turn_id: terminal.receipt.turn_id.clone(),
+                            message: error.to_string(),
+                        });
+                    if slot.phase == TurnPhase::Active {
+                        let message: Arc<str> = Arc::from(format!(
+                            "failed to persist Framework Turn terminal: {error}"
+                        ));
+                        slot.handle.events.push(TurnEvent::Warning {
+                            data: serde_json::json!({
+                                "kind": "framework_terminal_persistence",
+                                "message": message.as_ref(),
+                                "turnId": terminal.receipt.turn_id,
+                            }),
+                        });
+                        slot.handle.completion.settle(Err(message));
+                    }
+                }
+            }
+            slot.handle.control.abort();
+            slot.handle.events.close();
+        }
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __state_runtime(&self) -> StateRuntime {
         self.inner.state.clone()
     }
@@ -237,7 +777,7 @@ impl ApplicationBuilder {
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __state_runtime(mut self, state: StateRuntime) -> Self {
         self.state = Some(state);
         self
@@ -301,16 +841,12 @@ impl ApplicationBuilder {
                 config_path: self.config_path,
                 event_capacity,
                 admission: Mutex::new(true),
-                admission_gate: AsyncRwLock::new(()),
-                force_shutdown_requested: Mutex::new(false),
-                shutdown_complete: Mutex::new(false),
+                admission_gate: Arc::new(AsyncRwLock::new(())),
+                force_shutdown_requested: AtomicBool::new(false),
+                force_shutdown_notify: Notify::new(),
+                shutdown_complete: Mutex::new(None),
                 shutdown_finalizer: AsyncMutex::new(()),
-                tasks: TaskTracker::new(),
-                lanes: Mutex::new(HashMap::new()),
-                controls: Mutex::new(HashMap::new()),
-                active_turns: Mutex::new(HashMap::new()),
-                active_by_thread: Mutex::new(HashMap::new()),
-                active_operations_by_thread: Mutex::new(HashMap::new()),
+                runtime: Arc::new(ApplicationRuntime::new()),
             }),
         })
     }
@@ -406,22 +942,26 @@ impl Client {
     pub async fn resume_turn(&self, id: impl Into<String>) -> Result<TurnHandle> {
         self.ensure_open()?;
         let id = id.into();
-        if let Some(handle) = self
-            .inner
-            .active_turns
-            .lock()
-            .expect("application active turn map poisoned")
-            .get(&id)
-            .cloned()
-        {
+        if let Some(pending) = self.inner.runtime.pending_terminal(&id) {
+            pending.persist(&self.inner.state).await.map_err(|error| {
+                Error::TerminalPersistence {
+                    turn_id: id.clone(),
+                    message: error.to_string(),
+                }
+            })?;
+            self.inner.runtime.remove_pending_terminal(&id);
+            return Ok(pending.completed_handle());
+        }
+        if let Some(handle) = self.inner.runtime.turn_handle(&id) {
             return Ok(handle);
         }
-        let terminal = self
-            .inner
-            .state
-            .gateway_turn_terminal(&id)
-            .await?
-            .ok_or_else(|| Error::Message(format!("turn not found: {id}")))?;
+        let Some(terminal) = self.inner.state.gateway_turn_terminal(&id).await? else {
+            return if self.inner.state.gateway_turn_delivery(&id).await?.is_some() {
+                Err(Error::OutcomeIndeterminate { turn_id: id })
+            } else {
+                Err(Error::Message(format!("turn not found: {id}")))
+            };
+        };
         let metadata = terminal.metadata.unwrap_or(Value::Null);
         let receipt = serde_json::from_value::<TurnReceipt>(
             metadata
@@ -433,16 +973,12 @@ impl Client {
             Some(result) if !result.is_null() => Ok(TurnHandle::completed(
                 receipt,
                 serde_json::from_value::<TurnResult>(result)?,
-                self.inner.state.clone(),
-                self.inner.tasks.clone(),
             )),
             _ if terminal.status == "failed" => Ok(TurnHandle::failed(
                 receipt,
                 terminal
                     .error_message
                     .unwrap_or_else(|| "Framework Turn failed".to_string()),
-                self.inner.state.clone(),
-                self.inner.tasks.clone(),
             )),
             _ => Err(Error::Message(format!(
                 "Framework turn has no durable result: {id}"
@@ -465,16 +1001,6 @@ impl Client {
         }
     }
 
-    fn lane(&self, thread_id: &str) -> Arc<AsyncMutex<()>> {
-        self.inner
-            .lanes
-            .lock()
-            .expect("application lane map poisoned")
-            .entry(thread_id.to_string())
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone()
-    }
-
     fn application_environment(
         &self,
         inherited: Option<BTreeMap<String, String>>,
@@ -488,13 +1014,7 @@ impl Client {
     }
 
     fn summary_from_summary(&self, summary: SessionSummary) -> ThreadSummary {
-        let active_turn_id = self
-            .inner
-            .active_by_thread
-            .lock()
-            .expect("application active thread map poisoned")
-            .get(&summary.id)
-            .and_then(|turns| turns.front().cloned());
+        let (_, active_turn_id, _) = self.inner.runtime.thread_activity(&summary.id);
         ThreadSummary::from_summary(summary, active_turn_id)
     }
 
@@ -508,18 +1028,14 @@ impl Client {
             .into_iter()
             .map(PendingInteraction::from)
             .collect();
-        let items = self
-            .inner
-            .state
-            .load_tui_message_summaries(&summary.id)
-            .await?
-            .into_iter()
-            .map(ThreadItem::from)
-            .collect();
+        let history = HistoryReader::new(self.inner.state.clone(), summary.id.clone())
+            .latest(None)
+            .await?;
         Ok(ThreadSnapshot::from_summary(
             summary,
             pending_interactions,
-            items,
+            history.items,
+            history.next_before,
         ))
     }
 }
@@ -580,13 +1096,12 @@ impl Thread {
     }
 
     pub async fn start_turn(&self, mut request: TurnRequest) -> Result<TurnHandle> {
-        let _admission_gate = self.client.inner.admission_gate.read().await;
+        let admission_gate = self.client.inner.admission_gate.clone().read_owned().await;
         self.client.ensure_open()?;
         request.inherited_env = Some(
             self.client
                 .application_environment(request.inherited_env.take()),
         );
-        let snapshot = self.snapshot().await?;
         let receipt = TurnReceipt {
             accepted: true,
             thread_id: self.id.clone(),
@@ -606,62 +1121,32 @@ impl Thread {
             "runtimeRef": request.runtime_ref,
         }))?;
         let durable_input_hash = format!("{:x}", Sha256::digest(durable_input.as_bytes()));
-        let runtime_ref = request.runtime_ref.as_deref().unwrap_or("native");
-        self.client
+        let runtime_ref = request
+            .runtime_ref
+            .as_deref()
+            .unwrap_or("native")
+            .to_string();
+        let lane = self
+            .client
             .inner
-            .state
-            .insert_gateway_turn_delivery(GatewayTurnDeliveryInput {
-                turn_id: &receipt.turn_id,
-                thread_id: &receipt.thread_id,
-                runtime_ref,
-                input_json: &durable_input,
-                input_hash: &durable_input_hash,
-            })
-            .await?;
-        if let Some(client_turn_id) = request
+            .runtime
+            .reserve_turn(&receipt.thread_id, &receipt.turn_id);
+        let client_turn_id = request
             .client_turn_id
             .as_deref()
             .map(str::trim)
             .filter(|client_turn_id| !client_turn_id.is_empty())
-        {
-            self.client
-                .inner
-                .state
-                .record_gateway_turn_start_receipt(
-                    &receipt.thread_id,
-                    client_turn_id,
-                    &receipt.turn_id,
-                )
-                .await?;
-        }
+            .map(ToOwned::to_owned);
         let event_observer = request.adapter_options.turn_event_observer.take();
-        let events = Arc::new(EventLog::observed(
-            self.client.inner.event_capacity,
-            event_observer,
-        ));
-        events.push(TurnEvent::Accepted {
-            receipt: receipt.clone(),
-        });
+        let events = Arc::new(EventLog::new(self.client.inner.event_capacity));
         let (control_handle, control) = request
             .prepared_control
             .take()
             .map(|prepared| (prepared.handle, prepared.control))
             .unwrap_or_else(run_control);
         let interactions = FrameworkInteractionControl::default();
-        self.client
-            .inner
-            .controls
-            .lock()
-            .expect("application control map poisoned")
-            .insert(receipt.turn_id.clone(), control_handle.clone());
-        let (completion_tx, completion_rx) = oneshot::channel();
-        let completion: Shared<BoxFuture<'static, SharedTurnCompletion>> = async move {
-            completion_rx
-                .await
-                .unwrap_or_else(|_| Err(Arc::from("accepted Turn task ended without completion")))
-        }
-        .boxed()
-        .shared();
+        let completion = TurnCompletion::pending();
+        let task_completion = completion.clone();
         let client = self.client.clone();
         let task_client = client.clone();
         let thread_id = self.id.clone();
@@ -670,69 +1155,127 @@ impl Thread {
         let task_events = Arc::clone(&events);
         let task_control_handle = control_handle.clone();
         let task_interactions = interactions.clone();
-        let lane = client.lane(&thread_id);
         let agent_sessions = Arc::clone(&client.inner.agent_sessions);
         let state = client.inner.state.clone();
-        let tasks = client.inner.tasks.clone();
+        let interaction_broker = InteractionBroker::new(
+            state.clone(),
+            client.inner.runtime.clone(),
+            Arc::clone(&events),
+            interactions.clone(),
+            control_handle.clone(),
+            thread_id.clone(),
+            turn_id.clone(),
+        );
+        let task_interaction_broker = interaction_broker.clone();
+        let (acceptance_tx, acceptance_rx) = oneshot::channel();
         let handle = TurnHandle {
             receipt: receipt.clone(),
             events,
             completion,
             control: control_handle,
-            interactions,
-            state: state.clone(),
-            tasks: tasks.clone(),
+            interaction_broker: Some(interaction_broker),
         };
+        client.inner.runtime.register_turn(&turn_id, handle.clone());
 
+        if let Some(observer) = event_observer {
+            let mut stream = handle.events();
+            client.inner.runtime.spawn(async move {
+                while let Some(event) = stream.next().await {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| observer(event)))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+        }
         {
-            client
-                .inner
-                .active_turns
-                .lock()
-                .expect("application active turn map poisoned")
-                .insert(turn_id.clone(), handle.clone());
-            client
-                .inner
-                .active_by_thread
-                .lock()
-                .expect("application active thread map poisoned")
-                .entry(thread_id.clone())
-                .or_default()
-                .push_back(turn_id.clone());
-            client.inner.tasks.spawn(async move {
-                let _lane = lane.lock().await;
+            let spawned_turn_id = turn_id.clone();
+            let task = client.inner.runtime.spawn(async move {
+                let acceptance = state
+                    .accept_gateway_turn(
+                        GatewayTurnDeliveryInput {
+                            turn_id: &turn_id,
+                            thread_id: &thread_id,
+                            runtime_ref: &runtime_ref,
+                            input_json: &durable_input,
+                            input_hash: &durable_input_hash,
+                        },
+                        client_turn_id.as_deref(),
+                    )
+                    .await;
+                if let Err(error) = acceptance {
+                    let message: Arc<str> = Arc::from(error.to_string());
+                    task_client
+                        .inner
+                        .runtime
+                        .settle_turn(&thread_id, &turn_id, None);
+                    task_interactions.cancel_permissions();
+                    task_interaction_broker.finish().await;
+                    task_events.close();
+                    task_completion.settle(Err(message));
+                    let _ = acceptance_tx.send(Err(error));
+                    return;
+                }
+                task_events.push(TurnEvent::Accepted {
+                    receipt: task_receipt.clone(),
+                });
+                let _ = acceptance_tx.send(Ok(()));
+                drop(admission_gate);
+                if lane.await.is_err() {
+                    let message: Arc<str> = Arc::from("Thread operation reservation was cancelled");
+                    task_client
+                        .inner
+                        .runtime
+                        .settle_turn(&thread_id, &turn_id, None);
+                    task_interactions.cancel_permissions();
+                    task_interaction_broker.finish().await;
+                    task_events.close();
+                    task_completion.settle(Err(message));
+                    return;
+                }
                 task_events.push(TurnEvent::Started {
                     thread_id: thread_id.clone(),
                     turn_id: turn_id.clone(),
                 });
-                let result = async {
+                let result = std::panic::AssertUnwindSafe(async {
+                    let summary = state
+                        .session_summary(&thread_id)
+                        .await?
+                        .ok_or_else(|| Error::Message(format!("thread not found: {thread_id}")))?;
+                    let thread = ThreadExecutionContext::from_summary(summary);
+                    let history = HistoryReader::new(state.clone(), thread_id.clone());
                     let event_sender = TurnEventSender {
                         log: Arc::clone(&task_events),
-                        state: state.clone(),
-                        tasks: tasks.clone(),
-                        thread_id: thread_id.clone(),
-                        turn_id: turn_id.clone(),
+                        interactions: task_interaction_broker.clone(),
                     };
                     request.approval_handler = Some(Arc::new(FrameworkApprovalHandler {
                         delegate: request.approval_handler.take(),
-                        events: event_sender.clone(),
                         interactions: task_interactions.clone(),
+                        broker: task_interaction_broker.clone(),
                     }));
                     agent_sessions
                         .run_turn(AgentTurnRequest {
-                            thread: snapshot,
+                            thread,
+                            history,
                             receipt: task_receipt.clone(),
                             input: request,
                             events: event_sender,
                             control: TurnControl {
                                 handle: task_control_handle,
-                                interactions: task_interactions.clone(),
+                                interactions: task_interaction_broker.clone(),
                             },
                             native_control: Some(control),
                         })
                         .await
-                }
-                .await;
+                })
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| {
+                    Err(Error::Message(
+                        "Agent Session Adapter panicked while running the Turn".to_string(),
+                    ))
+                });
                 let (shared, terminal_event) = match result {
                     Ok(result) => {
                         let event = TurnEvent::Completed {
@@ -753,81 +1296,23 @@ impl Thread {
                     }
                 };
                 let completed_at_ms = psychevo_agent_core::now_ms();
-                let finalization = match &shared {
-                    Ok(result) => match serde_json::to_value(result.as_ref()) {
-                        Ok(framework_result) => {
-                            let (status, outcome) = gateway_terminal_facts(result.outcome);
-                            state
-                                .finalize_framework_turn(
-                                    GatewayTurnTerminalInput {
-                                        turn_id: &turn_id,
-                                        thread_id: &thread_id,
-                                        status,
-                                        outcome: Some(outcome),
-                                        error_message: None,
-                                        started_at_ms: None,
-                                        completed_at_ms,
-                                        metadata: Some(serde_json::json!({
-                                            "source": "framework",
-                                            "frameworkReceipt": task_receipt,
-                                            "frameworkResult": framework_result,
-                                        })),
-                                    },
-                                    "turn_finished",
-                                )
-                                .await
-                        }
-                        Err(error) => Err(Error::from(error)),
-                    },
-                    Err(message) => {
-                        state
-                            .finalize_framework_turn(
-                                GatewayTurnTerminalInput {
-                                    turn_id: &turn_id,
-                                    thread_id: &thread_id,
-                                    status: "failed",
-                                    outcome: Some("failed"),
-                                    error_message: Some(message.as_ref()),
-                                    started_at_ms: None,
-                                    completed_at_ms,
-                                    metadata: Some(serde_json::json!({
-                                        "source": "framework",
-                                        "frameworkReceipt": task_receipt,
-                                        "frameworkResult": Value::Null,
-                                    })),
-                                },
-                                "turn_finished",
-                            )
-                            .await
-                    }
+                let terminal = PendingTerminal {
+                    receipt: task_receipt.clone(),
+                    completion: shared.clone(),
+                    terminal_event: terminal_event.clone(),
+                    completed_at_ms,
+                    last_error: String::new(),
                 };
+                let finalization = terminal.persist(&state).await;
                 task_interactions.cancel_permissions();
+                task_interaction_broker.finish().await;
+                let pending_terminal = finalization.as_ref().err().map(|error| {
+                    let mut terminal = terminal.clone();
+                    terminal.last_error = error.to_string();
+                    terminal
+                });
                 let completion = match finalization {
                     Ok(()) => {
-                        task_client
-                            .inner
-                            .controls
-                            .lock()
-                            .expect("application control map poisoned")
-                            .remove(&turn_id);
-                        task_client
-                            .inner
-                            .active_turns
-                            .lock()
-                            .expect("application active turn map poisoned")
-                            .remove(&turn_id);
-                        let mut turns = task_client
-                            .inner
-                            .active_by_thread
-                            .lock()
-                            .expect("application active thread map poisoned");
-                        if let Some(thread_turns) = turns.get_mut(&thread_id) {
-                            thread_turns.retain(|queued_turn_id| queued_turn_id != &turn_id);
-                            if thread_turns.is_empty() {
-                                turns.remove(&thread_id);
-                            }
-                        }
-                        drop(turns);
                         task_events.push(terminal_event);
                         shared
                     }
@@ -845,30 +1330,52 @@ impl Thread {
                         Err(message)
                     }
                 };
+                task_client
+                    .inner
+                    .runtime
+                    .settle_turn(&thread_id, &turn_id, pending_terminal);
                 task_events.close();
-                let _ = completion_tx.send(completion);
+                task_completion.settle(completion);
             });
+            client.inner.runtime.set_turn_abort(&spawned_turn_id, task);
         }
 
+        acceptance_rx.await.map_err(|_| {
+            Error::Message("accepted Turn admission task ended without a receipt".to_string())
+        })??;
         Ok(handle)
     }
 
     pub async fn archive(&self) -> Result<()> {
-        if self.has_activity() {
-            return Err(Error::Message(format!(
-                "running Thread cannot be archived: {}",
-                self.id
-            )));
-        }
+        let _mutation = self
+            .client
+            .inner
+            .runtime
+            .reserve_mutation(&self.id)
+            .acquire()
+            .await?;
         self.client.inner.state.archive_session(&self.id).await
     }
 
     pub async fn compact(&self, request: CompactThreadRequest) -> Result<CompactionResult> {
-        let _operation = ThreadOperationGuard::new(self.client.inner.clone(), self.id.clone());
+        self.enqueue_compact(request).await
+    }
+
+    fn enqueue_compact(
+        &self,
+        request: CompactThreadRequest,
+    ) -> BoxFuture<'static, Result<CompactionResult>> {
+        let mutation = self.client.inner.runtime.reserve_mutation(&self.id);
+        let thread = self.clone();
+        Box::pin(async move {
+            let _mutation = mutation.acquire().await?;
+            thread.compact_reserved(request).await
+        })
+    }
+
+    async fn compact_reserved(&self, request: CompactThreadRequest) -> Result<CompactionResult> {
         let snapshot = self.snapshot().await?;
         let inherited_env = self.client.application_environment(request.inherited_env);
-        let lane = self.client.lane(&self.id);
-        let _lane = lane.lock().await;
         crate::compaction::compact_session(CompactSessionOptions {
             state: self.client.inner.state.clone(),
             cwd: PathBuf::from(snapshot.cwd.clone()),
@@ -886,13 +1393,23 @@ impl Thread {
         .await
     }
 
+    #[doc(hidden)]
+    #[cfg(feature = "product")]
+    pub fn __enqueue_compact(
+        &self,
+        request: CompactThreadRequest,
+    ) -> BoxFuture<'static, Result<CompactionResult>> {
+        self.enqueue_compact(request)
+    }
+
     pub async fn fork(&self, request: ForkThreadRequest) -> Result<Thread> {
-        if self.has_activity() {
-            return Err(Error::Message(format!(
-                "running Thread cannot be forked: {}",
-                self.id
-            )));
-        }
+        let _mutation = self
+            .client
+            .inner
+            .runtime
+            .reserve_mutation(&self.id)
+            .acquire()
+            .await?;
         let id = self
             .client
             .inner
@@ -908,108 +1425,58 @@ impl Thread {
         })
     }
 
-    pub fn respond(&self, interaction_id: &str, response: InteractionResponse) -> bool {
-        let turn_id = self
+    pub async fn respond(
+        &self,
+        interaction_id: &str,
+        response: InteractionResponse,
+    ) -> Result<InteractionResponseReceipt> {
+        match self
             .client
             .inner
-            .active_by_thread
-            .lock()
-            .expect("application active thread map poisoned")
-            .get(&self.id)
-            .and_then(|turns| turns.front().cloned());
-        let Some(turn_id) = turn_id else {
-            return false;
-        };
-        self.client
-            .inner
-            .active_turns
-            .lock()
-            .expect("application active turn map poisoned")
-            .get(&turn_id)
-            .is_some_and(|turn| turn.respond(interaction_id, response))
+            .runtime
+            .thread_turn_handles(&self.id)
+            .into_iter()
+            .next()
+        {
+            Some(turn) => turn.respond(interaction_id, response).await,
+            None => Ok(InteractionResponseReceipt { accepted: false }),
+        }
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __activity(&self) -> (bool, Option<String>, usize) {
-        let (active_turn_id, turn_count) = self
-            .client
-            .inner
-            .active_by_thread
-            .lock()
-            .expect("application active thread map poisoned")
-            .get(&self.id)
-            .map(|turns| (turns.front().cloned(), turns.len()))
-            .unwrap_or((None, 0));
-        let operation_count = self
-            .client
-            .inner
-            .active_operations_by_thread
-            .lock()
-            .expect("application active operation map poisoned")
-            .get(&self.id)
-            .copied()
-            .unwrap_or(0);
-        let running = active_turn_id.is_some() || operation_count > 0;
-        let queued = turn_count
-            .saturating_add(operation_count)
-            .saturating_sub(usize::from(running));
-        (running, active_turn_id, queued)
+        self.client.inner.runtime.thread_activity(&self.id)
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __interrupt_all(&self) -> (bool, usize) {
-        let turn_ids = self
-            .client
-            .inner
-            .active_by_thread
-            .lock()
-            .expect("application active thread map poisoned")
-            .get(&self.id)
-            .cloned()
-            .unwrap_or_default();
-        let handles = self
-            .client
-            .inner
-            .active_turns
-            .lock()
-            .expect("application active turn map poisoned");
+        let handles = self.client.inner.runtime.thread_turn_handles(&self.id);
         let mut interrupted = false;
         let mut cleared = 0;
-        for (index, turn_id) in turn_ids.iter().enumerate() {
-            if let Some(handle) = handles.get(turn_id) {
-                handle.interrupt();
-                if index == 0 {
-                    interrupted = true;
-                } else {
-                    cleared += 1;
-                }
+        for (index, handle) in handles.into_iter().enumerate() {
+            handle.interrupt();
+            if index == 0 {
+                interrupted = true;
+            } else {
+                cleared += 1;
             }
         }
         (interrupted, cleared)
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __steer(&self, expected_turn_id: &str, input: impl Into<String>) -> bool {
-        let active_turn_id = self
-            .client
-            .inner
-            .active_by_thread
-            .lock()
-            .expect("application active thread map poisoned")
-            .get(&self.id)
-            .and_then(|turns| turns.front().cloned());
+        let (_, active_turn_id, _) = self.client.inner.runtime.thread_activity(&self.id);
         if active_turn_id.as_deref() != Some(expected_turn_id) {
             return false;
         }
         self.client
             .inner
-            .active_turns
-            .lock()
-            .expect("application active turn map poisoned")
-            .get(expected_turn_id)
+            .runtime
+            .turn_handle(expected_turn_id)
             .is_some_and(|turn| turn.steer(input))
     }
 
@@ -1025,57 +1492,13 @@ impl Thread {
             .collect())
     }
 
+    pub fn history(&self) -> HistoryReader {
+        HistoryReader::new(self.client.inner.state.clone(), self.id.clone())
+    }
+
+    #[cfg(test)]
     fn has_activity(&self) -> bool {
-        let has_turns = self
-            .client
-            .inner
-            .active_by_thread
-            .lock()
-            .expect("application active thread map poisoned")
-            .get(&self.id)
-            .is_some_and(|turns| !turns.is_empty());
-        has_turns
-            || self
-                .client
-                .inner
-                .active_operations_by_thread
-                .lock()
-                .expect("application active operation map poisoned")
-                .get(&self.id)
-                .is_some_and(|count| *count > 0)
-    }
-}
-
-struct ThreadOperationGuard {
-    inner: Arc<ApplicationInner>,
-    thread_id: String,
-}
-
-impl ThreadOperationGuard {
-    fn new(inner: Arc<ApplicationInner>, thread_id: String) -> Self {
-        *inner
-            .active_operations_by_thread
-            .lock()
-            .expect("application active operation map poisoned")
-            .entry(thread_id.clone())
-            .or_default() += 1;
-        Self { inner, thread_id }
-    }
-}
-
-impl Drop for ThreadOperationGuard {
-    fn drop(&mut self) {
-        let mut operations = self
-            .inner
-            .active_operations_by_thread
-            .lock()
-            .expect("application active operation map poisoned");
-        if let Some(count) = operations.get_mut(&self.thread_id) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                operations.remove(&self.thread_id);
-            }
-        }
+        self.client.inner.runtime.thread_activity(&self.id).0
     }
 }
 
@@ -1103,7 +1526,8 @@ pub trait AgentSessionAdapter: Send + Sync + fmt::Debug {
 }
 
 pub struct AgentTurnRequest {
-    pub thread: ThreadSnapshot,
+    pub thread: ThreadExecutionContext,
+    pub history: HistoryReader,
     pub receipt: TurnReceipt,
     pub input: TurnRequest,
     pub events: TurnEventSender,
@@ -1124,7 +1548,7 @@ impl fmt::Debug for AgentTurnRequest {
 
 impl AgentTurnRequest {
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __take_native_control(&mut self) -> Result<crate::types::RunControl> {
         self.native_control.take().ok_or_else(|| {
             Error::Message("Agent Session Adapter is missing its Turn control".to_string())
@@ -1135,66 +1559,23 @@ impl AgentTurnRequest {
 #[derive(Clone)]
 pub struct TurnEventSender {
     log: Arc<EventLog>,
-    state: StateRuntime,
-    tasks: TaskTracker,
-    thread_id: String,
-    turn_id: String,
+    interactions: InteractionBroker,
 }
 
 impl TurnEventSender {
     pub fn emit(&self, event: TurnEvent) {
-        match &event {
-            TurnEvent::InteractionRequested {
-                interaction_id,
-                kind,
-                payload,
-            } => {
-                let state = self.state.clone();
-                let interaction_id = interaction_id.clone();
-                let thread_id = self.thread_id.clone();
-                let turn_id = self.turn_id.clone();
-                let kind = kind.clone();
-                let payload = payload.clone();
-                self.tasks.spawn(async move {
-                    let _ = state
-                        .request_framework_interaction(
-                            &interaction_id,
-                            &thread_id,
-                            &turn_id,
-                            &kind,
-                            payload,
-                        )
-                        .await;
-                });
-            }
-            TurnEvent::InteractionResolved {
-                interaction_id,
-                kind: _,
-                reason,
-            } => {
-                let state = self.state.clone();
-                let interaction_id = interaction_id.clone();
-                let thread_id = self.thread_id.clone();
-                let turn_id = self.turn_id.clone();
-                let reason = reason.clone();
-                self.tasks.spawn(async move {
-                    let _ = state
-                        .resolve_framework_interaction(
-                            &interaction_id,
-                            &thread_id,
-                            &turn_id,
-                            &reason,
-                        )
-                        .await;
-                });
-            }
-            _ => {}
+        if matches!(
+            event,
+            TurnEvent::InteractionRequested { .. } | TurnEvent::InteractionResolved { .. }
+        ) {
+            self.interactions.observe(event);
+        } else {
+            self.log.push(event);
         }
-        self.log.push(event);
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __emit_run_stream(&self, event: RunStreamEvent) {
         if let Some(event) = TurnEvent::from_run_stream(event) {
             self.emit(event);
@@ -1205,6 +1586,328 @@ impl TurnEventSender {
 impl fmt::Debug for TurnEventSender {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("TurnEventSender(..)")
+    }
+}
+
+const INTERACTION_COMMAND_CAPACITY: usize = 32;
+
+#[derive(Clone)]
+struct InteractionBroker {
+    sender: mpsc::Sender<InteractionCommand>,
+    waiters: FrameworkInteractionControl,
+    control: crate::types::RunControlHandle,
+    log: Arc<EventLog>,
+}
+
+enum InteractionCommand {
+    Request {
+        event: Box<TurnEvent>,
+        receipt: Option<oneshot::Sender<std::result::Result<(), String>>>,
+    },
+    Respond {
+        interaction_id: String,
+        response: InteractionResponse,
+        receipt: oneshot::Sender<std::result::Result<InteractionResponseReceipt, String>>,
+    },
+    ObservedResolution {
+        interaction_id: String,
+        kind: String,
+        reason: String,
+    },
+    Finish,
+}
+
+impl InteractionBroker {
+    fn new(
+        state: StateRuntime,
+        runtime: Arc<ApplicationRuntime>,
+        log: Arc<EventLog>,
+        waiters: FrameworkInteractionControl,
+        control: crate::types::RunControlHandle,
+        thread_id: String,
+        turn_id: String,
+    ) -> Self {
+        let (sender, mut receiver) = mpsc::channel(INTERACTION_COMMAND_CAPACITY);
+        let broker = Self {
+            sender,
+            waiters: waiters.clone(),
+            control: control.clone(),
+            log: log.clone(),
+        };
+        runtime.spawn(async move {
+            while let Some(command) = receiver.recv().await {
+                match command {
+                    InteractionCommand::Request { event, receipt } => {
+                        let TurnEvent::InteractionRequested {
+                            interaction_id,
+                            kind,
+                            payload,
+                        } = &*event
+                        else {
+                            continue;
+                        };
+                        let result = state
+                            .request_framework_interaction(
+                                interaction_id,
+                                &thread_id,
+                                &turn_id,
+                                kind,
+                                payload.clone(),
+                            )
+                            .await
+                            .map_err(|error| error.to_string())
+                            .and_then(|inserted| {
+                                inserted
+                                    .then_some(())
+                                    .ok_or_else(|| "interaction is no longer pending".to_string())
+                            });
+                        match &result {
+                            Ok(()) => log.push(*event),
+                            Err(_) => {
+                                cancel_interaction_waiter(&waiters, &control, interaction_id, kind)
+                            }
+                        }
+                        if let Some(receipt) = receipt {
+                            let _ = receipt.send(result);
+                        }
+                    }
+                    InteractionCommand::Respond {
+                        interaction_id,
+                        response,
+                        receipt,
+                    } => {
+                        let kind = match state
+                            .pending_framework_interaction_kind(
+                                &interaction_id,
+                                &thread_id,
+                                &turn_id,
+                            )
+                            .await
+                        {
+                            Ok(Some(kind)) => kind,
+                            Ok(None) => {
+                                let _ = receipt.send(Ok(InteractionResponseReceipt {
+                                    accepted: false,
+                                }));
+                                continue;
+                            }
+                            Err(error) => {
+                                let _ = receipt.send(Err(error.to_string()));
+                                continue;
+                            }
+                        };
+                        let Some(waiter) = adopt_interaction_waiter(
+                            &control,
+                            &waiters,
+                            &interaction_id,
+                            &kind,
+                            &response,
+                        ) else {
+                            let _ = receipt.send(Ok(InteractionResponseReceipt {
+                                accepted: false,
+                            }));
+                            continue;
+                        };
+                        let resolution = match serde_json::to_value(&response) {
+                            Ok(resolution) => resolution,
+                            Err(error) => {
+                                waiter.restore(
+                                    &control,
+                                    &waiters,
+                                    interaction_id.clone(),
+                                );
+                                let _ = receipt.send(Err(error.to_string()));
+                                continue;
+                            }
+                        };
+                        let status = if matches!(&response, InteractionResponse::Cancel) {
+                            "cancelled"
+                        } else {
+                            "resolved"
+                        };
+                        let result = state
+                            .resolve_framework_interaction(
+                                &interaction_id,
+                                &thread_id,
+                                &turn_id,
+                                &kind,
+                                status,
+                                resolution,
+                            )
+                            .await
+                            .map_err(|error| error.to_string());
+                        let result = match result {
+                            Err(error) => {
+                                waiter.restore(
+                                    &control,
+                                    &waiters,
+                                    interaction_id.clone(),
+                                );
+                                Err(error)
+                            }
+                            Ok(false) => {
+                                waiter.restore(
+                                    &control,
+                                    &waiters,
+                                    interaction_id.clone(),
+                                );
+                                Ok(InteractionResponseReceipt { accepted: false })
+                            }
+                            Ok(true) => {
+                                let reason = interaction_response_reason(&response);
+                                let delivered = waiter.deliver(response);
+                                log.push(TurnEvent::InteractionResolved {
+                                    interaction_id: interaction_id.clone(),
+                                    kind,
+                                    reason: reason.to_string(),
+                                });
+                                if delivered {
+                                    Ok(InteractionResponseReceipt { accepted: true })
+                                } else {
+                                    Err(format!(
+                                        "interaction {interaction_id} committed after its waiter closed"
+                                    ))
+                                }
+                            }
+                        };
+                        let _ = receipt.send(result);
+                    }
+                    InteractionCommand::ObservedResolution {
+                        interaction_id,
+                        kind,
+                        reason,
+                    } => {
+                        let status = if matches!(
+                            reason.as_str(),
+                            "cancelled" | "timed_out" | "turn_finished"
+                        ) {
+                            "cancelled"
+                        } else {
+                            "resolved"
+                        };
+                        let resolution = serde_json::json!({
+                            "kind": "observed",
+                            "interactionKind": kind,
+                            "reason": reason,
+                        });
+                        if state
+                            .resolve_framework_interaction(
+                                &interaction_id,
+                                &thread_id,
+                                &turn_id,
+                                &kind,
+                                status,
+                                resolution,
+                            )
+                            .await
+                            .unwrap_or(false)
+                        {
+                            log.push(TurnEvent::InteractionResolved {
+                                interaction_id,
+                                kind,
+                                reason,
+                            });
+                        }
+                    }
+                    InteractionCommand::Finish => break,
+                }
+            }
+        });
+        broker
+    }
+
+    async fn request(&self, event: TurnEvent) -> Result<()> {
+        let (receipt_tx, receipt_rx) = oneshot::channel();
+        self.sender
+            .send(InteractionCommand::Request {
+                event: Box::new(event),
+                receipt: Some(receipt_tx),
+            })
+            .await
+            .map_err(|_| Error::Message("interaction broker is closed".to_string()))?;
+        receipt_rx
+            .await
+            .map_err(|_| Error::Message("interaction broker request was cancelled".to_string()))?
+            .map_err(Error::Message)
+    }
+
+    fn observe(&self, event: TurnEvent) {
+        let command = match event {
+            event @ TurnEvent::InteractionRequested { .. } => InteractionCommand::Request {
+                event: Box::new(event),
+                receipt: None,
+            },
+            TurnEvent::InteractionResolved {
+                interaction_id,
+                kind,
+                reason,
+            } => InteractionCommand::ObservedResolution {
+                interaction_id,
+                kind,
+                reason,
+            },
+            _ => return,
+        };
+        if let Err(error) = self.sender.try_send(command) {
+            let event = match error.into_inner() {
+                InteractionCommand::Request { event, .. } => Some(event),
+                _ => None,
+            };
+            let pending = event.as_deref().and_then(|event| match event {
+                TurnEvent::InteractionRequested {
+                    interaction_id,
+                    kind,
+                    ..
+                } => Some((interaction_id, kind)),
+                _ => None,
+            });
+            if let Some((interaction_id, kind)) = pending {
+                cancel_interaction_waiter(&self.waiters, &self.control, interaction_id, kind);
+            }
+            self.log.push(TurnEvent::Warning {
+                data: serde_json::json!({
+                    "kind": "framework_interaction_overload",
+                    "message": "interaction broker queue is unavailable",
+                }),
+            });
+        }
+    }
+
+    async fn respond(
+        &self,
+        interaction_id: &str,
+        response: InteractionResponse,
+    ) -> Result<InteractionResponseReceipt> {
+        let (receipt_tx, receipt_rx) = oneshot::channel();
+        self.sender
+            .send(InteractionCommand::Respond {
+                interaction_id: interaction_id.to_string(),
+                response,
+                receipt: receipt_tx,
+            })
+            .await
+            .map_err(|_| Error::Message("interaction broker is closed".to_string()))?;
+        receipt_rx
+            .await
+            .map_err(|_| Error::Message("interaction response was cancelled".to_string()))?
+            .map_err(Error::Message)
+    }
+
+    async fn finish(&self) {
+        let _ = self.sender.send(InteractionCommand::Finish).await;
+    }
+}
+
+fn cancel_interaction_waiter(
+    waiters: &FrameworkInteractionControl,
+    control: &crate::types::RunControlHandle,
+    interaction_id: &str,
+    kind: &str,
+) {
+    if kind == "permission" {
+        let _ = waiters.submit_permission(interaction_id, PermissionApprovalDecision::deny());
+    } else if kind == "clarify" {
+        let _ = control.submit_clarify_result(interaction_id, ClarifyResult::Cancelled);
     }
 }
 
@@ -1239,6 +1942,35 @@ impl FrameworkInteractionControl {
             .is_some()
     }
 
+    fn take_permission(
+        &self,
+        interaction_id: &str,
+    ) -> Option<oneshot::Sender<PermissionApprovalDecision>> {
+        self.permissions
+            .lock()
+            .expect("Framework permission interaction map poisoned")
+            .remove(interaction_id)
+    }
+
+    fn restore_permission(
+        &self,
+        interaction_id: String,
+        sender: oneshot::Sender<PermissionApprovalDecision>,
+    ) -> bool {
+        if sender.is_closed() {
+            return false;
+        }
+        let mut permissions = self
+            .permissions
+            .lock()
+            .expect("Framework permission interaction map poisoned");
+        if permissions.contains_key(&interaction_id) {
+            return false;
+        }
+        permissions.insert(interaction_id, sender);
+        true
+    }
+
     fn remove_permission(&self, interaction_id: &str) {
         self.permissions
             .lock()
@@ -1257,8 +1989,8 @@ impl FrameworkInteractionControl {
 #[derive(Clone)]
 struct FrameworkApprovalHandler {
     delegate: Option<Arc<dyn ApprovalHandler>>,
-    events: TurnEventSender,
     interactions: FrameworkInteractionControl,
+    broker: InteractionBroker,
 }
 
 impl fmt::Debug for FrameworkApprovalHandler {
@@ -1289,7 +2021,7 @@ impl ApprovalHandler for FrameworkApprovalHandler {
         let receiver = self
             .interactions
             .register_permission(interaction_id.clone());
-        self.events.emit(TurnEvent::InteractionRequested {
+        let request_event = TurnEvent::InteractionRequested {
             interaction_id: interaction_id.clone(),
             kind: "permission".to_string(),
             payload: serde_json::json!({
@@ -1303,41 +2035,63 @@ impl ApprovalHandler for FrameworkApprovalHandler {
                 "filesystem": request.filesystem,
                 "timeoutSecs": request.timeout_secs,
             }),
-        });
+        };
         let delegate = self.delegate.clone();
-        let events = self.events.clone();
         let interactions = self.interactions.clone();
+        let broker = self.broker.clone();
         Box::pin(async move {
+            if broker.request(request_event).await.is_err() {
+                interactions.remove_permission(&interaction_id);
+                return PermissionApprovalDecision::deny();
+            }
             let timeout_secs = request.timeout_secs.max(1);
-            let wait_for_response = async move {
-                match delegate {
-                    Some(delegate) => tokio::select! {
-                        decision = delegate.request_permission(request) => decision,
-                        decision = receiver => decision.unwrap_or_else(|_| PermissionApprovalDecision::deny()),
-                    },
-                    None => receiver
-                        .await
-                        .unwrap_or_else(|_| PermissionApprovalDecision::deny()),
+            let mut receiver = receiver;
+            let decision = match delegate {
+                Some(delegate) => {
+                    let mut delegate_response = delegate.request_permission(request);
+                    tokio::select! {
+                        decision = &mut delegate_response => {
+                            match broker
+                                .respond(
+                                    &interaction_id,
+                                    InteractionResponse::Permission(decision.clone()),
+                                )
+                                .await
+                            {
+                                Ok(receipt) if receipt.accepted => decision,
+                                _ => receiver.await.unwrap_or_else(|_| PermissionApprovalDecision::deny()),
+                            }
+                        },
+                        decision = &mut receiver => decision.unwrap_or_else(|_| PermissionApprovalDecision::deny()),
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+                            let decision = PermissionApprovalDecision::deny();
+                            let _ = broker
+                                .respond(
+                                    &interaction_id,
+                                    InteractionResponse::Permission(decision.clone()),
+                                )
+                                .await;
+                            decision
+                        },
+                    }
                 }
-            };
-            let (decision, reason) = match tokio::time::timeout(
-                std::time::Duration::from_secs(timeout_secs),
-                wait_for_response,
-            )
-            .await
-            {
-                Ok(decision) => {
-                    let reason = permission_approval_reason(decision.outcome);
-                    (decision, reason)
+                None => {
+                    tokio::select! {
+                        decision = &mut receiver => decision.unwrap_or_else(|_| PermissionApprovalDecision::deny()),
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+                            let decision = PermissionApprovalDecision::deny();
+                            let _ = broker
+                                .respond(
+                                    &interaction_id,
+                                    InteractionResponse::Permission(decision.clone()),
+                                )
+                                .await;
+                            decision
+                        },
+                    }
                 }
-                Err(_) => (PermissionApprovalDecision::deny(), "timed_out"),
             };
             interactions.remove_permission(&interaction_id);
-            events.emit(TurnEvent::InteractionResolved {
-                interaction_id,
-                kind: "permission".to_string(),
-                reason: reason.to_string(),
-            });
             decision
         })
     }
@@ -1356,7 +2110,7 @@ fn permission_approval_reason(outcome: PermissionApprovalOutcome) -> &'static st
 #[derive(Clone)]
 pub struct TurnControl {
     handle: crate::types::RunControlHandle,
-    interactions: FrameworkInteractionControl,
+    interactions: InteractionBroker,
 }
 
 impl TurnControl {
@@ -1364,8 +2118,12 @@ impl TurnControl {
         self.handle.inner.is_aborted()
     }
 
-    pub fn respond(&self, interaction_id: &str, response: InteractionResponse) -> bool {
-        submit_interaction_response(&self.handle, &self.interactions, interaction_id, response)
+    pub async fn respond(
+        &self,
+        interaction_id: &str,
+        response: InteractionResponse,
+    ) -> Result<InteractionResponseReceipt> {
+        self.interactions.respond(interaction_id, response).await
     }
 }
 
@@ -1449,32 +2207,32 @@ impl AgentSessionAdapter for NativeAgentSessionAdapter {
 
 #[derive(Debug)]
 pub struct TurnRequest {
-    pub prompt: String,
-    pub image_inputs: Vec<ImageInput>,
-    pub extract_prompt_image_sources: bool,
-    pub prompt_display: Option<crate::types::PromptDisplayMetadata>,
-    pub client_turn_id: Option<String>,
-    pub source: String,
-    pub config_path: Option<PathBuf>,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub runtime_ref: Option<String>,
-    pub runtime_options: BTreeMap<String, String>,
-    pub include_reasoning: bool,
-    pub mode: RunMode,
-    pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<ApprovalMode>,
-    pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
-    pub clarify_enabled: bool,
-    pub inherited_env: Option<BTreeMap<String, String>>,
-    pub project_context: Option<ProjectContextInstructionMode>,
-    pub sandbox: Option<RunSandboxOverride>,
-    pub agent: Option<String>,
-    pub no_agents: bool,
-    pub no_skills: bool,
-    pub skill_inputs: Vec<String>,
-    pub mcp_servers: Vec<McpServerInput>,
-    pub tools: Vec<RuntimeTool>,
+    prompt: String,
+    image_inputs: Vec<ImageInput>,
+    extract_prompt_image_sources: bool,
+    prompt_display: Option<crate::types::PromptDisplayMetadata>,
+    client_turn_id: Option<String>,
+    source: String,
+    config_path: Option<PathBuf>,
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+    runtime_ref: Option<String>,
+    runtime_options: BTreeMap<String, String>,
+    include_reasoning: bool,
+    mode: RunMode,
+    permission_mode: Option<PermissionMode>,
+    approval_mode: Option<ApprovalMode>,
+    approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    clarify_enabled: bool,
+    inherited_env: Option<BTreeMap<String, String>>,
+    project_context: Option<ProjectContextInstructionMode>,
+    sandbox: Option<RunSandboxOverride>,
+    agent: Option<String>,
+    no_agents: bool,
+    no_skills: bool,
+    skill_inputs: Vec<String>,
+    mcp_servers: Vec<McpServerInput>,
+    tools: Vec<RuntimeTool>,
     adapter_options: AdapterTurnOptions,
     requested_turn_id: Option<String>,
     prepared_control: Option<PreparedTurnControl>,
@@ -1492,6 +2250,7 @@ pub struct AdapterTurnOptions {
     pub initial_thread_preferences: BTreeMap<String, String>,
     pub prepared_source_key: Option<String>,
     pub turn_event_observer: Option<Arc<dyn Fn(TurnEvent) + Send + Sync>>,
+    pub agent_entrypoint: Option<crate::agents::AgentEntrypoint>,
 }
 
 impl fmt::Debug for AdapterTurnOptions {
@@ -1525,6 +2284,7 @@ impl fmt::Debug for AdapterTurnOptions {
                 "has_turn_event_observer",
                 &self.turn_event_observer.is_some(),
             )
+            .field("agent_entrypoint", &self.agent_entrypoint)
             .finish()
     }
 }
@@ -1575,8 +2335,179 @@ impl TurnRequest {
         }
     }
 
+    pub fn prompt(&self) -> &str {
+        &self.prompt
+    }
+
+    pub fn image_inputs(&self) -> &[ImageInput] {
+        &self.image_inputs
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn clarify_enabled(&self) -> bool {
+        self.clarify_enabled
+    }
+
+    pub fn with_prompt_images(
+        mut self,
+        image_inputs: Vec<ImageInput>,
+        extract_prompt_image_sources: bool,
+    ) -> Self {
+        self.image_inputs = image_inputs;
+        self.extract_prompt_image_sources = extract_prompt_image_sources;
+        self
+    }
+
+    pub fn with_prompt_display(
+        mut self,
+        prompt_display: Option<crate::types::PromptDisplayMetadata>,
+    ) -> Self {
+        self.prompt_display = prompt_display;
+        self
+    }
+
+    pub fn with_identity(
+        mut self,
+        source: impl Into<String>,
+        client_turn_id: Option<String>,
+    ) -> Self {
+        self.source = source.into();
+        self.client_turn_id = client_turn_id;
+        self
+    }
+
+    pub fn with_model(mut self, model: Option<String>, reasoning_effort: Option<String>) -> Self {
+        self.model = model;
+        self.reasoning_effort = reasoning_effort;
+        self
+    }
+
+    pub fn with_runtime(
+        mut self,
+        runtime_ref: Option<String>,
+        runtime_options: BTreeMap<String, String>,
+    ) -> Self {
+        self.runtime_ref = runtime_ref;
+        self.runtime_options = runtime_options;
+        self
+    }
+
+    pub fn with_reasoning_output(mut self, include_reasoning: bool) -> Self {
+        self.include_reasoning = include_reasoning;
+        self
+    }
+
+    pub fn with_execution_policy(
+        mut self,
+        mode: RunMode,
+        permission_mode: Option<PermissionMode>,
+        config_path: Option<PathBuf>,
+    ) -> Self {
+        self.mode = mode;
+        self.permission_mode = permission_mode;
+        self.config_path = config_path;
+        self
+    }
+
+    pub fn with_approval(
+        mut self,
+        approval_mode: Option<ApprovalMode>,
+        approval_handler: Option<Arc<dyn ApprovalHandler>>,
+        clarify_enabled: bool,
+    ) -> Self {
+        self.approval_mode = approval_mode;
+        self.approval_handler = approval_handler;
+        self.clarify_enabled = clarify_enabled;
+        self
+    }
+
+    pub fn with_environment(
+        mut self,
+        inherited_env: Option<BTreeMap<String, String>>,
+        project_context: Option<ProjectContextInstructionMode>,
+        sandbox: Option<RunSandboxOverride>,
+    ) -> Self {
+        self.inherited_env = inherited_env;
+        self.project_context = project_context;
+        self.sandbox = sandbox;
+        self
+    }
+
+    pub fn with_agent(mut self, agent: Option<String>, no_agents: bool, no_skills: bool) -> Self {
+        self.agent = agent;
+        self.no_agents = no_agents;
+        self.no_skills = no_skills;
+        self
+    }
+
+    pub fn with_skills(mut self, skill_inputs: Vec<String>) -> Self {
+        self.skill_inputs = skill_inputs;
+        self
+    }
+
+    pub fn with_mcp_servers(mut self, mcp_servers: Vec<McpServerInput>) -> Self {
+        self.mcp_servers = mcp_servers;
+        self
+    }
+
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
+    pub fn __set_runtime_tools(&mut self, tools: Vec<RuntimeTool>) {
+        self.tools = tools;
+    }
+
+    #[doc(hidden)]
+    #[cfg(feature = "product")]
+    pub fn __from_run_options(
+        options: RunOptions,
+        source: impl Into<String>,
+        run_stream_observer: Option<RunStreamSink>,
+    ) -> Self {
+        Self {
+            prompt: options.prompt,
+            image_inputs: options.image_inputs,
+            extract_prompt_image_sources: options.extract_prompt_image_sources,
+            prompt_display: options.prompt_display,
+            client_turn_id: None,
+            source: source.into(),
+            config_path: options.config_path,
+            model: options.model,
+            reasoning_effort: options.reasoning_effort,
+            runtime_ref: options.runtime_ref,
+            runtime_options: options.runtime_options,
+            include_reasoning: options.include_reasoning,
+            mode: options.mode,
+            permission_mode: options.permission_mode,
+            approval_mode: options.approval_mode,
+            approval_handler: options.approval_handler,
+            clarify_enabled: options.clarify_enabled,
+            inherited_env: options.inherited_env,
+            project_context: options.project_context_override,
+            sandbox: options.sandbox_override,
+            agent: options.agent,
+            no_agents: options.no_agents,
+            no_skills: options.no_skills,
+            skill_inputs: options.skill_inputs,
+            mcp_servers: options.mcp_servers,
+            tools: options.runtime_tools,
+            adapter_options: AdapterTurnOptions {
+                snapshot_root: options.snapshot_root,
+                max_context_messages: options.max_context_messages,
+                selected_capability_roots: options.selected_capability_roots,
+                workspace_mutations: options.workspace_mutations,
+                run_stream_observer,
+                ..AdapterTurnOptions::default()
+            },
+            requested_turn_id: None,
+            prepared_control: None,
+        }
+    }
+
+    #[doc(hidden)]
+    #[cfg(feature = "product")]
     pub fn __set_control(
         &mut self,
         handle: crate::types::RunControlHandle,
@@ -1586,37 +2517,49 @@ impl TurnRequest {
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __set_adapter_options(&mut self, options: AdapterTurnOptions) {
         self.adapter_options = options;
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __take_adapter_input_parts(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.adapter_options.input_parts)
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __take_run_stream_observer(&mut self) -> Option<RunStreamSink> {
         self.adapter_options.run_stream_observer.take()
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __take_initial_thread_preferences(&mut self) -> BTreeMap<String, String> {
         std::mem::take(&mut self.adapter_options.initial_thread_preferences)
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __take_prepared_source_key(&mut self) -> Option<String> {
         self.adapter_options.prepared_source_key.take()
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
+    pub fn __take_agent_entrypoint(&mut self) -> Option<crate::agents::AgentEntrypoint> {
+        self.adapter_options.agent_entrypoint.take()
+    }
+
+    #[doc(hidden)]
+    #[cfg(feature = "product")]
+    pub fn __set_agent_entrypoint(&mut self, entrypoint: crate::agents::AgentEntrypoint) {
+        self.adapter_options.agent_entrypoint = Some(entrypoint);
+    }
+
+    #[doc(hidden)]
+    #[cfg(feature = "product")]
     pub fn __set_turn_id(&mut self, turn_id: String) {
         self.requested_turn_id = Some(turn_id);
     }
@@ -1672,7 +2615,7 @@ impl TurnRequest {
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __into_run_options(
         self,
         state: StateRuntime,
@@ -1696,14 +2639,151 @@ pub struct TurnReceipt {
 type SharedTurnCompletion = std::result::Result<Arc<TurnResult>, Arc<str>>;
 
 #[derive(Clone)]
+struct PendingTerminal {
+    receipt: TurnReceipt,
+    completion: SharedTurnCompletion,
+    terminal_event: TurnEvent,
+    completed_at_ms: i64,
+    last_error: String,
+}
+
+impl PendingTerminal {
+    fn interrupted(receipt: TurnReceipt) -> Self {
+        let result = TurnResult {
+            thread_id: receipt.thread_id.clone(),
+            outcome: TurnOutcome::Interrupted,
+            final_answer: String::new(),
+            provider: "application".to_string(),
+            model: "forced-shutdown".to_string(),
+            reasoning_effort: None,
+            tool_failures: 0,
+            context_limit: None,
+            context_snapshot: None,
+            warnings: Vec::new(),
+            terminal_reason: None,
+            terminal_error: None,
+            selected_agent: None,
+            selected_skills: Vec::new(),
+        };
+        Self {
+            terminal_event: TurnEvent::Completed {
+                thread_id: receipt.thread_id.clone(),
+                turn_id: receipt.turn_id.clone(),
+                outcome: TurnOutcome::Interrupted,
+            },
+            receipt,
+            completion: Ok(Arc::new(result)),
+            completed_at_ms: psychevo_agent_core::now_ms(),
+            last_error: String::new(),
+        }
+    }
+
+    async fn persist(&self, state: &StateRuntime) -> Result<()> {
+        match &self.completion {
+            Ok(result) => {
+                let framework_result = serde_json::to_value(result.as_ref())?;
+                let (status, outcome) = gateway_terminal_facts(result.outcome);
+                state
+                    .finalize_framework_turn(
+                        GatewayTurnTerminalInput {
+                            turn_id: &self.receipt.turn_id,
+                            thread_id: &self.receipt.thread_id,
+                            status,
+                            outcome: Some(outcome),
+                            error_message: None,
+                            started_at_ms: None,
+                            completed_at_ms: self.completed_at_ms,
+                            metadata: Some(serde_json::json!({
+                                "source": "framework",
+                                "frameworkReceipt": self.receipt,
+                                "frameworkResult": framework_result,
+                            })),
+                        },
+                        "turn_finished",
+                    )
+                    .await
+            }
+            Err(message) => {
+                state
+                    .finalize_framework_turn(
+                        GatewayTurnTerminalInput {
+                            turn_id: &self.receipt.turn_id,
+                            thread_id: &self.receipt.thread_id,
+                            status: "failed",
+                            outcome: Some("failed"),
+                            error_message: Some(message.as_ref()),
+                            started_at_ms: None,
+                            completed_at_ms: self.completed_at_ms,
+                            metadata: Some(serde_json::json!({
+                                "source": "framework",
+                                "frameworkReceipt": self.receipt,
+                                "frameworkResult": Value::Null,
+                            })),
+                        },
+                        "turn_finished",
+                    )
+                    .await
+            }
+        }
+    }
+
+    fn completed_handle(&self) -> TurnHandle {
+        match &self.completion {
+            Ok(result) => TurnHandle::completed(self.receipt.clone(), result.as_ref().clone()),
+            Err(message) => TurnHandle::failed(self.receipt.clone(), message.to_string()),
+        }
+    }
+}
+
+struct TurnCompletion {
+    value: Mutex<Option<SharedTurnCompletion>>,
+    notify: Notify,
+}
+
+impl TurnCompletion {
+    fn pending() -> Arc<Self> {
+        Arc::new(Self {
+            value: Mutex::new(None),
+            notify: Notify::new(),
+        })
+    }
+
+    fn ready(value: SharedTurnCompletion) -> Arc<Self> {
+        Arc::new(Self {
+            value: Mutex::new(Some(value)),
+            notify: Notify::new(),
+        })
+    }
+
+    fn settle(&self, value: SharedTurnCompletion) -> bool {
+        let mut current = self.value.lock().expect("Turn completion poisoned");
+        if current.is_some() {
+            return false;
+        }
+        *current = Some(value);
+        drop(current);
+        self.notify.notify_waiters();
+        true
+    }
+
+    async fn wait(&self) -> SharedTurnCompletion {
+        loop {
+            let notified = self.notify.notified();
+            if let Some(value) = self.value.lock().expect("Turn completion poisoned").clone() {
+                return value;
+            }
+            notified.await;
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct TurnHandle {
     receipt: TurnReceipt,
     events: Arc<EventLog>,
-    completion: Shared<BoxFuture<'static, SharedTurnCompletion>>,
+    completion: Arc<TurnCompletion>,
     control: crate::types::RunControlHandle,
-    interactions: FrameworkInteractionControl,
-    state: StateRuntime,
-    tasks: TaskTracker,
+    interaction_broker: Option<InteractionBroker>,
 }
 
 impl fmt::Debug for TurnHandle {
@@ -1716,12 +2796,7 @@ impl fmt::Debug for TurnHandle {
 }
 
 impl TurnHandle {
-    fn completed(
-        receipt: TurnReceipt,
-        result: TurnResult,
-        state: StateRuntime,
-        tasks: TaskTracker,
-    ) -> Self {
+    fn completed(receipt: TurnReceipt, result: TurnResult) -> Self {
         let events = Arc::new(EventLog::new(DEFAULT_EVENT_CAPACITY));
         events.push(TurnEvent::Accepted {
             receipt: receipt.clone(),
@@ -1733,25 +2808,18 @@ impl TurnHandle {
         });
         events.close();
         let result = Arc::new(result);
-        let completion = async move { Ok(result) }.boxed().shared();
+        let completion = TurnCompletion::ready(Ok(result));
         let (control, _) = run_control();
         Self {
             receipt,
             events,
             completion,
             control,
-            interactions: FrameworkInteractionControl::default(),
-            state,
-            tasks,
+            interaction_broker: None,
         }
     }
 
-    fn failed(
-        receipt: TurnReceipt,
-        message: String,
-        state: StateRuntime,
-        tasks: TaskTracker,
-    ) -> Self {
+    fn failed(receipt: TurnReceipt, message: String) -> Self {
         let events = Arc::new(EventLog::new(DEFAULT_EVENT_CAPACITY));
         events.push(TurnEvent::Accepted {
             receipt: receipt.clone(),
@@ -1762,16 +2830,14 @@ impl TurnHandle {
             message: message.clone(),
         });
         events.close();
-        let completion = async move { Err(Arc::from(message)) }.boxed().shared();
+        let completion = TurnCompletion::ready(Err(Arc::from(message)));
         let (control, _) = run_control();
         Self {
             receipt,
             events,
             completion,
             control,
-            interactions: FrameworkInteractionControl::default(),
-            state,
-            tasks,
+            interaction_broker: None,
         }
     }
 
@@ -1787,7 +2853,7 @@ impl TurnHandle {
     }
 
     pub async fn wait(&self) -> Result<TurnResult> {
-        match self.completion.clone().await {
+        match self.completion.wait().await {
             Ok(result) => Ok((*result).clone()),
             Err(message) => Err(Error::Message(message.to_string())),
         }
@@ -1813,68 +2879,116 @@ impl TurnHandle {
     }
 
     #[doc(hidden)]
-    #[cfg(feature = "internal")]
+    #[cfg(feature = "product")]
     pub fn __control_handle(&self) -> crate::types::RunControlHandle {
         self.control.clone()
     }
 
-    pub fn respond(&self, interaction_id: &str, response: InteractionResponse) -> bool {
-        let accepted = submit_interaction_response(
-            &self.control,
-            &self.interactions,
-            interaction_id,
-            response,
-        );
-        if accepted {
-            let state = self.state.clone();
-            let interaction_id = interaction_id.to_string();
-            let thread_id = self.receipt.thread_id.clone();
-            let turn_id = self.receipt.turn_id.clone();
-            self.tasks.spawn(async move {
-                let _ = state
-                    .resolve_framework_interaction(
-                        &interaction_id,
-                        &thread_id,
-                        &turn_id,
-                        "answered",
-                    )
-                    .await;
-            });
+    pub async fn respond(
+        &self,
+        interaction_id: &str,
+        response: InteractionResponse,
+    ) -> Result<InteractionResponseReceipt> {
+        match self.interaction_broker.as_ref() {
+            Some(broker) => broker.respond(interaction_id, response).await,
+            None => Ok(InteractionResponseReceipt { accepted: false }),
         }
-        accepted
     }
 }
 
-fn submit_interaction_response(
+enum AdoptedInteractionWaiter {
+    Permission(oneshot::Sender<PermissionApprovalDecision>),
+    Clarify(oneshot::Sender<ClarifyResult>),
+}
+
+impl AdoptedInteractionWaiter {
+    fn restore(
+        self,
+        control: &crate::types::RunControlHandle,
+        interactions: &FrameworkInteractionControl,
+        interaction_id: String,
+    ) {
+        match self {
+            Self::Permission(sender) => {
+                interactions.restore_permission(interaction_id, sender);
+            }
+            Self::Clarify(sender) => {
+                control.restore_clarify_waiter(interaction_id, sender);
+            }
+        }
+    }
+
+    fn deliver(self, response: InteractionResponse) -> bool {
+        match (self, response) {
+            (Self::Permission(sender), InteractionResponse::Permission(decision)) => {
+                sender.send(decision).is_ok()
+            }
+            (Self::Permission(sender), InteractionResponse::Cancel) => {
+                sender.send(PermissionApprovalDecision::deny()).is_ok()
+            }
+            (Self::Clarify(sender), InteractionResponse::Clarify(answers)) => sender
+                .send(ClarifyResult::Answered(ClarifyResponse {
+                    answers: answers
+                        .into_iter()
+                        .map(|answers| ClarifyAnswer { answers })
+                        .collect(),
+                }))
+                .is_ok(),
+            (Self::Clarify(sender), InteractionResponse::Cancel) => {
+                sender.send(ClarifyResult::Cancelled).is_ok()
+            }
+            _ => false,
+        }
+    }
+}
+
+fn adopt_interaction_waiter(
     control: &crate::types::RunControlHandle,
     interactions: &FrameworkInteractionControl,
     interaction_id: &str,
-    response: InteractionResponse,
-) -> bool {
-    match response {
-        InteractionResponse::Permission(decision) => {
-            interactions.submit_permission(interaction_id, decision)
+    durable_kind: &str,
+    response: &InteractionResponse,
+) -> Option<AdoptedInteractionWaiter> {
+    match (durable_kind, response) {
+        ("permission", InteractionResponse::Permission(_) | InteractionResponse::Cancel) => {
+            interactions
+                .take_permission(interaction_id)
+                .filter(|sender| !sender.is_closed())
+                .map(AdoptedInteractionWaiter::Permission)
         }
-        InteractionResponse::Clarify(answers) => control.submit_clarify_result(
-            interaction_id,
-            ClarifyResult::Answered(ClarifyResponse {
-                answers: answers
-                    .into_iter()
-                    .map(|answers| ClarifyAnswer { answers })
-                    .collect(),
-            }),
-        ),
-        InteractionResponse::Cancel => {
-            control.submit_clarify_result(interaction_id, ClarifyResult::Cancelled)
-        }
+        ("clarify", InteractionResponse::Clarify(_) | InteractionResponse::Cancel) => control
+            .take_clarify_waiter(interaction_id)
+            .filter(|sender| !sender.is_closed())
+            .map(AdoptedInteractionWaiter::Clarify),
+        _ => None,
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum InteractionResponse {
     Permission(PermissionApprovalDecision),
     Clarify(Vec<Vec<String>>),
     Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionResponseReceipt {
+    pub accepted: bool,
+}
+
+fn interaction_response_reason(response: &InteractionResponse) -> &'static str {
+    match response {
+        InteractionResponse::Permission(decision) => permission_approval_reason(decision.outcome),
+        InteractionResponse::Clarify(_) => "answered",
+        InteractionResponse::Cancel => "cancelled",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1964,6 +3078,97 @@ impl ThreadSummary {
     }
 }
 
+const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
+const MAX_HISTORY_PAGE_SIZE: usize = 200;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadExecutionContext {
+    pub id: String,
+    pub cwd: String,
+    pub source: String,
+}
+
+impl ThreadExecutionContext {
+    fn from_summary(summary: SessionSummary) -> Self {
+        Self {
+            id: summary.id,
+            cwd: summary.cwd,
+            source: summary.source,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct HistoryReader {
+    state: StateRuntime,
+    thread_id: String,
+}
+
+impl HistoryReader {
+    fn new(state: StateRuntime, thread_id: String) -> Self {
+        Self { state, thread_id }
+    }
+
+    pub fn thread_id(&self) -> &str {
+        &self.thread_id
+    }
+
+    pub async fn latest(&self, limit: Option<usize>) -> Result<HistoryPage> {
+        self.before(None, limit).await
+    }
+
+    pub async fn before(
+        &self,
+        before_session_seq: Option<i64>,
+        limit: Option<usize>,
+    ) -> Result<HistoryPage> {
+        let limit = limit
+            .unwrap_or(DEFAULT_HISTORY_PAGE_SIZE)
+            .clamp(1, MAX_HISTORY_PAGE_SIZE);
+        let mut items = self
+            .state
+            .load_tui_message_summaries_before(
+                &self.thread_id,
+                before_session_seq,
+                limit.saturating_add(1),
+            )
+            .await?
+            .into_iter()
+            .map(ThreadItem::from)
+            .collect::<Vec<_>>();
+        let has_more = items.len() > limit;
+        if has_more {
+            items.remove(0);
+        }
+        let next_before = has_more
+            .then(|| items.first().map(|item| item.session_seq))
+            .flatten();
+        Ok(HistoryPage {
+            thread_id: self.thread_id.clone(),
+            items,
+            next_before,
+        })
+    }
+}
+
+impl fmt::Debug for HistoryReader {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HistoryReader")
+            .field("thread_id", &self.thread_id)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPage {
+    pub thread_id: String,
+    pub items: Vec<ThreadItem>,
+    pub next_before: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSnapshot {
@@ -1971,6 +3176,7 @@ pub struct ThreadSnapshot {
     pub summary: ThreadSummary,
     pub pending_interactions: Vec<PendingInteraction>,
     pub items: Vec<ThreadItem>,
+    pub history_cursor: Option<i64>,
 }
 
 impl ThreadSnapshot {
@@ -1978,11 +3184,13 @@ impl ThreadSnapshot {
         summary: ThreadSummary,
         pending_interactions: Vec<PendingInteraction>,
         items: Vec<ThreadItem>,
+        history_cursor: Option<i64>,
     ) -> Self {
         Self {
             summary,
             pending_interactions,
             items,
+            history_cursor,
         }
     }
 }
@@ -2231,7 +3439,6 @@ struct EventLog {
     inner: Mutex<EventLogState>,
     notify: Notify,
     capacity: usize,
-    observer: Option<Arc<dyn Fn(TurnEvent) + Send + Sync>>,
 }
 
 struct EventLogState {
@@ -2243,10 +3450,6 @@ struct EventLogState {
 
 impl EventLog {
     fn new(capacity: usize) -> Self {
-        Self::observed(capacity, None)
-    }
-
-    fn observed(capacity: usize, observer: Option<Arc<dyn Fn(TurnEvent) + Send + Sync>>) -> Self {
         Self {
             inner: Mutex::new(EventLogState {
                 first_sequence: 0,
@@ -2256,12 +3459,10 @@ impl EventLog {
             }),
             notify: Notify::new(),
             capacity,
-            observer,
         }
     }
 
     fn push(&self, event: TurnEvent) {
-        let observed = event.clone();
         let mut state = self.inner.lock().expect("turn event log poisoned");
         if state.events.len() == self.capacity {
             state.events.pop_front();
@@ -2270,9 +3471,6 @@ impl EventLog {
         state.events.push_back(event);
         state.next_sequence += 1;
         drop(state);
-        if let Some(observer) = self.observer.as_ref() {
-            observer(observed);
-        }
         self.notify.notify_waiters();
     }
 
@@ -2349,13 +3547,41 @@ mod tests {
     }
 
     #[derive(Debug)]
+    struct ClarifyInteractionAgentSessionAdapter {
+        started: Arc<Notify>,
+        outcome: Arc<Mutex<Option<crate::types::ClarifyInteractionOutcome>>>,
+    }
+
+    #[derive(Debug)]
     struct ForceAwareAgentSessionAdapter {
         started: Arc<Notify>,
         shutdown_modes: Arc<Mutex<Vec<bool>>>,
     }
 
     #[derive(Debug)]
+    struct ShutdownReleasesAgentSessionAdapter {
+        started: Arc<Notify>,
+        release: Arc<Notify>,
+    }
+
+    #[derive(Debug)]
+    struct PendingAgentSessionAdapter {
+        started: Arc<Notify>,
+    }
+
+    #[derive(Debug)]
     struct FailingAgentSessionAdapter;
+
+    #[derive(Debug)]
+    struct PanickingAgentSessionAdapter;
+
+    #[derive(Debug)]
+    struct SnapshotOrderingAgentSessionAdapter {
+        calls: Arc<AtomicUsize>,
+        first_started: Arc<Notify>,
+        release_first: Arc<Notify>,
+        second_snapshot_items: Arc<Mutex<Option<usize>>>,
+    }
 
     #[test]
     fn public_turn_outcomes_map_to_distinct_gateway_terminal_facts() {
@@ -2375,6 +3601,25 @@ mod tests {
             gateway_terminal_facts(TurnOutcome::Interrupted),
             ("interrupted", "aborted")
         );
+    }
+
+    #[test]
+    fn non_clean_shutdown_report_is_a_teardown_error() {
+        let report = ShutdownReport {
+            forced: true,
+            adapter: ShutdownAdapterStatus::TimedOut,
+            task_panics: 1,
+            aborted_tasks: 2,
+            pending_terminal_failures: vec![PendingTerminalFailure {
+                turn_id: "turn-1".to_string(),
+                message: "write failed".to_string(),
+            }],
+        };
+        let error = report.require_clean().expect_err("non-clean report");
+        let message = error.to_string();
+        assert!(message.contains("timed_out"));
+        assert!(message.contains("turn-1"));
+        assert!(message.contains("write failed"));
     }
 
     impl AgentSessionAdapter for ForceAwareAgentSessionAdapter {
@@ -2416,9 +3661,108 @@ mod tests {
         }
     }
 
+    impl AgentSessionAdapter for ShutdownReleasesAgentSessionAdapter {
+        fn run_turn(&self, request: AgentTurnRequest) -> BoxFuture<'static, Result<TurnResult>> {
+            let started = self.started.clone();
+            let release = self.release.clone();
+            Box::pin(async move {
+                started.notify_one();
+                release.notified().await;
+                Ok(TurnResult {
+                    thread_id: request.receipt.thread_id,
+                    outcome: TurnOutcome::Interrupted,
+                    final_answer: String::new(),
+                    provider: "fake".to_string(),
+                    model: "fake-model".to_string(),
+                    reasoning_effort: None,
+                    tool_failures: 0,
+                    context_limit: None,
+                    context_snapshot: None,
+                    warnings: Vec::new(),
+                    terminal_reason: None,
+                    terminal_error: None,
+                    selected_agent: None,
+                    selected_skills: Vec::new(),
+                })
+            })
+        }
+
+        fn shutdown(&self, force: bool) -> BoxFuture<'static, Result<()>> {
+            let release = self.release.clone();
+            Box::pin(async move {
+                assert!(force);
+                release.notify_waiters();
+                Ok(())
+            })
+        }
+    }
+
+    impl AgentSessionAdapter for PendingAgentSessionAdapter {
+        fn run_turn(&self, _request: AgentTurnRequest) -> BoxFuture<'static, Result<TurnResult>> {
+            let started = self.started.clone();
+            Box::pin(async move {
+                started.notify_one();
+                std::future::pending::<Result<TurnResult>>().await
+            })
+        }
+
+        fn shutdown(&self, force: bool) -> BoxFuture<'static, Result<()>> {
+            assert!(force);
+            Box::pin(std::future::pending())
+        }
+    }
+
     impl AgentSessionAdapter for FailingAgentSessionAdapter {
         fn run_turn(&self, _request: AgentTurnRequest) -> BoxFuture<'static, Result<TurnResult>> {
             Box::pin(async { Err(Error::Message("adapter fixture failed".to_string())) })
+        }
+    }
+
+    impl AgentSessionAdapter for PanickingAgentSessionAdapter {
+        fn run_turn(&self, _request: AgentTurnRequest) -> BoxFuture<'static, Result<TurnResult>> {
+            Box::pin(async { panic!("adapter fixture panic") })
+        }
+    }
+
+    impl AgentSessionAdapter for SnapshotOrderingAgentSessionAdapter {
+        fn run_turn(&self, request: AgentTurnRequest) -> BoxFuture<'static, Result<TurnResult>> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let first_started = self.first_started.clone();
+            let release_first = self.release_first.clone();
+            let second_snapshot_items = self.second_snapshot_items.clone();
+            Box::pin(async move {
+                if call == 0 {
+                    first_started.notify_one();
+                    release_first.notified().await;
+                } else {
+                    *second_snapshot_items
+                        .lock()
+                        .expect("snapshot observation poisoned") = Some(
+                        request
+                            .history
+                            .latest(Some(MAX_HISTORY_PAGE_SIZE))
+                            .await?
+                            .items
+                            .len(),
+                    );
+                }
+                Ok(TurnResult {
+                    thread_id: request.receipt.thread_id,
+                    outcome: TurnOutcome::Completed,
+                    final_answer: format!("turn {call}"),
+                    provider: "fake".to_string(),
+                    model: "fake-model".to_string(),
+                    reasoning_effort: None,
+                    tool_failures: 0,
+                    context_limit: None,
+                    context_snapshot: None,
+                    warnings: Vec::new(),
+                    terminal_reason: None,
+                    terminal_error: None,
+                    selected_agent: None,
+                    selected_skills: Vec::new(),
+                })
+            })
         }
     }
 
@@ -2488,6 +3832,66 @@ mod tests {
                     thread_id: request.receipt.thread_id,
                     outcome: TurnOutcome::Completed,
                     final_answer: "permission accepted".to_string(),
+                    provider: "fake".to_string(),
+                    model: "fake-model".to_string(),
+                    reasoning_effort: None,
+                    tool_failures: 0,
+                    context_limit: None,
+                    context_snapshot: None,
+                    warnings: Vec::new(),
+                    terminal_reason: None,
+                    terminal_error: None,
+                    selected_agent: None,
+                    selected_skills: Vec::new(),
+                })
+            })
+        }
+    }
+
+    impl AgentSessionAdapter for ClarifyInteractionAgentSessionAdapter {
+        fn run_turn(
+            &self,
+            mut request: AgentTurnRequest,
+        ) -> BoxFuture<'static, Result<TurnResult>> {
+            let started = self.started.clone();
+            let observed_outcome = self.outcome.clone();
+            Box::pin(async move {
+                let native_control = request
+                    .native_control
+                    .take()
+                    .expect("Application must install native Turn control");
+                let control = native_control.handle();
+                let events = request.events.clone();
+                let stream: RunStreamSink = Arc::new(move |event| {
+                    if let Some(event) = TurnEvent::from_run_stream(event) {
+                        events.emit(event);
+                    }
+                    started.notify_one();
+                });
+                let outcome = control
+                    .request_clarification(
+                        crate::types::ClarifyRequestEvent {
+                            call_id: "clarify-application-1".to_string(),
+                            questions: vec![crate::types::ClarifyQuestion {
+                                header: "Target".to_string(),
+                                question: "Which directories?".to_string(),
+                                options: Vec::new(),
+                                multiple: true,
+                                custom: true,
+                                secret: false,
+                            }],
+                        },
+                        stream,
+                        Some(native_control.abort_signal()),
+                    )
+                    .await;
+                *observed_outcome
+                    .lock()
+                    .expect("observed clarify outcome poisoned") = Some(outcome);
+                Ok(TurnResult {
+                    thread_id: request.receipt.thread_id,
+                    outcome: TurnOutcome::Completed,
+                    final_answer: "clarification accepted".to_string(),
                     provider: "fake".to_string(),
                     model: "fake-model".to_string(),
                     reasoning_effort: None,
@@ -2660,6 +4064,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn history_reader_returns_the_latest_bounded_tail_then_older_pages() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(FailingAgentSessionAdapter))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        for index in 0..205 {
+            application
+                .inner
+                .state
+                .append_message(
+                    thread.id(),
+                    &psychevo_agent_core::user_text_message(format!("message-{index}")),
+                )
+                .await
+                .expect("append history");
+        }
+
+        let latest = thread.history().latest(Some(5)).await.expect("latest page");
+        assert_eq!(latest.items.len(), 5);
+        assert_eq!(
+            latest
+                .items
+                .iter()
+                .map(|item| item.session_seq)
+                .collect::<Vec<_>>(),
+            vec![201, 202, 203, 204, 205]
+        );
+        assert_eq!(latest.next_before, Some(201));
+        let older = thread
+            .history()
+            .before(latest.next_before, Some(5))
+            .await
+            .expect("older page");
+        assert_eq!(
+            older
+                .items
+                .iter()
+                .map(|item| item.session_seq)
+                .collect::<Vec<_>>(),
+            vec![196, 197, 198, 199, 200]
+        );
+        assert!(latest.items.iter().all(|item| {
+            older
+                .items
+                .iter()
+                .all(|older| older.session_seq != item.session_seq)
+        }));
+
+        let snapshot = thread.snapshot().await.expect("bounded snapshot");
+        assert_eq!(snapshot.items.len(), DEFAULT_HISTORY_PAGE_SIZE);
+        assert_eq!(
+            snapshot.items.first().map(|item| item.session_seq),
+            Some(106)
+        );
+        assert_eq!(snapshot.history_cursor, Some(106));
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
     async fn shutdown_closes_new_work_admission() {
         let temp = tempfile::tempdir().expect("tempdir");
         let application = Application::builder()
@@ -2678,7 +4150,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forced_shutdown_escalates_after_graceful_deadline_cancels() {
+    async fn concurrent_forced_shutdown_upgrades_graceful_owner() {
         let temp = tempfile::tempdir().expect("tempdir");
         let started = Arc::new(Notify::new());
         let shutdown_modes = Arc::new(Mutex::new(Vec::new()));
@@ -2703,11 +4175,13 @@ mod tests {
             .expect("turn");
         started.notified().await;
 
+        let graceful_application = application.clone();
+        let graceful =
+            tokio::spawn(async move { graceful_application.shutdown().await.expect("graceful") });
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(10), application.shutdown())
-                .await
-                .is_err(),
-            "graceful shutdown must still be draining the accepted turn"
+            !graceful.is_finished(),
+            "graceful shutdown must be draining"
         );
         let forced = tokio::time::timeout(
             std::time::Duration::from_secs(1),
@@ -2721,7 +4195,13 @@ mod tests {
                 handle.control.inner.is_aborted()
             );
         }
-        forced.expect("checked deadline").expect("forced shutdown");
+        let forced_report = forced.expect("checked deadline").expect("forced shutdown");
+        let graceful_report = tokio::time::timeout(std::time::Duration::from_secs(1), graceful)
+            .await
+            .expect("graceful owner deadline")
+            .expect("graceful task");
+        assert_eq!(graceful_report, forced_report);
+        assert!(forced_report.forced);
         assert_eq!(
             *shutdown_modes.lock().expect("shutdown modes poisoned"),
             vec![true]
@@ -2730,6 +4210,87 @@ mod tests {
             handle.wait().await.expect("interrupted result").outcome,
             TurnOutcome::Interrupted
         );
+    }
+
+    #[tokio::test]
+    async fn forced_shutdown_invokes_adapter_shutdown_before_joining_turn_tasks() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let started = Arc::new(Notify::new());
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(ShutdownReleasesAgentSessionAdapter {
+                started: started.clone(),
+                release: Arc::new(Notify::new()),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let handle = thread
+            .start_turn(TurnRequest::new("adapter-owned release"))
+            .await
+            .expect("turn");
+        started.notified().await;
+
+        let report = application.shutdown_force().await.expect("forced shutdown");
+        assert_eq!(report.adapter, ShutdownAdapterStatus::Completed);
+        assert_eq!(report.aborted_tasks, 0);
+        assert_eq!(
+            handle.wait().await.expect("interrupted result").outcome,
+            TurnOutcome::Interrupted
+        );
+    }
+
+    #[tokio::test]
+    async fn forced_shutdown_aborts_a_cancellation_safe_pending_adapter() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let started = Arc::new(Notify::new());
+        let database_path = temp.path().join("state.db");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(&database_path)
+            .agent_session_adapter(Arc::new(PendingAgentSessionAdapter {
+                started: started.clone(),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let handle = thread
+            .start_turn(TurnRequest::new("pending forever"))
+            .await
+            .expect("turn");
+        let turn_id = handle.receipt().turn_id.clone();
+        started.notified().await;
+
+        let report = application.shutdown_force().await.expect("forced shutdown");
+        assert_eq!(report.adapter, ShutdownAdapterStatus::TimedOut);
+        assert!(report.aborted_tasks > 0);
+        assert!(report.pending_terminal_failures.is_empty());
+        assert_eq!(
+            handle.wait().await.expect("forced settlement").outcome,
+            TurnOutcome::Interrupted
+        );
+        let reopened = StateRuntime::open(&database_path)
+            .await
+            .expect("reopen settled state");
+        let terminal = reopened
+            .gateway_turn_terminal(&turn_id)
+            .await
+            .expect("terminal query")
+            .expect("durable forced terminal");
+        assert_eq!(terminal.status, "interrupted");
+        assert_eq!(terminal.outcome.as_deref(), Some("aborted"));
+        reopened.close().await;
     }
 
     #[tokio::test]
@@ -2795,6 +4356,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn panicking_turn_observer_cannot_orphan_accepted_work() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (adapter, started, release, completed) = fake_adapter();
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(adapter)
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let mut request = TurnRequest::new("observer panic");
+        request.adapter_options.turn_event_observer =
+            Some(Arc::new(|_| panic!("observer fixture panic")));
+
+        let handle = thread
+            .start_turn(request)
+            .await
+            .expect("observer must not escape admission");
+        started.notified().await;
+        release.notify_one();
+        assert_eq!(
+            handle.wait().await.expect("turn result").outcome,
+            TurnOutcome::Completed
+        );
+        assert_eq!(completed.load(Ordering::SeqCst), 1);
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
     async fn dropping_turn_handle_does_not_cancel_accepted_work() {
         let temp = tempfile::tempdir().expect("tempdir");
         let (adapter, started, release, completed) = fake_adapter();
@@ -2825,6 +4420,204 @@ mod tests {
         .await
         .expect("accepted work completed");
         application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn caller_cancellation_drops_only_the_turn_acceptance_receipt() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (adapter, started, release, _) = fake_adapter();
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(adapter)
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let thread = client
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let entered = Arc::new(Notify::new());
+        let accept = Arc::new(Notify::new());
+        application
+            .inner
+            .state
+            .set_gateway_turn_acceptance_barrier_for_test(entered.clone(), accept.clone());
+        let turn_id = Uuid::now_v7().to_string();
+        let client_turn_id = "cancelled-caller-1".to_string();
+        let mut request = TurnRequest::new("caller goes away");
+        request.requested_turn_id = Some(turn_id.clone());
+        request.client_turn_id = Some(client_turn_id.clone());
+        let caller_thread = thread.clone();
+        let caller = tokio::spawn(async move { caller_thread.start_turn(request).await });
+        entered.notified().await;
+        caller.abort();
+        assert!(
+            caller
+                .await
+                .expect_err("caller task cancelled")
+                .is_cancelled()
+        );
+
+        accept.notify_one();
+        started.notified().await;
+        let delivery = application
+            .inner
+            .state
+            .gateway_turn_delivery(&turn_id)
+            .await
+            .expect("delivery query")
+            .expect("accepted delivery");
+        assert_eq!(delivery.thread_id, thread.id());
+        let receipts = application
+            .inner
+            .state
+            .gateway_turn_start_receipts(thread.id())
+            .await
+            .expect("start receipts");
+        assert!(receipts.iter().any(|receipt| {
+            receipt.client_turn_id == client_turn_id && receipt.turn_id == turn_id
+        }));
+        let resumed = client
+            .resume_turn(&turn_id)
+            .await
+            .expect("Application retained active Turn");
+        release.notify_one();
+        assert_eq!(
+            resumed.wait().await.expect("turn result").final_answer,
+            "fake answer"
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn adapter_panic_settles_and_releases_thread_activity() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(PanickingAgentSessionAdapter))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let handle = thread
+            .start_turn(TurnRequest::new("panic"))
+            .await
+            .expect("accepted turn");
+
+        let error = handle.wait().await.expect_err("panic must fail the turn");
+        assert!(error.to_string().contains("panicked"));
+        assert!(!thread.has_activity());
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn queued_turn_builds_snapshot_after_acquiring_thread_lane() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let first_started = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let second_snapshot_items = Arc::new(Mutex::new(None));
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(SnapshotOrderingAgentSessionAdapter {
+                calls,
+                first_started: first_started.clone(),
+                release_first: release_first.clone(),
+                second_snapshot_items: second_snapshot_items.clone(),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let first = thread
+            .start_turn(TurnRequest::new("first"))
+            .await
+            .expect("first turn");
+        first_started.notified().await;
+        let second = thread
+            .start_turn(TurnRequest::new("second"))
+            .await
+            .expect("second turn");
+
+        application
+            .inner
+            .state
+            .append_message(
+                thread.id(),
+                &psychevo_agent_core::user_text_message("committed before first releases"),
+            )
+            .await
+            .expect("append message");
+        release_first.notify_one();
+        first.wait().await.expect("first result");
+        second.wait().await.expect("second result");
+        assert_eq!(
+            *second_snapshot_items
+                .lock()
+                .expect("snapshot observation poisoned"),
+            Some(1)
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn turn_and_thread_mutation_reservations_share_one_fifo_and_evict_when_idle() {
+        let runtime = Arc::new(ApplicationRuntime::new());
+        let thread_id = "thread-operation-fifo";
+        let first = runtime.reserve_turn(thread_id, "turn-1");
+        first.await.expect("first Turn is ready");
+        let mut mutation = runtime.reserve_mutation(thread_id);
+        let mut second = runtime.reserve_turn(thread_id, "turn-2");
+
+        assert!(matches!(
+            mutation
+                .ready
+                .as_mut()
+                .expect("mutation reservation")
+                .try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            second.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        runtime.settle_turn(thread_id, "turn-1", None);
+        mutation
+            .ready
+            .take()
+            .expect("mutation reservation")
+            .await
+            .expect("mutation is next");
+        assert!(matches!(
+            second.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+
+        drop(mutation);
+        second.await.expect("second Turn follows mutation");
+        runtime.settle_turn(thread_id, "turn-2", None);
+        assert!(
+            !runtime
+                .state
+                .lock()
+                .expect("runtime state")
+                .threads
+                .contains_key(thread_id),
+            "idle Thread cells must be evicted"
+        );
     }
 
     #[tokio::test]
@@ -2977,18 +4770,13 @@ mod tests {
                 .to_string()
                 .contains("failed to persist Framework Turn terminal")
         );
-        let resumed = client
-            .resume_turn(&turn_id)
-            .await
-            .expect("active error handle");
-        assert!(
-            resumed
-                .wait()
+        assert!(matches!(
+            client
+                .resume_turn(&turn_id)
                 .await
-                .expect_err("same persistence failure")
-                .to_string()
-                .contains("failed to persist Framework Turn terminal")
-        );
+                .expect_err("pending terminal retry must preserve its typed failure"),
+            Error::TerminalPersistence { .. }
+        ));
         let mut events = handle.events();
         let mut saw_durability_warning = false;
         while let Some(event) = events.next().await {
@@ -3008,7 +4796,128 @@ mod tests {
             }
         }
         assert!(saw_durability_warning);
+        assert!(
+            !thread.has_activity(),
+            "terminal persistence failure must release running/control projection"
+        );
         application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn resume_turn_retries_the_same_in_memory_pending_terminal_once() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (adapter, started, release, _) = fake_adapter();
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(adapter)
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let thread = client
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let handle = thread
+            .start_turn(TurnRequest::new("retry terminal"))
+            .await
+            .expect("accepted turn");
+        let turn_id = handle.receipt().turn_id.clone();
+        started.notified().await;
+        application
+            .inner
+            .state
+            .fail_next_framework_terminal_for_test();
+        release.notify_one();
+        assert!(matches!(
+            handle.wait().await.expect_err("first terminal commit fails"),
+            Error::Message(message)
+                if message.contains("failed to persist Framework Turn terminal")
+        ));
+
+        let resumed = client
+            .resume_turn(&turn_id)
+            .await
+            .expect("same-process retry succeeds");
+        assert_eq!(
+            resumed
+                .wait()
+                .await
+                .expect("retried durable result")
+                .final_answer,
+            "fake answer"
+        );
+        assert!(
+            application
+                .inner
+                .state
+                .gateway_turn_terminal(&turn_id)
+                .await
+                .expect("terminal query")
+                .is_some()
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn restart_reports_a_durable_nonterminal_delivery_as_outcome_indeterminate() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let database_path = temp.path().join("state.db");
+        let first = Application::builder()
+            .home(temp.path())
+            .database_path(&database_path)
+            .agent_session_adapter(Arc::new(FailingAgentSessionAdapter))
+            .build()
+            .await
+            .expect("first application");
+        let thread = first
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let turn_id = Uuid::now_v7().to_string();
+        first
+            .inner
+            .state
+            .accept_gateway_turn(
+                GatewayTurnDeliveryInput {
+                    turn_id: &turn_id,
+                    thread_id: thread.id(),
+                    runtime_ref: "native",
+                    input_json: "{}",
+                    input_hash: "fixture",
+                },
+                None,
+            )
+            .await
+            .expect("durable nonterminal delivery");
+        first.shutdown().await.expect("first shutdown");
+
+        let restarted = Application::builder()
+            .home(temp.path())
+            .database_path(&database_path)
+            .agent_session_adapter(Arc::new(FailingAgentSessionAdapter))
+            .build()
+            .await
+            .expect("restarted application");
+        assert!(matches!(
+            restarted
+                .client()
+                .resume_turn(&turn_id)
+                .await
+                .expect_err("unknown outcome must never be replayed or fabricated"),
+            Error::OutcomeIndeterminate { turn_id: ref actual } if actual == &turn_id
+        ));
+        let delivery = restarted
+            .inner
+            .state
+            .gateway_turn_delivery(&turn_id)
+            .await
+            .expect("delivery query")
+            .expect("delivery retained");
+        assert_ne!(delivery.status, "terminal");
+        restarted.shutdown().await.expect("restarted shutdown");
     }
 
     #[tokio::test]
@@ -3136,15 +5045,27 @@ mod tests {
         .await
         .expect("permission interaction persisted");
 
-        assert!(thread.respond(
-            "permission-1",
-            InteractionResponse::Permission(PermissionApprovalDecision::allow_once()),
-        ));
+        let expected_decision =
+            PermissionApprovalDecision::allow_filesystem_turn(temp.path().display().to_string());
         assert!(
-            !thread.respond(
-                "permission-1",
-                InteractionResponse::Permission(PermissionApprovalDecision::deny()),
-            ),
+            thread
+                .respond(
+                    "permission-1",
+                    InteractionResponse::Permission(expected_decision.clone()),
+                )
+                .await
+                .expect("permission response")
+                .accepted
+        );
+        assert!(
+            !thread
+                .respond(
+                    "permission-1",
+                    InteractionResponse::Permission(PermissionApprovalDecision::deny()),
+                )
+                .await
+                .expect("duplicate permission response")
+                .accepted,
             "Framework permission response must be accepted exactly once"
         );
         assert_eq!(
@@ -3156,8 +5077,23 @@ mod tests {
                 .lock()
                 .expect("observed permission decision poisoned")
                 .as_ref()
-                .map(|decision| decision.outcome),
-            Some(PermissionApprovalOutcome::AllowOnce)
+                .cloned(),
+            Some(expected_decision.clone())
+        );
+        let durable = application
+            .inner
+            .state
+            .framework_interactions_for_thread(thread.id(), false)
+            .await
+            .expect("durable interactions");
+        assert_eq!(durable.len(), 1);
+        assert_eq!(durable[0].status, "resolved");
+        assert_eq!(
+            durable[0].resolution,
+            Some(
+                serde_json::to_value(InteractionResponse::Permission(expected_decision))
+                    .expect("serialize response")
+            )
         );
         assert!(
             thread
@@ -3165,6 +5101,169 @@ mod tests {
                 .await
                 .expect("resolved interactions")
                 .is_empty()
+        );
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_permission_interaction_wakes_its_waiter() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let started = Arc::new(Notify::new());
+        let decision = Arc::new(Mutex::new(None));
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(PermissionInteractionAgentSessionAdapter {
+                started: started.clone(),
+                decision: decision.clone(),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let handle = thread
+            .start_turn(TurnRequest::new("cancel permission"))
+            .await
+            .expect("turn");
+        started.notified().await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if thread
+                    .pending_interactions()
+                    .await
+                    .expect("pending interactions")
+                    .iter()
+                    .any(|interaction| interaction.interaction_id == "permission-1")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("permission interaction persisted");
+
+        assert!(
+            !thread
+                .respond(
+                    "permission-1",
+                    InteractionResponse::Clarify(vec![vec!["wrong kind".to_string()]]),
+                )
+                .await
+                .expect("mismatched response")
+                .accepted,
+            "a mismatched typed response must not terminate the durable interaction"
+        );
+        assert!(
+            thread
+                .respond("permission-1", InteractionResponse::Cancel)
+                .await
+                .expect("cancel response")
+                .accepted
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), handle.wait())
+            .await
+            .expect("permission waiter must wake")
+            .expect("turn result");
+        assert_eq!(
+            decision
+                .lock()
+                .expect("observed permission decision poisoned")
+                .as_ref()
+                .map(|decision| decision.outcome),
+            Some(PermissionApprovalOutcome::Deny)
+        );
+        let durable = application
+            .inner
+            .state
+            .framework_interactions_for_thread(thread.id(), false)
+            .await
+            .expect("durable interactions");
+        assert_eq!(durable[0].status, "cancelled");
+        application.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn application_persists_and_delivers_the_same_clarify_response() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let started = Arc::new(Notify::new());
+        let outcome = Arc::new(Mutex::new(None));
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(ClarifyInteractionAgentSessionAdapter {
+                started: started.clone(),
+                outcome: outcome.clone(),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let thread = application
+            .client()
+            .start_thread(StartThreadRequest::new(temp.path()))
+            .await
+            .expect("thread");
+        let handle = thread
+            .start_turn(TurnRequest::new("request clarification"))
+            .await
+            .expect("turn");
+        started.notified().await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if thread
+                    .pending_interactions()
+                    .await
+                    .expect("pending interactions")
+                    .iter()
+                    .any(|interaction| interaction.interaction_id == "clarify-application-1")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("clarify interaction persisted");
+
+        let answers = vec![vec!["/workspace/a".to_string(), "/workspace/b".to_string()]];
+        assert!(
+            thread
+                .respond(
+                    "clarify-application-1",
+                    InteractionResponse::Clarify(answers.clone()),
+                )
+                .await
+                .expect("clarify response")
+                .accepted
+        );
+        handle.wait().await.expect("turn result");
+        assert_eq!(
+            *outcome.lock().expect("observed clarify outcome poisoned"),
+            Some(crate::types::ClarifyInteractionOutcome::Answered(
+                ClarifyResponse {
+                    answers: vec![ClarifyAnswer {
+                        answers: answers[0].clone(),
+                    }],
+                }
+            ))
+        );
+        let durable = application
+            .inner
+            .state
+            .framework_interactions_for_thread(thread.id(), false)
+            .await
+            .expect("durable interactions");
+        assert_eq!(durable.len(), 1);
+        assert_eq!(
+            durable[0].resolution,
+            Some(
+                serde_json::to_value(InteractionResponse::Clarify(answers))
+                    .expect("serialize response")
+            )
         );
         application.shutdown().await.expect("shutdown");
     }

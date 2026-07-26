@@ -4,8 +4,9 @@ use super::catalog::{
     SkillSource,
 };
 use super::{
-    BTreeMap, BTreeSet, Command, Component, Error, Path, PathBuf, Result, Value, fs, json,
+    BTreeMap, BTreeSet, Component, Error, Path, PathBuf, Result, Value, fs, json,
 };
+use std::process::Command;
 
 pub(crate) fn add_skill(
     mut skill: Skill,
@@ -415,81 +416,22 @@ pub(crate) fn strip_frontmatter(content: &str) -> &str {
 pub(crate) fn preprocess_skill_content(
     content: &str,
     skill_dir: &Path,
-    session_id: Option<&str>,
-    settings: Option<&SkillSettings>,
+    session_id: &str,
+    settings: &SkillSettings,
 ) -> String {
-    let default_settings;
-    let settings = if let Some(settings) = settings {
-        settings
-    } else {
-        default_settings = SkillSettings::default();
-        &default_settings
-    };
     let mut out = content.to_string();
     if settings.template_vars {
         let skill_dir = skill_dir.display().to_string();
         out = out
             .replace("${PSYCHEVO_SKILL_DIR}", &skill_dir)
             .replace("${HERMES_SKILL_DIR}", &skill_dir);
-        if let Some(session_id) = session_id {
+        if !session_id.is_empty() {
             out = out
                 .replace("${PSYCHEVO_SESSION_ID}", session_id)
                 .replace("${HERMES_SESSION_ID}", session_id);
         }
     }
-    if settings.inline_shell {
-        out = expand_inline_shell(&out, skill_dir, settings.inline_shell_timeout_secs);
-    }
     out
-}
-
-pub(crate) fn expand_inline_shell(content: &str, skill_dir: &Path, timeout_secs: u64) -> String {
-    let mut out = String::new();
-    let mut rest = content;
-    while let Some(start) = rest.find("!`") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        let Some(end) = after.find('`') else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let command = after[..end].trim();
-        if command.contains('\n') || command.is_empty() {
-            out.push_str("");
-        } else {
-            out.push_str(&run_inline_shell(command, skill_dir, timeout_secs));
-        }
-        rest = &after[end + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-pub(crate) fn run_inline_shell(command: &str, skill_dir: &Path, timeout_secs: u64) -> String {
-    let output = Command::new("bash")
-        .arg("-c")
-        .arg(command)
-        .current_dir(skill_dir)
-        .output();
-    match output {
-        Ok(output) => {
-            let mut text = if output.stdout.is_empty() {
-                String::from_utf8_lossy(&output.stderr)
-                    .trim_end()
-                    .to_string()
-            } else {
-                String::from_utf8_lossy(&output.stdout)
-                    .trim_end()
-                    .to_string()
-            };
-            if text.len() > 4000 {
-                text.truncate(4000);
-                text.push_str("...[truncated]");
-            }
-            text
-        }
-        Err(err) => format!("[inline-shell error after {timeout_secs}s: {err}]"),
-    }
 }
 
 pub(crate) fn available_files(base_dir: &Path) -> Vec<String> {

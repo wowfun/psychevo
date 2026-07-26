@@ -1,23 +1,26 @@
 use super::catalog::{
     BUNDLES_DIR, InstallOptions, MAX_DESCRIPTION_LENGTH, SaveSkillBundleOptions, ScanResult,
     ScanVerdict, SelectedSkill, Skill, SkillBundle, SkillCatalog, SkillContextFragment,
-    SkillDiagnostic, SkillSource, SkillTarget,
+    SkillDiagnostic, SkillSettings, SkillSource, SkillTarget,
 };
 use super::selection_scan::{
     add_skill, clone_git_source, copy_dir_recursive, ensure_mutable_skill, escape_xml,
     existing_input_path, find_skill, merge_string_values, metadata_pointer, parse_frontmatter,
-    required_environment_variables, resolve_skill_relative_path, resolve_skill_write_path,
-    scan_text, setup_help, skill_matches_current_os, string_values, string_values_from_value,
-    strip_frontmatter, text_files_under, validate_name, yaml_scalar,
+    preprocess_skill_content, required_environment_variables, resolve_skill_relative_path,
+    resolve_skill_write_path, scan_text, setup_help, skill_matches_current_os, string_values,
+    string_values_from_value, strip_frontmatter, text_files_under, validate_name, yaml_scalar,
 };
 use super::{
     BTreeMap, BTreeSet, CONFIG_FILE_NAME, Error, Path, PathBuf, Result, Value, fs, json,
     load_toml_config_file, write_toml_config_file,
 };
+use std::io::Write;
 
 pub fn skill_context_fragments(
     skills: &[SelectedSkill],
     catalog: &SkillCatalog,
+    session_id: &str,
+    settings: &SkillSettings,
 ) -> Result<Vec<SkillContextFragment>> {
     let mut fragments = Vec::new();
     for selected in skills {
@@ -29,7 +32,12 @@ pub fn skill_context_fragments(
             continue;
         };
         let raw = fs::read_to_string(&skill.file_path)?;
-        let body = strip_frontmatter(&raw).trim();
+        let body = preprocess_skill_content(
+            strip_frontmatter(&raw).trim(),
+            &skill.base_dir,
+            session_id,
+            settings,
+        );
         let content = format!(
             concat!(
                 "<skill>\n",
@@ -234,14 +242,93 @@ pub fn write_skill_file(
     file_path: &str,
     content: &str,
 ) -> Result<Value> {
+    write_skill_file_inner(catalog, home, cwd, name, file_path, content, || {})
+}
+
+fn write_skill_file_inner(
+    catalog: &SkillCatalog,
+    home: &Path,
+    cwd: &Path,
+    name: &str,
+    file_path: &str,
+    content: &str,
+    before_mutation: impl FnOnce(),
+) -> Result<Value> {
     let skill = find_skill(catalog, name)?;
     ensure_mutable_skill(skill, home, cwd)?;
     let target = resolve_skill_write_path(skill, file_path)?;
+    let canonical_base = skill.base_dir.canonicalize()?;
+    let approved_identity = crate::filesystem_identity::canonicalize_deepest_existing(&target)?;
+    if !crate::filesystem_identity::is_within(&canonical_base, &approved_identity) {
+        return Err(Error::Message(
+            "supporting skill file path escapes skill directory".to_string(),
+        ));
+    }
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&target, content)?;
+    before_mutation();
+    let current_identity = crate::filesystem_identity::canonicalize_deepest_existing(&target)
+        .map_err(|error| {
+            Error::Message(format!(
+                "path_identity_changed: supporting skill file identity could not be revalidated: {error}"
+            ))
+        })?;
+    if current_identity != approved_identity
+        || !crate::filesystem_identity::is_within(&canonical_base, &current_identity)
+    {
+        return Err(Error::Message(
+            "path_identity_changed: supporting skill file identity changed before mutation"
+                .to_string(),
+        ));
+    }
+    write_without_following_final_symlink(&target, content.as_bytes())?;
     Ok(json!({"success": true, "name": skill.name, "path": target}))
+}
+
+#[cfg(test)]
+pub(crate) fn write_skill_file_after_validation(
+    catalog: &SkillCatalog,
+    home: &Path,
+    cwd: &Path,
+    name: &str,
+    file_path: &str,
+    content: &str,
+    before_mutation: impl FnOnce(),
+) -> Result<Value> {
+    write_skill_file_inner(
+        catalog,
+        home,
+        cwd,
+        name,
+        file_path,
+        content,
+        before_mutation,
+    )
+}
+
+fn write_without_following_final_symlink(target: &Path, content: &[u8]) -> Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let mut file = options.open(target).map_err(|error| {
+        Error::Message(format!(
+            "supporting skill file must not be a symlink or reparse point: {error}"
+        ))
+    })?;
+    file.write_all(content)?;
+    file.sync_data()?;
+    Ok(())
 }
 
 pub fn remove_skill_file(

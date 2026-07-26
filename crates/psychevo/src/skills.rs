@@ -1,7 +1,6 @@
 pub(crate) use std::collections::{BTreeMap, BTreeSet, HashSet};
 pub(crate) use std::fs;
 pub(crate) use std::path::{Component, Path, PathBuf};
-pub(crate) use std::process::Command;
 
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
@@ -25,6 +24,8 @@ pub(crate) use catalog::{Skill, SkillContextFragment, format_skills_for_prompt};
 #[path = "skills/management.rs"]
 mod management;
 pub(crate) use management::skill_context_fragments;
+#[cfg(test)]
+pub(crate) use management::write_skill_file_after_validation;
 pub use management::{
     create_skill, delete_skill_bundle, edit_skill, install_skill, list_skill_bundles, patch_skill,
     remove_installed_skill, remove_skill, remove_skill_file, save_skill_bundle, scan_skill_path,

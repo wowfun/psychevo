@@ -540,6 +540,7 @@ pub(crate) fn tool_declarations_hash_with_search(
     tool_search: ToolSearchOptions,
 ) -> String {
     let declarations = ToolRouter::from_tools(tools.iter().cloned())
+        .expect("assembled tool surface must have unique display and canonical identities")
         .with_tool_search(tool_search)
         .declarations()
         .into_iter()

@@ -4,6 +4,28 @@ pub(crate) use super::*;
 #[allow(unused_imports)]
 use serde_json::json;
 
+struct ExecSessionReaper {
+    sender: std::sync::mpsc::Sender<ExecSessionReapRequest>,
+}
+
+struct ExecSessionReapRequest {
+    task_id: String,
+    deadline: Instant,
+}
+
+static EXEC_SESSION_REAPER: LazyLock<ExecSessionReaper> = LazyLock::new(|| {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    thread::Builder::new()
+        .name("psychevo-exec-session-reaper".to_string())
+        .spawn(move || run_exec_session_reaper(receiver))
+        .expect("spawn shared exec session reaper");
+    ExecSessionReaper { sender }
+});
+
+#[cfg(test)]
+static EXEC_SESSION_REAPER_STARTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 pub(crate) fn session_result_json(
     session: &ExecSession,
     elapsed: Duration,
@@ -173,19 +195,85 @@ pub(crate) fn interrupt_exec_sessions_for_task(task_id: &str) {
     }
 }
 
-pub(crate) fn detach_exec_sessions_for_task(task_id: String) {
-    thread::spawn(move || {
-        thread::sleep(EXEC_DETACHED_SESSION_TTL);
-        let sessions = sessions_for_task(&task_id);
-        for session in sessions {
-            if session_completed(&session) {
-                remove_exec_session(session.id);
-            } else {
-                session.interrupt();
-                remove_exec_session(session.id);
+pub(crate) fn detach_exec_sessions_for_task(task_id: String) -> bool {
+    let has_sessions = EXEC_SESSIONS
+        .lock()
+        .map(|registry| {
+            registry
+                .sessions
+                .values()
+                .any(|session| session.task_id == task_id)
+        })
+        .unwrap_or(false);
+    if !has_sessions {
+        return false;
+    }
+    EXEC_SESSION_REAPER
+        .sender
+        .send(ExecSessionReapRequest {
+            task_id,
+            deadline: Instant::now() + EXEC_DETACHED_SESSION_TTL,
+        })
+        .is_ok()
+}
+
+fn run_exec_session_reaper(
+    receiver: std::sync::mpsc::Receiver<ExecSessionReapRequest>,
+) {
+    #[cfg(test)]
+    EXEC_SESSION_REAPER_STARTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut pending = Vec::<ExecSessionReapRequest>::new();
+    loop {
+        let request = match pending.iter().map(|request| request.deadline).min() {
+            None => match receiver.recv() {
+                Ok(request) => Some(request),
+                Err(_) => break,
+            },
+            Some(deadline) => {
+                let now = Instant::now();
+                if deadline <= now {
+                    None
+                } else {
+                    match receiver.recv_timeout(deadline.duration_since(now)) {
+                        Ok(request) => Some(request),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
             }
+        };
+        if let Some(request) = request {
+            pending.retain(|existing| existing.task_id != request.task_id);
+            pending.push(request);
         }
-    });
+        let now = Instant::now();
+        let mut due = Vec::new();
+        pending.retain(|request| {
+            if request.deadline <= now {
+                due.push(request.task_id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for task_id in due {
+            reap_exec_sessions_for_task(&task_id);
+        }
+    }
+}
+
+fn reap_exec_sessions_for_task(task_id: &str) {
+    for session in sessions_for_task(task_id) {
+        if !session_completed(&session) {
+            session.interrupt();
+        }
+        remove_exec_session(session.id);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn exec_session_reaper_start_count() -> usize {
+    EXEC_SESSION_REAPER_STARTS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 pub(crate) fn sessions_for_task(task_id: &str) -> Vec<Arc<ExecSession>> {

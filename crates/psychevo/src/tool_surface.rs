@@ -232,7 +232,9 @@ pub(crate) fn assemble_tool_surface_with_warnings(
 }
 
 pub(crate) fn tool_declarations(tools: &[Arc<dyn ToolBinding>]) -> Vec<ToolDeclaration> {
-    ToolRouter::from_tools(tools.iter().cloned()).declarations()
+    ToolRouter::from_tools(tools.iter().cloned())
+        .expect("assembled tool surface must have unique display and canonical identities")
+        .declarations()
 }
 
 fn extension_tool_binding(tool: &RuntimeTool, tool_search_enabled: bool) -> Arc<dyn ToolBinding> {
@@ -911,6 +913,7 @@ mod tests {
 
         let result = assemble_tool_surface_with_warnings(input);
         let declarations = ToolRouter::from_tools(result.tools)
+            .expect("unique tools")
             .with_tool_search(psychevo_agent_core::ToolSearchOptions::enabled())
             .declarations();
         let names = declarations
@@ -967,6 +970,7 @@ mod tests {
 
         let result = assemble_tool_surface_with_warnings(input);
         let declarations = ToolRouter::from_tools(result.tools)
+            .expect("unique tools")
             .with_tool_search(psychevo_agent_core::ToolSearchOptions::enabled())
             .declarations();
         let names = declarations
@@ -990,6 +994,7 @@ mod tests {
 
         let result = assemble_tool_surface_with_warnings(input);
         let declarations = ToolRouter::from_tools(result.tools)
+            .expect("unique tools")
             .with_tool_search(psychevo_agent_core::ToolSearchOptions::disabled())
             .declarations();
         let names = declarations
@@ -1023,6 +1028,7 @@ mod tests {
 
         let result = assemble_tool_surface_with_warnings(input);
         let router = ToolRouter::from_tools(result.tools)
+            .expect("unique tools")
             .with_tool_search(psychevo_agent_core::ToolSearchOptions::enabled());
         let names = router
             .declarations()

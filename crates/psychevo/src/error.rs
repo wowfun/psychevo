@@ -23,6 +23,10 @@ pub enum Error {
     TomlSer(#[from] toml::ser::Error),
     #[error("agent failed: {0}")]
     Agent(#[from] psychevo_agent_core::Error),
+    #[error("Turn outcome is indeterminate after process loss: {turn_id}")]
+    OutcomeIndeterminate { turn_id: String },
+    #[error("Turn terminal persistence is pending for {turn_id}: {message}")]
+    TerminalPersistence { turn_id: String, message: String },
     #[error("config failed: {0}")]
     Config(String),
     #[error("{0}")]

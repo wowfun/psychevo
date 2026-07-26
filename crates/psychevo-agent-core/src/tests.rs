@@ -221,6 +221,42 @@ impl ToolBinding for NamespacedTool {
     }
 }
 
+pub(crate) struct AliasedTool {
+    display_name: &'static str,
+    canonical_name: psychevo_ai::ToolName,
+}
+
+impl ToolBinding for AliasedTool {
+    fn name(&self) -> &str {
+        self.display_name
+    }
+
+    fn canonical_tool_name(&self) -> psychevo_ai::ToolName {
+        self.canonical_name.clone()
+    }
+
+    fn description(&self) -> &str {
+        "A test tool with independently selectable identities."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object", "properties": {}, "additionalProperties": false})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::Sequential
+    }
+
+    fn execute(
+        &self,
+        _tool_call_id: String,
+        _args: Value,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        Box::pin(async { ToolOutput::ok(json!({"ok": true})) })
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     let provider = RequestCaptureProvider::default();
@@ -251,6 +287,7 @@ pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
 #[test]
 pub(crate) fn tool_search_activates_deferred_tools_for_later_declarations() {
     let mut router = ToolRouter::from_tools(vec![Arc::new(DeferredTool) as Arc<dyn ToolBinding>])
+        .expect("unique tools")
         .with_tool_search(ToolSearchOptions::enabled());
 
     let initial = router.declarations();
@@ -290,6 +327,7 @@ pub(crate) fn tool_search_activates_deferred_tools_for_later_declarations() {
 #[test]
 pub(crate) fn tool_search_matches_source_metadata() {
     let mut router = ToolRouter::from_tools(vec![Arc::new(DeferredTool) as Arc<dyn ToolBinding>])
+        .expect("unique tools")
         .with_tool_search(ToolSearchOptions::enabled());
 
     let output = router.execute_tool_search(&json!({"query": "repo_tools"}));
@@ -300,7 +338,8 @@ pub(crate) fn tool_search_matches_source_metadata() {
 
 #[test]
 pub(crate) fn router_declarations_preserve_canonical_tool_identity() {
-    let router = ToolRouter::from_tools(vec![Arc::new(NamespacedTool) as Arc<dyn ToolBinding>]);
+    let router = ToolRouter::from_tools(vec![Arc::new(NamespacedTool) as Arc<dyn ToolBinding>])
+        .expect("unique tools");
     let declarations = router.declarations();
 
     assert_eq!(declarations.len(), 1);
@@ -314,11 +353,91 @@ pub(crate) fn router_declarations_preserve_canonical_tool_identity() {
     );
 }
 
+#[test]
+pub(crate) fn router_rejects_duplicate_display_names_in_any_input_order() {
+    let first = || {
+        Arc::new(AliasedTool {
+            display_name: "lookup",
+            canonical_name: psychevo_ai::ToolName::namespaced("first", "lookup"),
+        }) as Arc<dyn ToolBinding>
+    };
+    let second = || {
+        Arc::new(AliasedTool {
+            display_name: "lookup",
+            canonical_name: psychevo_ai::ToolName::namespaced("second", "lookup"),
+        }) as Arc<dyn ToolBinding>
+    };
+
+    for tools in [vec![first(), second()], vec![second(), first()]] {
+        let Err(error) = ToolRouter::from_tools(tools) else {
+            panic!("duplicate display name must fail");
+        };
+        assert_eq!(
+            error,
+            ToolRouterError::DuplicateDisplayName("lookup".to_string())
+        );
+    }
+}
+
+#[test]
+pub(crate) fn router_rejects_duplicate_canonical_names_in_any_input_order() {
+    let first = || {
+        Arc::new(AliasedTool {
+            display_name: "repo_lookup",
+            canonical_name: psychevo_ai::ToolName::namespaced("repo", "lookup"),
+        }) as Arc<dyn ToolBinding>
+    };
+    let second = || {
+        Arc::new(AliasedTool {
+            display_name: "workspace_lookup",
+            canonical_name: psychevo_ai::ToolName::namespaced("repo", "lookup"),
+        }) as Arc<dyn ToolBinding>
+    };
+
+    for tools in [vec![first(), second()], vec![second(), first()]] {
+        let Err(error) = ToolRouter::from_tools(tools) else {
+            panic!("duplicate canonical name must fail");
+        };
+        assert_eq!(
+            error,
+            ToolRouterError::DuplicateCanonicalName("repo__lookup".to_string())
+        );
+    }
+}
+
+#[test]
+pub(crate) fn valid_router_keeps_declarations_and_both_lookups_bijective() {
+    let tools = vec![
+        Arc::new(AliasedTool {
+            display_name: "repo_lookup",
+            canonical_name: psychevo_ai::ToolName::namespaced("repo", "lookup"),
+        }) as Arc<dyn ToolBinding>,
+        Arc::new(AliasedTool {
+            display_name: "workspace_read",
+            canonical_name: psychevo_ai::ToolName::namespaced("workspace", "read"),
+        }) as Arc<dyn ToolBinding>,
+    ];
+
+    let router = ToolRouter::from_tools(tools).expect("unique tools");
+    let declarations = router.declarations();
+    assert_eq!(declarations.len(), 2);
+    for declaration in declarations {
+        let display = router.tool(&declaration.name).expect("display lookup");
+        let canonical = display.canonical_tool_name();
+        assert!(Arc::ptr_eq(
+            &display,
+            &router
+                .tool_by_canonical_name(&canonical)
+                .expect("canonical lookup")
+        ));
+    }
+}
+
 #[tokio::test]
 pub(crate) async fn hidden_tools_are_not_model_callable() {
     let (_abort_tx, abort_rx) = watch::channel(false);
     let tools: Vec<Arc<dyn ToolBinding>> = vec![Arc::new(HiddenTool)];
-    let mut router = ToolRouter::from_tools(tools);
+    let mut router = ToolRouter::from_tools(tools).expect("unique tools");
     let messages = execute_tool_batch(
         &mut router,
         &[ToolCallBlock {
@@ -544,7 +663,7 @@ pub(crate) async fn tool_call_pending_is_emitted_before_message_end() {
     });
     let sink = Arc::new(CaptureSink::default());
     let (_, control) = ControlHandle::new();
-    let router = ToolRouter::from_tools(request().tools);
+    let router = ToolRouter::from_tools(request().tools).expect("unique tools");
     stream_assistant(
         provider,
         &request(),

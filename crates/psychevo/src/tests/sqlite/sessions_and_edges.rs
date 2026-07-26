@@ -158,7 +158,7 @@ pub(crate) async fn sqlite_schema_v29_creates_framework_and_gateway_coordination
 }
 
 #[tokio::test]
-pub(crate) async fn framework_interaction_writes_are_order_independent() {
+pub(crate) async fn framework_interaction_writes_are_store_first_and_turn_scoped() {
     let temp = tempdir().expect("temp");
     let store = StateRuntime::open(":memory:").await.expect("store");
     let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
@@ -168,34 +168,38 @@ pub(crate) async fn framework_interaction_writes_are_order_independent() {
         .expect("thread");
 
     assert!(
-        store
+        !store
             .resolve_framework_interaction(
                 "answered-before-request",
                 &thread_id,
                 "turn-answered",
-                "answered",
+                "clarify",
+                "resolved",
+                json!({"kind": "clarify", "value": [["yes"]]}),
             )
             .await
             .expect("early resolution")
     );
-    store
-        .request_framework_interaction(
-            "answered-before-request",
-            &thread_id,
-            "turn-answered",
-            "clarify",
-            json!([{"question": "Proceed?"}]),
-        )
-        .await
-        .expect("late request");
+    assert!(
+        store
+            .request_framework_interaction(
+                "answered-before-request",
+                &thread_id,
+                "turn-answered",
+                "clarify",
+                json!([{"question": "Proceed?"}]),
+            )
+            .await
+            .expect("late request")
+    );
     let answered = store
         .framework_interactions_for_thread(&thread_id, false)
         .await
         .expect("interactions");
     assert_eq!(answered.len(), 1);
-    assert_eq!(answered[0].status, "resolved");
+    assert_eq!(answered[0].status, "pending");
     assert_eq!(answered[0].kind, "clarify");
-    assert_eq!(answered[0].resolution, Some(json!({"reason": "answered"})));
+    assert_eq!(answered[0].resolution, None);
 
     store
         .upsert_gateway_turn_terminal(GatewayTurnTerminalInput {
@@ -210,33 +214,33 @@ pub(crate) async fn framework_interaction_writes_are_order_independent() {
         })
         .await
         .expect("terminal");
-    store
-        .request_framework_interaction(
-            "requested-after-terminal",
-            &thread_id,
-            "turn-completed",
-            "approval",
-            json!({"summary": "late"}),
-        )
-        .await
-        .expect("late terminal request");
+    assert!(
+        !store
+            .request_framework_interaction(
+                "requested-after-terminal",
+                &thread_id,
+                "turn-completed",
+                "approval",
+                json!({"summary": "late"}),
+            )
+            .await
+            .expect("late terminal request")
+    );
     let records = store
         .framework_interactions_for_thread(&thread_id, false)
         .await
         .expect("interactions");
-    let late = records
-        .iter()
-        .find(|record| record.interaction_id == "requested-after-terminal")
-        .expect("late interaction");
-    assert_eq!(late.status, "cancelled");
-    assert_eq!(late.resolution, Some(json!({"reason": "turn_finished"})));
     assert!(
-        store
-            .framework_interactions_for_thread(&thread_id, true)
-            .await
-            .expect("pending interactions")
-            .is_empty()
+        records
+            .iter()
+            .all(|record| record.interaction_id != "requested-after-terminal")
     );
+    let pending = store
+        .framework_interactions_for_thread(&thread_id, true)
+        .await
+        .expect("pending interactions");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].interaction_id, "answered-before-request");
 
     store
         .request_framework_interaction(
@@ -250,7 +254,14 @@ pub(crate) async fn framework_interaction_writes_are_order_independent() {
         .expect("first reused id");
     assert!(
         store
-            .resolve_framework_interaction("call_1", &thread_id, "turn-first", "answered",)
+            .resolve_framework_interaction(
+                "call_1",
+                &thread_id,
+                "turn-first",
+                "clarify",
+                "resolved",
+                json!({"kind": "clarify", "value": [["first"]]}),
+            )
             .await
             .expect("resolve first reused id")
     );
@@ -264,6 +275,14 @@ pub(crate) async fn framework_interaction_writes_are_order_independent() {
         )
         .await
         .expect("second reused id");
+    let mut conn = store.acquire_sqlx().await.expect("interaction connection");
+    sqlx::query(
+        "UPDATE framework_interactions SET requested_at_ms = 1 WHERE interaction_id = 'call_1'",
+    )
+    .execute(&mut *conn)
+    .await
+    .expect("force equal request timestamps");
+    drop(conn);
     let reused = store
         .framework_interactions_for_thread(&thread_id, false)
         .await

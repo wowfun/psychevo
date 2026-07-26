@@ -164,6 +164,50 @@ impl StateRuntime {
         self.query_agent_edges(Some(parent_session_id)).await
     }
 
+    pub async fn list_agent_edges_for_parent_candidates(
+        &self,
+        parent_session_id: &str,
+        candidates: &[String],
+    ) -> Result<Vec<AgentEdgeRecord>> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidates_json = serde_json::to_string(candidates)?;
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT parent_session_id, child_session_id, status,
+                       created_at_ms, updated_at_ms, metadata_json
+                FROM agent_edges
+                WHERE parent_session_id = ?1
+                  AND EXISTS (
+                    SELECT 1
+                    FROM json_each(?2) AS candidate
+                    WHERE candidate.value IN (
+                        json_extract(metadata_json, '$.agent.parent_tool_call_id'),
+                        json_extract(metadata_json, '$.agent.id'),
+                        json_extract(metadata_json, '$.agent.name'),
+                        json_extract(metadata_json, '$.agent.agent_type'),
+                        json_extract(metadata_json, '$.agent.task_name'),
+                        json_extract(metadata_json, '$.agent.task'),
+                        json_extract(metadata_json, '$.agent.message')
+                    )
+                  )
+                ORDER BY updated_at_ms DESC, created_at_ms DESC
+                "#,
+            )
+            .bind(parent_session_id)
+            .bind(candidates_json)
+            .fetch_all(&mut *conn)
+            .await?;
+            rows.into_iter()
+                .map(|row| agent_edge_from_row(&row))
+                .collect()
+        })
+        .await
+    }
+
     pub async fn find_agent_edge(&self, target: &str) -> Result<Option<AgentEdgeRecord>> {
         let target = target.trim();
         if target.is_empty() {

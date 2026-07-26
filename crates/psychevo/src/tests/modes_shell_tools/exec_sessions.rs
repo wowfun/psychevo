@@ -78,6 +78,78 @@ pub(crate) async fn exec_command_yielded_session_emits_background_lifecycle_even
     .await;
 }
 
+#[test]
+fn completed_tasks_without_exec_sessions_do_not_start_detach_workers() {
+    for index in 0..1_000 {
+        assert!(
+            !crate::tools::detach_exec_sessions_for_task(format!("no-exec-session-{index}")),
+            "task without an exec session must take the allocation-free cleanup path"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+pub(crate) async fn detached_exec_sessions_share_one_reaper_worker() {
+    let temp = tempdir().expect("temp");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let mut session_ids = Vec::new();
+    for task_id in ["exec-reaper-a", "exec-reaper-b"] {
+        let tools = crate::tools::coding_core_tools_for_mode_with_context(
+            &cwd,
+            RunMode::Default,
+            crate::tools::ToolRuntimeContext {
+                task_id: task_id.to_string(),
+                lsp: crate::config::LspConfig::default(),
+                lsp_manager: crate::tools::write_support::default_lsp_manager(),
+                allow_login_shell: false,
+                env: BTreeMap::new(),
+                path_prefixes: Vec::new(),
+                sandbox_policy: crate::sandbox::SandboxPolicy::disabled(),
+                sandbox_grants: crate::sandbox::SandboxWriteGrants::default(),
+                ..crate::tools::ToolRuntimeContext::default()
+            },
+        );
+        let exec = tools
+            .iter()
+            .find(|tool| tool.name() == "exec_command")
+            .expect("exec_command");
+        let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+        let result = exec
+            .execute(
+                format!("call_{task_id}"),
+                json!({"cmd": "sleep 30", "yield_time_ms": 250}),
+                receivers.abort_signal(),
+            )
+            .await;
+        assert!(!result.is_error, "{:?}", result.json);
+        session_ids.push(result.json["session_id"].as_u64().expect("session id"));
+        assert!(crate::tools::detach_exec_sessions_for_task(
+            task_id.to_string()
+        ));
+    }
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if session_ids
+                .iter()
+                .all(|session_id| crate::tools::get_exec_session(*session_id).is_none())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("shared reaper cleanup");
+    assert_eq!(
+        crate::tools::exec_session_reaper_start_count(),
+        1,
+        "all detached sessions must use the same process worker"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 pub(crate) async fn interrupt_exec_sessions_for_task_emits_interrupted_finish() {

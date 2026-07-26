@@ -181,6 +181,66 @@ impl StateRuntime {
         .await
     }
 
+    pub async fn list_gateway_turn_terminals_for_thread_window(
+        &self,
+        thread_id: &str,
+        lower_session_seq: i64,
+        before_session_seq: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<GatewayTurnTerminalRecord>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        const STRUCTURAL_BOUNDARY_SQL: &str = r#"
+            COALESCE(
+                json_extract(metadata_json, '$.lastCommittedSeq'),
+                json_extract(metadata_json, '$.last_committed_seq'),
+                json_extract(metadata_json, '$.firstCommittedSeq') - 1,
+                json_extract(metadata_json, '$.first_committed_seq') - 1,
+                9223372036854775807
+            )
+        "#;
+        let upper_predicate = if before_session_seq.is_some() {
+            format!("AND {STRUCTURAL_BOUNDARY_SQL} < ?3")
+        } else {
+            String::new()
+        };
+        let sql = format!(
+            r#"
+            SELECT turn_id, thread_id, status, outcome, error_message,
+                   started_at_ms, completed_at_ms, metadata_json
+            FROM gateway_turn_terminals
+            WHERE thread_id = ?1
+              AND {STRUCTURAL_BOUNDARY_SQL} >= ?2
+              {upper_predicate}
+            ORDER BY {STRUCTURAL_BOUNDARY_SQL} DESC, completed_at_ms DESC, turn_id DESC
+            LIMIT ?4
+            "#
+        );
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(thread_id)
+                .bind(lower_session_seq);
+            query = if let Some(before_session_seq) = before_session_seq {
+                query.bind(before_session_seq)
+            } else {
+                query.bind(Option::<i64>::None)
+            };
+            let rows = query
+                .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+                .fetch_all(&mut *conn)
+                .await?;
+            let mut records = rows
+                .into_iter()
+                .map(|row| gateway_turn_terminal_from_row(&row))
+                .collect::<Result<Vec<_>>>()?;
+            records.reverse();
+            Ok(records)
+        })
+        .await
+    }
+
     async fn gateway_control_write<'q>(
         &self,
         query: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments>,

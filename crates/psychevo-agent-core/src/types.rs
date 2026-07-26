@@ -8,6 +8,8 @@ pub enum Error {
     EventSink(String),
     #[error("agent failed: {0}")]
     Agent(String),
+    #[error(transparent)]
+    ToolRouter(#[from] ToolRouterError),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

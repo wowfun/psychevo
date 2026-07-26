@@ -1248,6 +1248,7 @@ fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
         agents: None,
     });
     let declarations = ToolRouter::from_tools(surface.tools)
+        .expect("unique tools")
         .with_tool_search(ToolSearchOptions::enabled())
         .declarations();
     let names = declarations

@@ -10,6 +10,13 @@ use super::{
 };
 
 impl StateRuntime {
+    #[cfg(test)]
+    pub(crate) fn fail_next_framework_terminal_for_test(&self) {
+        self.inner
+            .fail_next_framework_terminal
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub(crate) async fn request_framework_interaction(
         &self,
         interaction_id: &str,
@@ -17,24 +24,22 @@ impl StateRuntime {
         turn_id: &str,
         kind: &str,
         payload: Value,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let requested_at_ms = now_ms();
         let payload_json = serde_json::to_string(&payload)?;
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
-            sqlx::query(
+            let changed = sqlx::query(
                 r#"
                 INSERT INTO framework_interactions (
                     interaction_id, thread_id, turn_id, kind, status,
                     payload_json, resolution_json, requested_at_ms, resolved_at_ms
-                ) VALUES (?1, ?2, ?3, ?4, 'pending', ?5, NULL, ?6, NULL)
-                ON CONFLICT(turn_id, interaction_id) DO UPDATE SET
-                    kind = excluded.kind,
-                    status = CASE
-                        WHEN framework_interactions.status = 'pending' THEN 'pending'
-                        ELSE framework_interactions.status
-                    END,
-                    payload_json = excluded.payload_json
+                )
+                SELECT ?1, ?2, ?3, ?4, 'pending', ?5, NULL, ?6, NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM gateway_turn_terminals WHERE turn_id = ?3
+                )
+                ON CONFLICT(turn_id, interaction_id) DO NOTHING
                 "#,
             )
             .bind(interaction_id)
@@ -44,30 +49,10 @@ impl StateRuntime {
             .bind(payload_json)
             .bind(requested_at_ms)
             .execute(&mut *tx)
-            .await?;
-            sqlx::query(
-                r#"
-                UPDATE framework_interactions
-                SET status = 'cancelled',
-                    resolution_json = '{"reason":"turn_finished"}',
-                    resolved_at_ms = ?2
-                WHERE interaction_id = ?1
-                  AND turn_id = ?3
-                  AND status = 'pending'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM gateway_turn_terminals
-                      WHERE turn_id = ?3
-                  )
-                "#,
-            )
-            .bind(interaction_id)
-            .bind(requested_at_ms)
-            .bind(turn_id)
-            .execute(&mut *tx)
-            .await?;
+            .await?
+            .rows_affected();
             tx.commit().await?;
-            Ok(())
+            Ok(changed == 1)
         })
         .await
     }
@@ -77,44 +62,32 @@ impl StateRuntime {
         interaction_id: &str,
         thread_id: &str,
         turn_id: &str,
-        reason: &str,
+        kind: &str,
+        status: &str,
+        resolution: Value,
     ) -> Result<bool> {
         let resolved_at_ms = now_ms();
-        let status = if matches!(reason, "cancelled" | "timed_out" | "turn_finished") {
-            "cancelled"
-        } else {
-            "resolved"
-        };
-        let resolution_json = serde_json::to_string(&json!({ "reason": reason }))?;
+        debug_assert!(matches!(status, "resolved" | "cancelled"));
+        let resolution_json = serde_json::to_string(&resolution)?;
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
             let changed = sqlx::query(
                 r#"
-                INSERT INTO framework_interactions (
-                    interaction_id, thread_id, turn_id, kind, status,
-                    payload_json, resolution_json, requested_at_ms, resolved_at_ms
-                ) VALUES (?1, ?2, ?3, 'unknown', ?4, 'null', ?5, ?6, ?6)
-                ON CONFLICT(turn_id, interaction_id) DO UPDATE SET
-                    status = CASE
-                        WHEN framework_interactions.status = 'pending'
-                        THEN excluded.status
-                        ELSE framework_interactions.status
-                    END,
-                    resolution_json = CASE
-                        WHEN framework_interactions.status = 'pending'
-                        THEN excluded.resolution_json
-                        ELSE framework_interactions.resolution_json
-                    END,
-                    resolved_at_ms = CASE
-                        WHEN framework_interactions.status = 'pending'
-                        THEN excluded.resolved_at_ms
-                        ELSE framework_interactions.resolved_at_ms
-                    END
+                UPDATE framework_interactions
+                SET status = ?5,
+                    resolution_json = ?6,
+                    resolved_at_ms = ?7
+                WHERE interaction_id = ?1
+                  AND thread_id = ?2
+                  AND turn_id = ?3
+                  AND kind = ?4
+                  AND status = 'pending'
                 "#,
             )
             .bind(interaction_id)
             .bind(thread_id)
             .bind(turn_id)
+            .bind(kind)
             .bind(status)
             .bind(resolution_json)
             .bind(resolved_at_ms)
@@ -127,11 +100,49 @@ impl StateRuntime {
         .await
     }
 
+    pub(crate) async fn pending_framework_interaction_kind(
+        &self,
+        interaction_id: &str,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<Option<String>> {
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            Ok(sqlx::query_scalar(
+                r#"
+                SELECT kind
+                FROM framework_interactions
+                WHERE interaction_id = ?1
+                  AND thread_id = ?2
+                  AND turn_id = ?3
+                  AND status = 'pending'
+                "#,
+            )
+            .bind(interaction_id)
+            .bind(thread_id)
+            .bind(turn_id)
+            .fetch_optional(&mut *conn)
+            .await?)
+        })
+        .await
+    }
+
     pub(crate) async fn finalize_framework_turn(
         &self,
         input: GatewayTurnTerminalInput<'_>,
         interaction_reason: &str,
     ) -> Result<()> {
+        #[cfg(test)]
+        if self
+            .inner
+            .fail_next_framework_terminal
+            .swap(0, std::sync::atomic::Ordering::SeqCst)
+            > 0
+        {
+            return Err(crate::Error::Message(
+                "injected Framework terminal persistence failure".to_string(),
+            ));
+        }
         let metadata_json = input
             .metadata
             .as_ref()
@@ -225,7 +236,7 @@ impl StateRuntime {
                        payload_json, resolution_json, requested_at_ms, resolved_at_ms
                 FROM framework_interactions
                 WHERE thread_id = ?1 AND (?2 = 0 OR status = 'pending')
-                ORDER BY requested_at_ms ASC, interaction_id ASC
+                ORDER BY requested_at_ms ASC, rowid ASC
                 "#,
             )
             .bind(thread_id)

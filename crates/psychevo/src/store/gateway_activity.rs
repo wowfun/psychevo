@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use psychevo_agent_core::now_ms;
 use serde_json::Value;
-use sqlx::{Arguments, Row};
+use sqlx::{Arguments, Row, Sqlite, Transaction};
 
 use crate::error::{Error, Result};
 
@@ -22,43 +22,13 @@ impl StateRuntime {
     ) -> Result<()> {
         self.observe_sqlx(async {
             let mut tx = self.begin_sqlx_write().await?;
-            let metadata_json = sqlx::query_scalar::<_, Option<String>>(
-                "SELECT metadata_json FROM sessions WHERE id = ?1",
+            record_gateway_turn_start_receipt_in_tx(
+                &mut tx,
+                thread_id,
+                client_turn_id,
+                turn_id,
             )
-            .bind(thread_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-            let mut metadata = metadata_json
-                .as_deref()
-                .map(serde_json::from_str::<Value>)
-                .transpose()?
-                .and_then(|value| value.as_object().cloned())
-                .unwrap_or_default();
-            let mut receipts = metadata
-                .remove(TURN_START_RECEIPTS_METADATA_KEY)
-                .and_then(|value| value.as_array().cloned())
-                .unwrap_or_default();
-            receipts.retain(|receipt| {
-                receipt.get("clientTurnId").and_then(Value::as_str) != Some(client_turn_id)
-            });
-            receipts.push(serde_json::json!({
-                "clientTurnId": client_turn_id,
-                "turnId": turn_id,
-            }));
-            if receipts.len() > MAX_TURN_START_RECEIPTS {
-                receipts.drain(..receipts.len() - MAX_TURN_START_RECEIPTS);
-            }
-            metadata.insert(
-                TURN_START_RECEIPTS_METADATA_KEY.to_string(),
-                Value::Array(receipts),
-            );
-            sqlx::query("UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3")
-                .bind(Value::Object(metadata).to_string())
-                .bind(now_ms())
-                .bind(thread_id)
-                .execute(&mut *tx)
-                .await?;
+            .await?;
             tx.commit().await?;
             Ok(())
         })
@@ -426,6 +396,51 @@ impl StateRuntime {
         })
         .await
     }
+}
+
+pub(super) async fn record_gateway_turn_start_receipt_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_id: &str,
+    client_turn_id: &str,
+    turn_id: &str,
+) -> Result<()> {
+    let metadata_json =
+        sqlx::query_scalar::<_, Option<String>>("SELECT metadata_json FROM sessions WHERE id = ?1")
+            .bind(thread_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
+    let mut metadata = metadata_json
+        .as_deref()
+        .map(serde_json::from_str::<Value>)
+        .transpose()?
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    let mut receipts = metadata
+        .remove(TURN_START_RECEIPTS_METADATA_KEY)
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    receipts.retain(|receipt| {
+        receipt.get("clientTurnId").and_then(Value::as_str) != Some(client_turn_id)
+    });
+    receipts.push(serde_json::json!({
+        "clientTurnId": client_turn_id,
+        "turnId": turn_id,
+    }));
+    if receipts.len() > MAX_TURN_START_RECEIPTS {
+        receipts.drain(..receipts.len() - MAX_TURN_START_RECEIPTS);
+    }
+    metadata.insert(
+        TURN_START_RECEIPTS_METADATA_KEY.to_string(),
+        Value::Array(receipts),
+    );
+    sqlx::query("UPDATE sessions SET metadata_json = ?1, updated_at_ms = ?2 WHERE id = ?3")
+        .bind(Value::Object(metadata).to_string())
+        .bind(now_ms())
+        .bind(thread_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 fn gateway_activity_select_sql(where_clause: &str) -> String {

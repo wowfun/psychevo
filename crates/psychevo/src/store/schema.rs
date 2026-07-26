@@ -86,6 +86,10 @@ impl StateRuntime {
                 acquire_latency_micros: AtomicU64::new(0),
                 execute_latency_micros: AtomicU64::new(0),
                 filesystem_grants: Mutex::new(Default::default()),
+                #[cfg(test)]
+                fail_next_framework_terminal: AtomicU64::new(0),
+                #[cfg(test)]
+                gateway_turn_acceptance_barrier: Mutex::new(None),
             }),
         })
     }

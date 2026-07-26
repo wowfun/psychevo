@@ -121,6 +121,57 @@ impl StateRuntime {
         .await
     }
 
+    pub async fn list_valid_session_compactions_between(
+        &self,
+        session_id: &str,
+        lower_session_seq: i64,
+        before_session_seq: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<SessionCompactionRecord>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let revert_boundary = self
+            .session_revert_state(session_id)
+            .await?
+            .map(|revert| revert.start_seq)
+            .unwrap_or(i64::MAX);
+        let upper_session_seq = before_session_seq
+            .unwrap_or(i64::MAX)
+            .min(revert_boundary);
+        self.observe_sqlx(async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+            SELECT id, session_id, created_at_ms, reason, summary_text,
+                   first_kept_session_seq, created_after_session_seq,
+                   tokens_before, tokens_after, summary_provider, summary_model,
+                   instructions, metadata_json
+            FROM session_compactions
+            WHERE session_id = ?1
+              AND created_after_session_seq >= ?2
+              AND created_after_session_seq < ?3
+              AND COALESCE(json_extract(metadata_json, '$.projection_only'), 0) != 1
+            ORDER BY created_after_session_seq DESC, id DESC
+            LIMIT ?4
+            "#,
+            )
+            .bind(session_id)
+            .bind(lower_session_seq)
+            .bind(upper_session_seq)
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(&mut *conn)
+            .await?;
+            let mut records = rows
+                .into_iter()
+                .map(|row| compaction_from_row(&row))
+                .collect::<Result<Vec<_>>>()?;
+            records.reverse();
+            Ok(records)
+        })
+        .await
+    }
+
     pub async fn load_message_records(
         &self,
         session_id: &str,

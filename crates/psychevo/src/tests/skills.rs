@@ -1,13 +1,15 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+#[cfg(unix)]
+use crate::skills::write_skill_file_after_validation;
 use crate::skills::{
-    InstallOptions, SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillSource,
-    SkillTarget, delete_skill_bundle, discover_skills, format_skills_for_prompt, install_skill,
-    list_skill_bundles, list_skills_value, save_skill_bundle, scan_skill_path,
+    InstallOptions, SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillSettings,
+    SkillSource, SkillTarget, delete_skill_bundle, discover_skills, format_skills_for_prompt,
+    install_skill, list_skill_bundles, list_skills_value, save_skill_bundle, scan_skill_path,
     select_explicit_skills, select_skills_for_prompt, set_skill_config_value, set_skill_enabled,
     skill_context_fragments, skill_context_messages, skill_source_display_label,
     skills_visible_for_prompt_with_tools, skills_visible_for_prompt_with_tools_and_toolsets,
-    view_skill_value, view_skill_value_selected,
+    view_skill_value, view_skill_value_selected, write_skill_file,
 };
 use crate::tools::skill_tools_for_mode;
 
@@ -512,12 +514,19 @@ pub(crate) async fn selected_skill_context_contains_body_without_frontmatter() {
         &home.join("skills"),
         "reviewer",
         "review code",
-        "Follow the review workflow.",
+        concat!(
+            "Follow the review workflow in ${PSYCHEVO_SKILL_DIR} for ",
+            "${PSYCHEVO_SESSION_ID}. Legacy ${HERMES_SKILL_DIR}/${HERMES_SESSION_ID}. ",
+            "Literal !`touch should-not-exist`."
+        ),
     );
     let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
     let selected = select_skills_for_prompt(&catalog, "$reviewer do it");
-    let fragments = skill_context_fragments(&selected, &catalog).expect("fragments");
-    let contexts = skill_context_messages(&selected, &catalog).expect("contexts");
+    let settings = SkillSettings::default();
+    let fragments =
+        skill_context_fragments(&selected, &catalog, "session-1", &settings).expect("fragments");
+    let contexts =
+        skill_context_messages(&selected, &catalog, "session-1", &settings).expect("contexts");
 
     assert_eq!(fragments.len(), 1);
     assert_eq!(contexts.len(), 1);
@@ -529,8 +538,175 @@ pub(crate) async fn selected_skill_context_contains_body_without_frontmatter() {
     assert!(contexts[0].contains("<name>reviewer</name>"));
     assert!(contexts[0].contains("<loaded_for_turn>true</loaded_for_turn>"));
     assert!(contexts[0].contains("Follow this already-loaded skill body directly"));
-    assert!(contexts[0].contains("Follow the review workflow."));
+    let skill_dir = home.join("skills").join("reviewer");
+    assert!(contexts[0].contains(&format!(
+        "Follow the review workflow in {} for session-1.",
+        skill_dir.display()
+    )));
+    assert!(contexts[0].contains(&format!("Legacy {}/session-1.", skill_dir.display())));
+    assert!(contexts[0].contains("Literal !`touch should-not-exist`."));
+    assert!(!skill_dir.join("should-not-exist").exists());
     assert!(!contexts[0].contains("description:"));
+}
+
+#[tokio::test]
+pub(crate) async fn selected_skill_context_can_keep_template_variables_literal() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    write_package_skill(
+        &home.join("skills"),
+        "literal",
+        "literal variables",
+        "${PSYCHEVO_SKILL_DIR}/${PSYCHEVO_SESSION_ID}",
+    );
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+    let selected = select_skills_for_prompt(&catalog, "$literal");
+    let settings = SkillSettings {
+        template_vars: false,
+        ..SkillSettings::default()
+    };
+
+    let fragments =
+        skill_context_fragments(&selected, &catalog, "session-1", &settings).expect("fragments");
+
+    assert!(
+        fragments[0]
+            .content
+            .contains("${PSYCHEVO_SKILL_DIR}/${PSYCHEVO_SESSION_ID}")
+    );
+}
+
+#[test]
+fn supporting_skill_write_allows_nested_missing_paths() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    write_package_skill(
+        &home.join("skills"),
+        "writer",
+        "write support files",
+        "Use supporting files.",
+    );
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+
+    write_skill_file(
+        &catalog,
+        &home,
+        &cwd,
+        "writer",
+        "references/nested/note.md",
+        "durable",
+    )
+    .expect("write");
+
+    assert_eq!(
+        fs::read_to_string(
+            home.join("skills")
+                .join("writer")
+                .join("references/nested/note.md")
+        )
+        .expect("content"),
+        "durable"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn supporting_skill_write_rejects_directory_and_final_symlink_escape() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(&outside).expect("outside");
+    write_package_skill(
+        &home.join("skills"),
+        "writer",
+        "write support files",
+        "Use supporting files.",
+    );
+    let skill_dir = home.join("skills").join("writer");
+    std::os::unix::fs::symlink(&outside, skill_dir.join("references")).expect("directory symlink");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+
+    let directory_error = write_skill_file(
+        &catalog,
+        &home,
+        &cwd,
+        "writer",
+        "references/escape.md",
+        "blocked",
+    )
+    .expect_err("directory escape");
+    assert!(
+        directory_error
+            .to_string()
+            .contains("escapes skill directory")
+    );
+    assert!(!outside.join("escape.md").exists());
+
+    fs::remove_file(skill_dir.join("references")).expect("remove directory symlink");
+    fs::create_dir_all(skill_dir.join("references")).expect("references");
+    fs::write(outside.join("target.md"), "outside").expect("outside target");
+    std::os::unix::fs::symlink(
+        outside.join("target.md"),
+        skill_dir.join("references/final.md"),
+    )
+    .expect("final symlink");
+    let final_error = write_skill_file(
+        &catalog,
+        &home,
+        &cwd,
+        "writer",
+        "references/final.md",
+        "blocked",
+    )
+    .expect_err("final escape");
+    assert!(final_error.to_string().contains("escapes skill directory"));
+    assert_eq!(
+        fs::read_to_string(outside.join("target.md")).expect("outside content"),
+        "outside"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn supporting_skill_write_rejects_identity_change_before_mutation() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::create_dir_all(&outside).expect("outside");
+    write_package_skill(
+        &home.join("skills"),
+        "writer",
+        "write support files",
+        "Use supporting files.",
+    );
+    let skill_dir = home.join("skills").join("writer");
+    let catalog = discover_skills(&skill_options(&temp, &home, &cwd)).expect("catalog");
+
+    let error = write_skill_file_after_validation(
+        &catalog,
+        &home,
+        &cwd,
+        "writer",
+        "references/changed.md",
+        "blocked",
+        || {
+            fs::remove_dir(skill_dir.join("references")).expect("remove checked parent");
+            std::os::unix::fs::symlink(&outside, skill_dir.join("references"))
+                .expect("replace identity");
+        },
+    )
+    .expect_err("identity change");
+
+    assert!(error.to_string().contains("path_identity_changed"));
+    assert!(!outside.join("changed.md").exists());
 }
 
 #[tokio::test]

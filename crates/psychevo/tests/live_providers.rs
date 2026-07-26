@@ -1,11 +1,13 @@
 use std::env;
 use std::path::PathBuf;
 
-use psychevo::state::StateRuntime;
+use psychevo::__product::persistence::StateRuntime;
 use psychevo::{
-    config::fetch_and_cache_model_catalog, config::model_catalog_provider,
-    config::provider_models_cache_path_for_home, config::read_cached_model_catalog, run::run_live,
-    types::RunOptions,
+    __product::configuration::fetch_and_cache_model_catalog,
+    __product::configuration::model_catalog_provider,
+    __product::configuration::provider_models_cache_path_for_home,
+    __product::configuration::read_cached_model_catalog, __product::runtime::RunOptions,
+    __product::runtime::run_live,
 };
 use psychevo_ai::Outcome;
 use rusqlite::Connection;
@@ -63,7 +65,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         workspace_mutations: None,
         runtime_tools: Vec::new(),
         include_reasoning: true,
-        mode: psychevo::types::RunMode::Default,
+        mode: psychevo::__product::runtime::RunMode::Default,
         permission_mode: None,
         approval_mode: None,
         approval_handler: None,
@@ -159,7 +161,7 @@ async fn live_provider_options_with_temp_home(
             workspace_mutations: None,
             runtime_tools: Vec::new(),
             include_reasoning: false,
-            mode: psychevo::types::RunMode::Default,
+            mode: psychevo::__product::runtime::RunMode::Default,
             permission_mode: None,
             approval_mode: None,
             approval_handler: None,

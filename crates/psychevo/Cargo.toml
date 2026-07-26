@@ -11,12 +11,13 @@ description = "In-process Framework for building coding agents with Psychevo"
 documentation = "https://docs.rs/psychevo"
 keywords = ["ai", "agent", "coding", "llm"]
 categories = ["development-tools"]
+autotests = false
 
 [features]
 default = []
 # Private bridge used by Psychevo's first-party product crates while the
 # published default surface remains the Framework API.
-internal = []
+product = []
 
 [dependencies]
 base64.workspace = true
@@ -61,3 +62,22 @@ landlock.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+
+[[test]]
+name = "public_framework"
+path = "tests/public_framework.rs"
+
+[[test]]
+name = "product_api"
+path = "tests/product_api.rs"
+required-features = ["product"]
+
+[[test]]
+name = "host_process"
+path = "tests/host_process.rs"
+required-features = ["product"]
+
+[[test]]
+name = "live_providers"
+path = "tests/live_providers.rs"
+required-features = ["product"]

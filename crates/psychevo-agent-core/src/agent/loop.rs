@@ -31,7 +31,7 @@ pub async fn run_agent_loop(
     let mut new_messages = Vec::new();
     let mut turn_index = 0usize;
     let mut tool_router =
-        ToolRouter::from_tools(request.tools.clone()).with_tool_search(request.tool_search);
+        ToolRouter::from_tools(request.tools.clone())?.with_tool_search(request.tool_search);
 
     emit(&sink, AgentEvent::TurnStart { turn_index }).await?;
     for message in request.prompt_messages.iter().cloned() {

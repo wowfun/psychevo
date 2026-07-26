@@ -3,8 +3,8 @@ use super::paths::{deep_merge, env_path};
 use super::selection_scan::{
     ancestor_agents_skill_dirs, available_files, escape_xml, existing_input_path,
     explicit_path_selects_skill, finalize_skill_catalog, find_skill, find_skill_by_path,
-    linked_files, looks_like_existing_path, preprocess_skill_content, resolve_configured_path,
-    resolve_skill_relative_path, select_skills, selected_skill, skill_mentions,
+    linked_files, looks_like_existing_path, resolve_configured_path, resolve_skill_relative_path,
+    preprocess_skill_content, select_skills, selected_skill, skill_mentions,
     skill_prompt_visible_for_activation, strip_frontmatter, truncate_description, valid_env_name,
 };
 use super::{
@@ -167,8 +167,6 @@ pub struct SkillSettings {
     pub paths: Vec<PathBuf>,
     pub enable_commands: Option<bool>,
     pub template_vars: bool,
-    pub inline_shell: bool,
-    pub inline_shell_timeout_secs: u64,
 }
 
 impl Default for SkillSettings {
@@ -179,8 +177,6 @@ impl Default for SkillSettings {
             paths: Vec::new(),
             enable_commands: None,
             template_vars: true,
-            inline_shell: false,
-            inline_shell_timeout_secs: 10,
         }
     }
 }
@@ -275,8 +271,6 @@ pub(crate) struct RawSkillSettings {
     pub(crate) paths: Option<Vec<String>>,
     pub(crate) enable_commands: Option<bool>,
     pub(crate) template_vars: Option<bool>,
-    pub(crate) inline_shell: Option<bool>,
-    pub(crate) inline_shell_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -376,12 +370,6 @@ pub(crate) fn parse_skill_settings(
         settings.enable_commands = raw.enable_commands;
         if let Some(value) = raw.template_vars {
             settings.template_vars = value;
-        }
-        if let Some(value) = raw.inline_shell {
-            settings.inline_shell = value;
-        }
-        if let Some(value) = raw.inline_shell_timeout {
-            settings.inline_shell_timeout_secs = value.max(1);
         }
     }
     Ok(settings)
@@ -826,7 +814,12 @@ pub fn view_skill_value_selected(
     };
     let preview_content = text.clone();
     let content = if file_path.is_none() {
-        preprocess_skill_content(strip_frontmatter(&text).trim(), &skill.base_dir, None, None)
+        preprocess_skill_content(
+            strip_frontmatter(&text).trim(),
+            &skill.base_dir,
+            "",
+            &SkillSettings::default(),
+        )
     } else {
         text
     };
@@ -1060,8 +1053,10 @@ pub fn select_explicit_skills(
 pub fn skill_context_messages(
     skills: &[SelectedSkill],
     catalog: &SkillCatalog,
+    session_id: &str,
+    settings: &SkillSettings,
 ) -> Result<Vec<String>> {
-    Ok(skill_context_fragments(skills, catalog)?
+    Ok(skill_context_fragments(skills, catalog, session_id, settings)?
         .into_iter()
         .map(|fragment| fragment.content)
         .collect())
