@@ -292,7 +292,7 @@ mod tests {
     fn normal_stdout_is_not_mirrored_to_terminal() {
         assert!(!should_mirror_to_terminal(
             OutputStream::Stdout,
-            b"Compiling psychevo-runtime v0.1.0\n"
+            b"Compiling psychevo v0.1.0\n"
         ));
     }
 

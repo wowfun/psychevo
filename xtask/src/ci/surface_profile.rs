@@ -166,8 +166,8 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
         }
     };
     let mut errors = Vec::new();
-    if manifest.get("schemaVersion").and_then(Value::as_u64) != Some(2) {
-        errors.push("surface comparison must use schemaVersion 2".to_string());
+    if manifest.get("schemaVersion").and_then(Value::as_u64) != Some(3) {
+        errors.push("surface comparison must use schemaVersion 3".to_string());
     }
     if manifest.get("outcome").and_then(Value::as_str) != Some("passed") {
         errors.push("surface comparison did not pass".to_string());
@@ -201,22 +201,28 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
         }
         if let Some(samples) = samples {
             for (index, sample) in samples.iter().enumerate() {
-                if sample
-                    .pointer("/gatewayStructure/turnStarted")
-                    .and_then(Value::as_u64)
-                    != Some(1)
-                {
+                if surface == "workbench" {
+                    if sample
+                        .pointer("/workbenchGateway/structure/turnStarted")
+                        .and_then(Value::as_u64)
+                        != Some(1)
+                    {
+                        errors.push(format!(
+                            "surface comparison Workbench sample {index} must contain exactly one public turnStarted"
+                        ));
+                    }
+                    if sample
+                        .pointer("/workbenchGateway/structure/reviewScans")
+                        .and_then(Value::as_u64)
+                        != Some(0)
+                    {
+                        errors.push(format!(
+                            "surface comparison Workbench sample {index} must contain zero synchronous review scans"
+                        ));
+                    }
+                } else if sample.get("workbenchGateway").is_some() {
                     errors.push(format!(
-                        "surface comparison {surface} sample {index} must contain exactly one turnStarted"
-                    ));
-                }
-                if sample
-                    .pointer("/gatewayStructure/reviewScans")
-                    .and_then(Value::as_u64)
-                    != Some(0)
-                {
-                    errors.push(format!(
-                        "surface comparison {surface} sample {index} must contain zero synchronous review scans"
+                        "surface comparison TUI sample {index} must not synthesize a Gateway Turn"
                     ));
                 }
             }
@@ -231,21 +237,6 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
                 "requestToFirstSurfaceCommitMs",
                 "firstSurfaceCommitToSettledCommitMs",
                 "sendToSettledCommitMs",
-            ],
-            measured_samples,
-            &mut errors,
-        );
-        validate_summary(
-            &manifest,
-            surface,
-            "gatewaySummary",
-            &[
-                "gatewayEntryToThreadMaterializedMs",
-                "threadMaterializedToTurnStartedMs",
-                "turnStartedToAdapterMs",
-                "adapterToUserEntryProjectedMs",
-                "userEntryProjectedToFirstAssistantMs",
-                "firstAssistantToGatewayCompletedMs",
             ],
             measured_samples,
             &mut errors,
@@ -274,10 +265,23 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
             }
         }
     }
+    validate_top_level_summary(
+        &manifest,
+        "workbenchGatewaySummary",
+        &[
+            "turnStartReceivedToAdmittedMs",
+            "turnAdmittedToAcceptedMs",
+            "turnAcceptedToAdapterMs",
+            "adapterToUserEntryProjectedMs",
+            "userEntryProjectedToFirstAssistantMs",
+            "firstAssistantToTurnCompletedMs",
+        ],
+        measured_samples,
+        &mut errors,
+    );
     for reference in [
         "/artifacts/providerEvents",
         "/artifacts/report",
-        "/artifacts/tuiGatewayTrace",
         "/artifacts/tuiTrace",
         "/artifacts/workbenchBrowserMarks",
         "/artifacts/workbenchGatewayTrace",
@@ -298,7 +302,7 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
             )),
         }
     }
-    for delta in ["delta", "gatewayDelta", "surfaceDelta"] {
+    for delta in ["delta", "surfaceDelta"] {
         if !manifest.get(delta).is_some_and(Value::is_object) {
             errors.push(format!(
                 "surface comparison is missing GUI-minus-TUI {delta} data"
@@ -306,6 +310,44 @@ fn validate_surface_profile(root: &Path, measured_samples: usize) -> Vec<String>
         }
     }
     errors
+}
+
+fn validate_top_level_summary(
+    manifest: &Value,
+    summary: &str,
+    metrics: &[&str],
+    measured_samples: usize,
+    errors: &mut Vec<String>,
+) {
+    for metric in metrics {
+        let base = format!("/{summary}/{metric}");
+        let observed = manifest
+            .pointer(&format!("{base}/observedSamples"))
+            .and_then(Value::as_u64);
+        let missing = manifest
+            .pointer(&format!("{base}/missingSamples"))
+            .and_then(Value::as_u64);
+        if observed
+            .zip(missing)
+            .map(|(observed, missing)| observed + missing)
+            != Some(measured_samples as u64)
+        {
+            errors.push(format!(
+                "surface comparison {summary}.{metric} has invalid sample accounting"
+            ));
+        }
+        for percentile in ["p50", "p95"] {
+            if manifest
+                .pointer(&format!("{base}/{percentile}"))
+                .and_then(Value::as_f64)
+                .is_none()
+            {
+                errors.push(format!(
+                    "surface comparison is missing {summary}.{metric}.{percentile}"
+                ));
+            }
+        }
+    }
 }
 
 fn validate_summary(
@@ -371,7 +413,6 @@ mod tests {
         for artifact in [
             "provider.jsonl",
             "report.md",
-            "tui-gateway.jsonl",
             "tui.jsonl",
             "browser.jsonl",
             "workbench-gateway.jsonl",
@@ -393,12 +434,12 @@ mod tests {
             "sendToSettledCommitMs": metric
         });
         let gateway_summary = serde_json::json!({
-            "gatewayEntryToThreadMaterializedMs": metric,
-            "threadMaterializedToTurnStartedMs": metric,
-            "turnStartedToAdapterMs": metric,
+            "turnStartReceivedToAdmittedMs": metric,
+            "turnAdmittedToAcceptedMs": metric,
+            "turnAcceptedToAdapterMs": metric,
             "adapterToUserEntryProjectedMs": metric,
             "userEntryProjectedToFirstAssistantMs": metric,
-            "firstAssistantToGatewayCompletedMs": metric
+            "firstAssistantToTurnCompletedMs": metric
         });
         let surface_summary = serde_json::json!({
             "assistantReceivedToControllerAppliedMs": metric,
@@ -406,12 +447,22 @@ mod tests {
             "completionReceivedToControllerAppliedMs": metric,
             "completionAppliedToSettledCommitMs": metric
         });
-        let surface = serde_json::json!({
+        let tui_surface = serde_json::json!({
             "cold": {},
-            "gatewaySummary": gateway_summary,
             "samples": [
-                {"gatewayStructure": {"reviewScans": 0, "turnStarted": 1}},
-                {"gatewayStructure": {"reviewScans": 0, "turnStarted": 1}}
+                {},
+                {}
+            ],
+            "summary": summary,
+            "surfaceSummary": surface_summary,
+            "traceDiagnostic": {},
+            "warmup": {}
+        });
+        let workbench_surface = serde_json::json!({
+            "cold": {},
+            "samples": [
+                {"workbenchGateway": {"structure": {"reviewScans": 0, "turnStarted": 1}}},
+                {"workbenchGateway": {"structure": {"reviewScans": 0, "turnStarted": 1}}}
             ],
             "summary": summary,
             "surfaceSummary": surface_summary,
@@ -421,23 +472,22 @@ mod tests {
         fs::write(
             root.join("comparison.json"),
             serde_json::to_vec(&serde_json::json!({
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "outcome": "passed",
                 "contract": {
                     "measuredSamples": 2,
                     "trackedDirtyFiles": DEFAULT_TRACKED_DIRTY_FILES
                 },
                 "surfaces": {
-                    "tui": surface,
-                    "workbench": surface
+                    "tui": tui_surface,
+                    "workbench": workbench_surface
                 },
                 "delta": {},
-                "gatewayDelta": {},
                 "surfaceDelta": {},
+                "workbenchGatewaySummary": gateway_summary,
                 "artifacts": {
                     "providerEvents": "provider.jsonl",
                     "report": "report.md",
-                    "tuiGatewayTrace": "tui-gateway.jsonl",
                     "tuiTrace": "tui.jsonl",
                     "workbenchBrowserMarks": "browser.jsonl",
                     "workbenchGatewayTrace": "workbench-gateway.jsonl",
@@ -457,7 +507,7 @@ mod tests {
         fs::create_dir_all(&root).expect("create test root");
         fs::write(
             root.join("comparison.json"),
-            br#"{"schemaVersion":2,"outcome":"failed"}"#,
+            br#"{"schemaVersion":3,"outcome":"failed"}"#,
         )
         .expect("write partial manifest");
         let errors = validate_surface_profile(&root, 20);

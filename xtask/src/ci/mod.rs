@@ -6,6 +6,7 @@ pub(crate) mod process;
 mod profiles;
 pub(crate) mod retention;
 mod runner;
+mod sdk_architecture;
 mod surface_profile;
 mod tui_capture;
 mod workbench_visual;

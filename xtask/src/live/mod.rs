@@ -490,9 +490,20 @@ fn run_check(
         LiveCheckAction::PevoDoctorLive => {
             run_pevo_doctor_live_check(root, check_dir, providers, env_mode, log)
         }
-        LiveCheckAction::CargoIgnoredTest { package, test, .. } => {
-            run_cargo_ignored_live_check(root, check_dir, providers, env_mode, package, test, log)
-        }
+        LiveCheckAction::CargoIgnoredTest {
+            package,
+            test,
+            features,
+            ..
+        } => run_cargo_ignored_live_check_with_command_resolver(
+            root,
+            check_dir,
+            providers,
+            env_mode,
+            (package, test, features),
+            log,
+            resolve_live_command_path,
+        ),
         LiveCheckAction::DeterministicPlaywright { spec, grep } => {
             run_deterministic_playwright_check(
                 root,
@@ -1075,39 +1086,19 @@ fn run_pevo_doctor_live_check(
     .include_suppressed_output(had_suppressed_output))
 }
 
-fn run_cargo_ignored_live_check(
-    root: &Path,
-    check_dir: &Path,
-    providers: &[LiveProvider],
-    env_mode: LiveEnvMode,
-    package: &'static str,
-    test: &'static str,
-    log: Arc<Mutex<fs::File>>,
-) -> Result<CheckResult> {
-    run_cargo_ignored_live_check_with_command_resolver(
-        root,
-        check_dir,
-        providers,
-        env_mode,
-        (package, test),
-        log,
-        resolve_live_command_path,
-    )
-}
-
 fn run_cargo_ignored_live_check_with_command_resolver<F>(
     root: &Path,
     check_dir: &Path,
     providers: &[LiveProvider],
     env_mode: LiveEnvMode,
-    cargo_test: (&'static str, &'static str),
+    cargo_test: (&'static str, &'static str, &'static [&'static str]),
     log: Arc<Mutex<fs::File>>,
     resolve_command: F,
 ) -> Result<CheckResult>
 where
     F: Fn(&str) -> Option<PathBuf>,
 {
-    let (package, test) = cargo_test;
+    let (package, test, features) = cargo_test;
     let prerequisites = match LivePrerequisites::load(root) {
         Ok(prerequisites) => prerequisites,
         Err(reason) => return blocked(log, reason),
@@ -1159,8 +1150,12 @@ where
         }
     }
     let mut command = ProcessCommand::new("cargo");
+    command.args(["test", "-p", package]);
+    if !features.is_empty() {
+        command.args(["--features", &features.join(",")]);
+    }
     command
-        .args(["test", "-p", package, test, "--", "--ignored", "--exact"])
+        .args([test, "--", "--ignored", "--exact"])
         .current_dir(root);
     live_env.apply_to_command(&mut command, providers.first().copied());
     if let Some(profile) = codex_broker_profile {
@@ -1945,6 +1940,7 @@ mod tests {
             (
                 "psychevo-gateway",
                 "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_installed_plugins",
+                &[],
             ),
             log,
             |_| None,

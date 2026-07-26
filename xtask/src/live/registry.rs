@@ -23,6 +23,7 @@ pub(crate) enum LiveCheckAction {
     CargoIgnoredTest {
         package: &'static str,
         test: &'static str,
+        features: &'static [&'static str],
         provider_required: bool,
     },
     DeterministicPlaywright {
@@ -88,8 +89,9 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         description: "Run runtime ignored live provider read-tool validation",
         suites: &["provider"],
         action: LiveCheckAction::CargoIgnoredTest {
-            package: "psychevo-runtime",
+            package: "psychevo",
             test: "live_xiaomi_token_plan_read_tool",
+            features: &["internal"],
             provider_required: true,
         },
     },
@@ -98,8 +100,9 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         description: "Run runtime ignored live model catalog fetch validation",
         suites: &["provider"],
         action: LiveCheckAction::CargoIgnoredTest {
-            package: "psychevo-runtime",
+            package: "psychevo",
             test: "live_xiaomi_token_plan_model_fetch",
+            features: &["internal"],
             provider_required: true,
         },
     },
@@ -110,6 +113,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-gateway",
             test: "live_xiaomi_token_plan_automation_manual_run_completes",
+            features: &[],
             provider_required: true,
         },
     },
@@ -120,6 +124,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo-gateway",
             test: "server::codex_capability_broker::tests::live_codex_plugin_broker_lists_installed_plugins",
+            features: &[],
             provider_required: false,
         },
     },
@@ -520,16 +525,29 @@ pub(crate) fn command_for_plan(check: &LiveCheck) -> Vec<String> {
         LiveCheckAction::PevoDoctorLive => {
             vec!["xtask-internal".to_string(), "pevo-doctor-live".to_string()]
         }
-        LiveCheckAction::CargoIgnoredTest { package, test, .. } => vec![
-            "cargo".to_string(),
-            "test".to_string(),
-            "-p".to_string(),
-            package.to_string(),
-            test.to_string(),
-            "--".to_string(),
-            "--ignored".to_string(),
-            "--exact".to_string(),
-        ],
+        LiveCheckAction::CargoIgnoredTest {
+            package,
+            test,
+            features,
+            ..
+        } => {
+            let mut command = vec![
+                "cargo".to_string(),
+                "test".to_string(),
+                "-p".to_string(),
+                package.to_string(),
+            ];
+            if !features.is_empty() {
+                command.extend(["--features".to_string(), features.join(",")]);
+            }
+            command.extend([
+                test.to_string(),
+                "--".to_string(),
+                "--ignored".to_string(),
+                "--exact".to_string(),
+            ]);
+            command
+        }
         LiveCheckAction::DeterministicPlaywright { spec, grep } => vec![
             "xtask-internal".to_string(),
             "playwright-deterministic".to_string(),
@@ -626,6 +644,19 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn psychevo_live_checks_enable_the_private_internal_surface() {
+        for id in ["runtime-provider-read", "runtime-model-fetch"] {
+            let command = command_for_plan(check_by_id(id).expect("runtime live check"));
+            assert!(
+                command
+                    .windows(2)
+                    .any(|args| args == ["--features", "internal"]),
+                "{id} plan must compile its private integration-test surface: {command:?}"
+            );
+        }
     }
 
     #[test]

@@ -40,6 +40,7 @@ pub(crate) struct WorkflowStep {
 pub(crate) enum WorkflowStepAction {
     Command(&'static [&'static str]),
     DesktopManifestParity,
+    SdkArchitecture,
     SingleProviderLive,
     DesktopVisual,
     SurfaceProfile,
@@ -52,6 +53,7 @@ impl WorkflowStepAction {
         match self {
             Self::Command(command) => command,
             Self::DesktopManifestParity => &["xtask-internal", "desktop-manifest-parity"],
+            Self::SdkArchitecture => &["xtask-internal", "sdk-architecture"],
             Self::SingleProviderLive => &["xtask-internal", "single-provider-live"],
             Self::DesktopVisual => &["xtask-internal", "desktop-visual"],
             Self::SurfaceProfile => &["xtask-internal", "surface-profile"],

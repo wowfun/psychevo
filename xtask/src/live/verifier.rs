@@ -25,24 +25,42 @@ pub(crate) fn verify_provider_smoke(
     let combined = first.iter().chain(second.iter()).collect::<Vec<_>>();
 
     let reasoning_seen = combined.iter().any(|event| {
-        entry_blocks(event).any(|block| {
-            block.get("kind").and_then(Value::as_str) == Some("reasoning")
-                && block
-                    .get("body")
-                    .and_then(Value::as_str)
-                    .is_some_and(|body| !body.trim().is_empty())
-        })
+        event.get("type").and_then(Value::as_str) == Some("item.updated")
+            && blocks(event).any(|block| {
+                block.get("kind").and_then(Value::as_str) == Some("reasoning")
+                    && ["body", "preview", "detail"].iter().any(|field| {
+                        block
+                            .get(*field)
+                            .and_then(Value::as_str)
+                            .is_some_and(|text| !text.trim().is_empty())
+                    })
+            })
     });
     if !reasoning_seen {
         bail!("{provider}: missing reasoning transcript entry");
     }
 
     let read_tool_seen = first.iter().any(|event| {
-        entry_blocks(event).any(|block| {
-            let metadata = block.get("metadata").unwrap_or(&Value::Null);
-            metadata.get("tool_name").and_then(Value::as_str) == Some("read")
-                && metadata.get("outcome").and_then(Value::as_str) == Some("normal")
-        })
+        event.get("type").and_then(Value::as_str) == Some("item.completed")
+            && blocks(event).any(|block| {
+                let metadata = block.get("metadata");
+                metadata
+                    .and_then(|value| value.get("projection"))
+                    .and_then(Value::as_str)
+                    == Some("tool")
+                    && metadata
+                        .and_then(|value| value.get("type"))
+                        .and_then(Value::as_str)
+                        == Some("tool_execution_end")
+                    && metadata
+                        .and_then(|value| value.get("tool_name"))
+                        .and_then(Value::as_str)
+                        == Some("read")
+                    && metadata
+                        .and_then(|value| value.get("outcome"))
+                        .and_then(Value::as_str)
+                        == Some("normal")
+            })
     });
     if !read_tool_seen {
         bail!("{provider}: first run did not complete read");
@@ -75,22 +93,20 @@ pub(crate) fn verify_provider_smoke(
     })
 }
 
+fn blocks(event: &Value) -> impl Iterator<Item = &Value> {
+    event
+        .pointer("/item/blocks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+}
+
 fn load_events(path: &Path) -> Result<Vec<Value>> {
     let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     text.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).with_context(|| format!("parse {}", path.display())))
         .collect()
-}
-
-fn entry_blocks(event: &Value) -> impl Iterator<Item = &Value> {
-    event
-        .get("entry")
-        .filter(|_| event.get("type").and_then(Value::as_str) == Some("entry.completed"))
-        .and_then(|entry| entry.get("blocks"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
 }
 
 fn thread_id(events: &[Value]) -> Option<String> {
@@ -103,39 +119,20 @@ fn thread_id(events: &[Value]) -> Option<String> {
 }
 
 fn final_text(events: &[Value]) -> String {
-    let final_answer = events.iter().rev().find_map(|event| {
-        matches!(
-            event.get("type").and_then(Value::as_str),
-            Some("turn.completed" | "turn.failed")
-        )
-        .then(|| event.get("finalAnswer").and_then(Value::as_str))
-        .flatten()
-        .filter(|text| !text.trim().is_empty())
-        .map(str::to_string)
-    });
-    if let Some(final_answer) = final_answer {
-        return final_answer;
-    }
-
     events
         .iter()
-        .filter_map(|event| {
-            event
-                .get("entry")
-                .filter(|_| event.get("type").and_then(Value::as_str) == Some("entry.completed"))
+        .rev()
+        .find_map(|event| {
+            matches!(
+                event.get("type").and_then(Value::as_str),
+                Some("turn.completed" | "turn.failed")
+            )
+            .then(|| event.get("finalAnswer").and_then(Value::as_str))
+            .flatten()
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string)
         })
-        .filter(|entry| entry.get("role").and_then(Value::as_str) == Some("assistant"))
-        .flat_map(|entry| {
-            entry
-                .get("blocks")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-        })
-        .filter(|block| block.get("kind").and_then(Value::as_str) == Some("text"))
-        .filter_map(|block| block.get("body").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("\n")
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -153,7 +150,8 @@ mod tests {
         fs::write(
             &first,
             r#"{"type":"thread.started","threadId":"thread-1"}
-{"type":"entry.completed","entry":{"role":"assistant","blocks":[{"kind":"reasoning","body":"thinking"},{"kind":"tool","metadata":{"tool_name":"read","outcome":"normal"}}]}}
+{"type":"item.updated","item":{"blocks":[{"kind":"reasoning","body":"thinking"}]}}
+{"type":"item.completed","item":{"blocks":[{"kind":"file","metadata":{"projection":"tool","type":"tool_execution_end","tool_name":"read","outcome":"normal"}}]}}
 {"type":"turn.completed","finalAnswer":"token ABC"}
 "#,
         )
@@ -161,7 +159,7 @@ mod tests {
         fs::write(
             &second,
             r#"{"type":"thread.started","threadId":"thread-1"}
-{"type":"entry.completed","entry":{"role":"assistant","blocks":[{"kind":"text","body":"token ABC"}]}}
+{"type":"turn.completed","finalAnswer":"token ABC"}
 "#,
         )
         .expect("second");
@@ -189,7 +187,7 @@ mod tests {
         fs::write(
             &first,
             r#"{"type":"thread.started","threadId":"thread-1"}
-{"type":"entry.completed","entry":{"role":"assistant","blocks":[{"kind":"reasoning","body":"thinking"}]}}
+{"type":"item.updated","item":{"blocks":[{"kind":"reasoning","body":"thinking"}]}}
 {"type":"turn.completed","finalAnswer":"token ABC"}
 "#,
         )

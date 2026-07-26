@@ -14,6 +14,7 @@ use super::model::{
 use super::process::{create_step_log, run_logged_process};
 use super::profiles::{find_profile, plan_for_profile_with_env};
 use super::retention::warn_if_ci_retention_cleanup_fails;
+use super::sdk_architecture::check_sdk_architecture;
 use super::surface_profile::run_surface_profile;
 use super::tui_capture::run_tui_vhs_demo;
 use super::workbench_visual::run_workbench_visual;
@@ -134,6 +135,19 @@ fn run_step(
         WorkflowStepAction::DesktopManifestParity => {
             create_step_log(log_path)?;
             check_desktop_manifest_parity(root)?;
+            println!("ci step {}: ok", step.id);
+            Ok(step_execution(
+                step,
+                log_path,
+                step.action.command_for_plan(),
+                true,
+                Some(0),
+                false,
+            ))
+        }
+        WorkflowStepAction::SdkArchitecture => {
+            create_step_log(log_path)?;
+            check_sdk_architecture(root)?;
             println!("ci step {}: ok", step.id);
             Ok(step_execution(
                 step,

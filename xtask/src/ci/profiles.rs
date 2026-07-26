@@ -26,6 +26,25 @@ const CHANGED_STEPS: &[WorkflowStep] = &[
 
 const RUST_BROAD_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
+        id: "sdk-architecture",
+        description: "Check SDK crate graph, publication boundary, and internal feature use",
+        action: WorkflowStepAction::SdkArchitecture,
+        live: false,
+    },
+    WorkflowStep {
+        id: "rust-sdk-default-surface",
+        description: "Compile the published Framework with its empty default feature set",
+        action: WorkflowStepAction::Command(&[
+            "cargo",
+            "check",
+            "-p",
+            "psychevo",
+            "--no-default-features",
+            "--quiet",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
         id: "gateway-protocol-check",
         description: "Check generated Gateway protocol bindings",
         action: WorkflowStepAction::Command(&[
@@ -213,6 +232,26 @@ const LIVE_STEPS: &[WorkflowStep] = &[WorkflowStep {
 }];
 
 const PACKAGE_STEPS: &[WorkflowStep] = &[
+    WorkflowStep {
+        id: "verify-rust-sdk-packages",
+        description: "Package and compile the three publishable Rust SDK crates",
+        action: WorkflowStepAction::Command(&["sh", "scripts/verify-sdk-packages.sh"]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "verify-python-sdk-packages",
+        description: "Build and install the Python SDK and binary wheels",
+        action: WorkflowStepAction::Command(&[
+            "python3",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "python/tests",
+            "-v",
+        ]),
+        live: false,
+    },
     WorkflowStep {
         id: "build-cli-release",
         description: "Build release CLI artifact",
@@ -485,7 +524,11 @@ mod tests {
     #[test]
     fn rust_broad_cargo_steps_use_quiet_output() {
         let plan = plan_profile("rust-broad", None).expect("rust-broad profile");
-        for step in plan.steps {
+        for step in plan
+            .steps
+            .into_iter()
+            .filter(|step| step.command.first().is_some_and(|part| part == "cargo"))
+        {
             assert!(
                 step.command.iter().any(|part| part == "--quiet"),
                 "step '{}' should quiet normal cargo output: {:?}",
