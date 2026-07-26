@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{
+use psychevo::{
     config::auth_status_value, config::create_scoped_custom_provider, config::set_default_model,
     config::set_provider_api_key, types::ScopedCustomProviderInput,
 };
@@ -40,7 +40,7 @@ pub(crate) async fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> 
 
 pub(crate) fn auth_status(
     args: &AuthStatusArgs,
-    options: &psychevo_runtime::types::RunOptions,
+    options: &psychevo::types::RunOptions,
 ) -> Result<ExitCode> {
     let value = auth_status_value(options, args.provider.as_deref())?;
     if args.json {
@@ -122,7 +122,7 @@ pub(crate) fn auth_setup(
 
 pub(crate) fn auth_set(
     args: &AuthSetArgs,
-    options: &psychevo_runtime::types::RunOptions,
+    options: &psychevo::types::RunOptions,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<ExitCode> {

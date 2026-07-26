@@ -27,7 +27,7 @@ pub trait GatewayBackend: Send + Sync + fmt::Debug {
     fn run_turn(
         &self,
         request: BackendTurnRequest,
-    ) -> BoxFuture<'static, psychevo_runtime::Result<RunResult>>;
+    ) -> BoxFuture<'static, psychevo::Result<RunResult>>;
 }
 
 #[derive(Clone)]
@@ -53,7 +53,7 @@ impl ExternalAgentDelegate for GatewayExternalAgentDelegate {
     fn run(
         &self,
         request: ExternalAgentDelegateRequest,
-    ) -> BoxFuture<'static, psychevo_runtime::Result<ExternalAgentDelegateResult>> {
+    ) -> BoxFuture<'static, psychevo::Result<ExternalAgentDelegateResult>> {
         let delegate = self.clone();
         Box::pin(async move { delegate.run_inner(request).await })
     }
@@ -63,7 +63,7 @@ impl GatewayExternalAgentDelegate {
     async fn run_inner(
         self,
         request: ExternalAgentDelegateRequest,
-    ) -> psychevo_runtime::Result<ExternalAgentDelegateResult> {
+    ) -> psychevo::Result<ExternalAgentDelegateResult> {
         let child_session_id = request.child_session_id.clone();
         let terminal_child_session_id = child_session_id.clone();
         let child_turn_id = request.run_id.clone();
@@ -234,7 +234,7 @@ impl GatewayExternalAgentDelegate {
 
             .set_agent_edge_status(
                 &terminal_child_session_id,
-                psychevo_runtime::state::AgentEdgeStatus::Closed,
+                psychevo::state::AgentEdgeStatus::Closed,
             )
             .await?;
         match &result {
@@ -266,7 +266,7 @@ impl Gateway {
         result: &ExternalAgentDelegateResult,
         durable_activity: Option<&DurableGatewayActivity>,
         event_sink: Option<&GatewayEventEmitter>,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         if let Some(terminal) = self.state.gateway_turn_terminal(turn_id).await? {
             self.mark_active_turn_terminal(turn_id);
             self.finish_durable_gateway_activity(durable_activity, &terminal.status)
@@ -326,7 +326,7 @@ fn resolve_peer_delegate(
     options: &RunOptions,
     request: &ExternalAgentDelegateRequest,
     profile_fingerprint: &str,
-) -> psychevo_runtime::Result<ResolvedPeerTurn> {
+) -> psychevo::Result<ResolvedPeerTurn> {
     if options.no_agents {
         return Err(Error::Message("agent delegation is disabled".to_string()));
     }
@@ -407,7 +407,7 @@ impl GatewayBackend for PsychevoRuntimeBackend {
     fn run_turn(
         &self,
         request: BackendTurnRequest,
-    ) -> BoxFuture<'static, psychevo_runtime::Result<RunResult>> {
+    ) -> BoxFuture<'static, psychevo::Result<RunResult>> {
         Box::pin(async move {
             let continue_sources = request
                 .continue_sources

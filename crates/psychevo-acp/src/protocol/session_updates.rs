@@ -130,7 +130,7 @@ pub(crate) mod tests {
         assert_eq!(
             tool_call.meta.value().expect("meta")["psychevo"]["toolTiming"],
             json!({
-                "source": "psychevo_runtime",
+                "source": "psychevo",
                 "startedAtMs": 1_234,
             })
         );
@@ -154,7 +154,7 @@ pub(crate) mod tests {
         assert_eq!(
             update.meta.value().expect("meta")["psychevo"]["toolTiming"],
             json!({
-                "source": "psychevo_runtime",
+                "source": "psychevo",
                 "elapsedMs": 321,
             })
         );
@@ -163,7 +163,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn advertises_tools_slash_command() {
         let commands = available_command_lines_from(available_commands_from(
-            psychevo_runtime::command_registry::available_slash_commands_for_surface(
+            psychevo::command_registry::available_slash_commands_for_surface(
                 acp_command_capabilities(),
                 false,
                 &[],
@@ -179,7 +179,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn parses_slash_prompt_command_and_args() {
-        use psychevo_runtime::command_registry::{
+        use psychevo::command_registry::{
             SlashCommandAction, SlashCommandParse, parse_slash_command_line,
         };
 
@@ -211,9 +211,15 @@ pub(crate) mod tests {
         })
         .await.expect("agent");
         let session_id = SessionId::new("acp-test");
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let thread = agent
+            .framework
+            .start_thread(StartThreadRequest::new(&cwd))
+            .await
+            .expect("thread");
         let session = AcpSession::new(
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            None,
+            cwd,
+            thread,
             Vec::new(),
         );
         let text = agent.status_command_text(&session_id, &session).await;

@@ -8,7 +8,7 @@ struct RpcRequest {
 }
 
 impl RpcRequest {
-    fn params<T>(&self) -> psychevo_runtime::Result<T>
+    fn params<T>(&self) -> psychevo::Result<T>
     where
         T: Default + for<'de> Deserialize<'de>,
     {
@@ -18,7 +18,7 @@ impl RpcRequest {
         }
     }
 
-    fn required_params<T: for<'de> Deserialize<'de>>(&self) -> psychevo_runtime::Result<T> {
+    fn required_params<T: for<'de> Deserialize<'de>>(&self) -> psychevo::Result<T> {
         let params = self
             .params
             .clone()

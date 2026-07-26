@@ -100,12 +100,12 @@
             .append_message_with_metrics(
                 session_id,
                 &RuntimeMessage::Assistant {
-                    content: vec![psychevo_agent_core::AssistantBlock::Text {
+                    content: vec![psychevo::__agent_core::AssistantBlock::Text {
                         text: "done".to_string(),
                     }],
                     timestamp_ms: 1,
                     finish_reason: Some("stop".to_string()),
-                    outcome: psychevo_ai::Outcome::Normal,
+                    outcome: psychevo::__ai::Outcome::Normal,
                     model: Some("fake-model".to_string()),
                     provider: Some("fake-provider".to_string()),
                 },

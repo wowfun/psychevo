@@ -6,12 +6,12 @@ use std::thread;
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{
+use psychevo::{
     Error, host_paths::GitBashRuntime, host_paths::resolve_input_path, paths::canonicalize_cwd,
     process_env::ProcessEnvOptions, process_env::apply_pty_process_env,
     process_env::terminate_pty_child_tree,
 };
+use psychevo_gateway_protocol as wire;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -36,7 +36,7 @@ impl TerminalManager {
         params: wire::TerminalStartParams,
         inherited_env: &BTreeMap<String, String>,
         out_tx: ConnectionSender,
-    ) -> psychevo_runtime::Result<wire::TerminalStartResult> {
+    ) -> psychevo::Result<wire::TerminalStartResult> {
         let cwd = resolve_terminal_cwd(&scope.cwd, params.cwd.as_deref())?;
         let rows = params.rows.clamp(4, 200);
         let cols = params.cols.clamp(20, 400);
@@ -96,7 +96,7 @@ impl TerminalManager {
     pub(super) fn write(
         &self,
         params: wire::TerminalWriteParams,
-    ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
+    ) -> psychevo::Result<wire::TerminalMutationResult> {
         let bytes = BASE64_STANDARD
             .decode(params.data_base64.as_bytes())
             .map_err(|err| Error::Message(format!("invalid terminal data: {err}")))?;
@@ -113,7 +113,7 @@ impl TerminalManager {
     pub(super) fn resize(
         &self,
         params: wire::TerminalResizeParams,
-    ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
+    ) -> psychevo::Result<wire::TerminalMutationResult> {
         let session = self.session(&params.terminal_id)?;
         let master = session
             .master
@@ -134,7 +134,7 @@ impl TerminalManager {
         &self,
         params: wire::TerminalTerminateParams,
         out_tx: ConnectionSender,
-    ) -> psychevo_runtime::Result<wire::TerminalMutationResult> {
+    ) -> psychevo::Result<wire::TerminalMutationResult> {
         let Some(session) = self
             .sessions
             .lock()
@@ -157,7 +157,7 @@ impl TerminalManager {
         Ok(wire::TerminalMutationResult { accepted: true })
     }
 
-    fn session(&self, terminal_id: &str) -> psychevo_runtime::Result<TerminalSession> {
+    fn session(&self, terminal_id: &str) -> psychevo::Result<TerminalSession> {
         self.sessions
             .lock()
             .expect("web terminal sessions poisoned")
@@ -249,7 +249,7 @@ fn spawn_terminal_waiter(
     });
 }
 
-fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo_runtime::Result<PathBuf> {
+fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo::Result<PathBuf> {
     let Some(cwd) = cwd.map(str::trim).filter(|cwd| !cwd.is_empty()) else {
         return Ok(root.to_path_buf());
     };
@@ -269,7 +269,7 @@ fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> psychevo_runtime::Res
 
 fn default_terminal_shell(
     inherited_env: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<(String, Vec<String>)> {
+) -> psychevo::Result<(String, Vec<String>)> {
     if cfg!(windows) {
         let git_bash = GitBashRuntime::discover(inherited_env)?;
         return Ok((
@@ -292,7 +292,7 @@ fn default_terminal_shell(
 fn apply_terminal_env(
     command: &mut portable_pty::CommandBuilder,
     inherited_env: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     apply_pty_process_env(command, inherited_env, ProcessEnvOptions::new(&[]))?;
     command.env("TERM", "xterm-256color");
     Ok(())
@@ -302,8 +302,8 @@ fn apply_terminal_env(
 fn terminal_effective_env(
     inherited_env: &BTreeMap<String, String>,
     windows_utf8_defaults: bool,
-) -> psychevo_runtime::Result<BTreeMap<String, String>> {
-    let mut env = psychevo_runtime::process_env::effective_process_env(
+) -> psychevo::Result<BTreeMap<String, String>> {
+    let mut env = psychevo::process_env::effective_process_env(
         inherited_env,
         ProcessEnvOptions::new(&[]).with_windows_utf8_defaults(windows_utf8_defaults),
     )?;

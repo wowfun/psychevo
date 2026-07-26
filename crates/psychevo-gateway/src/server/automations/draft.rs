@@ -49,7 +49,7 @@ User request:
 fn parse_automation_draft_response(
     text: &str,
     current_thread_id: Option<&str>,
-) -> psychevo_runtime::Result<wire::AutomationDraftView> {
+) -> psychevo::Result<wire::AutomationDraftView> {
     let value = extract_json_object(text)?;
     let mut draft: wire::AutomationDraftView = serde_json::from_value(value)?;
     draft.title = draft.title.trim().to_string();
@@ -90,7 +90,7 @@ fn parse_automation_draft_response(
     Ok(draft)
 }
 
-fn extract_json_object(text: &str) -> psychevo_runtime::Result<Value> {
+fn extract_json_object(text: &str) -> psychevo::Result<Value> {
     let trimmed = text.trim();
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
         return Ok(value);

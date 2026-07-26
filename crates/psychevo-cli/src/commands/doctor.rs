@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo_runtime::{
+use psychevo::{
     config::auth_status_value, config::config_show_value, config::fetch_model_catalog,
     config::model_catalog_providers, config::selected_configured_model,
 };
@@ -42,7 +42,7 @@ async fn doctor_report(args: &DoctorArgs) -> Result<Value> {
         Ok(options) => capture_value(|| {
             Ok(config_show_value(
                 options,
-                psychevo_runtime::types::ConfigScope::Effective,
+                psychevo::types::ConfigScope::Effective,
             )?)
         }),
         Err(err) => json!({ "ok": false, "error": format!("{err:#}") }),
@@ -123,7 +123,7 @@ fn capture_value(f: impl FnOnce() -> Result<Value>) -> Value {
     }
 }
 
-async fn live_checks(options: Option<&psychevo_runtime::types::RunOptions>) -> Value {
+async fn live_checks(options: Option<&psychevo::types::RunOptions>) -> Value {
     let Some(options) = options else {
         return json!({ "enabled": true, "ok": false, "error": "local configuration is not available" });
     };

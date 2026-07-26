@@ -1,7 +1,7 @@
 pub(crate) use std::path::PathBuf;
 
 pub(crate) use clap::{Parser, Subcommand};
-pub(crate) use psychevo_runtime::{
+pub(crate) use psychevo::{
     session_export::SessionArtifactKind, session_export::SessionExportIncludeSet,
     types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
 };

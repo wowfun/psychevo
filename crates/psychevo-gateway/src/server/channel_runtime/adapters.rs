@@ -5,7 +5,7 @@ use super::*;
 pub(super) async fn build_channel_gateway(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
-) -> psychevo_runtime::Result<ChannelGateway> {
+) -> psychevo::Result<ChannelGateway> {
     #[cfg(not(feature = "native-channels"))]
     {
         let _ = (state, connection);

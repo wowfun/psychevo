@@ -4,6 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish = false
 
 [features]
 default = ["native-channels"]
@@ -19,11 +20,9 @@ clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
 ignore.workspace = true
-psychevo-ai = { path = "../psychevo-ai" }
-psychevo-agent-core = { path = "../psychevo-agent-core" }
 psychevo-acp = { path = "../psychevo-acp" }
 psychevo-gateway = { path = "../psychevo-gateway", default-features = false }
-psychevo-runtime = { path = "../psychevo-runtime" }
+psychevo = { path = "../psychevo", features = ["internal"] }
 pulldown-cmark.workspace = true
 qrcode = { workspace = true, optional = true }
 ratatui.workspace = true

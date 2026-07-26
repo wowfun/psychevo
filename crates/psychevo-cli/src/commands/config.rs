@@ -3,7 +3,7 @@ use std::fs;
 use std::process::{Command, ExitCode};
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{
+use psychevo::{
     config::config_provider_list_value, config::config_show_value,
     config::create_scoped_custom_provider, config::permission_rules_value,
     config::remove_local_permission_rule, config::set_config_value, config::set_provider_api_key,

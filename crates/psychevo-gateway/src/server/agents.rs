@@ -4,7 +4,7 @@ pub(super) fn read_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::AgentReadParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let target = agent_config_target(params.target);
     let path = agent_definition_path(state, scope, target, &params.name)?;
     let text = std::fs::read_to_string(&path)?;
@@ -18,7 +18,7 @@ pub(super) fn discover_gateway_teams(
     state: &WebState,
     scope: &ResolvedScope,
     agents: &AgentCatalog,
-) -> psychevo_runtime::Result<AgentTeamCatalog> {
+) -> psychevo::Result<AgentTeamCatalog> {
     discover_agent_teams_with_catalog(
         &AgentDiscoveryOptions {
             home: state.inner.home.clone(),
@@ -35,7 +35,7 @@ pub(super) fn read_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::TeamReadParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let target = agent_config_target(params.target);
     let path = team_definition_path(state, scope, target, &params.name)?;
     let text = std::fs::read_to_string(&path)?;
@@ -50,7 +50,7 @@ pub(super) fn write_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
     mut params: wire::TeamWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
             "invalid team name: {}",
@@ -65,7 +65,7 @@ pub(super) fn write_team_definition(
             .members
             .iter()
             .map(team_member_input)
-            .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+            .collect::<psychevo::Result<Vec<_>>>()?;
         let captured = validate_and_capture_team_runtime_members(state, scope, &agents, &members)?;
         params.members = captured.iter().map(team_member_wire_input).collect();
     }
@@ -109,7 +109,7 @@ pub(super) fn set_team_definition_enabled(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::TeamSetEnabledParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
             "invalid team name: {}",
@@ -142,7 +142,7 @@ pub(super) fn delete_team_definition(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::TeamDeleteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
             "invalid team name: {}",
@@ -167,7 +167,7 @@ pub(super) fn delete_team_definition(
 fn structured_team_markdown(
     path: &Path,
     params: &wire::TeamWriteParams,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let description = params.description.trim();
     if description.is_empty() {
         return Err(Error::Message(
@@ -294,7 +294,7 @@ fn structured_team_markdown(
     render_agent_markdown(frontmatter, params.instructions.trim())
 }
 
-fn team_member_input(member: &wire::TeamMemberInput) -> psychevo_runtime::Result<AgentTeamMember> {
+fn team_member_input(member: &wire::TeamMemberInput) -> psychevo::Result<AgentTeamMember> {
     let runtime_profile_revision = member
         .runtime_profile_revision
         .as_deref()
@@ -340,7 +340,7 @@ pub(super) fn write_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::AgentWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
             "invalid agent name: {}",
@@ -385,7 +385,7 @@ pub(super) fn set_agent_definition_enabled(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::AgentSetEnabledParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
             "invalid agent name: {}",
@@ -415,7 +415,7 @@ pub(super) fn set_agent_definition_enabled(
 fn structured_agent_markdown(
     path: &Path,
     params: &wire::AgentWriteParams,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let description = params.description.trim();
     if description.is_empty() {
         return Err(Error::Message(
@@ -507,12 +507,11 @@ fn structured_agent_markdown(
     }
     let mut optional_contributions = BTreeSet::new();
     for name in &params.optional_contributions {
-        let contribution =
-            psychevo_runtime::agents::AgentContribution::parse(name).ok_or_else(|| {
-                Error::Message(format!(
-                    "optional contribution `{name}` must be instructions, tools, mcp, or skills"
-                ))
-            })?;
+        let contribution = psychevo::agents::AgentContribution::parse(name).ok_or_else(|| {
+            Error::Message(format!(
+                "optional contribution `{name}` must be instructions, tools, mcp, or skills"
+            ))
+        })?;
         optional_contributions.insert(contribution.as_str());
     }
     if optional_contributions.is_empty() {
@@ -535,7 +534,7 @@ pub(super) fn delete_agent_definition(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::AgentDeleteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.name) {
         return Err(Error::Message(format!(
             "invalid agent name: {}",
@@ -566,7 +565,7 @@ fn agent_definition_path(
     scope: &ResolvedScope,
     target: wire::AgentConfigTarget,
     name: &str,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     if !valid_agent_name(name) {
         return Err(Error::Message(format!("invalid agent name: {name}")));
     }
@@ -582,7 +581,7 @@ fn team_definition_path(
     scope: &ResolvedScope,
     target: wire::AgentConfigTarget,
     name: &str,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     if !valid_agent_name(name) {
         return Err(Error::Message(format!("invalid team name: {name}")));
     }
@@ -612,7 +611,7 @@ fn parse_managed_agent_text(
     name: &str,
     path: &Path,
     target: wire::AgentConfigTarget,
-) -> psychevo_runtime::Result<AgentDefinition> {
+) -> psychevo::Result<AgentDefinition> {
     let agent = parse_agent_definition_text(
         text,
         name,
@@ -634,7 +633,7 @@ fn parse_managed_team_text(
     path: &Path,
     target: wire::AgentConfigTarget,
     agents: &AgentCatalog,
-) -> psychevo_runtime::Result<AgentTeamDefinition> {
+) -> psychevo::Result<AgentTeamDefinition> {
     let team = parse_agent_team_definition_text(
         text,
         name,
@@ -648,7 +647,7 @@ fn parse_managed_team_text(
     Ok(team)
 }
 
-fn split_agent_markdown(content: &str) -> psychevo_runtime::Result<(serde_yaml::Mapping, String)> {
+fn split_agent_markdown(content: &str) -> psychevo::Result<(serde_yaml::Mapping, String)> {
     let Some(rest) = content.strip_prefix("---\n") else {
         return Ok((serde_yaml::Mapping::new(), content.to_string()));
     };
@@ -673,10 +672,7 @@ fn split_agent_markdown(content: &str) -> psychevo_runtime::Result<(serde_yaml::
     Ok((mapping, body))
 }
 
-fn render_agent_markdown(
-    frontmatter: serde_yaml::Mapping,
-    body: &str,
-) -> psychevo_runtime::Result<String> {
+fn render_agent_markdown(frontmatter: serde_yaml::Mapping, body: &str) -> psychevo::Result<String> {
     let frontmatter = serde_yaml::to_string(&frontmatter)?;
     let body = body.trim();
     Ok(if body.is_empty() {
@@ -819,10 +815,7 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
         enabled: agent.enabled,
         source: agent.source.as_str().to_string(),
         source_label: agent.source.display_label().to_string(),
-        generated: matches!(
-            agent.source,
-            psychevo_runtime::agents::AgentSource::Generated
-        ),
+        generated: matches!(agent.source, psychevo::agents::AgentSource::Generated),
         target,
         mutable: target.is_some(),
         path: agent
@@ -919,7 +912,7 @@ fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticV
 }
 
 pub(super) async fn agent_status_result(
-    store: Option<&psychevo_runtime::state::StateRuntime>,
+    store: Option<&psychevo::state::StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> wire::AgentStatusResult {
@@ -934,9 +927,9 @@ pub(super) async fn agent_status_result(
 }
 
 pub(super) async fn team_status_result(
-    store: &psychevo_runtime::state::StateRuntime,
+    store: &psychevo::state::StateRuntime,
     parent_session_id: Option<&str>,
-) -> psychevo_runtime::Result<wire::TeamStatusResult> {
+) -> psychevo::Result<wire::TeamStatusResult> {
     let team = if let Some(thread) = parent_session_id {
         match store.find_active_agent_team_run(thread).await? {
             Some(team) => Some(team),
@@ -974,9 +967,9 @@ pub(super) async fn team_status_result(
 }
 
 pub(super) async fn agent_control_result(
-    store: &psychevo_runtime::state::StateRuntime,
+    store: &psychevo::state::StateRuntime,
     params: wire::AgentControlParams,
-) -> psychevo_runtime::Result<wire::AgentControlResult> {
+) -> psychevo::Result<wire::AgentControlResult> {
     let action = params.action.trim();
     let agent = match action {
         "stop" => {
@@ -1019,7 +1012,7 @@ pub(super) async fn agent_control_result(
     })
 }
 
-fn required_control_target(params: &wire::AgentControlParams) -> psychevo_runtime::Result<&str> {
+fn required_control_target(params: &wire::AgentControlParams) -> psychevo::Result<&str> {
     params
         .target
         .as_deref()
@@ -1062,7 +1055,7 @@ fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
     }
 }
 
-fn team_run_view(record: &psychevo_runtime::state::AgentTeamRunRecord) -> wire::TeamRunView {
+fn team_run_view(record: &psychevo::state::AgentTeamRunRecord) -> wire::TeamRunView {
     wire::TeamRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),
@@ -1084,9 +1077,7 @@ fn team_run_view(record: &psychevo_runtime::state::AgentTeamRunRecord) -> wire::
     }
 }
 
-fn mission_run_view(
-    record: &psychevo_runtime::state::AgentMissionRunRecord,
-) -> wire::MissionRunView {
+fn mission_run_view(record: &psychevo::state::AgentMissionRunRecord) -> wire::MissionRunView {
     wire::MissionRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),
@@ -1131,7 +1122,7 @@ pub(super) fn backend_values_for_scope(
     state: &WebState,
     scope: &ResolvedScope,
     backends: &BTreeMap<String, AgentBackendConfig>,
-) -> psychevo_runtime::Result<Vec<wire::BackendConfigView>> {
+) -> psychevo::Result<Vec<wire::BackendConfigView>> {
     backends
         .values()
         .map(|backend| {
@@ -1146,7 +1137,7 @@ pub(super) fn backend_values_for_scope(
 pub(super) fn materialize_local_acp_backends(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let existing_backends =
         load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let config_dir = active_profile_config_dir(state, scope);
@@ -1253,7 +1244,7 @@ pub(super) fn write_backend_config(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::BackendWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!("invalid backend id: {}", params.id)));
     }
@@ -1285,7 +1276,7 @@ pub(super) fn delete_backend_config(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::BackendDeleteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!("invalid backend id: {}", params.id)));
     }
@@ -1305,7 +1296,7 @@ fn backend_config_dir(
     state: &WebState,
     scope: &ResolvedScope,
     target: wire::BackendConfigTarget,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     match target {
         wire::BackendConfigTarget::Project => Ok(scope.cwd.join(".psychevo")),
         wire::BackendConfigTarget::Profile => Ok(active_profile_config_dir(state, scope)),
@@ -1316,7 +1307,7 @@ fn ensure_profile_config_for_backend_write(
     state: &WebState,
     scope: &ResolvedScope,
     target: wire::BackendConfigTarget,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if target != wire::BackendConfigTarget::Profile
         || !state
             .inner
@@ -1373,7 +1364,7 @@ fn resolve_gateway_env_path(value: &str, state: &WebState, scope: &ResolvedScope
 fn backend_config_json(
     params: &wire::BackendWriteParams,
     existing: Option<&AgentBackendConfig>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let entrypoints = if params.entrypoints.is_empty() {
         vec!["peer".to_string(), "subagent".to_string()]
     } else {
@@ -1453,7 +1444,7 @@ fn backend_config_json(
     Ok(Value::Object(object))
 }
 
-fn validate_backend_entrypoints(values: &[String]) -> psychevo_runtime::Result<Vec<String>> {
+fn validate_backend_entrypoints(values: &[String]) -> psychevo::Result<Vec<String>> {
     let mut entrypoints = Vec::new();
     for value in values {
         let value = value.trim();
@@ -1475,9 +1466,7 @@ fn validate_backend_entrypoints(values: &[String]) -> psychevo_runtime::Result<V
     Ok(entrypoints)
 }
 
-fn validate_backend_client_capabilities(
-    values: &[String],
-) -> psychevo_runtime::Result<Vec<String>> {
+fn validate_backend_client_capabilities(values: &[String]) -> psychevo::Result<Vec<String>> {
     let mut capabilities = Vec::new();
     for value in values {
         let value = value.trim();
@@ -1506,7 +1495,7 @@ fn backend_source_targets(
     state: &WebState,
     scope: &ResolvedScope,
     id: &str,
-) -> psychevo_runtime::Result<Vec<wire::BackendConfigTarget>> {
+) -> psychevo::Result<Vec<wire::BackendConfigTarget>> {
     let mut targets = Vec::new();
     if backend_exists_in_scope(state, scope, id, ConfigScope::Global)? {
         targets.push(wire::BackendConfigTarget::Profile);
@@ -1522,7 +1511,7 @@ fn backend_exists_in_scope(
     scope: &ResolvedScope,
     id: &str,
     config_scope: ConfigScope,
-) -> psychevo_runtime::Result<bool> {
+) -> psychevo::Result<bool> {
     let config_dir = match config_scope {
         ConfigScope::Global => active_profile_config_dir(state, scope),
         ConfigScope::Local => scope.cwd.join(".psychevo"),
@@ -1535,7 +1524,7 @@ fn backend_exists_in_scope(
     backend_exists_in_config_dir(&config_dir, id)
 }
 
-fn backend_exists_in_config_dir(config_dir: &Path, id: &str) -> psychevo_runtime::Result<bool> {
+fn backend_exists_in_config_dir(config_dir: &Path, id: &str) -> psychevo::Result<bool> {
     let config_path = config_dir.join("config.toml");
     if !config_path.exists() {
         return Ok(false);
@@ -1572,7 +1561,7 @@ pub(super) async fn manage_backend_value(
     scope: &ResolvedScope,
     params: wire::BackendManageParams,
     operation: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if params.id != crate::managed_acp::CODEX_ACP_BACKEND_ID {
         return Err(agent_session_error(
             "unsupported",
@@ -1626,7 +1615,7 @@ pub(super) fn backend_doctor_value_for_platform(
     env: &BTreeMap<String, String>,
     cwd: &Path,
     platform: HostPlatform,
-) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
+) -> psychevo::Result<wire::BackendDoctorResult> {
     let mut checks = Vec::new();
     checks.push(wire::BackendDoctorCheck {
         name: "enabled".to_string(),
@@ -1690,7 +1679,7 @@ pub(super) fn managed_backend_doctor_value(
     state: &WebState,
     scope: &ResolvedScope,
     backend: &AgentBackendConfig,
-) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
+) -> psychevo::Result<wire::BackendDoctorResult> {
     let platform = HostPlatform::current();
     let mut result = backend_doctor_value_for_platform(
         backend,
@@ -1752,7 +1741,7 @@ pub(super) async fn managed_backend_doctor_value_with_auth(
     state: &WebState,
     scope: &ResolvedScope,
     backend: &AgentBackendConfig,
-) -> psychevo_runtime::Result<wire::BackendDoctorResult> {
+) -> psychevo::Result<wire::BackendDoctorResult> {
     let mut result = managed_backend_doctor_value(state, scope, backend)?;
     if !result.ok {
         result.checks.push(wire::BackendDoctorCheck {

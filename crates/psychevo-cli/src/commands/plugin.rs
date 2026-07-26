@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::CommandFactory;
-use psychevo_runtime::{
+use psychevo::{
     plugins::PluginInspectOptions, plugins::PluginInstallOptions, plugins::PluginMarketplaceEntry,
     plugins::PluginScope, plugins::PluginSourceKind, plugins::plugin_doctor_value,
     plugins::plugin_import_inspect_value, plugins::plugin_install_value,

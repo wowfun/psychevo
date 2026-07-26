@@ -2,7 +2,7 @@ pub(super) async fn automation_list_result(
     state: &WebState,
     _auth: &AuthContext,
     params: wire::AutomationListParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let store = &state.inner.state;
     let records = match params.cwd {
         Some(cwd) => {
@@ -26,7 +26,7 @@ pub(super) async fn automation_draft_result(
     state: WebState,
     auth: &AuthContext,
     params: wire::AutomationDraftParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let request = params.request.trim().to_string();
     if request.is_empty() {
         return Err(Error::Message(
@@ -105,7 +105,7 @@ pub(super) async fn automation_write_result(
     state: &WebState,
     auth: &AuthContext,
     params: wire::AutomationWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let automation_id = params
         .automation_id
         .clone()
@@ -183,7 +183,7 @@ pub(super) async fn automation_set_enabled_result(
     auth: &AuthContext,
     params: wire::AutomationIdParams,
     enabled: bool,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let existing = automation_task_for_request(state, auth, &params.automation_id).await?;
     let schedule = automation_schedule_from_value(existing.schedule.clone())?;
     let next_run_at_ms = if enabled {
@@ -225,7 +225,7 @@ pub(super) async fn automation_delete_result(
     state: &WebState,
     auth: &AuthContext,
     params: wire::AutomationIdParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let _record = automation_task_for_request(state, auth, &params.automation_id).await?;
     let deleted = state
         .inner
@@ -244,7 +244,7 @@ pub(super) async fn automation_run_result(
     auth: &AuthContext,
     params: wire::AutomationRunParams,
     out_tx: ConnectionSender,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     recover_stale_automation_runs(&state).await?;
     let task = automation_task_for_request(&state, auth, &params.automation_id).await?;
     let trigger = params

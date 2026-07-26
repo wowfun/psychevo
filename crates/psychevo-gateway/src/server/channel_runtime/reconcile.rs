@@ -17,7 +17,7 @@ pub(in crate::server) fn reconcile(state: WebState) {
     });
 }
 
-async fn reconcile_inner(state: WebState) -> psychevo_runtime::Result<()> {
+async fn reconcile_inner(state: WebState) -> psychevo::Result<()> {
     if !channel_runtime_enabled(&state.inner.inherited_env) {
         state
             .inner

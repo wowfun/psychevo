@@ -3,7 +3,7 @@ async fn resolve_automation_target_scope(
     auth: &AuthContext,
     scope: Option<wire::GatewayRequestScope>,
     target: &wire::AutomationTargetInput,
-) -> psychevo_runtime::Result<ResolvedAutomationTarget> {
+) -> psychevo::Result<ResolvedAutomationTarget> {
     match target {
         wire::AutomationTargetInput::Project => {
             let scope = resolve_optional_scope(state, auth, scope)?;
@@ -43,7 +43,7 @@ async fn automation_task_for_request(
     state: &WebState,
     _auth: &AuthContext,
     automation_id: &str,
-) -> psychevo_runtime::Result<AutomationTaskRecord> {
+) -> psychevo::Result<AutomationTaskRecord> {
     let record = state
         .inner
         .state
@@ -57,7 +57,7 @@ async fn automation_task_for_request(
 async fn automation_task_view(
     state: &WebState,
     record: AutomationTaskRecord,
-) -> psychevo_runtime::Result<wire::AutomationTaskView> {
+) -> psychevo::Result<wire::AutomationTaskView> {
     let runs = state
         .inner
         .state
@@ -112,7 +112,7 @@ fn automation_source(id: &str, title: &str) -> GatewaySource {
         .with_raw_identity(json!({"kind": "automation", "automationId": id}))
 }
 
-fn next_run_after_now(task: &AutomationTaskRecord) -> psychevo_runtime::Result<Option<i64>> {
+fn next_run_after_now(task: &AutomationTaskRecord) -> psychevo::Result<Option<i64>> {
     if !task.enabled {
         return Ok(None);
     }
@@ -121,17 +121,17 @@ fn next_run_after_now(task: &AutomationTaskRecord) -> psychevo_runtime::Result<O
     next_run_at_ms(&schedule, task.created_at_ms, Some(now), now)
 }
 
-fn automation_schedule_from_value(value: Value) -> psychevo_runtime::Result<AutomationSchedule> {
+fn automation_schedule_from_value(value: Value) -> psychevo::Result<AutomationSchedule> {
     serde_json::from_value(value).map_err(Into::into)
 }
 
 fn automation_execution_from_value(
     value: Value,
-) -> psychevo_runtime::Result<wire::AutomationExecutionInput> {
+) -> psychevo::Result<wire::AutomationExecutionInput> {
     serde_json::from_value(value).map_err(Into::into)
 }
 
-fn automation_kind_from_str(value: &str) -> psychevo_runtime::Result<wire::AutomationTaskKind> {
+fn automation_kind_from_str(value: &str) -> psychevo::Result<wire::AutomationTaskKind> {
     match value {
         "project" => Ok(wire::AutomationTaskKind::Project),
         "threadHeartbeat" => Ok(wire::AutomationTaskKind::ThreadHeartbeat),

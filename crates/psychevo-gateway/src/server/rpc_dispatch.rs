@@ -5,7 +5,7 @@ fn handle_rpc<T>(
     auth: AuthContext,
     out_tx: T,
     request: RpcRequest,
-) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<Value>>
+) -> futures::future::BoxFuture<'static, psychevo::Result<Value>>
 where
     T: Into<ConnectionSender>,
 {
@@ -623,7 +623,7 @@ where
             let codex = if broker.is_enabled() {
                 broker.plugin_list(&scope.cwd).await
             } else {
-                Err(psychevo_runtime::Error::Message(
+                Err(psychevo::Error::Message(
                     "Codex plugin authority is disabled in the active profile".to_string(),
                 ))
             };
@@ -649,7 +649,7 @@ where
                     .codex_capability_broker
                     .plugin_read(&scope.cwd, &identity)
                     .await?;
-                let policy = psychevo_runtime::plugins::codex_plugin_policy_value(
+                let policy = psychevo::plugins::codex_plugin_policy_value(
                     &state.inner.home,
                     &scope.cwd,
                     &identity.selector(),
@@ -842,7 +842,7 @@ where
             let identity =
                 codex_capability_broker::CodexPluginIdentity::parse_selector(&params.selector)?
                     .ok_or_else(|| {
-                        psychevo_runtime::Error::Message(
+                        psychevo::Error::Message(
                             "plugin/authority/setTrust accepts only Codex authority selectors"
                                 .to_string(),
                         )
@@ -1509,7 +1509,7 @@ fn plugin_runtime_options(state: &WebState, cwd: PathBuf) -> RunOptions {
     options
 }
 
-fn parse_skill_target(value: Option<&str>) -> psychevo_runtime::Result<SkillTarget> {
+fn parse_skill_target(value: Option<&str>) -> psychevo::Result<SkillTarget> {
     match value.unwrap_or("global") {
         "global" | "profile" => Ok(SkillTarget::Global),
         "project" | "local" => Ok(SkillTarget::Project),
@@ -1517,7 +1517,7 @@ fn parse_skill_target(value: Option<&str>) -> psychevo_runtime::Result<SkillTarg
     }
 }
 
-fn parse_plugin_scope(value: Option<&str>) -> psychevo_runtime::Result<PluginScope> {
+fn parse_plugin_scope(value: Option<&str>) -> psychevo::Result<PluginScope> {
     match value.unwrap_or("global") {
         "global" | "profile" => Ok(PluginScope::Global),
         "local" | "project" => Ok(PluginScope::Local),
@@ -1527,7 +1527,7 @@ fn parse_plugin_scope(value: Option<&str>) -> psychevo_runtime::Result<PluginSco
 
 fn parse_plugin_source_kind(
     value: Option<&str>,
-) -> psychevo_runtime::Result<Option<PluginSourceKind>> {
+) -> psychevo::Result<Option<PluginSourceKind>> {
     value
         .map(|value| {
             PluginSourceKind::parse(value).ok_or_else(|| {
@@ -1539,7 +1539,7 @@ fn parse_plugin_source_kind(
         .transpose()
 }
 
-fn parse_tool_mode(value: &str) -> psychevo_runtime::Result<RunMode> {
+fn parse_tool_mode(value: &str) -> psychevo::Result<RunMode> {
     RunMode::parse(value).ok_or_else(|| Error::Config(format!("unknown tool mode: {value}")))
 }
 
@@ -1551,7 +1551,7 @@ fn tool_config_dir(state: &WebState, scope: &ResolvedScope, local: bool) -> Path
     }
 }
 
-fn toolset_mutation_value(result: psychevo_runtime::config::ToolsetMutationResult) -> Value {
+fn toolset_mutation_value(result: psychevo::config::ToolsetMutationResult) -> Value {
     json!({
         "success": true,
         "changed": result.changed,
@@ -1598,7 +1598,7 @@ async fn mcp_oauth_start_value(
     state: WebState,
     scope: ResolvedScope,
     params: wire::McpOAuthStartParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let metadata = mcp_oauth_metadata(&state, &scope, &params.name)?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let redirect_uri = format!("http://{}/callback", listener.local_addr()?);
@@ -1631,7 +1631,7 @@ async fn mcp_oauth_start_value(
     }))
 }
 
-fn mcp_oauth_status_value(state: &WebState, session_id: &str) -> psychevo_runtime::Result<Value> {
+fn mcp_oauth_status_value(state: &WebState, session_id: &str) -> psychevo::Result<Value> {
     let sessions = state
         .inner
         .mcp_oauth_sessions
@@ -1664,7 +1664,7 @@ fn mcp_oauth_logout_value(
     state: &WebState,
     scope: &ResolvedScope,
     name: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let metadata = mcp_oauth_metadata(state, scope, name)?;
     let removed =
         clear_mcp_oauth_access_token(&metadata.profile_home, &metadata.name, &metadata.url)?;
@@ -1679,7 +1679,7 @@ fn mcp_oauth_metadata(
     state: &WebState,
     scope: &ResolvedScope,
     name: &str,
-) -> psychevo_runtime::Result<McpOAuthMetadata> {
+) -> psychevo::Result<McpOAuthMetadata> {
     let options = plugin_runtime_options(state, scope.cwd.clone());
     let value = mcp_server_value(&options, name)?;
     let server = value
@@ -1741,7 +1741,7 @@ fn mcp_authorization_url(
     metadata: &McpOAuthMetadata,
     redirect_uri: &str,
     state_token: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let base = metadata
         .oauth_resource
         .as_deref()
@@ -1836,7 +1836,7 @@ async fn exchange_mcp_oauth_code(
     metadata: &McpOAuthMetadata,
     redirect_uri: &str,
     code: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let base = metadata
         .oauth_resource
         .as_deref()
@@ -1912,7 +1912,7 @@ async fn thread_compact_result_for_thread(
     instructions: Option<String>,
     runtime_ref: String,
     out_tx: ConnectionSender,
-) -> psychevo_runtime::Result<wire::ThreadCompactionResult> {
+) -> psychevo::Result<wire::ThreadCompactionResult> {
     enqueue_thread_compact_result_for_thread(
         state,
         scope,
@@ -1932,27 +1932,25 @@ async fn enqueue_thread_compact_result_for_thread(
     instructions: Option<String>,
     runtime_ref: String,
     out_tx: ConnectionSender,
-) -> psychevo_runtime::Result<
-    BoxFuture<'static, psychevo_runtime::Result<wire::ThreadCompactionResult>>,
+) -> psychevo::Result<
+    BoxFuture<'static, psychevo::Result<wire::ThreadCompactionResult>>,
 > {
     let options = state.run_options(scope.cwd.clone(), Some(thread_id.clone()));
-    let event_selector = GatewayThreadSelector::thread_id(&thread_id);
-    let event_thread_id = thread_id.clone();
-    let event_state = state.clone();
-    let event_tx = out_tx.clone();
-    let event_sink = GatewayEventEmitter::new(move |event| {
-        let context =
-            event_state.pending_context_for_selector(&event_selector, Some(&event_thread_id));
-        event_state.publish_gateway_event_for_connection(event, context, None, Some(&event_tx));
-    });
-    let completion = state
+    let thread = state
         .inner
-        .gateway
-        .enqueue_compact_session(SendCompactRequest {
-            thread_id: Some(thread_id.clone()),
-            source: Some(scope.source.clone()),
-            runtime_ref: Some(runtime_ref),
-            cwd: scope.cwd.clone(),
+        .framework
+        .resume_thread(&thread_id)
+        .await?;
+    let binding = state
+        .inner
+        .state
+        .gateway_runtime_binding(&thread_id)
+        .await?;
+    let non_native_runtime = binding
+        .as_ref()
+        .is_some_and(|binding| binding.backend_kind.as_deref() == Some("acp"))
+        || (binding.is_none() && runtime_ref != "native");
+    let request = psychevo::CompactThreadRequest {
             config_path: options.config_path,
             model: options.model,
             reasoning_effort: options.reasoning_effort,
@@ -1960,14 +1958,40 @@ async fn enqueue_thread_compact_result_for_thread(
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
             force: true,
-            reason: psychevo_runtime::compaction::CompactionReason::Manual,
-            inherited_env: options.inherited_env,
-            event_sink: Some(event_sink),
-        })
-        .await?;
+        inherited_env: options.inherited_env,
+    };
+    let source = scope.source.clone();
+    let event_selector = GatewayThreadSelector::thread_id(&thread_id);
+    let event_thread_id = thread_id.clone();
+    let event_state = state.clone();
+    let event_sink = GatewayEventEmitter::new(move |event| {
+        let context =
+            event_state.pending_context_for_selector(&event_selector, Some(&event_thread_id));
+        event_state.publish_gateway_event_for_connection(event, context, None, Some(&out_tx));
+    });
     let state = state.clone();
     Ok(Box::pin(async move {
-        let response = match completion.await {
+        let mut started_activity = state.activity(&source, Some(&thread_id)).await;
+        started_activity.running = true;
+        let _ = event_sink.emit(GatewayEvent::ActivityChanged {
+            thread_id: Some(thread_id.clone()),
+            activity: gateway_activity_view(&started_activity),
+        });
+        let result = if non_native_runtime {
+            Ok(unavailable_compaction_result(
+                &thread_id,
+                psychevo::compaction::CompactionReason::Manual,
+                &runtime_ref,
+            ))
+        } else {
+            thread.compact(request).await
+        };
+        let completed_activity = state.activity(&source, Some(&thread_id)).await;
+        let _ = event_sink.emit(GatewayEvent::ActivityChanged {
+            thread_id: Some(thread_id.clone()),
+            activity: gateway_activity_view(&completed_activity),
+        });
+        let response = match result {
             Ok(result) => thread_compact_result(&state, result).await?,
             Err(err) => wire::ThreadCompactionResult {
                 accepted: false,
@@ -1990,8 +2014,8 @@ async fn enqueue_thread_compact_result_for_thread(
 
 async fn thread_compact_result(
     state: &WebState,
-    result: psychevo_runtime::compaction::CompactionResult,
-) -> psychevo_runtime::Result<wire::ThreadCompactionResult> {
+    result: psychevo::compaction::CompactionResult,
+) -> psychevo::Result<wire::ThreadCompactionResult> {
     let checkpoint = match result.checkpoint_id {
         Some(checkpoint_id) => state
             .inner

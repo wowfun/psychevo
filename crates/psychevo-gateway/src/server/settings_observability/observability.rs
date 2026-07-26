@@ -2,7 +2,7 @@ async fn context_read_value(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(context_read_result(
         state, scope, thread_id,
     )
@@ -13,7 +13,7 @@ async fn context_read_result(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<wire::ContextReadResult> {
+) -> psychevo::Result<wire::ContextReadResult> {
     let thread_id = match thread_id {
         Some(thread_id) => Some(thread_id.to_string()),
         None => {
@@ -64,7 +64,7 @@ async fn context_read_result(
 }
 
 fn context_read_result_from_snapshot(
-    snapshot: &psychevo_runtime::context_usage::ContextSnapshot,
+    snapshot: &psychevo::context_usage::ContextSnapshot,
 ) -> wire::ContextReadResult {
     let status = match snapshot.status.as_str() {
         "reported" | "derived" | "partial" | "unavailable" => snapshot.status.as_str(),
@@ -113,7 +113,7 @@ async fn observability_read_value(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let resolved_thread_id = match thread_id {
         Some(thread_id) => Some(thread_id.to_string()),
         None => {
@@ -293,7 +293,7 @@ fn usage_unavailable() -> wire::SessionUsageSummaryView {
 async fn usage_read_value(
     state: &WebState,
     params: wire::UsageReadParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let result = usage_read(UsageReadOptions {
         state: state.inner.state.clone(),
         activity_days: params.activity_days.unwrap_or(365) as usize,

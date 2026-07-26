@@ -3,7 +3,7 @@ async fn resolve_model_state_request_scope(
     auth: &AuthContext,
     cwd: Option<String>,
     thread_id: Option<String>,
-) -> psychevo_runtime::Result<(PathBuf, Option<String>)> {
+) -> psychevo::Result<(PathBuf, Option<String>)> {
     if let Some(thread_id) = thread_id {
         authorize_thread(state, auth, &thread_id).await?;
         let summary = state

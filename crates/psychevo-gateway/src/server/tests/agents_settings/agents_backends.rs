@@ -458,7 +458,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             .all(|profile| profile.id != "acp:opencode")
     );
 
-    let catalog = psychevo_runtime::agents::discover_agents(&psychevo_runtime::agents::AgentDiscoveryOptions {
+    let catalog = psychevo::agents::discover_agents(&psychevo::agents::AgentDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: state.inner.cwd.clone(),
         env: state.inner.inherited_env.clone(),
@@ -512,7 +512,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     .expect("child Thread");
     let cwd = state.inner.cwd.display().to_string();
     Box::pin(state.inner.state.create_gateway_runtime_binding(
-        psychevo_runtime::state::GatewayRuntimeBindingInput {
+        psychevo::state::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("opencode"),
             agent_fingerprint: &agent_fingerprint,
@@ -1308,7 +1308,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         .inner
         .state
 
-        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("native-peer"),
             agent_fingerprint: &agent_fingerprint,
@@ -1425,7 +1425,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         .inner
         .state
 
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "foreign-native-turn",
             thread_id: Some(&thread_id),
             source_key: Some(&state.inner.source.source_key().0),
@@ -2280,7 +2280,7 @@ fn backend_doctor_resolves_windows_pathext_command_shim() {
     std::fs::write(&shim, "@echo off\n").expect("shim");
     let backend = AgentBackendConfig {
         id: "opencode".to_string(),
-        kind: psychevo_runtime::agents::AgentBackendKind::Acp,
+        kind: psychevo::agents::AgentBackendKind::Acp,
         enabled: true,
         label: "OpenCode".to_string(),
         description: None,

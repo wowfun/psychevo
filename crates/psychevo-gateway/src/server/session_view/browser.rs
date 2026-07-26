@@ -2,7 +2,7 @@ async fn thread_browser_value(
     state: &WebState,
     params: wire::ThreadBrowserParams,
     cwd: Option<PathBuf>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let limit = params.limit.unwrap_or(20).clamp(1, 50);
     let recent_days = params.recent_days.unwrap_or(7).clamp(1, 365);
     let recent_since_ms = gateway_now_ms().saturating_sub(recent_days * 86_400_000);
@@ -28,7 +28,7 @@ async fn thread_browser_value(
         .map(|cursor| cursor.offset)
         .unwrap_or(0);
     let projections = state.inner.state.browse_human_sessions(
-        psychevo_runtime::state::SessionBrowserRequest {
+        psychevo::state::SessionBrowserRequest {
             cwd: cwd.as_deref(),
             archived: params.archived.unwrap_or(false),
             cursor_cwd,

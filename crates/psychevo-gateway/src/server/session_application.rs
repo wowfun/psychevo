@@ -5,7 +5,7 @@ pub(super) async fn resume(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadResumeParams,
-) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
+) -> psychevo::Result<wire::ThreadSnapshot> {
     let (thread_id, scope) = match params.thread_id {
         Some(thread_id) => {
             authorize_thread(state, auth, &thread_id).await?;
@@ -34,7 +34,7 @@ pub(super) async fn read(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadReadParams,
-) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
+) -> psychevo::Result<wire::ThreadSnapshot> {
     authorize_thread(state, auth, &params.thread_id).await?;
     let scope = resolved_scope_for_thread(state, &params.thread_id).await?;
     decode_result(
@@ -47,7 +47,7 @@ pub(super) async fn trace(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadTraceParams,
-) -> psychevo_runtime::Result<wire::ThreadTraceResult> {
+) -> psychevo::Result<wire::ThreadTraceResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
     let runtime_state = state.inner.state.clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -75,7 +75,7 @@ pub(super) async fn list(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadListParams,
-) -> psychevo_runtime::Result<wire::ThreadListResult> {
+) -> psychevo::Result<wire::ThreadListResult> {
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
     let cwd = resolve_session_cwd_filter(state, auth, params.cwd)?;
     let cwd = cwd.map(|cwd| cwd.to_string_lossy().into_owned());
@@ -94,7 +94,7 @@ pub(super) async fn list(
                 .unwrap_or_default();
             decode_result(session_summary_value(projection, activity), "thread/list")
         })
-        .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+        .collect::<psychevo::Result<Vec<_>>>()?;
     Ok(wire::ThreadListResult { sessions })
 }
 
@@ -102,7 +102,7 @@ pub(super) async fn browse(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadBrowserParams,
-) -> psychevo_runtime::Result<wire::ThreadBrowserResult> {
+) -> psychevo::Result<wire::ThreadBrowserResult> {
     let requested_cwd = params
         .cwd
         .clone()
@@ -119,7 +119,7 @@ pub(super) async fn rename(
     auth: &AuthContext,
     out_tx: &ConnectionSender,
     params: wire::ThreadRenameParams,
-) -> psychevo_runtime::Result<wire::ThreadMutationResult> {
+) -> psychevo::Result<wire::ThreadMutationResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
     state
         .inner
@@ -155,7 +155,7 @@ pub(super) async fn archive(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadIdParams,
-) -> psychevo_runtime::Result<wire::ThreadMutationResult> {
+) -> psychevo::Result<wire::ThreadMutationResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
     guard_session_mutation(state, auth, &params.thread_id).await?;
     let session = decode_result(
@@ -169,7 +169,7 @@ pub(super) async fn restore(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadIdParams,
-) -> psychevo_runtime::Result<wire::ThreadMutationResult> {
+) -> psychevo::Result<wire::ThreadMutationResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
     guard_session_mutation(state, auth, &params.thread_id).await?;
     let session = decode_result(
@@ -183,7 +183,7 @@ pub(super) async fn delete(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadIdParams,
-) -> psychevo_runtime::Result<wire::ThreadDeleteResult> {
+) -> psychevo::Result<wire::ThreadDeleteResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
     guard_session_mutation(state, auth, &params.thread_id).await?;
     let scope = default_resolved_scope(state, auth)?;
@@ -208,7 +208,7 @@ pub(super) async fn delete(
     })
 }
 
-fn decode_result<T>(value: Value, method: &str) -> psychevo_runtime::Result<T>
+fn decode_result<T>(value: Value, method: &str) -> psychevo::Result<T>
 where
     T: DeserializeOwned,
 {

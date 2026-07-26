@@ -236,7 +236,7 @@ pub(crate) async fn load_history_keeps_unfinished_tool_call_active_with_live_own
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -805,7 +805,7 @@ async fn claim_foreign_gateway_activity(
     started_elapsed_ms: i64,
 ) {
     store
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "activity-web",
             thread_id: Some(session_id),
             source_key: Some("source:web:test"),
@@ -845,7 +845,7 @@ async fn append_foreign_gateway_event(
                 _ => unreachable!(),
             };
             store
-                .upsert_gateway_live_snapshot(psychevo_runtime::state::GatewayLiveSnapshotInput {
+                .upsert_gateway_live_snapshot(psychevo::state::GatewayLiveSnapshotInput {
                     snapshot_key: &format!("activity-web:{turn_id}:{}", entry.id),
                     activity_id: Some("activity-web"),
                     owner_id: Some("gateway:web:test"),

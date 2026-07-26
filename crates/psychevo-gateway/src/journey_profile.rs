@@ -25,6 +25,12 @@ pub(crate) struct GatewayProfileFields<'a> {
     pub(crate) request_method: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) runtime_source: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) state_in_flight: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) state_pool_idle: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) state_pool_size: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]

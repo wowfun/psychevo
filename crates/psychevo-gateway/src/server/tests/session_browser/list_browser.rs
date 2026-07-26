@@ -268,7 +268,7 @@ async fn thread_browser_pages_workspace_sessions_and_keeps_include_exceptions() 
 
     let running_id = ids[0].clone();
     store
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "browser-running-activity",
             thread_id: Some(&running_id),
             source_key: None,

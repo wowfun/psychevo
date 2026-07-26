@@ -136,7 +136,7 @@ allow_users = ["12345"]
         .inner
         .state
 
-        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
+        .upsert_gateway_source_binding(psychevo::state::GatewaySourceBindingInput {
             source_key: "im.telegram:release-lane",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -225,7 +225,7 @@ allow_users = ["12345"]
         .inner
         .state
 
-        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
+        .upsert_gateway_source_binding(psychevo::state::GatewaySourceBindingInput {
             source_key: "im.telegram:same-cwd-lane",
             source_kind: "im.telegram",
             raw_identity: json!({
@@ -298,7 +298,7 @@ allow_users = ["12345"]
         .inner
         .state
 
-        .upsert_gateway_source_binding(psychevo_runtime::state::GatewaySourceBindingInput {
+        .upsert_gateway_source_binding(psychevo::state::GatewaySourceBindingInput {
             source_key: "im.telegram:source-hash",
             source_kind: "im.telegram",
             raw_identity: json!({

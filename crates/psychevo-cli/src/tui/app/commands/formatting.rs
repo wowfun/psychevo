@@ -163,38 +163,66 @@ impl TuiApp {
         ui.push_user_with_images(display_prompt.clone(), &images);
         ui.mark_optimistic_rows_from(optimistic_start);
         let (tx, rx) = mpsc::unbounded_channel();
-        let event_observer = move |event| {
-            let _ = tx.send(event);
-        };
+        let (approval_tx, approval_rx) = mpsc::unbounded_channel();
+        ui.approval_rx = Some(approval_rx);
         let (control_handle, control) = run_control();
-        let (mut caller, mut intent) = self.thread_turn_request_with_images(prompt, image_inputs);
-        intent.policy.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
-        let gateway = self.gateway.clone();
-        let source = self.gateway_source();
-        let bind_source = self.canonical_gateway_source();
-        let selector = GatewayThreadSelector::source(source.source_key());
-        let reset_source_binding = self.force_new_once && self.current_session.is_none();
-        let gateway_control_handle = control_handle.clone();
-        intent.source = Some(source);
-        intent.bind_source = Some(bind_source);
-        intent.reset_source_binding = reset_source_binding;
-        caller.observe_gateway_events(event_observer);
-        caller.set_control(gateway_control_handle, control);
+        let mut request = self.framework_turn_request_with_images(prompt, image_inputs);
+        request.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
+        request.approval_handler = Some(Arc::new(TuiApprovalHandler {
+            session_id: self.current_session.clone(),
+            sender: approval_tx,
+        }));
+        request.__set_adapter_options(psychevo::AdapterTurnOptions {
+            snapshot_root: Some(self.home.join("snapshots")),
+            run_stream_observer: Some(Arc::new(move |event| {
+                let _ = tx.send(event);
+            })),
+            ..Default::default()
+        });
+        request.__set_control(control_handle.clone(), control);
+        let framework = self.framework.clone();
+        let current_session = self.current_session.clone();
+        let force_new_once = self.force_new_once;
+        let cwd = self.cwd.clone();
+        let db_path = self.db_path.clone();
         let task = tokio::spawn(async move {
-            gateway
-                .start_turn(caller, intent)
-                .await?
+            let thread = if let Some(thread_id) = current_session
+                && let Ok(thread) = framework.resume_thread(thread_id).await
+            {
+                thread
+            } else if !force_new_once
+                && let Some(snapshot) = framework
+                    .list_threads(ThreadListQuery {
+                        cwd: Some(cwd.clone()),
+                        archived: false,
+                        sources: TUI_CONTINUE_SESSION_SOURCES
+                            .iter()
+                            .map(|source| (*source).to_string())
+                            .collect(),
+                    })
+                    .await?
+                    .into_iter()
+                    .next()
+            {
+                framework.resume_thread(snapshot.id).await?
+            } else {
+                let mut start = StartThreadRequest::new(&cwd);
+                start.source = "tui".to_string();
+                framework.start_thread(start).await?
+            };
+            let handle = thread.start_turn(request).await?;
+            handle
                 .wait()
                 .await
-                .map(|turn| turn.result)
+                .map(|result| framework_result_to_runtime(result, db_path, cwd))
         });
         ui.scroll_to_bottom();
         ui.running = Some(RunningTurn {
             session_id: self.current_session.clone(),
             control: control_handle,
-            selector: Some(selector),
+            selector: None,
             turn_id: None,
-            events: RunningTurnEvents::Gateway(rx),
+            events: RunningTurnEvents::Runtime(rx),
             task: RunningTask::Agent(task),
         });
         ui.start_assistant();
@@ -486,7 +514,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push("--format json".to_string());
             }
             if options.include
-                != psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
+                != psychevo::session_export::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Export,
                 )
             {
@@ -500,7 +528,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push(path.clone());
             }
             if options.include
-                != psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
+                != psychevo::session_export::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Share,
                 )
             {
@@ -636,7 +664,7 @@ pub(crate) fn skill_args_without_scope<'a>(args: &'a [&str]) -> Vec<&'a str> {
     filtered
 }
 
-pub(crate) fn format_skill_mutation_result(result: psychevo_runtime::Result<Value>) -> String {
+pub(crate) fn format_skill_mutation_result(result: psychevo::Result<Value>) -> String {
     match result {
         Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string()),
         Err(err) => format!("error: {err:#}"),

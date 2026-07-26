@@ -5,7 +5,7 @@ use crate::{
     runtime_profile_config_revision,
 };
 use futures::{StreamExt, stream};
-use psychevo_runtime::agents::AgentEntrypoint;
+use psychevo::agents::AgentEntrypoint;
 
 const IMPORT_DISCOVERY_CONCURRENCY: usize = 4;
 const IMPORT_STATE_METADATA_KEY: &str = "agentSessionImportState";
@@ -16,7 +16,7 @@ pub(super) async fn list(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadImportListParams,
-) -> psychevo_runtime::Result<wire::ThreadImportListResult> {
+) -> psychevo::Result<wire::ThreadImportListResult> {
     let scope = resolve_optional_scope(state, auth, Some(params.scope.clone()))?;
     let requested_cursors = params.cursors;
     let jobs = runtime_profiles::importable_acp_profiles(state, &scope)?;
@@ -170,7 +170,7 @@ fn resolve_import_cursor(
     state: &WebState,
     runtime_profile_ref: &str,
     public_cursor: Option<&str>,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     let Some(public_cursor) = public_cursor else {
         return Ok(None);
     };
@@ -208,7 +208,7 @@ pub(super) async fn import(
     state: &WebState,
     auth: &AuthContext,
     params: wire::ThreadImportParams,
-) -> psychevo_runtime::Result<wire::ThreadImportResult> {
+) -> psychevo::Result<wire::ThreadImportResult> {
     let scope = resolve_optional_scope(state, auth, Some(params.scope.clone()))?;
     let import_archived = params.archived;
     let candidate = take_import_candidate(state, &params.candidate_id)?;
@@ -316,7 +316,7 @@ async fn import_agent_session_into_thread(
     peer: ResolvedPeerTurn,
     candidate: AgentSessionImportCandidate,
     thread_id: &str,
-) -> psychevo_runtime::Result<wire::ThreadImportResult> {
+) -> psychevo::Result<wire::ThreadImportResult> {
     let mut options = state.run_options(candidate.cwd.clone(), Some(thread_id.to_string()));
     options.runtime_ref = Some(profile.id.clone());
     options.agent = target.agent_ref.clone();
@@ -414,7 +414,7 @@ async fn import_agent_session_into_thread(
 fn take_import_candidate(
     state: &WebState,
     candidate_id: &str,
-) -> psychevo_runtime::Result<AgentSessionImportCandidate> {
+) -> psychevo::Result<AgentSessionImportCandidate> {
     let now_ms = gateway_now_ms();
     let mut registry = state
         .inner
@@ -443,7 +443,7 @@ async fn persist_lifecycle_projection(
     thread_id: &str,
     target: &wire::RunnableTargetView,
     snapshot: &crate::acp_peer::AcpSessionSnapshot,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     state
         .inner
         .state
@@ -466,7 +466,7 @@ pub(super) async fn fork_acp_thread(
     scope: &ResolvedScope,
     source_thread_id: &str,
     context: &wire::ThreadContextReadResult,
-) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+) -> psychevo::Result<wire::ThreadActionRunResult> {
     let binding = require_acp_binding(state, source_thread_id).await?;
     let bound = runtime_profiles::resolve_bound_thread_agent_target(state, &binding).await?;
     let target = bound_context_target(context, source_thread_id)?;
@@ -574,7 +574,7 @@ pub(super) async fn fork_native_thread(
     scope: &ResolvedScope,
     source_thread_id: &str,
     before_session_seq: Option<i64>,
-) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+) -> psychevo::Result<wire::ThreadActionRunResult> {
     let thread_id = crate::history_editing::fork_native_history(
         &state.inner.state,
         source_thread_id,
@@ -609,7 +609,7 @@ pub(super) async fn fork_native_thread(
 fn bound_context_target(
     context: &wire::ThreadContextReadResult,
     thread_id: &str,
-) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::RunnableTargetView> {
     let selected_target_id = selected_context_target_id(context)?;
     context
         .compatible_targets
@@ -628,10 +628,7 @@ fn bound_context_target(
         })
 }
 
-pub(super) async fn archive_thread(
-    state: &WebState,
-    thread_id: &str,
-) -> psychevo_runtime::Result<Value> {
+pub(super) async fn archive_thread(state: &WebState, thread_id: &str) -> psychevo::Result<Value> {
     if let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await?
         && binding.backend_kind.as_deref() == Some("acp")
         && let Some(native_session_id) = binding.native_session_id.clone()
@@ -677,10 +674,7 @@ pub(super) async fn archive_thread(
     session_summary_by_id(state, thread_id).await
 }
 
-pub(super) async fn restore_thread(
-    state: &WebState,
-    thread_id: &str,
-) -> psychevo_runtime::Result<Value> {
+pub(super) async fn restore_thread(state: &WebState, thread_id: &str) -> psychevo::Result<Value> {
     if let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await?
         && binding.backend_kind.as_deref() == Some("acp")
     {
@@ -729,10 +723,7 @@ pub(super) async fn restore_thread(
     session_summary_by_id(state, thread_id).await
 }
 
-pub(super) async fn delete_thread(
-    state: &WebState,
-    thread_id: &str,
-) -> psychevo_runtime::Result<()> {
+pub(super) async fn delete_thread(state: &WebState, thread_id: &str) -> psychevo::Result<()> {
     let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await? else {
         state.inner.state.delete_session(thread_id).await?;
         state
@@ -826,7 +817,7 @@ pub(super) async fn delete_thread(
 async fn require_acp_binding(
     state: &WebState,
     thread_id: &str,
-) -> psychevo_runtime::Result<GatewayRuntimeBindingRecord> {
+) -> psychevo::Result<GatewayRuntimeBindingRecord> {
     let binding = state
         .inner
         .state
@@ -865,9 +856,7 @@ pub(super) async fn reconcile_acknowledged_session_deletes(state: &WebState) {
     }
 }
 
-pub(super) fn typed_thread_snapshot(
-    value: Value,
-) -> psychevo_runtime::Result<wire::ThreadSnapshot> {
+pub(super) fn typed_thread_snapshot(value: Value) -> psychevo::Result<wire::ThreadSnapshot> {
     serde_json::from_value(value)
         .map_err(|error| Error::Message(format!("invalid Thread snapshot projection: {error}")))
 }

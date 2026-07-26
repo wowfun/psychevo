@@ -1,9 +1,9 @@
 use super::*;
 use crate::im::FakeImAdapter;
 use futures::future::BoxFuture;
-use psychevo_ai::Outcome;
-use psychevo_runtime::state::StateRuntime;
-use psychevo_runtime::{types::PermissionApprovalOutcome, types::RunResult};
+use psychevo::__ai::Outcome;
+use psychevo::state::StateRuntime;
+use psychevo::{types::PermissionApprovalOutcome, types::RunResult};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -41,11 +41,11 @@ impl crate::im::ImAdapter for FailOnceImAdapter {
         "wechat"
     }
 
-    fn poll(&self) -> BoxFuture<'static, psychevo_runtime::Result<Vec<ImInboundMessage>>> {
+    fn poll(&self) -> BoxFuture<'static, psychevo::Result<Vec<ImInboundMessage>>> {
         Box::pin(async { Ok(Vec::new()) })
     }
 
-    fn send(&self, message: ImOutboundMessage) -> BoxFuture<'static, psychevo_runtime::Result<()>> {
+    fn send(&self, message: ImOutboundMessage) -> BoxFuture<'static, psychevo::Result<()>> {
         let attempts = Arc::clone(&self.attempts);
         let sent = Arc::clone(&self.sent);
         Box::pin(async move {
@@ -65,7 +65,7 @@ impl crate::im::ImAdapter for ErrorImAdapter {
         "wechat"
     }
 
-    fn poll(&self) -> BoxFuture<'static, psychevo_runtime::Result<Vec<ImInboundMessage>>> {
+    fn poll(&self) -> BoxFuture<'static, psychevo::Result<Vec<ImInboundMessage>>> {
         let polls = Arc::clone(&self.polls);
         Box::pin(async move {
             polls.fetch_add(1, Ordering::SeqCst);
@@ -76,10 +76,7 @@ impl crate::im::ImAdapter for ErrorImAdapter {
         })
     }
 
-    fn send(
-        &self,
-        _message: ImOutboundMessage,
-    ) -> BoxFuture<'static, psychevo_runtime::Result<()>> {
+    fn send(&self, _message: ImOutboundMessage) -> BoxFuture<'static, psychevo::Result<()>> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -92,7 +89,7 @@ impl crate::GatewayBackend for TestBackend {
     fn run_turn(
         &self,
         request: crate::BackendTurnRequest,
-    ) -> BoxFuture<'static, psychevo_runtime::Result<RunResult>> {
+    ) -> BoxFuture<'static, psychevo::Result<RunResult>> {
         let prompts = Arc::clone(&self.prompts);
         let run_number = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
         let request_permission = self.request_permission.load(Ordering::SeqCst);
@@ -102,7 +99,7 @@ impl crate::GatewayBackend for TestBackend {
                     return Err(Error::Message("approval handler missing".to_string()));
                 };
                 let decision = handler
-                    .request_permission(psychevo_runtime::types::PermissionApprovalRequest {
+                    .request_permission(psychevo::types::PermissionApprovalRequest {
                         tool_call_id: "permission-1".to_string(),
                         tool_name: "fake_tool".to_string(),
                         summary: "fake permission".to_string(),
@@ -320,7 +317,7 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     state
         .inner
         .state
-        .upsert_gateway_channel_outbox(psychevo_runtime::state::GatewayChannelOutboxInput {
+        .upsert_gateway_channel_outbox(psychevo::state::GatewayChannelOutboxInput {
             delivery_id: "out-retry",
             thread_id: &thread_id,
             turn_id: "turn-already-completed",

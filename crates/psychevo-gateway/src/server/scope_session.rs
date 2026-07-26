@@ -21,7 +21,7 @@ struct ResolvedScope {
 
 impl ResolvedScope {
     fn to_wire_scope(&self) -> wire::GatewayRequestScope {
-        let cwd = psychevo_runtime::host_paths::normalized_native_path(&self.cwd);
+        let cwd = psychevo::host_paths::normalized_native_path(&self.cwd);
         wire::GatewayRequestScope {
             cwd: cwd.display().to_string(),
             source: wire::GatewaySourceInput {
@@ -39,7 +39,7 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
     if !matches!(auth, AuthContext::Browser { .. }) {
         return scope.clone();
     }
-    let cwd = psychevo_runtime::host_paths::normalized_native_path(&scope.cwd);
+    let cwd = psychevo::host_paths::normalized_native_path(&scope.cwd);
     let mut source = scope.source.clone();
     let canonical_raw_id = source
         .raw_identity
@@ -81,7 +81,7 @@ fn canonical_source_mutation_key(source: &GatewaySource) -> SourceKey {
 async fn start_empty_source(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     state
         .inner
         .gateway
@@ -93,7 +93,7 @@ async fn start_empty_source(
 async fn reset_source_to_empty(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     state
         .inner
         .gateway
@@ -106,7 +106,7 @@ async fn bind_source_to_thread(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if let Some(bound) = state
         .inner
         .gateway
@@ -130,7 +130,7 @@ async fn ensure_turn_start_thread(
     state: &WebState,
     scope: &ResolvedScope,
     requested_thread_id: Option<String>,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     if let Some(thread_id) = requested_thread_id {
         bind_source_to_thread(state, scope, &thread_id).await?;
         return Ok(Some(thread_id));
@@ -178,7 +178,7 @@ fn user_shell_context_options(
 async fn gateway_backend_info_for_thread(
     state: &WebState,
     thread_id: &str,
-) -> psychevo_runtime::Result<GatewayBackendInfo> {
+) -> psychevo::Result<GatewayBackendInfo> {
     let store = &state.inner.state;
     if let Some(binding) = store.gateway_runtime_binding(thread_id).await? {
         if binding.status != GatewayRuntimeBindingStatus::Resolved {
@@ -255,7 +255,7 @@ async fn gateway_backend_info_for_thread(
 fn default_resolved_scope(
     state: &WebState,
     auth: &AuthContext,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     match auth {
         AuthContext::Bearer => Ok(ResolvedScope {
             cwd: state.inner.cwd.clone(),
@@ -275,7 +275,7 @@ fn resolve_optional_scope(
     state: &WebState,
     auth: &AuthContext,
     scope: Option<wire::GatewayRequestScope>,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     match scope {
         Some(scope) => resolve_required_scope(state, auth, scope),
         None => default_resolved_scope(state, auth),
@@ -286,7 +286,7 @@ fn resolve_required_scope(
     _state: &WebState,
     _auth: &AuthContext,
     scope: wire::GatewayRequestScope,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     let cwd = canonicalize_cwd(Path::new(&scope.cwd))?;
     Ok(ResolvedScope {
         source: source_from_input(
@@ -302,7 +302,7 @@ fn resolve_external_file_scope(
     state: &WebState,
     auth: &AuthContext,
     scope: wire::GatewayRequestScope,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     let resolved = resolve_required_scope(state, auth, scope)?;
     if matches!(auth, AuthContext::Browser { .. }) {
         let session = current_browser_session(state, auth)?;
@@ -329,7 +329,7 @@ fn resolve_workspace_preview_scope(
     state: &WebState,
     auth: &AuthContext,
     scope: wire::GatewayRequestScope,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     let resolved = resolve_required_scope(state, auth, scope)?;
     if matches!(auth, AuthContext::Browser { .. }) {
         let session = current_browser_session(state, auth)?;
@@ -348,7 +348,7 @@ fn resolve_start_scope(
     _state: &WebState,
     _auth: &AuthContext,
     scope: wire::GatewayRequestScope,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     let cwd = canonicalize_cwd(Path::new(&scope.cwd))?;
     Ok(ResolvedScope {
         source: source_from_input(
@@ -364,7 +364,7 @@ fn resolve_cwd_filter(
     state: &WebState,
     auth: &AuthContext,
     cwd: Option<String>,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     let cwd = match cwd {
         Some(cwd) => canonicalize_cwd(Path::new(&cwd))?,
         None => default_resolved_scope(state, auth)?.cwd,
@@ -376,7 +376,7 @@ fn resolve_session_cwd_filter(
     _state: &WebState,
     _auth: &AuthContext,
     cwd: Option<String>,
-) -> psychevo_runtime::Result<Option<PathBuf>> {
+) -> psychevo::Result<Option<PathBuf>> {
     let Some(cwd) = cwd else {
         return Ok(None);
     };
@@ -387,7 +387,7 @@ fn resolve_session_cwd_filter(
 async fn resolved_scope_for_thread(
     state: &WebState,
     thread_id: &str,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     let summary = state
         .inner
         .state
@@ -448,7 +448,7 @@ async fn update_browser_session_for_draft_scope(
     state: &WebState,
     auth: &AuthContext,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if !matches!(auth, AuthContext::Browser { .. }) {
         return Ok(());
     }

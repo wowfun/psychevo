@@ -1,7 +1,7 @@
-fn is_missing_session_usage_error(error: &psychevo_runtime::Error, session_id: &str) -> bool {
+fn is_missing_session_usage_error(error: &psychevo::Error, session_id: &str) -> bool {
     matches!(
         error,
-        psychevo_runtime::Error::Message(message)
+        psychevo::Error::Message(message)
             if message == &format!("session not found: {session_id}")
     )
 }

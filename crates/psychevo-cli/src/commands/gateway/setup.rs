@@ -3,15 +3,15 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
+use psychevo::{
+    config::ChannelSetupInput, config::channel_doctor_value, config::channel_list_value,
+    config::channel_summary_value, config::set_channel_enabled, config::setup_channel_connection,
+    config::upsert_channel_connection,
+};
 use psychevo_gateway::im::ImAdapter;
 use psychevo_gateway::im::adapters::{
     WECHAT_ILINK_BASE_URL, WechatIlinkAdapter, WechatIlinkConfig, WechatQrCode, WechatQrPoll,
     fetch_wechat_qr_code, poll_wechat_qr_code,
-};
-use psychevo_runtime::{
-    config::ChannelSetupInput, config::channel_doctor_value, config::channel_list_value,
-    config::channel_summary_value, config::set_channel_enabled, config::setup_channel_connection,
-    config::upsert_channel_connection,
 };
 use serde_json::{Value, json};
 

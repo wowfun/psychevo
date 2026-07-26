@@ -1,5 +1,5 @@
 fn configured_model_option_view(
-    model: &psychevo_runtime::types::ConfiguredModel,
+    model: &psychevo::types::ConfiguredModel,
 ) -> wire::ModelOptionView {
     let reasoning_supported = model.metadata.capabilities.reasoning;
     wire::ModelOptionView {
@@ -21,7 +21,7 @@ fn configured_model_option_view(
 fn model_options_with_cached_catalog(
     state: &WebState,
     options: &RunOptions,
-    configured: &[psychevo_runtime::types::ConfiguredModel],
+    configured: &[psychevo::types::ConfiguredModel],
 ) -> Vec<wire::ModelOptionView> {
     let mut seen = std::collections::BTreeSet::new();
     let mut views = Vec::new();
@@ -56,7 +56,7 @@ fn reasoning_efforts_for_model(reasoning_supported: Option<bool>) -> Vec<String>
         .collect()
 }
 
-fn model_settings_value(state: &WebState, cwd: &Path) -> psychevo_runtime::Result<Value> {
+fn model_settings_value(state: &WebState, cwd: &Path) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(model_settings_result(
         state, cwd,
     )?)?)
@@ -65,7 +65,7 @@ fn model_settings_value(state: &WebState, cwd: &Path) -> psychevo_runtime::Resul
 fn model_settings_result(
     state: &WebState,
     cwd: &Path,
-) -> psychevo_runtime::Result<wire::ModelSettingsResult> {
+) -> psychevo::Result<wire::ModelSettingsResult> {
     let options = model_settings_global_options(state, cwd);
     let selected_model = selected_configured_model(&options)?;
     let default_reasoning_effort = selected_model
@@ -248,7 +248,7 @@ async fn model_provider_catalog_value(
     state: &WebState,
     cwd: &Path,
     params: wire::ModelProviderCatalogParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let options = model_settings_global_options(state, cwd);
     let provider_id = normalize_provider_id(&params.provider_id);
     let provider = model_catalog_provider(&options, &provider_id)?
@@ -289,7 +289,7 @@ async fn model_state_read_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(
         model_state_result(state, cwd, thread_id).await?,
     )?)
@@ -300,7 +300,7 @@ async fn model_state_set_value(
     cwd: &Path,
     thread_id: Option<&str>,
     params: wire::ModelStateSetParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let (model_spec, provider, model_id) = normalize_provider_qualified_model(&params.model)?;
     let reasoning_effort = normalize_model_state_reasoning_effort(params.reasoning_effort)?;
     let path = ModelState::path_for_home(&state.inner.home);
@@ -338,7 +338,7 @@ async fn model_state_result(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<wire::ModelStateResult> {
+) -> psychevo::Result<wire::ModelStateResult> {
     let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))?;
     let cwd_key = cwd.to_string_lossy().to_string();
     let session_selection = match thread_id {
@@ -362,7 +362,7 @@ async fn model_state_result(
 
 fn normalize_provider_qualified_model(
     value: &str,
-) -> psychevo_runtime::Result<(String, String, String)> {
+) -> psychevo::Result<(String, String, String)> {
     let value = value.trim();
     let Some((provider, model)) = value.split_once('/') else {
         return Err(Error::Config(
@@ -380,7 +380,7 @@ fn normalize_provider_qualified_model(
 
 fn normalize_model_state_reasoning_effort(
     value: Option<String>,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     let reasoning_effort = normalize_reasoning_effort(value);
     if let Some(reasoning_effort) = reasoning_effort.as_deref()
         && !REASONING_EFFORT_VALUES.contains(&reasoning_effort)
@@ -397,7 +397,7 @@ fn model_provider_save_value(
     state: &WebState,
     cwd: &Path,
     params: wire::ModelProviderSaveParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let provider_id = normalize_provider_id(&params.provider_id);
     validate_model_provider_id(&provider_id)?;
     let name = params
@@ -462,7 +462,7 @@ fn model_assignment_set_value(
     state: &WebState,
     cwd: &Path,
     params: wire::ModelAssignmentSetParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let provider = normalize_provider_id(&params.provider);
     validate_model_provider_id(&provider)?;
     let reasoning_effort = assignment_reasoning_effort(params.reasoning_effort.as_deref());
@@ -517,7 +517,7 @@ fn assignment_reasoning_effort(value: Option<&str>) -> Option<&str> {
         .filter(|value| !value.is_empty() && *value != "none")
 }
 
-fn validate_model_provider_id(provider_id: &str) -> psychevo_runtime::Result<()> {
+fn validate_model_provider_id(provider_id: &str) -> psychevo::Result<()> {
     if provider_id == "custom" {
         return Err(Error::Config(
             "custom provider save requires a unique provider id".to_string(),
@@ -535,7 +535,7 @@ fn validate_model_provider_id(provider_id: &str) -> psychevo_runtime::Result<()>
     }
 }
 
-fn validate_model_api(value: &str) -> psychevo_runtime::Result<String> {
+fn validate_model_api(value: &str) -> psychevo::Result<String> {
     let value = value.trim().trim_end_matches('/').to_string();
     if value.starts_with("http://") || value.starts_with("https://") {
         Ok(value)
@@ -546,7 +546,7 @@ fn validate_model_api(value: &str) -> psychevo_runtime::Result<String> {
     }
 }
 
-fn validate_model_id(value: &str) -> psychevo_runtime::Result<String> {
+fn validate_model_id(value: &str) -> psychevo::Result<String> {
     let value = value.trim();
     if value.is_empty() {
         return Err(Error::Config("model id is required".to_string()));
@@ -561,7 +561,7 @@ fn validate_model_id(value: &str) -> psychevo_runtime::Result<String> {
 
 fn model_config_value(
     model: &wire::ModelProviderSaveModelParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let mut object = advanced_model_metadata_object(
         model.advanced_format.as_deref(),
         model.advanced.as_deref(),
@@ -596,7 +596,7 @@ fn model_config_value(
 fn advanced_model_metadata_object(
     format: Option<&str>,
     raw: Option<&str>,
-) -> psychevo_runtime::Result<serde_json::Map<String, Value>> {
+) -> psychevo::Result<serde_json::Map<String, Value>> {
     let raw = raw.map(str::trim).filter(|value| !value.is_empty());
     let Some(raw) = raw else {
         return Ok(serde_json::Map::new());
@@ -617,7 +617,7 @@ fn advanced_model_metadata_object(
         .ok_or_else(|| Error::Config("advanced metadata must be an object".to_string()))
 }
 
-fn configured_model_is_free(model: &psychevo_runtime::types::ConfiguredModel) -> bool {
+fn configured_model_is_free(model: &psychevo::types::ConfiguredModel) -> bool {
     let Some(cost) = &model.metadata.cost else {
         return false;
     };

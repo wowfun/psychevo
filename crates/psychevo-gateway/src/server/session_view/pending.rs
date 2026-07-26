@@ -2,7 +2,7 @@ async fn prune_pending_actions(
     state: &WebState,
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Vec<PendingActionView>> {
+) -> psychevo::Result<Vec<PendingActionView>> {
     let pending = state
         .inner
         .pending_actions
@@ -20,6 +20,50 @@ async fn prune_pending_actions(
             PendingInteractionState::Stale => {
                 stale_action_ids.push(action.action_id);
             }
+        }
+    }
+    if let Some(thread_id) = thread_id
+        && let Ok(thread) = state.inner.framework.resume_thread(thread_id).await
+    {
+        for interaction in thread.pending_interactions().await? {
+            if visible
+                .iter()
+                .any(|action| action.action_id == interaction.interaction_id)
+            {
+                continue;
+            }
+            let kind = match interaction.kind.as_str() {
+                "permission" => GatewayActionKind::Permission,
+                "clarify" | "user_input" => GatewayActionKind::Clarify,
+                _ => continue,
+            };
+            let title = interaction
+                .payload
+                .get("toolName")
+                .or_else(|| interaction.payload.get("title"))
+                .or_else(|| interaction.payload.get("message"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let summary = interaction
+                .payload
+                .get("summary")
+                .or_else(|| interaction.payload.get("reason"))
+                .or_else(|| interaction.payload.get("message"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            visible.push(PendingActionView {
+                action_id: interaction.interaction_id,
+                kind,
+                title,
+                summary,
+                payload: interaction.payload,
+                thread_id: Some(interaction.thread_id),
+                turn_id: Some(interaction.turn_id),
+                activity_id: None,
+                source_key: None,
+                owner_id: None,
+                lease_expires_at_ms: None,
+            });
         }
     }
     if !stale_action_ids.is_empty() {
@@ -52,7 +96,7 @@ async fn pending_action_state(
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
     action: &PendingActionView,
-) -> psychevo_runtime::Result<PendingInteractionState> {
+) -> psychevo::Result<PendingInteractionState> {
     if action.kind == GatewayActionKind::Permission
         && state
             .inner
@@ -95,7 +139,7 @@ async fn pending_interaction_context_state(
     selector: &GatewayThreadSelector,
     thread_id: Option<&str>,
     request: PendingInteractionRoute<'_>,
-) -> psychevo_runtime::Result<PendingInteractionState> {
+) -> psychevo::Result<PendingInteractionState> {
     if let (Some(current_thread_id), Some(request_thread_id)) = (thread_id, request.thread_id)
         && current_thread_id != request_thread_id
     {

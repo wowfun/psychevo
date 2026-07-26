@@ -3,18 +3,18 @@ use std::env;
 use std::io::{self, IsTerminal, Read, Write};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
-use psychevo_ai::Outcome;
-use psychevo_gateway::{
-    Gateway, GatewayInputPart, GatewaySource, ThreadCallerContext, ThreadSurface, ThreadTurnIntent,
-    TranscriptBlockKind,
-};
-use psychevo_runtime::state::StateRuntime;
-use psychevo_runtime::{
+use psychevo::{
+    Application, StartThreadRequest, ThreadListQuery, TurnEvent, TurnOutcome, TurnRequest,
     types::ApprovalHandler, types::PermissionApprovalDecision, types::PermissionApprovalRequest,
-    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode, types::RunWarning,
+    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
+};
+use psychevo_gateway::{
+    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
+    TranscriptEntryRole, gateway_event_from_run_stream,
 };
 
 use crate::args::{PermissionModeArg, RunArgs, RunFormatArg};
@@ -95,53 +95,90 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
         .iter()
         .cloned()
         .collect::<BTreeMap<_, _>>();
-    let state = StateRuntime::open(&db_path).await?;
-    let gateway = Gateway::new(state.clone());
-    let source = GatewaySource::new("cli", format!("run:{}", std::process::id()))
-        .invocation()
-        .with_raw_identity(serde_json::json!({
-            "kind": "cli",
-            "entrypoint": "run",
-            "cwd": cwd.display().to_string(),
-        }));
+    let mut builder = Application::builder().home(&home).database_path(&db_path);
+    if let Some(path) = config_path.as_ref() {
+        builder = builder.config_path(path);
+    }
+    let application = builder.build().await?;
+    let client = application.client();
+    let execution = async {
+        let thread = if let Some(thread_id) = args.session.as_ref() {
+            client.resume_thread(thread_id.clone()).await?
+        } else if args.continue_latest {
+            match client
+                .list_threads(ThreadListQuery {
+                    cwd: Some(cwd.clone()),
+                    archived: false,
+                    sources: vec!["run".to_string()],
+                })
+                .await?
+                .into_iter()
+                .next()
+            {
+                Some(snapshot) => client.resume_thread(snapshot.id).await?,
+                None => {
+                    let mut request = StartThreadRequest::new(&cwd);
+                    request.source = "run".to_string();
+                    request.metadata = Some(serde_json::json!({
+                        "caller": "pevo run",
+                        "pid": std::process::id(),
+                    }));
+                    client.start_thread(request).await?
+                }
+            }
+        } else {
+            let mut request = StartThreadRequest::new(&cwd);
+            request.source = "run".to_string();
+            request.metadata = Some(serde_json::json!({
+                "caller": "pevo run",
+                "pid": std::process::id(),
+            }));
+            client.start_thread(request).await?
+        };
+        let mut request = TurnRequest::new(prompt);
+        request.source = "run".to_string();
+        request.config_path = config_path;
+        request.project_context = project_context_override;
+        request.model = args.model.clone();
+        request.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+        request.runtime_ref = runtime_ref;
+        request.runtime_options = runtime_options;
+        request.include_reasoning = args.include_reasoning;
+        request.mode = run_mode;
+        request.permission_mode = permission_mode;
+        request.approval_handler = approval_handler;
+        request.inherited_env = Some(env_map);
+        request.agent = args.agent.clone();
+        request.no_agents = args.no_agents;
+        request.no_skills = args.no_skills;
+        request.skill_inputs = args.skill.clone();
+        let handle = thread.start_turn(request).await?;
+        let receipt = handle.receipt().clone();
+        let mut stream = handle.events();
+        let collect = async move {
+            let mut events = Vec::new();
+            while let Some(event) = stream.next().await {
+                events.push(event);
+            }
+            events
+        };
+        let (result, events) = tokio::join!(handle.wait(), collect);
+        Ok::<_, psychevo::Error>((receipt, events, result?))
+    }
+    .await;
+    let shutdown = application.shutdown().await;
+    let (receipt, events, result) = execution?;
+    shutdown?;
 
-    let mut caller = ThreadCallerContext::new(ThreadSurface::Cli, cwd);
-    caller.runtime_source = "run".to_string();
-    caller.continue_sources = vec!["run".to_string()];
-    let mut intent = ThreadTurnIntent::new(vec![GatewayInputPart::Text { text: prompt }]);
-    intent.thread_id = args.session.clone();
-    intent.source = Some(source);
-    intent.policy.snapshot_root = Some(home.join("snapshots"));
-    intent.policy.continue_latest = args.continue_latest;
-    intent.policy.extract_prompt_image_sources = true;
-    intent.policy.config_path = config_path;
-    intent.policy.project_context_override = project_context_override;
-    intent.policy.model = args.model.clone();
-    intent.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-    intent.policy.runtime_profile_ref = runtime_ref;
-    intent.policy.control_values = runtime_options;
-    intent.policy.include_reasoning = args.include_reasoning;
-    intent.policy.mode = run_mode;
-    intent.policy.permission_mode = permission_mode;
-    intent.policy.approval_handler = approval_handler;
-    intent.policy.inherited_env = Some(env_map);
-    intent.policy.agent_ref = args.agent.clone();
-    intent.policy.no_agents = args.no_agents;
-    intent.policy.no_skills = args.no_skills;
-    intent.policy.skill_inputs = args.skill.clone();
-    let turn_result = gateway.start_turn(caller, intent).await?.wait().await?;
-    let committed_entries = turn_result.committed_entries;
-    let result = turn_result.result;
-
-    let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
+    let success = result.outcome == TurnOutcome::Completed && result.tool_failures == 0;
     if args.format == RunFormatArg::Json {
-        let thread_id = result.session_id.clone();
-        let turn_id = format!("run:{thread_id}");
+        let thread_id = receipt.thread_id.clone();
+        let turn_id = receipt.turn_id.clone();
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
                 "type": "thread.started",
-                "threadId": thread_id,
+                "threadId": &thread_id,
                 "selectedSkills": &result.selected_skills,
             }))?
         );
@@ -149,47 +186,40 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             "{}",
             serde_json::to_string(&serde_json::json!({
                 "type": "turn.started",
-                "threadId": result.session_id,
-                "turnId": turn_id,
+                "threadId": thread_id,
+                "turnId": &turn_id,
             }))?
         );
-        for (index, warning) in result.warnings.iter().enumerate() {
-            println!(
-                "{}",
-                serde_json::to_string(&serde_json::json!({
-                    "type": "entry.completed",
-                    "threadId": result.session_id,
-                    "turnId": turn_id,
-                    "entry": warning_entry_value(index, warning),
-                }))?
-            );
+        for warning in &result.warnings {
+            let event = json_turn_event(
+                &receipt,
+                TurnEvent::Warning {
+                    data: serde_json::to_value(warning)?,
+                },
+            )
+            .expect("warning events always have a JSON projection");
+            println!("{}", serde_json::to_string(&event)?);
         }
-        for mut entry in committed_entries {
-            if !args.include_reasoning {
-                entry
-                    .blocks
-                    .retain(|block| block.kind != TranscriptBlockKind::Reasoning);
-            }
-            if entry.blocks.is_empty() {
+        for event in events {
+            if !args.include_reasoning
+                && matches!(
+                    event,
+                    TurnEvent::ReasoningDelta { .. } | TurnEvent::ReasoningCompleted { .. }
+                )
+            {
                 continue;
             }
-            println!(
-                "{}",
-                serde_json::to_string(&serde_json::json!({
-                    "type": "entry.completed",
-                    "threadId": result.session_id,
-                    "turnId": turn_id,
-                    "entry": entry,
-                }))?
-            );
+            if let Some(event) = json_turn_event(&receipt, event) {
+                println!("{}", serde_json::to_string(&event)?);
+            }
         }
         let mut terminal = serde_json::json!({
-                "type": if success { "turn.completed" } else { "turn.failed" },
-                "threadId": result.session_id,
-                "turnId": turn_id,
-                "outcome": result.outcome.as_str(),
-                "toolFailures": result.tool_failures,
-                "finalAnswer": result.final_answer,
+            "type": if success { "turn.completed" } else { "turn.failed" },
+            "threadId": receipt.thread_id,
+            "turnId": receipt.turn_id,
+            "outcome": turn_outcome_name(result.outcome),
+            "toolFailures": result.tool_failures,
+            "finalAnswer": result.final_answer,
         });
         if let Some(reason) = result.terminal_reason
             && let Some(object) = terminal.as_object_mut()
@@ -209,12 +239,12 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             }
         }
         println!("{}", result.final_answer);
-        if result.outcome != Outcome::Normal
+        if result.outcome != TurnOutcome::Completed
             && let Some(reason) = result.terminal_reason
         {
             eprintln!(
                 "turn ended: {} - {}",
-                result.outcome.as_str(),
+                turn_outcome_name(result.outcome),
                 reason.message()
             );
         }
@@ -227,45 +257,437 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     })
 }
 
-fn warning_entry_value(index: usize, warning: &RunWarning) -> serde_json::Value {
-    serde_json::json!({
-        "id": format!("warning:{index}"),
-        "threadId": null,
-        "turnId": null,
-        "messageSeq": null,
-        "role": "diagnostic",
-        "status": "info",
-        "source": "runtime.warning",
-        "blocks": [{
-            "id": format!("warning:{index}:block:0"),
-            "kind": "status",
-            "status": "info",
-            "order": 0,
-            "source": "runtime.warning",
-            "title": "warning",
-            "body": &warning.message,
-            "preview": &warning.message,
-            "detail": &warning.message,
-            "artifactIds": [],
-            "metadata": {
-                "kind": &warning.kind,
-                "sourcePath": &warning.source_path,
-                "suggestion": &warning.suggestion,
-            },
-            "result": null,
-            "createdAtMs": null,
-            "updatedAtMs": null
+fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<serde_json::Value> {
+    match event {
+        TurnEvent::Message {
+            stage,
+            message,
+            usage,
+            metadata,
+            accounting,
+        } => {
+            let mut runtime = serde_json::Map::new();
+            runtime.insert(
+                "type".to_string(),
+                serde_json::json!(if stage == psychevo::ItemStage::Completed {
+                    "message_end"
+                } else {
+                    "message_update"
+                }),
+            );
+            runtime.insert("message".to_string(), message);
+            if let Some(value) = usage.clone() {
+                runtime.insert("usage".to_string(), value);
+            }
+            if let Some(value) = metadata.clone() {
+                runtime.insert("metadata".to_string(), value);
+            }
+            if let Some(value) = accounting.clone() {
+                runtime.insert("accounting".to_string(), value);
+            }
+            let mut entry = projected_entry(
+                &receipt.turn_id,
+                psychevo::types::RunStreamEvent::value(serde_json::Value::Object(runtime)),
+            )?;
+            entry.metadata = metadata;
+            entry.usage = usage;
+            entry.accounting = accounting;
+            typed_item_event(receipt, stage, entry)
+        }
+        TurnEvent::Tool { stage, data } => {
+            let entry = projected_entry(
+                &receipt.turn_id,
+                psychevo::types::RunStreamEvent::value(data),
+            )?;
+            typed_item_event(receipt, stage, entry)
+        }
+        TurnEvent::ReasoningDelta { text } => {
+            let entry = projected_entry(
+                &receipt.turn_id,
+                psychevo::types::RunStreamEvent::ReasoningDelta { text },
+            )?;
+            typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
+        }
+        TurnEvent::ReasoningCompleted { text } => {
+            let mut entry = projected_entry(
+                &receipt.turn_id,
+                psychevo::types::RunStreamEvent::ReasoningDelta {
+                    text: text.unwrap_or_default(),
+                },
+            )?;
+            entry.status = TranscriptBlockStatus::Completed;
+            for block in &mut entry.blocks {
+                block.status = TranscriptBlockStatus::Completed;
+            }
+            typed_item_event(receipt, psychevo::ItemStage::Completed, entry)
+        }
+        TurnEvent::InteractionRequested {
+            interaction_id,
+            kind,
+            payload,
+        } => typed_item_event(
+            receipt,
+            psychevo::ItemStage::Started,
+            diagnostic_entry(
+                receipt,
+                format!("interaction:{interaction_id}"),
+                interaction_block_kind(&kind),
+                TranscriptBlockStatus::NeedsInput,
+                Some(kind),
+                None,
+                Some(serde_json::json!({
+                    "interactionId": interaction_id,
+                    "payload": payload,
+                })),
+                "framework.interaction",
+            ),
+        ),
+        TurnEvent::InteractionResolved {
+            interaction_id,
+            kind,
+            reason,
+        } => typed_item_event(
+            receipt,
+            psychevo::ItemStage::Completed,
+            diagnostic_entry(
+                receipt,
+                format!("interaction:{interaction_id}"),
+                interaction_block_kind(&kind),
+                TranscriptBlockStatus::Completed,
+                Some(kind),
+                Some(reason.clone()),
+                Some(serde_json::json!({
+                    "interactionId": interaction_id,
+                    "reason": reason,
+                })),
+                "framework.interaction",
+            ),
+        ),
+        TurnEvent::Warning { data } => {
+            let warning_kind = data
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("warning");
+            let warning_message = data
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("runtime warning");
+            typed_item_event(
+                receipt,
+                psychevo::ItemStage::Completed,
+                diagnostic_entry(
+                    receipt,
+                    format!("warning:{:016x}", stable_hash_json(&data)),
+                    TranscriptBlockKind::Status,
+                    TranscriptBlockStatus::Info,
+                    Some(warning_kind.to_string()),
+                    Some(warning_message.to_string()),
+                    Some(data),
+                    "framework.warning",
+                ),
+            )
+        }
+        TurnEvent::ResyncRequired { missed } => Some(serde_json::json!({
+            "type": "stream.resync_required",
+            "threadId": receipt.thread_id,
+            "turnId": receipt.turn_id,
+            "missed": missed,
+        })),
+        TurnEvent::Accepted { .. }
+        | TurnEvent::Started { .. }
+        | TurnEvent::Completed { .. }
+        | TurnEvent::Failed { .. } => None,
+    }
+}
+
+fn projected_entry(
+    turn_id: &str,
+    event: psychevo::types::RunStreamEvent,
+) -> Option<TranscriptEntry> {
+    match gateway_event_from_run_stream(turn_id, &event)? {
+        GatewayEvent::EntryStarted { entry, .. }
+        | GatewayEvent::EntryUpdated { entry, .. }
+        | GatewayEvent::EntryCompleted { entry, .. } => Some(entry),
+        _ => None,
+    }
+}
+
+fn typed_item_event(
+    receipt: &psychevo::TurnReceipt,
+    stage: psychevo::ItemStage,
+    mut entry: TranscriptEntry,
+) -> Option<serde_json::Value> {
+    entry.thread_id.clone_from(&receipt.thread_id);
+    entry.turn_id = Some(receipt.turn_id.clone());
+    sanitize_transcript_entry(&mut entry);
+    Some(serde_json::json!({
+        "type": format!("item.{}", item_stage_name(stage)),
+        "threadId": receipt.thread_id,
+        "turnId": receipt.turn_id,
+        "item": entry,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn diagnostic_entry(
+    receipt: &psychevo::TurnReceipt,
+    id_suffix: String,
+    kind: TranscriptBlockKind,
+    status: TranscriptBlockStatus,
+    title: Option<String>,
+    body: Option<String>,
+    metadata: Option<serde_json::Value>,
+    source: &str,
+) -> TranscriptEntry {
+    let now = now_ms();
+    let id = format!("live:{}:{id_suffix}", receipt.turn_id);
+    TranscriptEntry {
+        id: id.clone(),
+        thread_id: receipt.thread_id.clone(),
+        turn_id: Some(receipt.turn_id.clone()),
+        message_seq: None,
+        role: TranscriptEntryRole::Diagnostic,
+        status,
+        source: source.to_string(),
+        blocks: vec![TranscriptBlock {
+            id: format!("{id}:block"),
+            kind,
+            status,
+            order: 0,
+            phase_ordinal: None,
+            source: source.to_string(),
+            title,
+            body: body.clone(),
+            preview: body,
+            detail: None,
+            artifact_ids: Vec::new(),
+            metadata,
+            result: None,
+            created_at_ms: now,
+            updated_at_ms: now,
         }],
-        "metadata": {
-            "kind": &warning.kind,
-            "sourcePath": &warning.source_path,
-            "suggestion": &warning.suggestion,
-        },
-        "usage": null,
-        "accounting": null,
-        "createdAtMs": null,
-        "updatedAtMs": null,
+        metadata: None,
+        usage: None,
+        accounting: None,
+        created_at_ms: now,
+        updated_at_ms: now,
+    }
+}
+
+fn interaction_block_kind(kind: &str) -> TranscriptBlockKind {
+    match kind {
+        "permission" => TranscriptBlockKind::Permission,
+        "clarify" => TranscriptBlockKind::Clarify,
+        _ => TranscriptBlockKind::Tool,
+    }
+}
+
+const TRANSCRIPT_SHORT_TEXT_LIMIT: usize = 512;
+const TRANSCRIPT_LONG_TEXT_LIMIT: usize = 8_192;
+const TRANSCRIPT_JSON_LIMIT: usize = 4_096;
+const TRANSCRIPT_ARTIFACT_LIMIT: usize = 64;
+
+fn sanitize_transcript_entry(entry: &mut TranscriptEntry) {
+    entry.id = bounded_identifier(&entry.id);
+    entry.metadata = entry.metadata.take().map(bounded_json);
+    entry.usage = entry.usage.take().map(bounded_json);
+    entry.accounting = entry.accounting.take().map(bounded_json);
+    for block in &mut entry.blocks {
+        block.id = bounded_identifier(&block.id);
+        block.title = block
+            .title
+            .take()
+            .map(|value| capped_chars(&value, TRANSCRIPT_SHORT_TEXT_LIMIT));
+        block.preview = block
+            .preview
+            .take()
+            .map(|value| capped_chars(&value, TRANSCRIPT_SHORT_TEXT_LIMIT));
+        block.body = block
+            .body
+            .take()
+            .map(|value| capped_chars(&value, TRANSCRIPT_LONG_TEXT_LIMIT));
+        block.detail = block
+            .detail
+            .take()
+            .map(|value| capped_chars(&value, TRANSCRIPT_LONG_TEXT_LIMIT));
+        block.artifact_ids.truncate(TRANSCRIPT_ARTIFACT_LIMIT);
+        for artifact_id in &mut block.artifact_ids {
+            *artifact_id = bounded_identifier(artifact_id);
+        }
+        block.metadata = block.metadata.take().map(bounded_json);
+        if let Some(result) = &mut block.result {
+            result.content = capped_chars(&result.content, TRANSCRIPT_LONG_TEXT_LIMIT);
+            result.metadata = result.metadata.take().map(bounded_json);
+        }
+    }
+}
+
+fn bounded_identifier(value: &str) -> String {
+    if value.chars().count() <= TRANSCRIPT_SHORT_TEXT_LIMIT {
+        return value.to_string();
+    }
+    format!(
+        "{}#{:016x}",
+        capped_chars(value, TRANSCRIPT_SHORT_TEXT_LIMIT - 17),
+        stable_hash_bytes(value.as_bytes())
+    )
+}
+
+fn bounded_json(value: serde_json::Value) -> serde_json::Value {
+    let Ok(serialized) = serde_json::to_vec(&value) else {
+        return serde_json::json!({
+            "truncated": true,
+            "originalBytes": 0,
+            "preview": "<unserializable>",
+        });
+    };
+    if serialized.len() <= TRANSCRIPT_JSON_LIMIT {
+        return value;
+    }
+    let preview = String::from_utf8_lossy(&serialized);
+    serde_json::json!({
+        "truncated": true,
+        "originalBytes": serialized.len(),
+        "preview": capped_chars(&preview, 1_024),
     })
+}
+
+fn capped_chars(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        value.to_string()
+    } else {
+        value.chars().take(limit).collect()
+    }
+}
+
+fn stable_hash_json(value: &serde_json::Value) -> u64 {
+    serde_json::to_vec(value)
+        .map(|bytes| stable_hash_bytes(&bytes))
+        .unwrap_or_default()
+}
+
+fn stable_hash_bytes(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    })
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or_default()
+}
+
+fn item_stage_name(stage: psychevo::ItemStage) -> &'static str {
+    match stage {
+        psychevo::ItemStage::Started => "started",
+        psychevo::ItemStage::Updated => "updated",
+        psychevo::ItemStage::Completed => "completed",
+    }
+}
+
+#[cfg(test)]
+mod json_transcript_tests {
+    use super::*;
+
+    fn receipt() -> psychevo::TurnReceipt {
+        psychevo::TurnReceipt {
+            accepted: true,
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            client_turn_id: None,
+        }
+    }
+
+    #[test]
+    fn message_events_use_stable_typed_transcript_entries() {
+        let started = json_turn_event(
+            &receipt(),
+            TurnEvent::Message {
+                stage: psychevo::ItemStage::Started,
+                message: serde_json::json!({
+                    "role": "assistant",
+                    "content": "hello",
+                }),
+                usage: None,
+                metadata: None,
+                accounting: None,
+            },
+        )
+        .expect("started");
+        let completed = json_turn_event(
+            &receipt(),
+            TurnEvent::Message {
+                stage: psychevo::ItemStage::Completed,
+                message: serde_json::json!({
+                    "role": "assistant",
+                    "content": "hello",
+                }),
+                usage: Some(serde_json::json!({"inputTokens": 2})),
+                metadata: Some(serde_json::json!({"provider": "fake"})),
+                accounting: Some(serde_json::json!({"reportedTotalTokens": 3})),
+            },
+        )
+        .expect("completed");
+
+        assert_eq!(started["type"], "item.started");
+        assert_eq!(completed["type"], "item.completed");
+        assert_eq!(started["item"]["id"], completed["item"]["id"]);
+        assert_eq!(
+            started["item"]["blocks"][0]["id"],
+            completed["item"]["blocks"][0]["id"]
+        );
+        assert_eq!(completed["item"]["role"], "assistant");
+        assert_eq!(completed["item"]["blocks"][0]["kind"], "text");
+        assert_eq!(completed["item"]["usage"]["inputTokens"], 2);
+        assert_eq!(completed["item"]["accounting"]["reportedTotalTokens"], 3);
+        assert!(completed["item"].get("value").is_none());
+    }
+
+    #[test]
+    fn tool_transcript_entries_bound_content_and_arbitrary_json() {
+        let projected = json_turn_event(
+            &receipt(),
+            TurnEvent::Tool {
+                stage: psychevo::ItemStage::Completed,
+                data: serde_json::json!({
+                    "type": "tool_execution_end",
+                    "tool_call_id": "call-1",
+                    "tool_name": "exec_command",
+                    "result": {
+                        "model_content": "x".repeat(50_000),
+                        "raw_output": {"output": "y".repeat(50_000)},
+                    },
+                    "outcome": "normal",
+                }),
+            },
+        )
+        .expect("tool");
+
+        let block = &projected["item"]["blocks"][0];
+        assert_eq!(block["kind"], "shell");
+        assert!(
+            block["body"]
+                .as_str()
+                .expect("bounded body")
+                .chars()
+                .count()
+                <= TRANSCRIPT_LONG_TEXT_LIMIT
+        );
+        assert_eq!(block["metadata"]["truncated"], true);
+        assert!(serde_json::to_vec(&projected).expect("serialize").len() < 24_000);
+    }
+}
+
+fn turn_outcome_name(outcome: TurnOutcome) -> &'static str {
+    match outcome {
+        TurnOutcome::Completed => "completed",
+        TurnOutcome::Stopped => "stopped",
+        TurnOutcome::Failed => "failed",
+        TurnOutcome::Interrupted => "interrupted",
+    }
 }
 
 pub(crate) fn read_prompt(message: &[String]) -> Result<String> {

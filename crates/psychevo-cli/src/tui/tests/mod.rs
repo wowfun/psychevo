@@ -1,9 +1,9 @@
 pub(crate) use super::*;
-pub(crate) use psychevo_gateway::{GatewayTurn, GatewayTurnStatus};
-pub(crate) use psychevo_runtime::{
+pub(crate) use psychevo::{
     context_usage::ContextCategory, context_usage::ContextScope, context_usage::ContextTokenizer,
     context_usage::ContextTotal,
 };
+pub(crate) use psychevo_gateway::{GatewayTurn, GatewayTurnStatus};
 pub(crate) use ratatui::backend::{Backend, TestBackend};
 pub(crate) use ratatui::layout::Position;
 pub(crate) use std::fs;
@@ -137,8 +137,7 @@ pub(crate) fn insert_tui_message_with_metadata(
 }
 
 pub(crate) fn test_track_snapshot(app: &TuiApp, _session_id: &str) -> String {
-    let workspace_id =
-        psychevo_runtime::paths::workspace_snapshot_id(&app.cwd).expect("workspace id");
+    let workspace_id = psychevo::paths::workspace_snapshot_id(&app.cwd).expect("workspace id");
     let git_dir = app
         .home
         .join("snapshots")

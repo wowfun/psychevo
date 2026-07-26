@@ -154,7 +154,7 @@ Use the captured child session.
         .upsert_agent_edge(
             &parent_thread_id,
             &child_thread_id,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await.expect("open child edge");
@@ -294,7 +294,7 @@ Use the captured child session.
         .expect("child edge after terminal");
     assert_eq!(
         terminal_edge.status,
-        psychevo_runtime::state::AgentEdgeStatus::Closed
+        psychevo::state::AgentEdgeStatus::Closed
     );
     assert!(
         harness
@@ -805,7 +805,7 @@ tools: [read]
         .await.expect("stored messages");
     let stored_assistant = summaries
         .iter()
-        .find(|summary| matches!(summary.message, psychevo_agent_core::Message::Assistant { .. }))
+        .find(|summary| matches!(summary.message, psychevo::__agent_core::Message::Assistant { .. }))
         .expect("stored assistant message");
     assert_eq!(
         stored_assistant.usage,
@@ -817,8 +817,8 @@ tools: [read]
             "reasoning_tokens": 4
         }))
     );
-    let usage_summary = psychevo_runtime::stats::session_usage_summary(
-        psychevo_runtime::types::SessionUsageOptions {
+    let usage_summary = psychevo::stats::session_usage_summary(
+        psychevo::types::SessionUsageOptions {
             state: harness.state.clone(),
             session_id: result.result.session_id.clone(),
         },
@@ -826,7 +826,7 @@ tools: [read]
     .await.expect("session usage");
     assert_eq!(usage_summary.effective_total_tokens, Some(144));
     assert_eq!(usage_summary.total_status, "reported");
-    let psychevo_agent_core::Message::Assistant { content, .. } = &stored_assistant.message else {
+    let psychevo::__agent_core::Message::Assistant { content, .. } = &stored_assistant.message else {
         unreachable!("matched assistant message")
     };
     assert!(
@@ -879,7 +879,7 @@ tools: [read]
         .filter(|summary| {
             matches!(
                 summary.message,
-                psychevo_agent_core::Message::Assistant { .. }
+                psychevo::__agent_core::Message::Assistant { .. }
             )
         })
         .collect::<Vec<_>>();
@@ -904,8 +904,8 @@ tools: [read]
             "reasoning_tokens": 8
         })
     );
-    let usage_summary = psychevo_runtime::stats::session_usage_summary(
-        psychevo_runtime::types::SessionUsageOptions {
+    let usage_summary = psychevo::stats::session_usage_summary(
+        psychevo::types::SessionUsageOptions {
             state: harness.state.clone(),
             session_id: result.result.session_id.clone(),
         },

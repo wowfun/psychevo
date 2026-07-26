@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 
-use psychevo_runtime::host_paths::HostPlatform;
+use psychevo::host_paths::HostPlatform;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -176,7 +176,7 @@ pub(crate) async fn install_managed_codex_acp(
     npm_program: &Path,
     platform: HostPlatform,
     inherited_env: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<ManagedCodexAcpPaths> {
+) -> psychevo::Result<ManagedCodexAcpPaths> {
     install_managed_codex_acp_with_lock(
         home,
         npm_program,
@@ -193,17 +193,17 @@ async fn install_managed_codex_acp_with_lock(
     platform: HostPlatform,
     inherited_env: &BTreeMap<String, String>,
     package_lock: &[u8],
-) -> psychevo_runtime::Result<ManagedCodexAcpPaths> {
+) -> psychevo::Result<ManagedCodexAcpPaths> {
     let actual_lock_sha = format!("{:x}", Sha256::digest(package_lock));
     if actual_lock_sha != CODEX_ACP_LOCK_SHA256 {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "managed Codex ACP dependency lock integrity mismatch: expected {CODEX_ACP_LOCK_SHA256}, got {actual_lock_sha}"
         )));
     }
 
     let target = managed_codex_acp_paths(home, platform);
     let parent = target.root.parent().ok_or_else(|| {
-        psychevo_runtime::Error::Message("managed Codex ACP path has no parent".to_string())
+        psychevo::Error::Message("managed Codex ACP path has no parent".to_string())
     })?;
     std::fs::create_dir_all(parent)?;
     let nonce = Uuid::now_v7();
@@ -222,16 +222,16 @@ async fn install_managed_codex_acp_with_lock(
             .output()
             .await
             .map_err(|error| {
-                psychevo_runtime::Error::Message(format!(
+                psychevo::Error::Message(format!(
                     "failed to launch npm for managed Codex ACP: {error}"
                 ))
             })?;
         if !output.status.success() {
-            let stderr = psychevo_runtime::process_env::decode_process_output_for_platform(
+            let stderr = psychevo::process_env::decode_process_output_for_platform(
                 &output.stderr,
                 platform == HostPlatform::Windows,
             );
-            return Err(psychevo_runtime::Error::Message(format!(
+            return Err(psychevo::Error::Message(format!(
                 "managed Codex ACP npm install failed: {}",
                 stderr.trim()
             )));
@@ -256,7 +256,7 @@ async fn install_managed_codex_acp_with_lock(
         && !target.root.exists()
         && let Err(restore_error) = std::fs::rename(&backup_root, &target.root)
     {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "{}; failed to restore the previous managed Codex ACP install: {restore_error}",
             install_result
                 .as_ref()
@@ -272,22 +272,18 @@ fn managed_npm_command(
     npm_program: &Path,
     platform: HostPlatform,
     env: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<tokio::process::Command> {
+) -> psychevo::Result<tokio::process::Command> {
     let args = MANAGED_NPM_CI_ARGS
         .iter()
         .map(OsString::from)
         .collect::<Vec<_>>();
-    let mut command = psychevo_runtime::process_env::tokio_host_process_command(
-        npm_program,
-        &args,
-        platform,
-        env,
-    )?;
+    let mut command =
+        psychevo::process_env::tokio_host_process_command(npm_program, &args, platform, env)?;
     command.env_clear();
-    psychevo_runtime::process_env::apply_tokio_process_env(
+    psychevo::process_env::apply_tokio_process_env(
         &mut command,
         env,
-        psychevo_runtime::process_env::ProcessEnvOptions::new(&[])
+        psychevo::process_env::ProcessEnvOptions::new(&[])
             .with_windows_utf8_defaults(platform == HostPlatform::Windows),
     )?;
     Ok(command)
@@ -298,7 +294,7 @@ fn promote_managed_install(
     backup_root: &Path,
     target: &ManagedCodexAcpPaths,
     platform: HostPlatform,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let had_existing = target.root.exists();
     if had_existing {
         std::fs::rename(&target.root, backup_root)?;
@@ -333,17 +329,17 @@ fn restore_managed_install_after_failure(
     target: &ManagedCodexAcpPaths,
     backup_root: &Path,
     had_existing: bool,
-    original_error: psychevo_runtime::Error,
-) -> psychevo_runtime::Error {
+    original_error: psychevo::Error,
+) -> psychevo::Error {
     if target.root.exists()
         && let Err(remove_error) = std::fs::remove_dir_all(&target.root)
     {
-        return psychevo_runtime::Error::Message(format!(
+        return psychevo::Error::Message(format!(
             "{original_error}; failed to remove invalid managed install before restore: {remove_error}"
         ));
     }
     if had_existing && let Err(restore_error) = std::fs::rename(backup_root, &target.root) {
-        return psychevo_runtime::Error::Message(format!(
+        return psychevo::Error::Message(format!(
             "{original_error}; failed to restore previous managed install: {restore_error}"
         ));
     }
@@ -372,7 +368,7 @@ fn inspect_managed_codex_acp_paths(
     paths: ManagedCodexAcpPaths,
     platform: HostPlatform,
     purpose: ManagedTreeVerificationPurpose,
-) -> psychevo_runtime::Result<ManagedCodexAcpPaths> {
+) -> psychevo::Result<ManagedCodexAcpPaths> {
     verify_managed_codex_acp_payload(&paths, platform)?;
     verify_managed_tree_seal(&paths, purpose, managed_tree_verification_cache())?;
     Ok(paths)
@@ -381,48 +377,48 @@ fn inspect_managed_codex_acp_paths(
 fn verify_managed_codex_acp_payload(
     paths: &ManagedCodexAcpPaths,
     platform: HostPlatform,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let manifest = std::fs::read_to_string(&paths.package_json)
         .ok()
         .and_then(|raw| serde_json::from_str::<ManagedPackageManifest>(&raw).ok())
         .ok_or_else(|| {
-            psychevo_runtime::Error::Message(
+            psychevo::Error::Message(
                 "managed Codex ACP package manifest is unreadable or invalid".to_string(),
             )
         })?;
     if manifest.name != CODEX_ACP_PACKAGE || manifest.version != CODEX_ACP_VERSION {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "managed Codex ACP package must be {CODEX_ACP_PACKAGE}@{CODEX_ACP_VERSION}, found {}@{}",
             manifest.name, manifest.version
         )));
     }
     verify_managed_package_lock(paths)?;
     if !managed_executable_is_usable(&paths.executable, platform) {
-        return Err(psychevo_runtime::Error::Message(
+        return Err(psychevo::Error::Message(
             "managed Codex ACP launcher is not executable".to_string(),
         ));
     }
     Ok(())
 }
 
-fn verify_managed_package_lock(paths: &ManagedCodexAcpPaths) -> psychevo_runtime::Result<()> {
+fn verify_managed_package_lock(paths: &ManagedCodexAcpPaths) -> psychevo::Result<()> {
     let lock = std::fs::read(&paths.package_lock).map_err(|error| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "managed Codex ACP dependency lock is missing or unreadable: {error}"
         ))
     })?;
     let actual = format!("{:x}", Sha256::digest(&lock));
     if actual != CODEX_ACP_LOCK_SHA256 || lock != CODEX_ACP_PACKAGE_LOCK {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "managed Codex ACP dependency lock integrity mismatch: expected {CODEX_ACP_LOCK_SHA256}, got {actual}"
         )));
     }
     Ok(())
 }
 
-fn write_managed_tree_seal(paths: &ManagedCodexAcpPaths) -> psychevo_runtime::Result<()> {
+fn write_managed_tree_seal(paths: &ManagedCodexAcpPaths) -> psychevo::Result<()> {
     if std::fs::symlink_metadata(&paths.tree_seal).is_ok() {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "managed Codex ACP payload contains reserved seal path `{MANAGED_TREE_SEAL_FILE}`"
         )));
     }
@@ -443,33 +439,33 @@ fn verify_managed_tree_seal(
     paths: &ManagedCodexAcpPaths,
     purpose: ManagedTreeVerificationPurpose,
     cache: &ManagedTreeVerificationCache,
-) -> psychevo_runtime::Result<bool> {
+) -> psychevo::Result<bool> {
     let metadata = std::fs::symlink_metadata(&paths.tree_seal).map_err(|error| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "managed Codex ACP tree seal is missing or unreadable: {error}"
         ))
     })?;
     if !metadata.file_type().is_file() {
-        return Err(psychevo_runtime::Error::Message(
+        return Err(psychevo::Error::Message(
             "managed Codex ACP tree seal must be a regular file".to_string(),
         ));
     }
     let raw = std::fs::read(&paths.tree_seal).map_err(|error| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "managed Codex ACP tree seal is unreadable: {error}"
         ))
     })?;
     let seal: ManagedTreeSeal = serde_json::from_slice(&raw).map_err(|_| {
-        psychevo_runtime::Error::Message("managed Codex ACP tree seal is invalid".to_string())
+        psychevo::Error::Message("managed Codex ACP tree seal is invalid".to_string())
     })?;
     if seal.schema_version != MANAGED_TREE_SEAL_SCHEMA_VERSION {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "managed Codex ACP tree seal schema must be {MANAGED_TREE_SEAL_SCHEMA_VERSION}, found {}",
             seal.schema_version
         )));
     }
     let cache_key = paths.root.canonicalize().map_err(|error| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "managed Codex ACP install root cannot be canonicalized: {error}"
         ))
     })?;
@@ -478,7 +474,7 @@ fn verify_managed_tree_seal(
     let cache_hit = cache
         .lock()
         .map_err(|_| {
-            psychevo_runtime::Error::Message(
+            psychevo::Error::Message(
                 "managed Codex ACP verification cache is unavailable".to_string(),
             )
         })?
@@ -501,7 +497,7 @@ fn verify_managed_tree_seal(
         if let Ok(mut cache) = cache.lock() {
             cache.remove(&cache_key);
         }
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "managed Codex ACP installed payload integrity mismatch: expected {}, got {actual}",
             seal.tree_sha256
         )));
@@ -511,14 +507,12 @@ fn verify_managed_tree_seal(
         if let Ok(mut cache) = cache.lock() {
             cache.remove(&cache_key);
         }
-        return Err(psychevo_runtime::Error::Message(
+        return Err(psychevo::Error::Message(
             "managed Codex ACP payload changed during integrity verification".to_string(),
         ));
     }
     let mut cache = cache.lock().map_err(|_| {
-        psychevo_runtime::Error::Message(
-            "managed Codex ACP verification cache is unavailable".to_string(),
-        )
+        psychevo::Error::Message("managed Codex ACP verification cache is unavailable".to_string())
     })?;
     let launch_verified = purpose == ManagedTreeVerificationPurpose::Launch
         || cache.get(&cache_key).is_some_and(|cached| {
@@ -537,19 +531,19 @@ fn verify_managed_tree_seal(
     Ok(true)
 }
 
-fn managed_tree_sha256(root: &Path) -> psychevo_runtime::Result<String> {
+fn managed_tree_sha256(root: &Path) -> psychevo::Result<String> {
     let root_metadata = std::fs::symlink_metadata(root).map_err(|error| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "managed Codex ACP install root is unreadable: {error}"
         ))
     })?;
     if root_metadata.file_type().is_symlink() || !root_metadata.file_type().is_dir() {
-        return Err(psychevo_runtime::Error::Message(
+        return Err(psychevo::Error::Message(
             "managed Codex ACP install root must be a real directory".to_string(),
         ));
     }
     let canonical_root = root.canonicalize().map_err(|error| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "managed Codex ACP install root cannot be canonicalized: {error}"
         ))
     })?;
@@ -562,7 +556,7 @@ fn managed_tree_sha256(root: &Path) -> psychevo_runtime::Result<String> {
     for relative in entries {
         let absolute = root.join(&relative);
         let metadata = std::fs::symlink_metadata(&absolute).map_err(|error| {
-            psychevo_runtime::Error::Message(format!(
+            psychevo::Error::Message(format!(
                 "managed Codex ACP payload entry `{}` is unreadable: {error}",
                 relative.display()
             ))
@@ -589,13 +583,13 @@ fn managed_tree_sha256(root: &Path) -> psychevo_runtime::Result<String> {
         } else if file_type.is_symlink() {
             digest.update(b"symlink\0");
             let resolved = absolute.canonicalize().map_err(|error| {
-                psychevo_runtime::Error::Message(format!(
+                psychevo::Error::Message(format!(
                     "managed Codex ACP symlink `{}` cannot be resolved: {error}",
                     relative.display()
                 ))
             })?;
             if !resolved.starts_with(&canonical_root) {
-                return Err(psychevo_runtime::Error::Message(format!(
+                return Err(psychevo::Error::Message(format!(
                     "managed Codex ACP symlink `{}` escapes the managed install",
                     relative.display()
                 )));
@@ -603,7 +597,7 @@ fn managed_tree_sha256(root: &Path) -> psychevo_runtime::Result<String> {
             let target = std::fs::read_link(&absolute)?;
             update_managed_tree_digest_field(&mut digest, &managed_os_bytes(target.as_os_str()));
         } else {
-            return Err(psychevo_runtime::Error::Message(format!(
+            return Err(psychevo::Error::Message(format!(
                 "managed Codex ACP payload entry `{}` has an unsupported file type",
                 relative.display()
             )));
@@ -612,10 +606,10 @@ fn managed_tree_sha256(root: &Path) -> psychevo_runtime::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
-fn managed_tree_metadata_sha256(root: &Path) -> psychevo_runtime::Result<String> {
+fn managed_tree_metadata_sha256(root: &Path) -> psychevo::Result<String> {
     let root_metadata = std::fs::symlink_metadata(root)?;
     if root_metadata.file_type().is_symlink() || !root_metadata.file_type().is_dir() {
-        return Err(psychevo_runtime::Error::Message(
+        return Err(psychevo::Error::Message(
             "managed Codex ACP install root must be a real directory".to_string(),
         ));
     }
@@ -638,13 +632,13 @@ fn managed_tree_metadata_sha256(root: &Path) -> psychevo_runtime::Result<String>
         } else if file_type.is_symlink() {
             digest.update(b"symlink\0");
             let resolved = absolute.canonicalize().map_err(|error| {
-                psychevo_runtime::Error::Message(format!(
+                psychevo::Error::Message(format!(
                     "managed Codex ACP symlink `{}` cannot be resolved: {error}",
                     relative.display()
                 ))
             })?;
             if !resolved.starts_with(&canonical_root) {
-                return Err(psychevo_runtime::Error::Message(format!(
+                return Err(psychevo::Error::Message(format!(
                     "managed Codex ACP symlink `{}` escapes the managed install",
                     relative.display()
                 )));
@@ -652,7 +646,7 @@ fn managed_tree_metadata_sha256(root: &Path) -> psychevo_runtime::Result<String>
             let target = std::fs::read_link(&absolute)?;
             update_managed_tree_digest_field(&mut digest, &managed_os_bytes(target.as_os_str()));
         } else {
-            return Err(psychevo_runtime::Error::Message(format!(
+            return Err(psychevo::Error::Message(format!(
                 "managed Codex ACP payload entry `{}` has an unsupported file type",
                 relative.display()
             )));
@@ -700,14 +694,14 @@ fn collect_managed_tree_entries(
     root: &Path,
     directory: &Path,
     entries: &mut Vec<PathBuf>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
         let absolute = entry.path();
         let relative = absolute
             .strip_prefix(root)
             .map_err(|_| {
-                psychevo_runtime::Error::Message(
+                psychevo::Error::Message(
                     "managed Codex ACP payload escaped its install root".to_string(),
                 )
             })?
@@ -717,7 +711,7 @@ fn collect_managed_tree_entries(
         }
         let metadata = std::fs::symlink_metadata(&absolute)?;
         if managed_metadata_is_unsupported_reparse_point(&metadata) {
-            return Err(psychevo_runtime::Error::Message(format!(
+            return Err(psychevo::Error::Message(format!(
                 "managed Codex ACP payload entry `{}` is an unsupported Windows reparse point",
                 relative.display()
             )));
@@ -783,31 +777,30 @@ pub(crate) fn verified_managed_codex_acp_command(
     home: &Path,
     configured_command: &Path,
     platform: HostPlatform,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     match inspect_managed_codex_acp_for_purpose(
         home,
         platform,
         ManagedTreeVerificationPurpose::Launch,
     ) {
         ManagedCodexAcpStatus::Ready(paths) => {
-            let configured =
-                psychevo_runtime::host_paths::normalized_native_path(configured_command);
-            let expected = psychevo_runtime::host_paths::normalized_native_path(&paths.executable);
+            let configured = psychevo::host_paths::normalized_native_path(configured_command);
+            let expected = psychevo::host_paths::normalized_native_path(&paths.executable);
             if !paths.executable.is_absolute() || configured != expected {
-                return Err(psychevo_runtime::Error::Message(format!(
+                return Err(psychevo::Error::Message(format!(
                     "managed Codex ACP backend command must be the verified executable `{}`; run backend/repair",
                     paths.executable.display()
                 )));
             }
             Ok(paths.executable)
         }
-        ManagedCodexAcpStatus::Missing { .. } => Err(psychevo_runtime::Error::Message(
+        ManagedCodexAcpStatus::Missing { .. } => Err(psychevo::Error::Message(
             "managed Codex ACP is not installed; run backend/install before starting a turn"
                 .to_string(),
         )),
-        ManagedCodexAcpStatus::Invalid { reason, .. } => Err(psychevo_runtime::Error::Message(
-            format!("{reason}; run backend/repair before starting a turn"),
-        )),
+        ManagedCodexAcpStatus::Invalid { reason, .. } => Err(psychevo::Error::Message(format!(
+            "{reason}; run backend/repair before starting a turn"
+        ))),
     }
 }
 

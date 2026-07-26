@@ -66,8 +66,17 @@ pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
     );
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
     let db_path = home.join("state.db");
-    let state_runtime = StateRuntime::open(&db_path).await.expect("state runtime");
+    let state_runtime = StateRuntime::open(&db_path).await.expect("state");
     let gateway = Gateway::new(state_runtime.clone());
+    let application = Application::__from_open_state(
+        home.clone(),
+        None,
+        state_runtime.clone(),
+        Arc::new(psychevo_gateway::GatewayAgentSessionAdapter::new(
+            gateway.clone(),
+        )),
+    );
+    let framework = application.client();
     TuiApp {
         env_map,
         home: home.clone(),
@@ -76,6 +85,8 @@ pub(crate) async fn test_app(temp: &tempfile::TempDir) -> TuiApp {
         model_state_path: ModelState::path_for_home(&home),
         model_state: ModelState::default(),
         state_runtime,
+        application,
+        framework,
         gateway,
         db_path,
         config_path: None,
@@ -774,7 +785,7 @@ pub(crate) fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
 pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -790,7 +801,7 @@ pub(crate) fn attach_pending_agent_running(ui: &mut FullscreenUi<'_>) {
 pub(crate) fn attach_background_agent_running(ui: &mut FullscreenUi<'_>, session_id: &str) {
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.auxiliary_agent_tasks.push(AuxiliaryAgentTask {

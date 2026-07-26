@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::{
+use psychevo::{
     config::create_local_toolset, config::remove_local_toolset, config::set_local_toolset_enabled,
     config::toolsets_value, types::ConfigScope,
 };

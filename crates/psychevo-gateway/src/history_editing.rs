@@ -1,7 +1,7 @@
-use psychevo_agent_core::{Message, UserContentBlock, now_ms};
+use psychevo::__agent_core::{Message, UserContentBlock, now_ms};
+use psychevo::state::{ConversationDraftPart, StateRuntime};
+use psychevo::{types::StoredEditableInputEnvelope, types::StoredEditableInputPart};
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::state::{ConversationDraftPart, StateRuntime};
-use psychevo_runtime::{types::StoredEditableInputEnvelope, types::StoredEditableInputPart};
 
 use crate::Gateway;
 
@@ -9,7 +9,7 @@ pub async fn native_history_action_unavailable_reason(
     state: &StateRuntime,
     thread_id: &str,
     surface_kind: &str,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     if !matches!(surface_kind, "web" | "tui") {
         return Ok(Some(
             "History editing is available only in Workbench and TUI.".to_string(),
@@ -33,7 +33,7 @@ pub async fn native_history_action_unavailable_reason(
         .gateway_runtime_binding(thread_id)
         .await?
         .is_some_and(|binding| {
-            binding.status == psychevo_runtime::state::GatewayRuntimeBindingStatus::Resolved
+            binding.status == psychevo::state::GatewayRuntimeBindingStatus::Resolved
                 && binding.backend_kind.as_deref() == Some("native")
         });
     if !native_binding {
@@ -45,9 +45,7 @@ pub async fn native_history_action_unavailable_reason(
         .session_metadata(thread_id)
         .await?
         .as_ref()
-        .and_then(|metadata| {
-            metadata.get(psychevo_runtime::thread_lineage::SIDE_CONVERSATION_METADATA_KEY)
-        })
+        .and_then(|metadata| metadata.get(psychevo::thread_lineage::SIDE_CONVERSATION_METADATA_KEY))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     if side {
@@ -73,7 +71,7 @@ pub async fn read_native_editable_draft(
     thread_id: &str,
     message_id: &str,
     surface_kind: &str,
-) -> psychevo_runtime::Result<wire::ThreadHistoryDraftReadResult> {
+) -> psychevo::Result<wire::ThreadHistoryDraftReadResult> {
     if let Some(reason) =
         native_history_action_unavailable_reason(state, thread_id, surface_kind).await?
     {
@@ -122,7 +120,7 @@ pub async fn read_native_editable_draft(
     let envelope = summary
         .metadata
         .as_ref()
-        .and_then(|metadata| metadata.get(psychevo_runtime::types::EDITABLE_INPUT_METADATA_KEY))
+        .and_then(|metadata| metadata.get(psychevo::types::EDITABLE_INPUT_METADATA_KEY))
         .cloned()
         .map(serde_json::from_value::<StoredEditableInputEnvelope>)
         .transpose()?;
@@ -178,26 +176,26 @@ pub async fn stage_native_conversation_edit(
     message_id: &str,
     draft: &wire::ThreadEditableDraft,
     surface_kind: &str,
-) -> psychevo_runtime::Result<bool> {
+) -> psychevo::Result<bool> {
     if let Some(reason) =
         native_history_action_unavailable_reason(state, thread_id, surface_kind).await?
     {
-        return Err(psychevo_runtime::Error::Message(reason));
+        return Err(psychevo::Error::Message(reason));
     }
     let requested_parts = draft_parts_from_wire(&draft.parts);
     if let Some(existing) = state.session_revert_state(thread_id).await? {
         return match existing.kind {
-            psychevo_runtime::state::SessionRevertKind::ConversationEdit {
+            psychevo::state::SessionRevertKind::ConversationEdit {
                 boundary_message_id,
                 draft: existing_parts,
             } if boundary_message_id == message_id && existing_parts == requested_parts => Ok(true),
-            psychevo_runtime::state::SessionRevertKind::WorkspaceUndo { .. } => {
-                Err(psychevo_runtime::Error::Message(
+            psychevo::state::SessionRevertKind::WorkspaceUndo { .. } => {
+                Err(psychevo::Error::Message(
                     "Redo workspace files before editing conversation history.".to_string(),
                 ))
             }
-            psychevo_runtime::state::SessionRevertKind::ConversationEdit { .. } => {
-                Err(psychevo_runtime::Error::Message(
+            psychevo::state::SessionRevertKind::ConversationEdit { .. } => {
+                Err(psychevo::Error::Message(
                     "Restore or run the staged conversation edit before starting another edit."
                         .to_string(),
                 ))
@@ -207,10 +205,10 @@ pub async fn stage_native_conversation_edit(
     let current =
         read_native_editable_draft(state, gateway, thread_id, message_id, surface_kind).await?;
     if let Some(reason) = current.unavailable_reason {
-        return Err(psychevo_runtime::Error::Message(reason));
+        return Err(psychevo::Error::Message(reason));
     }
     let message_seq = current.message_seq.ok_or_else(|| {
-        psychevo_runtime::Error::Message(
+        psychevo::Error::Message(
             "The selected message does not have a durable sequence.".to_string(),
         )
     })?;
@@ -220,7 +218,7 @@ pub async fn stage_native_conversation_edit(
     state
         .set_session_revert_state(
             thread_id,
-            psychevo_runtime::state::SessionRevertState::conversation_edit(
+            psychevo::state::SessionRevertState::conversation_edit(
                 message_seq,
                 message_id.to_string(),
                 requested_parts,
@@ -233,16 +231,13 @@ pub async fn stage_native_conversation_edit(
 pub async fn restore_native_conversation_edit(
     state: &StateRuntime,
     thread_id: &str,
-) -> psychevo_runtime::Result<wire::ThreadEditableDraft> {
+) -> psychevo::Result<wire::ThreadEditableDraft> {
     let revert = state
         .session_revert_state(thread_id)
         .await?
-        .ok_or_else(|| {
-            psychevo_runtime::Error::Message("No conversation edit is staged.".to_string())
-        })?;
-    let psychevo_runtime::state::SessionRevertKind::ConversationEdit { draft, .. } = revert.kind
-    else {
-        return Err(psychevo_runtime::Error::Message(
+        .ok_or_else(|| psychevo::Error::Message("No conversation edit is staged.".to_string()))?;
+    let psychevo::state::SessionRevertKind::ConversationEdit { draft, .. } = revert.kind else {
+        return Err(psychevo::Error::Message(
             "The staged state belongs to workspace undo; use /redo instead.".to_string(),
         ));
     };
@@ -257,19 +252,19 @@ pub async fn fork_native_history(
     thread_id: &str,
     before_session_seq: Option<i64>,
     surface_kind: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     if let Some(reason) =
         native_history_action_unavailable_reason(state, thread_id, surface_kind).await?
     {
-        return Err(psychevo_runtime::Error::Message(reason));
+        return Err(psychevo::Error::Message(reason));
     }
     if state.session_revert_state(thread_id).await?.is_some() {
-        return Err(psychevo_runtime::Error::Message(
+        return Err(psychevo::Error::Message(
             "Run, restore, or redo the staged history state before forking.".to_string(),
         ));
     }
     state
-        .fork_native_session_history(psychevo_runtime::state::NativeSessionForkInput {
+        .fork_native_session_history(psychevo::state::NativeSessionForkInput {
             source_session_id: thread_id,
             before_session_seq,
         })

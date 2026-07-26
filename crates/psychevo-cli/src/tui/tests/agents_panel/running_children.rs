@@ -23,7 +23,7 @@ pub(crate) async fn loading_parent_history_links_orphan_agent_row_without_markin
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
@@ -122,7 +122,7 @@ pub(crate) async fn agents_status_text_includes_team_mission_member_and_cap_labe
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "teamRunId": "team-run-1",
                 "missionRunId": "mission-run-1",
@@ -218,7 +218,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
@@ -259,7 +259,7 @@ pub(crate) async fn running_agent_row_enter_opens_child_session_before_parent_tu
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::types::RunResult {
+    let result = psychevo::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -318,7 +318,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -338,7 +338,7 @@ pub(crate) async fn esc_interrupts_running_child_session_after_open() {
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::types::RunResult {
+    let result = psychevo::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -390,7 +390,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -465,7 +465,7 @@ pub(crate) async fn esc_interrupts_running_child_from_parent_session_after_retur
     ui.ensure_selection();
 
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::types::RunResult {
+    let result = psychevo::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -579,7 +579,7 @@ pub(crate) async fn agent_row_click_toggles_and_open_action_enters_child_session
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -652,7 +652,7 @@ pub(crate) async fn transcript_open_shortcut_opens_visible_agent_row_after_focus
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -704,7 +704,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -724,7 +724,7 @@ pub(crate) async fn running_child_session_receives_scoped_stream_after_open() {
     ui.ensure_selection();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::types::RunResult {
+    let result = psychevo::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -781,7 +781,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo_runtime::state::AgentEdgeStatus::Open,
+            psychevo::state::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -801,7 +801,7 @@ pub(crate) async fn opening_running_agent_child_replays_scoped_live_backlog() {
     ui.ensure_selection();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::types::RunResult {
+    let result = psychevo::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -865,7 +865,7 @@ pub(crate) async fn scoped_child_stream_updates_parent_agent_tail_without_child_
     ui.transcript.push(row);
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo_runtime::types::RunResult {
+    let result = psychevo::types::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };

@@ -3,7 +3,7 @@ pub(super) fn command_list_value(
     scope: &ResolvedScope,
     active_turn: bool,
     has_session: bool,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(command_list_result(
         state,
         scope,
@@ -19,7 +19,7 @@ pub(super) fn command_list_result(
     active_turn: bool,
     has_session: bool,
     cap: usize,
-) -> psychevo_runtime::Result<wire::CommandListResult> {
+) -> psychevo::Result<wire::CommandListResult> {
     let dynamic = dynamic_slash_commands(state, scope)?;
     let dynamic_names = dynamic
         .iter()
@@ -101,7 +101,7 @@ fn custom_alias_command_value(
     };
     let spec = invocation.spec;
     if !web_desktop_action_visible(spec.action)
-        || !psychevo_runtime::command_registry::supported_by_capabilities(spec, capabilities)
+        || !psychevo::command_registry::supported_by_capabilities(spec, capabilities)
         || (active_turn && !spec.available_during_active_turn())
     {
         return None;

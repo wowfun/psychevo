@@ -104,7 +104,7 @@ async fn acp_peer_v1_applies_controls_before_structured_prompt() {
     std::fs::write(
         &image,
         base64::engine::general_purpose::STANDARD
-            .decode(psychevo_ai::DEFAULT_FAKE_IMAGE_BASE64)
+            .decode(psychevo::__ai::DEFAULT_FAKE_IMAGE_BASE64)
             .expect("PNG fixture"),
     )
     .expect("image");

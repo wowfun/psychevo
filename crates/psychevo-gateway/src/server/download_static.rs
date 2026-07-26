@@ -45,11 +45,11 @@ async fn read_media_artifact(
 fn render_media_artifact(
     state: &WebState,
     artifact_id: &str,
-) -> psychevo_runtime::Result<Response<Body>> {
-    psychevo_runtime::media::validate_media_artifact_id(artifact_id)?;
-    let path = psychevo_runtime::media::media_artifact_path(&state.inner.home, artifact_id)?;
+) -> psychevo::Result<Response<Body>> {
+    psychevo::media::validate_media_artifact_id(artifact_id)?;
+    let path = psychevo::media::media_artifact_path(&state.inner.home, artifact_id)?;
     let bytes = std::fs::read(&path)?;
-    let media = psychevo_runtime::media::read_media_artifact(&state.inner.home, artifact_id)?;
+    let media = psychevo::media::read_media_artifact(&state.inner.home, artifact_id)?;
     let mut response = Response::new(Body::from(bytes));
     response.headers_mut().insert(
         CONTENT_TYPE,
@@ -78,7 +78,7 @@ async fn render_download(
     session_id: &str,
     kind: &str,
     query: &DownloadQuery,
-) -> psychevo_runtime::Result<Response<Body>> {
+) -> psychevo::Result<Response<Body>> {
     let artifact_kind = match kind {
         "export" => SessionArtifactKind::Export,
         "share" => SessionArtifactKind::Share,

@@ -5,9 +5,16 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use psychevo_ai::Outcome;
-use psychevo_runtime::state::{AgentEdgeRecord, StateRuntime};
-use psychevo_runtime::{agents::AgentBackendConfig, agents::AgentCatalog, agents::AgentDiscoveryOptions, types::RunMode, types::RunOptions, types::SessionSummary, types::TuiMessageSummary, agents::agent_status_value, agents::close_agent_id, agents::discover_agents, agents::list_agents_value, config::load_agent_backend_configs, accounting::effective_usage_total, agents::resolve_agent_definition, agents::resume_agent_id, agents::send_agent_message, config::set_config_value, agents::valid_agent_name, agents::view_agent_value_with_catalog, agents::wait_agent_mailbox};
+use psychevo::state::{AgentEdgeRecord, StateRuntime};
+use psychevo::{
+    Application, StartThreadRequest, TurnOutcome, TurnRequest, accounting::effective_usage_total,
+    agents::AgentBackendConfig, agents::AgentCatalog, agents::AgentDiscoveryOptions,
+    agents::agent_status_value, agents::close_agent_id, agents::discover_agents,
+    agents::list_agents_value, agents::resolve_agent_definition, agents::resume_agent_id,
+    agents::send_agent_message, agents::valid_agent_name, agents::view_agent_value_with_catalog,
+    agents::wait_agent_mailbox, config::load_agent_backend_configs, config::set_config_value,
+    types::SessionSummary, types::TuiMessageSummary,
+};
 use serde_json::{Value, json};
 
 use crate::args::{
@@ -280,46 +287,50 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         return Err(anyhow!("You must provide a message"));
     }
 
-    let result = psychevo_runtime::run::run_live(RunOptions {
-        state: StateRuntime::open(&db_path).await?,
-        cwd,
-        snapshot_root: Some(home.join("snapshots")),
-        session: None,
-        continue_latest: false,
-        prompt,
-        image_inputs: Vec::new(),
-        extract_prompt_image_sources: true,
-        prompt_display: None,
-        max_context_messages: None,
-        config_path,
-        project_context_override: None,
-        sandbox_override: None,
-        model: args.model.clone(),
-        reasoning_effort: args.variant.map(|variant| variant.as_str().to_string()),
-        runtime_ref: None,
-        runtime_session_id: None,
-        runtime_options: std::collections::BTreeMap::new(),
-        external_agent_delegate: None,
-        include_reasoning: false,
-        mode: RunMode::Default,
-        permission_mode: None,
-        approval_mode: None,
-        approval_handler: None,
-        clarify_enabled: false,
-        inherited_env: Some(env_map),
-        agent: Some(args.name),
-        no_agents: false,
-        no_skills: false,
-        selected_capability_roots: Vec::new(),
-        skill_inputs: Vec::new(),
-        mcp_servers: Vec::new(),
-        workspace_mutations: None,
-        runtime_tools: Vec::new(),
-    })
-    .await?;
+    let mut builder = Application::builder()
+        .home(&home)
+        .database_path(&db_path);
+    if let Some(config_path) = config_path.as_ref() {
+        builder = builder.config_path(config_path);
+    }
+    let application = builder.build().await?;
+    let execution = async {
+        let mut start = StartThreadRequest::new(&cwd);
+        start.source = "agent-run".to_string();
+        start.metadata = Some(json!({
+            "caller": "pevo agent run",
+            "agent": selected.name.clone(),
+            "pid": std::process::id(),
+        }));
+        let thread = application.client().start_thread(start).await?;
+        let mut request = TurnRequest::new(prompt);
+        request.source = "agent-run".to_string();
+        request.model = args.model;
+        request.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+        request.inherited_env = Some(env_map);
+        request.agent = Some(selected.name);
+        let handle = thread.start_turn(request).await?;
+        let mut stream = handle.events();
+        let events = tokio::spawn(async move {
+            let mut events = Vec::new();
+            while let Some(event) = stream.next().await {
+                events.push(event);
+            }
+            events
+        });
+        let result = handle.wait().await?;
+        let events = events
+            .await
+            .map_err(|error| anyhow!("Agent event task failed: {error}"))?;
+        Ok::<_, anyhow::Error>((result, events))
+    }
+    .await;
+    let shutdown = application.shutdown().await;
+    let (result, events) = execution?;
+    shutdown?;
 
     if args.format == RunFormatArg::Json {
-        for event in &result.events {
+        for event in &events {
             println!("{}", serde_json::to_string(event)?);
         }
     } else {
@@ -332,7 +343,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
         println!("{}", result.final_answer);
     }
 
-    let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
+    let success = result.outcome == TurnOutcome::Completed && result.tool_failures == 0;
     Ok(if success {
         ExitCode::SUCCESS
     } else {

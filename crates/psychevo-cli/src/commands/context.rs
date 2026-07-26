@@ -2,8 +2,8 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::state::StateRuntime;
-use psychevo_runtime::{
+use psychevo::state::StateRuntime;
+use psychevo::{
     context_usage::ContextOptions, context_usage::context_snapshot,
     context_usage::format_context_snapshot_text,
 };

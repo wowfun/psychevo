@@ -26,7 +26,7 @@ pub(crate) async fn run_hooks_command(args: HooksArgs) -> Result<ExitCode> {
     match command {
         HooksCommand::List(args) => list_hooks(args, &options, &cwd)?,
         HooksCommand::Trust(args) => {
-            let value = psychevo_runtime::hooks::trust_hook_in_profile(&options, &cwd, &args.key)?;
+            let value = psychevo::hooks::trust_hook_in_profile(&options, &cwd, &args.key)?;
             print_hooks_value(&value, args.json)?;
         }
         HooksCommand::Enable(args) => set_hook_enabled(args, &options, true)?,
@@ -38,19 +38,19 @@ pub(crate) async fn run_hooks_command(args: HooksArgs) -> Result<ExitCode> {
 
 fn list_hooks(
     args: HooksListArgs,
-    options: &psychevo_runtime::types::RunOptions,
+    options: &psychevo::types::RunOptions,
     cwd: &std::path::Path,
 ) -> Result<()> {
-    let value = psychevo_runtime::hooks::hook_metadata_value(options, cwd)?;
+    let value = psychevo::hooks::hook_metadata_value(options, cwd)?;
     print_hooks_value(&value, args.json)
 }
 
 fn set_hook_enabled(
     args: HookKeyArgs,
-    options: &psychevo_runtime::types::RunOptions,
+    options: &psychevo::types::RunOptions,
     enabled: bool,
 ) -> Result<()> {
-    let value = psychevo_runtime::hooks::set_hook_enabled_in_profile(options, &args.key, enabled)?;
+    let value = psychevo::hooks::set_hook_enabled_in_profile(options, &args.key, enabled)?;
     print_hooks_value(&value, args.json)
 }
 

@@ -23,7 +23,7 @@ fn wrap_stream(
                         .expect("gateway live projector poisoned")
                         .project(&turn_id, &event)
                     // Adapter stream terminals are useful as an internal
-                    // projection fence, but ThreadApplication owns the one
+                    // projection fence, but the Framework Application owns the one
                     // authoritative public terminal after persistence and
                     // delivery classification have completed.
                     && !matches!(
@@ -55,13 +55,29 @@ fn wrap_stream(
     }
 }
 
+#[cfg(test)]
 fn apply_input_parts(
     options: &mut RunOptions,
     input: &[GatewayInputPart],
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if input.is_empty() {
         return Ok(());
     }
+    let (prompt, image_inputs, prompt_display, has_structured_input) =
+        framework_input_parts(input)?;
+    options.prompt = prompt;
+    options.image_inputs = image_inputs;
+    options.prompt_display = Some(prompt_display);
+    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() && !has_structured_input
+    {
+        return Err(Error::Message("gateway turn input is empty".to_string()));
+    }
+    Ok(())
+}
+
+fn framework_input_parts(
+    input: &[GatewayInputPart],
+) -> psychevo::Result<(String, Vec<ImageInput>, PromptDisplayMetadata, bool)> {
     let mut prompt_parts = Vec::new();
     let mut image_inputs = Vec::new();
     let mut editable_parts = Vec::new();
@@ -113,21 +129,16 @@ fn apply_input_parts(
             }
         }
     }
-    options.prompt = prompt_parts.join("\n");
-    options.image_inputs = image_inputs;
-    options.prompt_display = Some(PromptDisplayMetadata {
+    let prompt = prompt_parts.join("\n");
+    let prompt_display = PromptDisplayMetadata {
         content_text: editable_text_parts.join("\n"),
         attachments: Vec::new(),
         editable_input: Some(StoredEditableInputEnvelope {
             version: 1,
             parts: editable_parts,
         }),
-    });
-    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() && !has_structured_input
-    {
-        return Err(Error::Message("gateway turn input is empty".to_string()));
-    }
-    Ok(())
+    };
+    Ok((prompt, image_inputs, prompt_display, has_structured_input))
 }
 
 fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
@@ -137,6 +148,7 @@ fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
     }
 }
 
+#[cfg(test)]
 fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> PermissionDecision {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce => PermissionDecision::AllowOnce,
@@ -147,6 +159,7 @@ fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> Pe
     }
 }
 
+#[cfg(test)]
 fn permission_action_outcome(decision: &PermissionApprovalDecision) -> GatewayActionOutcome {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce

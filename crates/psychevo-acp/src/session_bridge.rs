@@ -48,7 +48,12 @@ mod mission_tests {
         .await
         .expect("agent");
         let session_id = SessionId::new("acp-mission");
-        let session = AcpSession::new(cwd, None, Vec::new());
+        let thread = agent
+            .framework
+            .start_thread(StartThreadRequest::new(&cwd))
+            .await
+            .expect("thread");
+        let session = AcpSession::new(cwd, thread, Vec::new());
         agent
             .sessions
             .lock()

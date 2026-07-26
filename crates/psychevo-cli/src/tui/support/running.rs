@@ -10,6 +10,7 @@ pub(crate) struct RunningTurn {
 }
 
 pub(crate) enum RunningTurnEvents {
+    #[cfg(test)]
     Gateway(mpsc::UnboundedReceiver<GatewayEvent>),
     Runtime(mpsc::UnboundedReceiver<RunStreamEvent>),
 }
@@ -24,6 +25,7 @@ impl RunningTurnEvents {
         &mut self,
     ) -> std::result::Result<TuiLiveEvent, mpsc::error::TryRecvError> {
         match self {
+            #[cfg(test)]
             Self::Gateway(rx) => rx
                 .try_recv()
                 .map(|event| TuiLiveEvent::Gateway(Box::new(event))),
@@ -44,10 +46,84 @@ impl From<GatewayEvent> for TuiLiveEvent {
     }
 }
 
+pub(crate) fn framework_result_to_runtime(
+    result: TurnResult,
+    db_path: PathBuf,
+    cwd: PathBuf,
+) -> psychevo::types::RunResult {
+    psychevo::types::RunResult {
+        session_id: result.thread_id,
+        outcome: match result.outcome {
+            TurnOutcome::Completed => Outcome::Normal,
+            TurnOutcome::Stopped => Outcome::Stopped,
+            TurnOutcome::Failed => Outcome::Failed,
+            TurnOutcome::Interrupted => Outcome::Aborted,
+        },
+        terminal_reason: result.terminal_reason,
+        final_answer: result.final_answer,
+        db_path,
+        cwd,
+        provider: result.provider,
+        model: result.model,
+        base_url: String::new(),
+        api_key_env: None,
+        reasoning_effort: result.reasoning_effort,
+        context_limit: result.context_limit,
+        tool_failures: result.tool_failures,
+        selected_agent: result.selected_agent,
+        selected_skills: result.selected_skills,
+        context_snapshot: result.context_snapshot,
+        terminal_error: result.terminal_error,
+        events: Vec::new(),
+        warnings: result.warnings,
+    }
+}
+
 pub(crate) struct TuiApprovalRequest {
     pub(crate) session_id: Option<String>,
     pub(crate) request: PermissionApprovalRequest,
     pub(crate) response: oneshot::Sender<PermissionApprovalDecision>,
+}
+
+#[derive(Clone)]
+pub(crate) struct TuiApprovalHandler {
+    pub(crate) session_id: Option<String>,
+    pub(crate) sender: mpsc::UnboundedSender<TuiApprovalRequest>,
+}
+
+impl std::fmt::Debug for TuiApprovalHandler {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("TuiApprovalHandler(..)")
+    }
+}
+
+impl ApprovalHandler for TuiApprovalHandler {
+    fn request_permission(
+        &self,
+        request: PermissionApprovalRequest,
+    ) -> futures::future::BoxFuture<'static, PermissionApprovalDecision> {
+        let session_id = self.session_id.clone();
+        let sender = self.sender.clone();
+        Box::pin(async move {
+            let timeout = Duration::from_secs(request.timeout_secs.max(1));
+            let (response, receiver) = oneshot::channel();
+            if sender
+                .send(TuiApprovalRequest {
+                    session_id,
+                    request,
+                    response,
+                })
+                .is_err()
+            {
+                return PermissionApprovalDecision::deny();
+            }
+            tokio::time::timeout(timeout, receiver)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or_else(PermissionApprovalDecision::deny)
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +136,7 @@ pub(crate) struct AuxiliaryShellTask {
     pub(crate) session_id: Option<String>,
     pub(crate) control: RunControlHandle,
     pub(crate) rx: mpsc::UnboundedReceiver<RunStreamEvent>,
-    pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>>,
+    pub(crate) task: JoinHandle<psychevo::Result<psychevo::types::UserShellResult>>,
 }
 
 pub(crate) struct AuxiliaryAgentTask {
@@ -70,26 +146,26 @@ pub(crate) struct AuxiliaryAgentTask {
     pub(crate) pending_unowned_live_events: Vec<RunStreamEvent>,
     pub(crate) control: RunControlHandle,
     pub(crate) events: RunningTurnEvents,
-    pub(crate) task: JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>,
+    pub(crate) task: JoinHandle<psychevo::Result<psychevo::types::RunResult>>,
 }
 
 pub(crate) enum RunningTask {
-    Agent(JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::RunResult>>),
-    UserShell(JoinHandle<psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>>),
+    Agent(JoinHandle<psychevo::Result<psychevo::types::RunResult>>),
+    UserShell(JoinHandle<psychevo::Result<psychevo::types::UserShellResult>>),
 }
 
 pub(crate) enum RunningCompletion {
     Agent(
         Box<
             std::result::Result<
-                psychevo_runtime::Result<psychevo_runtime::types::RunResult>,
+                psychevo::Result<psychevo::types::RunResult>,
                 tokio::task::JoinError,
             >,
         >,
     ),
     UserShell(
         std::result::Result<
-            psychevo_runtime::Result<psychevo_runtime::types::UserShellResult>,
+            psychevo::Result<psychevo::types::UserShellResult>,
             tokio::task::JoinError,
         >,
     ),
@@ -264,7 +340,7 @@ pub(crate) fn prompt_display_metadata(
 fn tui_editable_input_envelope(
     content_text: &str,
     attachments: &[PendingImageAttachment],
-) -> psychevo_runtime::types::StoredEditableInputEnvelope {
+) -> psychevo::types::StoredEditableInputEnvelope {
     let mut parts = Vec::new();
     let mut cursor = 0usize;
     for (image_block_index, attachment) in attachments.iter().enumerate() {
@@ -273,21 +349,21 @@ fn tui_editable_input_envelope(
         };
         let placeholder_start = cursor + relative;
         if placeholder_start > cursor {
-            parts.push(psychevo_runtime::types::StoredEditableInputPart::Text {
+            parts.push(psychevo::types::StoredEditableInputPart::Text {
                 text: content_text[cursor..placeholder_start].to_string(),
             });
         }
-        parts.push(psychevo_runtime::types::StoredEditableInputPart::Image { image_block_index });
+        parts.push(psychevo::types::StoredEditableInputPart::Image { image_block_index });
         cursor = placeholder_start + attachment.placeholder.len();
     }
     if cursor < content_text.len() {
-        parts.push(psychevo_runtime::types::StoredEditableInputPart::Text {
+        parts.push(psychevo::types::StoredEditableInputPart::Text {
             text: content_text[cursor..].to_string(),
         });
     } else if parts.is_empty() {
-        parts.push(psychevo_runtime::types::StoredEditableInputPart::Text {
+        parts.push(psychevo::types::StoredEditableInputPart::Text {
             text: content_text.to_string(),
         });
     }
-    psychevo_runtime::types::StoredEditableInputEnvelope { version: 1, parts }
+    psychevo::types::StoredEditableInputEnvelope { version: 1, parts }
 }

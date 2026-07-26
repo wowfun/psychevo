@@ -1,5 +1,5 @@
-    use psychevo_agent_core::{UserContentBlock};
-    use psychevo_ai::{Outcome};
+    use psychevo::__agent_core::{UserContentBlock};
+    use psychevo::__ai::{Outcome};
 
     #[test]
     fn terminal_projection_keeps_failed_and_interrupted_turns_visible() {
@@ -190,11 +190,11 @@
     fn projector_preserves_hosted_web_lifecycle_and_clickable_sources() {
         let entries = project_transcript_entries("thread-1", &[summary(1, Message::Assistant {
             content: vec![
-                AssistantBlock::ProviderTool(psychevo_agent_core::ProviderToolBlock {
+                AssistantBlock::ProviderTool(psychevo::__agent_core::ProviderToolBlock {
                     id: "ws_1".into(), name: "web_search".into(),
                     action: Some(json!({"type":"search","query":"rust news"})), status: "completed".into(),
                 }),
-                AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(psychevo_ai::UrlCitationSource {
+                AssistantBlock::Source(psychevo::__ai::AssistantSource::UrlCitation(psychevo::__ai::UrlCitationSource {
                     url: "https://example.com/rust".into(), title: "Rust".into(), start_index: Some(0), end_index: Some(4),
                 })),
             ], timestamp_ms: 10, finish_reason: Some("completed".into()), outcome: Outcome::Normal,
@@ -1172,7 +1172,7 @@
         );
         let mut metadata = serde_json::Map::new();
         metadata.insert(
-            psychevo_runtime::thread_lineage::SIDE_INHERITED_METADATA_KEY.to_string(),
+            psychevo::thread_lineage::SIDE_INHERITED_METADATA_KEY.to_string(),
             json!({
                 "hidden": true,
                 "parent_session_id": "parent-thread",
@@ -1223,7 +1223,7 @@
         AgentEdgeRecord {
             parent_session_id: parent.to_string(),
             child_session_id: child.to_string(),
-            status: psychevo_runtime::state::AgentEdgeStatus::Closed,
+            status: psychevo::state::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(metadata),

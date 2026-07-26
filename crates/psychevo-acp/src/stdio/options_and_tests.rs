@@ -174,6 +174,30 @@ no_auth = true
         result
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn framework_turn_request_keeps_the_acp_snapshot_root() {
+        let (agent, root) = test_agent().await;
+        let cwd = root.join("workspace");
+        std::fs::create_dir_all(&cwd).expect("workspace");
+        let thread = agent
+            .framework
+            .start_thread(StartThreadRequest::new(&cwd))
+            .await
+            .expect("thread");
+        let session = AcpSession::new(cwd.clone(), thread.clone(), Vec::new());
+        let request = agent.turn_request(&session, "snapshot".to_string(), Vec::new(), None);
+        let options = request.__into_run_options(
+            agent.state.clone(),
+            cwd,
+            thread.id().to_string(),
+            None,
+        );
+
+        assert_eq!(options.snapshot_root, Some(root.join("home/snapshots")));
+        agent.application.shutdown().await.expect("shutdown");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     fn select_current_value(options: &Value, id: &str) -> Option<String> {
         options
             .as_array()?
@@ -200,16 +224,24 @@ pub async fn run_stdio(options: AcpOptions) -> std::io::Result<()> {
     );
     let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();
-    agent
+    let result = Arc::clone(&agent)
         .serve(ByteStreams::new(stdout, stdin))
-        .await
-        .map_err(|err| std::io::Error::other(format!("ACP error: {err}")))
+        .await;
+    let shutdown = agent.application.shutdown().await;
+    match (result, shutdown) {
+        (Err(error), _) => Err(std::io::Error::other(format!("ACP error: {error}"))),
+        (Ok(()), Err(error)) => Err(std::io::Error::other(format!(
+            "ACP shutdown error: {error}"
+        ))),
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }
 
 pub(crate) struct PsychevoAcpAgent {
     pub(crate) options: AcpOptions,
+    pub(crate) application: Application,
+    pub(crate) framework: FrameworkClient,
     pub(crate) state: StateRuntime,
-    pub(crate) gateway: Gateway,
     pub(crate) sessions: Arc<Mutex<HashMap<String, AcpSession>>>,
     pub(crate) client_terminal_auth: Arc<Mutex<bool>>,
     pub(crate) client_terminal_output: Arc<Mutex<bool>>,
@@ -232,18 +264,20 @@ pub(crate) struct AcpSession {
     pub(crate) model: Option<String>,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) mcp_servers: Vec<McpServerInput>,
-    pub(crate) control: Option<RunControlHandle>,
+    pub(crate) thread: Thread,
+    pub(crate) turn: Option<TurnHandle>,
     pub(crate) queued_prompts: VecDeque<String>,
-    pub(crate) pending_steers: Vec<psychevo_agent_core::PendingInputId>,
+    pub(crate) pending_steers: Vec<psychevo::__agent_core::PendingInputId>,
     pub(crate) last_session_list: Vec<SessionSummary>,
 }
 
 impl AcpSession {
     pub(crate) fn new(
         cwd: PathBuf,
-        runtime_session_id: Option<String>,
+        thread: Thread,
         mcp_servers: Vec<McpServerInput>,
     ) -> Self {
+        let runtime_session_id = Some(thread.id().to_string());
         Self {
             cwd,
             runtime_session_id,
@@ -252,7 +286,8 @@ impl AcpSession {
             model: None,
             reasoning_effort: None,
             mcp_servers,
-            control: None,
+            thread,
+            turn: None,
             queued_prompts: VecDeque::new(),
             pending_steers: Vec::new(),
             last_session_list: Vec::new(),

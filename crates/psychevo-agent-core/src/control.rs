@@ -59,11 +59,19 @@ impl ControlHandle {
     }
 
     pub fn stop(&self) {
-        let _ = self.stop_tx.send(true);
+        self.stop_tx.send_replace(true);
     }
 
     pub fn abort(&self) {
-        let _ = self.abort_tx.send(true);
+        self.abort_tx.send_replace(true);
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        *self.abort_tx.borrow()
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        *self.stop_tx.borrow()
     }
 
     pub fn inject_user_message(&self, message: Message) -> bool {

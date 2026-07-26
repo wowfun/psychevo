@@ -5,13 +5,9 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
-use psychevo_ai::Outcome;
-use psychevo_gateway::{
-    Gateway, GatewayInputPart, GatewaySource, ThreadCallerContext, ThreadSurface, ThreadTurnIntent,
-};
-use psychevo_runtime::state::StateRuntime;
-use psychevo_runtime::{
-    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
+use psychevo::{
+    Application, StartThreadRequest, TurnOutcome, TurnRequest, types::PermissionMode,
+    types::ProjectContextInstructionMode, types::RunMode,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -26,7 +22,12 @@ use crate::env::{
 pub(crate) async fn run_mcp_command(args: McpArgs) -> Result<ExitCode> {
     match args.command {
         McpCommand::Serve(args) => {
-            run_mcp_stdio(CliMcpRunner { args }).await?;
+            let runner = CliMcpRunner::new(args).await?;
+            let application = runner.application.clone();
+            let serve = run_mcp_stdio(runner).await;
+            let shutdown = application.shutdown().await;
+            serve?;
+            shutdown?;
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -57,6 +58,39 @@ struct PsychevoMcpTurnResult {
 #[derive(Clone)]
 struct CliMcpRunner {
     args: McpServeArgs,
+    application: Application,
+    client: psychevo::Client,
+    env_map: std::collections::BTreeMap<String, String>,
+    process_cwd: PathBuf,
+    config_path: Option<PathBuf>,
+}
+
+impl CliMcpRunner {
+    async fn new(args: McpServeArgs) -> Result<Self> {
+        let env_map = inherited_env();
+        let process_cwd = env::current_dir()?;
+        let home = resolve_psychevo_home(&env_map, &process_cwd)?;
+        let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &process_cwd)?;
+        let db_path = resolve_state_db(&env_map, &home, &process_cwd)?;
+        let bypass_home = config_path.is_some() && env_value("PSYCHEVO_DB", &env_map).is_some();
+        if !bypass_home {
+            ensure_home_initialized(&home)?;
+        }
+        let mut builder = Application::builder().home(&home).database_path(&db_path);
+        if let Some(path) = config_path.as_ref() {
+            builder = builder.config_path(path);
+        }
+        let application = builder.build().await?;
+        let client = application.client();
+        Ok(Self {
+            args,
+            application,
+            client,
+            env_map,
+            process_cwd,
+            config_path,
+        })
+    }
 }
 
 impl PsychevoMcpRunner for CliMcpRunner {
@@ -64,8 +98,8 @@ impl PsychevoMcpRunner for CliMcpRunner {
         &self,
         request: PsychevoMcpTurnRequest,
     ) -> BoxFuture<'static, Result<PsychevoMcpTurnResult>> {
-        let args = self.args.clone();
-        Box::pin(async move { run_cli_mcp_turn(args, request).await })
+        let runner = self.clone();
+        Box::pin(async move { run_cli_mcp_turn(runner, request).await })
     }
 }
 
@@ -182,18 +216,13 @@ async fn handle_mcp_tool_call(runner: &dyn PsychevoMcpRunner, id: Value, params:
 }
 
 async fn run_cli_mcp_turn(
-    args: McpServeArgs,
+    runner: CliMcpRunner,
     request: PsychevoMcpTurnRequest,
 ) -> Result<PsychevoMcpTurnResult> {
-    let env_map = inherited_env();
-    let process_cwd = env::current_dir()?;
-    let home = resolve_psychevo_home(&env_map, &process_cwd)?;
-    let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &process_cwd)?;
-    let db_path = resolve_state_db(&env_map, &home, &process_cwd)?;
-    let bypass_home = config_path.is_some() && env_value("PSYCHEVO_DB", &env_map).is_some();
-    if !bypass_home {
-        ensure_home_initialized(&home)?;
-    }
+    let args = runner.args;
+    let env_map = runner.env_map;
+    let process_cwd = runner.process_cwd;
+    let config_path = runner.config_path;
 
     let cwd = match request.cwd.or_else(|| args.dir.clone()) {
         Some(dir) => resolve_explicit_path(&dir, &env_map, &process_cwd)?,
@@ -225,41 +254,43 @@ async fn run_cli_mcp_turn(
         args.project_context.map(|mode| mode.mode())
     };
 
-    let state = StateRuntime::open(&db_path).await?;
-    let gateway = Gateway::new(state.clone());
-    let source = GatewaySource::new("mcp", format!("mcp:{}", std::process::id()))
-        .invocation()
-        .with_raw_identity(json!({
-            "kind": "mcp",
-            "entrypoint": "mcp serve",
-            "cwd": cwd.display().to_string(),
-        }));
-    let mut caller = ThreadCallerContext::new(ThreadSurface::Other("mcp".to_string()), cwd);
-    caller.runtime_source = "mcp".to_string();
-    caller.continue_sources = vec!["mcp".to_string()];
-    let mut intent = ThreadTurnIntent::new(vec![GatewayInputPart::Text { text: prompt }]);
-    intent.thread_id = request.session_id;
-    intent.source = Some(source);
-    intent.policy.snapshot_root = Some(home.join("snapshots"));
-    intent.policy.extract_prompt_image_sources = true;
-    intent.policy.config_path = config_path;
-    intent.policy.project_context_override = project_context_override;
-    intent.policy.model = args.model;
-    intent.policy.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-    intent.policy.mode = run_mode;
-    intent.policy.permission_mode = permission_mode;
-    intent.policy.approval_handler = interactive_approval_handler();
-    intent.policy.inherited_env = Some(env_map);
-    intent.policy.agent_ref = args.agent;
-    intent.policy.no_agents = args.no_agents;
-    intent.policy.no_skills = args.no_skills;
-    intent.policy.skill_inputs = args.skill;
-    let turn_result = gateway.start_turn(caller, intent).await?.wait().await?;
-    let result = turn_result.result;
+    let thread = match request.session_id {
+        Some(thread_id) => runner.client.resume_thread(thread_id).await?,
+        None => {
+            let mut start = StartThreadRequest::new(&cwd);
+            start.source = "mcp".to_string();
+            start.metadata = Some(json!({
+                "caller": "pevo mcp serve",
+                "pid": std::process::id(),
+            }));
+            runner.client.start_thread(start).await?
+        }
+    };
+    let mut turn = TurnRequest::new(prompt);
+    turn.source = "mcp".to_string();
+    turn.config_path = config_path;
+    turn.project_context = project_context_override;
+    turn.model = args.model;
+    turn.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
+    turn.mode = run_mode;
+    turn.permission_mode = permission_mode;
+    turn.approval_handler = interactive_approval_handler();
+    turn.inherited_env = Some(env_map);
+    turn.agent = args.agent;
+    turn.no_agents = args.no_agents;
+    turn.no_skills = args.no_skills;
+    turn.skill_inputs = args.skill;
+    let result = thread.start_turn(turn).await?.wait().await?;
     Ok(PsychevoMcpTurnResult {
-        session_id: result.session_id,
+        session_id: result.thread_id,
         final_answer: result.final_answer,
-        outcome: result.outcome.as_str().to_string(),
+        outcome: match result.outcome {
+            TurnOutcome::Completed => "completed",
+            TurnOutcome::Stopped => "stopped",
+            TurnOutcome::Failed => "failed",
+            TurnOutcome::Interrupted => "interrupted",
+        }
+        .to_string(),
         tool_failures: result.tool_failures,
     })
 }
@@ -346,7 +377,7 @@ fn psychevo_tool_schema(reply: bool) -> Value {
 }
 
 fn mcp_tool_success_result(result: PsychevoMcpTurnResult) -> Value {
-    let success = result.outcome == Outcome::Normal.as_str() && result.tool_failures == 0;
+    let success = result.outcome == "completed" && result.tool_failures == 0;
     let structured = json!({
         "sessionId": result.session_id,
         "threadId": result.session_id,
@@ -433,7 +464,7 @@ mod tests {
                 Ok(PsychevoMcpTurnResult {
                     session_id: "session-1".to_string(),
                     final_answer: "done".to_string(),
-                    outcome: "normal".to_string(),
+                    outcome: "completed".to_string(),
                     tool_failures: 0,
                 })
             })

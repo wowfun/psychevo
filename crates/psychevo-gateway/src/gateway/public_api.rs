@@ -5,7 +5,7 @@ impl Gateway {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         cursor: Option<String>,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionListPage> {
+    ) -> psychevo::Result<acp_peer::AcpSessionListPage> {
         self.agent_sessions
             .discover(
                 CapturedAgentSessionTarget::invocation(
@@ -28,7 +28,7 @@ impl Gateway {
         options: RunOptions,
         local_session_id: String,
         native_session_id: String,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionLoadOutput> {
+    ) -> psychevo::Result<acp_peer::AcpSessionLoadOutput> {
         let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
         self.agent_sessions
             .attach(CapturedAgentSessionTarget::invocation(
@@ -49,7 +49,7 @@ impl Gateway {
         &self,
         local_session_id: String,
         native_session_id: String,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         self.agent_sessions
             .release_acp_session(local_session_id, native_session_id)
             .await
@@ -61,7 +61,7 @@ impl Gateway {
         profile: RuntimeProfileConfig,
         peer: ResolvedPeerTurn,
         options: RunOptions,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
+    ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
         let native_session_id = binding.native_session_id.clone().ok_or_else(|| {
             agent_session_configuration_error(format!(
                 "Agent binding for thread `{}` has no native session id.",
@@ -92,7 +92,7 @@ impl Gateway {
         peer: ResolvedPeerTurn,
         options: RunOptions,
         fork_local_session_id: String,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
+    ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
         let native_session_id = binding.native_session_id.clone().ok_or_else(|| {
             agent_session_configuration_error(format!(
                 "Agent binding for thread `{}` has no native session id.",
@@ -125,7 +125,7 @@ impl Gateway {
         profile: RuntimeProfileConfig,
         peer: ResolvedPeerTurn,
         options: RunOptions,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let native_session_id = binding.native_session_id.clone().ok_or_else(|| {
             agent_session_configuration_error(format!(
                 "Agent binding for thread `{}` has no native session id.",
@@ -153,7 +153,7 @@ impl Gateway {
         profile: RuntimeProfileConfig,
         peer: ResolvedPeerTurn,
         options: RunOptions,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let native_session_id = binding.native_session_id.clone().ok_or_else(|| {
             agent_session_configuration_error(format!(
                 "Agent binding for thread `{}` has no native session id.",
@@ -215,14 +215,14 @@ impl Gateway {
         &self.state
     }
 
-    pub async fn shutdown_runtimes(&self, force: bool) -> psychevo_runtime::Result<()> {
+    pub async fn shutdown_runtimes(&self, force: bool) -> psychevo::Result<()> {
         self.agent_sessions.shutdown(force).await
     }
 
     pub(crate) async fn shutdown_application(
         &self,
         force: bool,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         self.supervisor.close_turn_admission();
         self.supervisor.stop_producers();
         self.supervisor.wait_for_producers().await;
@@ -266,7 +266,7 @@ impl Gateway {
         &self,
         local_session_id: String,
         native_session_id: String,
-    ) -> psychevo_runtime::Result<Option<acp_peer::AcpSessionSnapshot>> {
+    ) -> psychevo::Result<Option<acp_peer::AcpSessionSnapshot>> {
         self.agent_sessions
             .inspect_cached_acp_session(local_session_id, native_session_id)
             .await
@@ -279,7 +279,7 @@ impl Gateway {
         source_key: String,
         target_id: String,
         agent_ref: Option<String>,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
+    ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
         let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
         let (profile, _, _) = resolve_gateway_runtime_profile(&options).await?;
         self.agent_sessions
@@ -302,7 +302,7 @@ impl Gateway {
         &self,
         source_key: &str,
         target_id: &str,
-    ) -> psychevo_runtime::Result<Option<acp_peer::AcpSessionSnapshot>> {
+    ) -> psychevo::Result<Option<acp_peer::AcpSessionSnapshot>> {
         self.agent_sessions
             .inspect_prepared(source_key, target_id)
             .await
@@ -314,7 +314,7 @@ impl Gateway {
         target_id: &str,
         control_id: String,
         value: Value,
-    ) -> psychevo_runtime::Result<Option<acp_peer::AcpSessionSnapshot>> {
+    ) -> psychevo::Result<Option<acp_peer::AcpSessionSnapshot>> {
         self.agent_sessions
             .set_prepared_control(source_key, target_id, control_id, value)
             .await
@@ -323,7 +323,7 @@ impl Gateway {
     pub(crate) async fn release_prepared_agent_session(
         &self,
         source_key: &str,
-    ) -> psychevo_runtime::Result<bool> {
+    ) -> psychevo::Result<bool> {
         self.agent_sessions.release_prepared(source_key).await
     }
 
@@ -335,7 +335,7 @@ impl Gateway {
         native_session_id: String,
         control_id: String,
         value: Value,
-    ) -> psychevo_runtime::Result<acp_peer::AcpSessionSnapshot> {
+    ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
         let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
         let (profile, _, _) = resolve_gateway_runtime_profile(&options).await?;
         let binding = self
@@ -377,7 +377,7 @@ impl Gateway {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
-    ) -> psychevo_runtime::Result<acp_peer::AcpAuthDoctorStatus> {
+    ) -> psychevo::Result<acp_peer::AcpAuthDoctorStatus> {
         self.agent_sessions
             .probe_acp_authentication(peer, cwd)
             .await
@@ -387,7 +387,7 @@ impl Gateway {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
-    ) -> psychevo_runtime::Result<acp_peer::AcpProtocolDoctorStatus> {
+    ) -> psychevo::Result<acp_peer::AcpProtocolDoctorStatus> {
         self.agent_sessions
             .probe_acp_protocol_compatibility(peer, cwd)
             .await
@@ -401,7 +401,7 @@ impl Gateway {
         request: BackendTurnRequest,
         turn_id: String,
         session_ready: Option<acp_peer::AcpSessionReadyCallback>,
-    ) -> psychevo_runtime::Result<RunResult> {
+    ) -> psychevo::Result<RunResult> {
         let target = match binding.as_ref() {
             Some(binding) => CapturedAgentSessionTarget::bound(binding, profile, peer)?,
             None => CapturedAgentSessionTarget::invocation(turn_id.clone(), profile, peer),
@@ -420,14 +420,14 @@ impl Gateway {
     pub async fn resolve_source_thread(
         &self,
         source: &GatewaySource,
-    ) -> psychevo_runtime::Result<Option<String>> {
+    ) -> psychevo::Result<Option<String>> {
         self.lookup_source_thread(source).await
     }
 
     pub async fn thread_transcript(
         &self,
         thread_id: &str,
-    ) -> psychevo_runtime::Result<Vec<TranscriptEntry>> {
+    ) -> psychevo::Result<Vec<TranscriptEntry>> {
         let summaries = self.state.load_tui_message_summaries(thread_id).await?;
         let mut entries = transcript::project_transcript_entries(thread_id, &summaries);
         let agent_edges = self.state.list_agent_edges_for_parent(thread_id).await?;
@@ -516,7 +516,7 @@ impl Gateway {
 
     pub async fn session_activity_snapshot(
         &self,
-    ) -> psychevo_runtime::Result<BTreeMap<String, GatewayActivity>> {
+    ) -> psychevo::Result<BTreeMap<String, GatewayActivity>> {
         let mut snapshot = {
             let active = self.active.lock().expect("gateway active map poisoned");
             let aliases = self
@@ -555,7 +555,7 @@ impl Gateway {
     async fn durable_activity_for_key(
         &self,
         key: &str,
-    ) -> psychevo_runtime::Result<Option<GatewayActivityRecord>> {
+    ) -> psychevo::Result<Option<GatewayActivityRecord>> {
         if let Some(thread_id) = key.strip_prefix("thread:") {
             return self
                 .state
@@ -610,14 +610,16 @@ impl Gateway {
         }
     }
 
-    /// Accepts one caller turn through the complete Thread Application policy
-    /// boundary. Gateway supervision owns the accepted work independently of
-    /// the returned completion handle.
+    /// Legacy queue conformance seam. Product callers enter through
+    /// `psychevo::Application`; only the historical Gateway queue tests keep
+    /// this path compiled while their lower-level shell and compaction
+    /// coverage remains in this crate.
+    #[cfg(test)]
     pub async fn start_turn(
         &self,
         mut caller: ThreadCallerContext,
         mut intent: ThreadTurnIntent,
-    ) -> psychevo_runtime::Result<AcceptedTurn> {
+    ) -> psychevo::Result<AcceptedTurn> {
         let admission = self
             .supervisor
             .acquire_activity_admission()
@@ -683,11 +685,12 @@ impl Gateway {
         })
     }
 
+    #[cfg(test)]
     async fn materialize_accepted_thread(
         &self,
         caller: &ThreadCallerContext,
         intent: &ThreadTurnIntent,
-    ) -> psychevo_runtime::Result<String> {
+    ) -> psychevo::Result<String> {
         if let Some(thread_id) = intent
             .thread_id
             .as_deref()
@@ -704,7 +707,7 @@ impl Gateway {
                 return Ok(thread_id);
             }
         }
-        let cwd = psychevo_runtime::paths::canonicalize_cwd(&caller.cwd)?;
+        let cwd = psychevo::paths::canonicalize_cwd(&caller.cwd)?;
         if intent.policy.continue_latest {
             let continue_sources = if caller.continue_sources.is_empty() {
                 vec![caller.runtime_source.as_str()]
@@ -738,17 +741,18 @@ impl Gateway {
     pub(crate) async fn send_turn(
         &self,
         mut request: SendTurnRequest,
-    ) -> psychevo_runtime::Result<GatewayTurnResult> {
+    ) -> psychevo::Result<GatewayTurnResult> {
         request.explicit_thread = request.thread_id.is_some();
         let turn_id = Uuid::now_v7().to_string();
         self.send_turn_with_id(request, turn_id).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn send_turn_with_id(
         &self,
         request: SendTurnRequest,
         turn_id: String,
-    ) -> psychevo_runtime::Result<GatewayTurnResult> {
+    ) -> psychevo::Result<GatewayTurnResult> {
         let queue_key = self.queue_key_for_request(&request).await?;
         let mut request = Some(request);
         let queued = {
@@ -834,7 +838,7 @@ impl Gateway {
     pub async fn send_shell(
         &self,
         request: SendShellRequest,
-    ) -> psychevo_runtime::Result<GatewayShellResult> {
+    ) -> psychevo::Result<GatewayShellResult> {
         let _admission = self
             .supervisor
             .acquire_activity_admission()
@@ -930,8 +934,8 @@ impl Gateway {
     pub async fn enqueue_compact_session(
         &self,
         request: SendCompactRequest,
-    ) -> psychevo_runtime::Result<
-        BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult>>,
+    ) -> psychevo::Result<
+        BoxFuture<'static, psychevo::Result<psychevo::compaction::CompactionResult>>,
     > {
         let admission = self
             .supervisor
@@ -982,7 +986,7 @@ impl Gateway {
     pub async fn compact_session(
         &self,
         request: SendCompactRequest,
-    ) -> psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult> {
+    ) -> psychevo::Result<psychevo::compaction::CompactionResult> {
         self.enqueue_compact_session(request).await?.await
     }
 
@@ -990,8 +994,8 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        message: psychevo_agent_core::Message,
-    ) -> Option<psychevo_agent_core::PendingInputId> {
+        message: psychevo::__agent_core::Message,
+    ) -> Option<psychevo::__agent_core::PendingInputId> {
         if self.expected_turn_is_terminal(expected_turn_id).await {
             return None;
         }
@@ -1029,7 +1033,7 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        message: psychevo_agent_core::Message,
+        message: psychevo::__agent_core::Message,
     ) -> bool {
         if self.expected_turn_is_terminal(expected_turn_id).await {
             return false;
@@ -1066,7 +1070,7 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        input_id: psychevo_agent_core::PendingInputId,
+        input_id: psychevo::__agent_core::PendingInputId,
     ) -> bool {
         self.control_for_selector(&selector, expected_turn_id)
             .is_some_and(|control| control.cancel_pending_user_message(input_id))
@@ -1076,8 +1080,8 @@ impl Gateway {
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
-        input_id: psychevo_agent_core::PendingInputId,
-        message: psychevo_agent_core::Message,
+        input_id: psychevo::__agent_core::PendingInputId,
+        message: psychevo::__agent_core::Message,
     ) -> bool {
         self.control_for_selector(&selector, expected_turn_id)
             .is_some_and(|control| control.update_pending_user_message(input_id, message))
@@ -1206,6 +1210,7 @@ impl Gateway {
         let count = dropped.len();
         for pending in dropped {
             match pending {
+                #[cfg(test)]
                 PendingQueuedActivity::Turn(pending) => {
                     let _ = pending.responder.send(Err(Error::Message(
                         "gateway turn queue cleared".to_string(),

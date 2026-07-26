@@ -58,7 +58,7 @@ pub(super) async fn apply_acp_v1_config_options(
     local_session_id: &str,
     stream: &Option<RunStreamSink>,
     selections: Vec<AcpPeerConfigSelection>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     for selection in selections {
         let option = matching_acp_config_option(state.config_options, &selection);
         if option.is_none()
@@ -139,7 +139,7 @@ pub(super) async fn apply_legacy_model_selection(
     legacy_models: &mut Option<AcpLegacyModelState>,
     native_session_id: &str,
     requested: &str,
-) -> psychevo_runtime::Result<u64> {
+) -> psychevo::Result<u64> {
     let state =
         effective_legacy_models(config_options, legacy_models.as_ref()).ok_or_else(|| {
             acp_not_delivered_error(
@@ -197,7 +197,7 @@ fn matching_acp_config_option<'a>(
 fn acp_config_option_value(
     option: &SessionConfigOption,
     requested: &str,
-) -> psychevo_runtime::Result<SessionConfigOptionValue> {
+) -> psychevo::Result<SessionConfigOptionValue> {
     match &option.kind {
         SessionConfigKind::Select(select) => {
             let found = match &select.options {
@@ -238,7 +238,7 @@ fn acp_config_option_value(
 pub(super) fn acp_config_option_json_value(
     option: &SessionConfigOption,
     value: Value,
-) -> psychevo_runtime::Result<SessionConfigOptionValue> {
+) -> psychevo::Result<SessionConfigOptionValue> {
     match (&option.kind, value) {
         (SessionConfigKind::Boolean(_), Value::Bool(value)) => {
             Ok(SessionConfigOptionValue::boolean(value))

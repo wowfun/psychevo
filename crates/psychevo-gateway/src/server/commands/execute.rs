@@ -2,7 +2,7 @@ pub(super) async fn command_execute_value(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::CommandExecuteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let raw = params.command.trim().to_string();
     let thread_id = params.thread_id.clone();
     if raw.is_empty() {
@@ -108,7 +108,7 @@ async fn command_result_from_effect(
     action: SlashCommandAction,
     effect: SlashCommandEffect,
     thread_id: Option<String>,
-) -> psychevo_runtime::Result<wire::CommandExecuteResult> {
+) -> psychevo::Result<wire::CommandExecuteResult> {
     match effect {
         SlashCommandEffect::LocalText => match action {
             SlashCommandAction::Help => Ok(command_action(
@@ -225,7 +225,7 @@ async fn command_result_from_effect(
         }
         SlashCommandEffect::SandboxShow => {
             let options = state.run_options(scope.cwd.clone(), thread_id.clone());
-            let status = psychevo_runtime::sandbox::sandbox_status_text(&options, RunMode::Default)?;
+            let status = psychevo::sandbox::sandbox_status_text(&options, RunMode::Default)?;
             Ok(command_accepted_message(raw, action, Some(status)))
         }
         SlashCommandEffect::Voice(mode) => Ok(command_voice_result(
@@ -268,7 +268,7 @@ async fn record_gateway_mission_metadata(
     thread_id: Option<String>,
     team: Option<&str>,
     goal: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let parent_thread_id = ensure_turn_start_thread(state, scope, thread_id)
         .await?
         .ok_or_else(|| {
@@ -293,7 +293,7 @@ pub(crate) async fn record_gateway_mission_metadata_for_parent(
     team: Option<&str>,
     goal: &str,
     source: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let mission_id = Uuid::now_v7().to_string();
     let metadata = Some(json!({"source": source}));
     if let Some(team_name) = team.map(str::trim).filter(|team| !team.is_empty()) {
@@ -422,12 +422,12 @@ fn command_download_action(
 ) -> wire::CommandExecuteResult {
     let usage = match action {
         SlashCommandAction::Export => {
-            psychevo_runtime::command_registry::slash_command_spec("/export")
+            psychevo::command_registry::slash_command_spec("/export")
                 .map(|spec| spec.usage)
                 .unwrap_or("/export [path] [-f|--format markdown|json] [-i|--include list]")
         }
         SlashCommandAction::Share => {
-            psychevo_runtime::command_registry::slash_command_spec("/share")
+            psychevo::command_registry::slash_command_spec("/share")
                 .map(|spec| spec.usage)
                 .unwrap_or("/share [path] [-i|--include list]")
         }
@@ -722,7 +722,7 @@ async fn command_side_conversation_start(
     action: SlashCommandAction,
     parent_thread_id: Option<String>,
     prompt: Option<String>,
-) -> psychevo_runtime::Result<wire::CommandExecuteResult> {
+) -> psychevo::Result<wire::CommandExecuteResult> {
     let Some(parent_thread_id) = parent_thread_id else {
         return Ok(command_unsupported(
             raw,

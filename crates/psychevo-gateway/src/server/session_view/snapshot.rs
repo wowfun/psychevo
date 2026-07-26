@@ -2,7 +2,7 @@ async fn thread_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let store = &state.inner.state;
     let thread = if let Some(thread_id) = thread_id {
         let forked_from_thread_id = store
@@ -65,9 +65,9 @@ async fn thread_snapshot(
 }
 
 async fn thread_history_editing_value(
-    store: &psychevo_runtime::state::StateRuntime,
+    store: &psychevo::state::StateRuntime,
     thread_id: &str,
-) -> psychevo_runtime::Result<Option<Value>> {
+) -> psychevo::Result<Option<Value>> {
     let Some(revert) = store.session_revert_state(thread_id).await? else {
         return Ok(None);
     };
@@ -113,7 +113,7 @@ async fn thread_snapshot_live(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     thread_snapshot(state, scope, thread_id).await
 }
 
@@ -121,7 +121,7 @@ async fn snapshot_activity(
     state: &WebState,
     source: &GatewaySource,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<GatewayActivity> {
+) -> psychevo::Result<GatewayActivity> {
     let activity = state.activity(source, thread_id).await;
     let Some(thread_id) = thread_id else {
         return Ok(activity);
@@ -144,7 +144,7 @@ async fn snapshot_activity(
     let Some(edge) = state.inner.state.find_agent_edge(thread_id).await? else {
         return Ok(activity);
     };
-    if edge.child_session_id != thread_id || edge.status != psychevo_runtime::state::AgentEdgeStatus::Open
+    if edge.child_session_id != thread_id || edge.status != psychevo::state::AgentEdgeStatus::Open
     {
         return Ok(activity);
     }
@@ -173,7 +173,7 @@ async fn replay_running_live_transcript_overlay(
     thread_id: &str,
     activity: &GatewayActivity,
     entries: &mut Vec<TranscriptEntry>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if !activity.running {
         return Ok(());
     }
@@ -200,7 +200,7 @@ async fn active_turn_projection_window(
     state: &WebState,
     thread_id: &str,
     activity: &GatewayActivity,
-) -> psychevo_runtime::Result<Option<(String, i64)>> {
+) -> psychevo::Result<Option<(String, i64)>> {
     if !activity.running {
         return Ok(None);
     }
@@ -226,7 +226,7 @@ async fn active_turn_projection_window(
 }
 
 fn first_committed_seq_from_activity_intent(
-    record: &psychevo_runtime::state::GatewayActivityRecord,
+    record: &psychevo::state::GatewayActivityRecord,
 ) -> Option<i64> {
     record
         .intent

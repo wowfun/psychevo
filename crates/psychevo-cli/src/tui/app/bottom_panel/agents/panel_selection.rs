@@ -220,20 +220,15 @@ impl TuiApp {
         match panel.mode() {
             ClarifyInputMode::Options => match key.code {
                 KeyCode::Esc => {
-                    if let Some((selector, _)) = self.active_gateway_turn_selector(ui) {
-                        if self
-                            .gateway
-                            .submit_clarify(
-                                selector,
-                                &panel.request.call_id,
-                                ClarifyResult::Cancelled,
-                            )
-                            .await
-                        {
-                            restore = true;
-                        } else {
-                            panel.notice = Some("clarify request is no longer active".to_string());
-                        }
+                    if self
+                        .submit_active_clarify(
+                            ui,
+                            &panel.request.call_id,
+                            ClarifyResult::Cancelled,
+                        )
+                        .await
+                    {
+                        restore = true;
                     } else {
                         panel.notice = Some("clarify request is no longer active".to_string());
                     }
@@ -366,10 +361,6 @@ impl TuiApp {
         panel.set_mode(ClarifyInputMode::Options);
         panel.notice = None;
         if panel.answers.iter().all(Option::is_some) {
-            let Some((selector, _)) = self.active_gateway_turn_selector(ui) else {
-                panel.notice = Some("clarify request is no longer active".to_string());
-                return Ok(());
-            };
             let response = ClarifyResponse {
                 answers: panel
                     .answers
@@ -383,9 +374,8 @@ impl TuiApp {
                     .collect(),
             };
             if !self
-                .gateway
-                .submit_clarify(
-                    selector,
+                .submit_active_clarify(
+                    ui,
                     &panel.request.call_id,
                     ClarifyResult::Answered(response),
                 )
@@ -397,6 +387,28 @@ impl TuiApp {
         }
         panel.move_to_next_unanswered();
         Ok(())
+    }
+
+    async fn submit_active_clarify(
+        &self,
+        ui: &FullscreenUi<'_>,
+        call_id: &str,
+        result: ClarifyResult,
+    ) -> bool {
+        if let Some(running) = ui
+            .running
+            .as_ref()
+            .filter(|running| matches!(running.task, RunningTask::Agent(_)))
+            && running.selector.is_none()
+        {
+            return running.control.submit_clarify_result(call_id, result);
+        }
+        let Some((selector, _)) = self.active_gateway_turn_selector(ui) else {
+            return false;
+        };
+        self.gateway
+            .submit_clarify(selector, call_id, result)
+            .await
     }
 
     pub(crate) async fn apply_bottom_panel_selection(

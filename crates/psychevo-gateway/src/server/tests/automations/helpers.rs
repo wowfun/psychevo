@@ -210,7 +210,7 @@ impl crate::GatewayBackend for AutomationFakeBackend {
     fn run_turn(
         &self,
         request: crate::BackendTurnRequest,
-    ) -> futures::future::BoxFuture<'static, psychevo_runtime::Result<psychevo_runtime::types::RunResult>>
+    ) -> futures::future::BoxFuture<'static, psychevo::Result<psychevo::types::RunResult>>
     {
         self.dispatch_times
             .lock()
@@ -294,9 +294,9 @@ impl crate::GatewayBackend for AutomationFakeBackend {
             } else {
                 "automation done".to_string()
             };
-            Ok(psychevo_runtime::types::RunResult {
+            Ok(psychevo::types::RunResult {
                 session_id,
-                outcome: psychevo_ai::Outcome::Normal,
+                outcome: psychevo::__ai::Outcome::Normal,
                 terminal_reason: None,
                 final_answer,
                 db_path: request.options.state.db_path().to_path_buf(),

@@ -134,8 +134,8 @@ impl PsychevoAcpAgent {
         let catalog = self.skill_catalog(session)?;
         let Some(skill) = catalog.skills.iter().find(|skill| {
             skill.name == name
-                || psychevo_runtime::command_registry::normalize_dynamic_skill_name(&skill.name)
-                    == psychevo_runtime::command_registry::normalize_dynamic_skill_name(name)
+                || psychevo::command_registry::normalize_dynamic_skill_name(&skill.name)
+                    == psychevo::command_registry::normalize_dynamic_skill_name(name)
         }) else {
             return Ok(format!("skill not found: {name}"));
         };
@@ -167,10 +167,10 @@ impl PsychevoAcpAgent {
     ) -> Result<String, Error> {
         let catalog = self.skill_catalog(session)?;
         if let Some(name) = args.first() {
-            let normalized = psychevo_runtime::command_registry::normalize_dynamic_skill_name(name);
+            let normalized = psychevo::command_registry::normalize_dynamic_skill_name(name);
             let Some(skill) = catalog.skills.iter().find(|skill| {
                 skill.name == *name
-                    || psychevo_runtime::command_registry::normalize_dynamic_skill_name(&skill.name)
+                    || psychevo::command_registry::normalize_dynamic_skill_name(&skill.name)
                         == normalized
             }) else {
                 return Ok(format!("unknown skill: {name}"));
@@ -304,7 +304,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn skill_catalog(
         &self,
         session: &AcpSession,
-    ) -> Result<psychevo_runtime::skills::SkillCatalog, Error> {
+    ) -> Result<psychevo::skills::SkillCatalog, Error> {
         discover_skills(&SkillDiscoveryOptions {
             home: self.options.home.clone(),
             cwd: session.cwd.clone(),
@@ -387,7 +387,7 @@ impl PsychevoAcpAgent {
             session.cwd.join(path)
         };
         let store = self.state.clone();
-        let result = psychevo_runtime::session_export::write_session_export(
+        let result = psychevo::session_export::write_session_export(
             &store,
             runtime_session_id,
             &path,

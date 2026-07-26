@@ -11,7 +11,7 @@ pub(super) fn channel_cwd(default_cwd: &Path, connection: &ChannelRuntimeConnect
     } else {
         default_cwd.join(path)
     };
-    psychevo_runtime::paths::canonicalize_cwd(&path).unwrap_or(path)
+    psychevo::paths::canonicalize_cwd(&path).unwrap_or(path)
 }
 
 #[cfg(feature = "native-channels")]

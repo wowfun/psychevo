@@ -1,7 +1,7 @@
 
-    use psychevo_ai::Outcome;
-    use psychevo_runtime::{types::PermissionMode, types::RunMode, types::UserShellContextOptions};
-    use psychevo_agent_core::{AssistantBlock, Message, UserContentBlock};
+    use psychevo::__ai::Outcome;
+    use psychevo::{types::PermissionMode, types::RunMode, types::UserShellContextOptions};
+    use psychevo::__agent_core::{AssistantBlock, Message, UserContentBlock};
     use tokio::sync::{Notify, mpsc};
 
     #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@
         request_permission: AtomicBool,
         emit_stream_terminal: AtomicBool,
         persist_history: AtomicBool,
-        context_snapshot: Mutex<Option<psychevo_runtime::context_usage::ContextSnapshot>>,
+        context_snapshot: Mutex<Option<psychevo::context_usage::ContextSnapshot>>,
     }
 
     #[derive(Clone, Default)]
@@ -106,7 +106,7 @@
         fn run_turn(
             &self,
             request: BackendTurnRequest,
-        ) -> BoxFuture<'static, psychevo_runtime::Result<RunResult>> {
+        ) -> BoxFuture<'static, psychevo::Result<RunResult>> {
             let inner = Arc::clone(&self.inner);
             Box::pin(async move {
                 let run_number = inner.next_run.fetch_add(1, Ordering::SeqCst) + 1;
@@ -161,7 +161,7 @@
                     if let Some(mut abort) = request
                         .control
                         .as_ref()
-                        .map(psychevo_runtime::types::RunControl::abort_signal)
+                        .map(psychevo::types::RunControl::abort_signal)
                     {
                         tokio::select! {
                             _ = wait.release.notified() => {}
@@ -309,11 +309,11 @@
 
     fn test_python_command_toml(cwd: &std::path::Path) -> String {
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo_runtime::host_paths::resolve_executable_path(
+        let python = psychevo::host_paths::resolve_executable_path(
             "python3",
             cwd,
-            &psychevo_runtime::host_paths::ExecutableResolveOptions {
-                platform: psychevo_runtime::host_paths::HostPlatform::current(),
+            &psychevo::host_paths::ExecutableResolveOptions {
+                platform: psychevo::host_paths::HostPlatform::current(),
                 env: &host_env,
             },
         )

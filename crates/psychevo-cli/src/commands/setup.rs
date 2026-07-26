@@ -7,7 +7,7 @@ use std::process::{Command, ExitCode};
 use anyhow::{Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use psychevo_runtime::{
+use psychevo::{
     config::fetch_model_catalog, config::model_catalog_providers, config::set_default_model,
     config::set_provider_api_key, types::ModelCatalogEntry,
 };

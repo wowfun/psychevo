@@ -76,12 +76,9 @@ impl GatewayContext {
         })
     }
 
-    pub(super) async fn run_options(
-        &self,
-        cwd: PathBuf,
-    ) -> Result<psychevo_runtime::types::RunOptions> {
-        Ok(psychevo_runtime::types::RunOptions {
-            state: psychevo_runtime::state::StateRuntime::open(self.home.join("state.db")).await?,
+    pub(super) async fn run_options(&self, cwd: PathBuf) -> Result<psychevo::types::RunOptions> {
+        Ok(psychevo::types::RunOptions {
+            state: psychevo::state::StateRuntime::open(self.home.join("state.db")).await?,
             cwd,
             snapshot_root: Some(self.home.join("snapshots")),
             session: None,
@@ -101,7 +98,7 @@ impl GatewayContext {
             runtime_options: std::collections::BTreeMap::new(),
             external_agent_delegate: None,
             include_reasoning: false,
-            mode: psychevo_runtime::types::RunMode::Default,
+            mode: psychevo::types::RunMode::Default,
             permission_mode: None,
             approval_mode: None,
             approval_handler: None,

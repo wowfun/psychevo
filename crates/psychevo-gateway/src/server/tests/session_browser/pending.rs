@@ -69,7 +69,7 @@ async fn thread_snapshot_removes_pending_permission_after_activity_finishes() {
         .await.expect("session");
     let owner_id = "gateway:foreign";
     let activity = store
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "activity-1",
             thread_id: Some(&session_id),
             source_key: None,
@@ -251,7 +251,7 @@ async fn source_started_pending_permission_survives_unbound_canonical_snapshot()
         .inner
         .state
 
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "activity-draft-permission",
             thread_id: None,
             source_key: Some(&draft_source_key),
@@ -340,7 +340,7 @@ async fn source_started_pending_clarify_survives_unbound_canonical_snapshot() {
         .inner
         .state
 
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "activity-draft-clarify",
             thread_id: None,
             source_key: Some(&draft_source_key),
@@ -431,7 +431,7 @@ async fn public_pending_interaction_responses_are_typed_and_accepted_once() {
         .inner
         .state
 
-        .claim_gateway_activity(psychevo_runtime::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
             activity_id: "activity-draft-route",
             thread_id: Some(&thread_id),
             source_key: Some(&source_key),

@@ -3,6 +3,7 @@ const ACP_PEER_ABORT_MESSAGE: &str = "ACP peer turn aborted";
 #[derive(Debug)]
 pub(crate) struct AcpPeerTurnResult {
     pub(crate) run: RunResult,
+    #[cfg(test)]
     pub(crate) native_session_id: String,
 }
 
@@ -11,7 +12,7 @@ struct AcpClientContext {
     cwd: PathBuf,
     fs_read: bool,
     fs_write: bool,
-    approval_handler: Option<Arc<dyn psychevo_runtime::types::ApprovalHandler>>,
+    approval_handler: Option<Arc<dyn psychevo::types::ApprovalHandler>>,
     clarify_control: Option<RunControlHandle>,
     terminal: bool,
     terminal_env: BTreeMap<String, String>,
@@ -89,18 +90,18 @@ struct PreviousAcpPromptUsage {
 }
 
 async fn acp_prompt_usage_delta(
-    store: &psychevo_runtime::state::StateRuntime,
+    store: &psychevo::state::StateRuntime,
     session_id: &str,
     native_session_id: &str,
     cumulative: &Value,
-) -> psychevo_runtime::Result<(Value, bool)> {
+) -> psychevo::Result<(Value, bool)> {
     let previous = store
         .load_tui_message_summaries(session_id)
         .await?
         .into_iter()
         .rev()
         .filter(|summary| {
-            matches!(summary.message, psychevo_agent_core::Message::Assistant { .. })
+            matches!(summary.message, psychevo::__agent_core::Message::Assistant { .. })
         })
         .find_map(|summary| {
             let metadata = summary.metadata?;
@@ -198,13 +199,13 @@ fn acp_history_message_metadata(
 }
 
 async fn commit_acp_replay_and_current_input(
-    state: &psychevo_runtime::state::StateRuntime,
+    state: &psychevo::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     current_turn_id: &str,
     replay: &AcpHistoryReplayProjection,
     current_user_text: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     commit_acp_replay(
         state,
         peer,
@@ -224,21 +225,21 @@ async fn commit_acp_replay_and_current_input(
 }
 
 pub(crate) async fn commit_imported_acp_replay(
-    state: &psychevo_runtime::state::StateRuntime,
+    state: &psychevo::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     replay: &AcpHistoryReplayProjection,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     commit_acp_replay(state, peer, session_id, None, replay).await
 }
 
 async fn commit_acp_replay(
-    state: &psychevo_runtime::state::StateRuntime,
+    state: &psychevo::state::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     current_turn_id: Option<&str>,
     replay: &AcpHistoryReplayProjection,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let store = state.clone();
     let unknown = match current_turn_id {
         Some(current_turn_id) => {
@@ -386,12 +387,12 @@ async fn commit_acp_replay(
 pub(crate) async fn run_acp_peer_turn(
     pool: &AcpProcessPool,
     peer: ResolvedPeerTurn,
-    profile: &psychevo_runtime::config::RuntimeProfileConfig,
+    profile: &psychevo::config::RuntimeProfileConfig,
     request: BackendTurnRequest,
     turn_id: String,
     session_ready: AcpSessionReadyCallback,
     delivery_observer: crate::AgentDeliveryObserver,
-) -> psychevo_runtime::Result<AcpPeerTurnResult> {
+) -> psychevo::Result<AcpPeerTurnResult> {
     let clarify_control = request.control.as_ref().map(|control| control.handle());
     let abort = request
         .control
@@ -516,6 +517,7 @@ pub(crate) async fn run_acp_peer_turn(
             };
             return Ok(AcpPeerTurnResult {
                 run,
+                #[cfg(test)]
                 native_session_id: native_session_slot
                     .lock()
                     .ok()
@@ -647,13 +649,14 @@ pub(crate) async fn run_acp_peer_turn(
     };
     Ok(AcpPeerTurnResult {
         run,
+        #[cfg(test)]
         native_session_id: acp.native_session_id,
     })
 }
 
 fn acp_peer_turn_controls(
-    options: &psychevo_runtime::types::RunOptions,
-    profile: &psychevo_runtime::config::RuntimeProfileConfig,
+    options: &psychevo::types::RunOptions,
+    profile: &psychevo::config::RuntimeProfileConfig,
     is_new_native_session: bool,
 ) -> (Option<String>, Option<String>, BTreeMap<String, String>) {
     let mut runtime_options = options.runtime_options.clone();
@@ -675,7 +678,7 @@ fn acp_peer_turn_controls(
 }
 
 async fn set_session_title_if_empty(
-    store: &psychevo_runtime::state::StateRuntime,
+    store: &psychevo::state::StateRuntime,
     session_id: &str,
     title: &str,
 ) {

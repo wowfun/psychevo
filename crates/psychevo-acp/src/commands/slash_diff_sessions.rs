@@ -1,6 +1,6 @@
 pub(crate) fn acp_command_capabilities()
--> &'static [psychevo_runtime::command_registry::CommandCapability] {
-    use psychevo_runtime::command_registry::CommandCapability;
+-> &'static [psychevo::command_registry::CommandCapability] {
+    use psychevo::command_registry::CommandCapability;
     &[
         CommandCapability::ActiveTurnControl,
         CommandCapability::Queue,
@@ -131,16 +131,6 @@ fn diff_file_summary(file: &WorkspaceDiffFile) -> Value {
     })
 }
 
-pub(crate) fn user_text_message(text: &str) -> Message {
-    Message::User {
-        content: vec![UserContentBlock::text(text)],
-        timestamp_ms: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64,
-    }
-}
-
 pub(crate) fn resolve_session_reference(
     reference: &str,
     sessions: &[SessionSummary],
@@ -206,7 +196,7 @@ pub(crate) fn reasoning_effort_value(value: &str) -> Option<String> {
 }
 
 pub(crate) fn available_commands_from(
-    available: psychevo_runtime::command_registry::AvailableSlashCommands,
+    available: psychevo::command_registry::AvailableSlashCommands,
 ) -> Vec<AvailableCommand> {
     available
         .commands
@@ -222,7 +212,7 @@ pub(crate) fn available_commands_from(
                 )
             };
             let input = match command.argument_kind {
-                psychevo_runtime::command_registry::CommandArgumentKind::None => None,
+                psychevo::command_registry::CommandArgumentKind::None => None,
                 _ => Some(AvailableCommandInput::Text(TextCommandInput::new(
                     command.usage,
                 ))),
@@ -513,11 +503,4 @@ pub(crate) fn send_session_update(
     update: SessionUpdate,
 ) {
     let _ = cx.send_notification(UpdateSessionNotification::new(session_id, update));
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct AcpLiveProjection {
-    reasoning_offsets: HashMap<String, usize>,
-    terminal_output: bool,
-    terminal_offsets: HashMap<String, usize>,
 }

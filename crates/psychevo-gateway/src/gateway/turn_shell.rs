@@ -11,6 +11,7 @@ struct TerminalTurnInput<'a> {
     durable_activity: Option<&'a DurableGatewayActivity>,
 }
 
+#[cfg(test)]
 struct AutoCompactionAfterTurn<'a> {
     result: &'a RunResult,
     config_path: Option<PathBuf>,
@@ -22,12 +23,13 @@ struct AutoCompactionAfterTurn<'a> {
 }
 
 impl Gateway {
+    #[cfg(test)]
     async fn run_turn_now(
         &self,
         queue_key: &str,
         request: SendTurnRequest,
         turn_id: String,
-    ) -> psychevo_runtime::Result<GatewayTurnResult> {
+    ) -> psychevo::Result<GatewayTurnResult> {
         let thread_hint = request
             .thread_id
             .clone()
@@ -60,12 +62,13 @@ impl Gateway {
         result
     }
 
+    #[cfg(test)]
     async fn run_turn_now_inner(
         &self,
         queue_key: &str,
         request: SendTurnRequest,
         turn_id: String,
-    ) -> psychevo_runtime::Result<GatewayTurnResult> {
+    ) -> psychevo::Result<GatewayTurnResult> {
         let base_event_sink = request.event_sink.clone();
         let queue_source = request.source.clone();
         let alias_source_to_active = !request.explicit_thread;
@@ -107,7 +110,7 @@ impl Gateway {
             .or(mapped_thread_id)
             .or_else(|| options.session.clone());
         if active_thread_id.is_none() {
-            options.cwd = psychevo_runtime::paths::canonicalize_cwd(&options.cwd)?;
+            options.cwd = psychevo::paths::canonicalize_cwd(&options.cwd)?;
             if options.continue_latest {
                 let continue_source_refs = continue_sources
                     .iter()
@@ -274,7 +277,7 @@ impl Gateway {
         let auto_inherited_env = options.inherited_env.clone();
         // Everything after the durable claim is funneled through one result so configuration,
         // binding, and adapter failures all produce the same single terminal lifecycle.
-        let backend_result: psychevo_runtime::Result<(RunResult, GatewayBackendInfo)> = async {
+        let backend_result: psychevo::Result<(RunResult, GatewayBackendInfo)> = async {
             let bound_target = resolve_bound_gateway_agent_target(
                 &options,
                 options.runtime_ref.as_deref(),
@@ -705,7 +708,7 @@ impl Gateway {
         thread_hint: Option<&str>,
         event_sink: Option<&GatewayEventEmitter>,
         error: &Error,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         if let Some(terminal) = self.state.gateway_turn_terminal(turn_id).await? {
             self.mark_active_turn_terminal(turn_id);
             if let Some(activity) = self.state.gateway_activity(turn_id).await? {
@@ -773,7 +776,7 @@ impl Gateway {
     async fn record_and_project_terminal_turn(
         &self,
         input: TerminalTurnInput<'_>,
-    ) -> psychevo_runtime::Result<GatewayTurn> {
+    ) -> psychevo::Result<GatewayTurn> {
         let completed_at_ms = gateway_now_ms();
         let started_at_ms = if let Some(activity) = input.durable_activity {
             persisted_gateway_activity(&self.state, activity)
@@ -831,10 +834,11 @@ impl Gateway {
             .unwrap_or_default()
     }
 
+    #[cfg(test)]
     async fn maybe_auto_compact_after_turn(
         &self,
         input: AutoCompactionAfterTurn<'_>,
-    ) -> psychevo_runtime::Result<Option<psychevo_runtime::compaction::CompactionResult>> {
+    ) -> psychevo::Result<Option<psychevo::compaction::CompactionResult>> {
         let AutoCompactionAfterTurn {
             result,
             config_path,
@@ -847,7 +851,7 @@ impl Gateway {
         let Some(snapshot) = result.context_snapshot.as_ref() else {
             return Ok(None);
         };
-        let check = psychevo_runtime::compaction::AutoCompactionCheckOptions {
+        let check = psychevo::compaction::AutoCompactionCheckOptions {
             state: self.state.clone(),
             cwd: result.cwd.clone(),
             session: result.session_id.clone(),
@@ -856,7 +860,7 @@ impl Gateway {
             reasoning_effort: reasoning_effort.clone(),
             inherited_env: inherited_env.clone(),
         };
-        if !psychevo_runtime::compaction::auto_compaction_due_for_snapshot(&check, snapshot)? {
+        if !psychevo::compaction::auto_compaction_due_for_snapshot(&check, snapshot)? {
             return Ok(None);
         }
         let started_at_ms = gateway_now_ms();
@@ -872,7 +876,7 @@ impl Gateway {
                 ),
             });
         }
-        let result = psychevo_runtime::compaction::compact_session(psychevo_runtime::compaction::CompactSessionOptions {
+        let result = psychevo::compaction::compact_session(psychevo::compaction::CompactSessionOptions {
             state: self.state.clone(),
             cwd: result.cwd.clone(),
             session: result.session_id.clone(),
@@ -880,7 +884,7 @@ impl Gateway {
             model,
             reasoning_effort,
             inherited_env,
-            reason: psychevo_runtime::compaction::CompactionReason::AutoThreshold,
+            reason: psychevo::compaction::CompactionReason::AutoThreshold,
             instructions: None,
             force: false,
         })
@@ -910,7 +914,7 @@ impl Gateway {
         queue_key: &str,
         request: SendCompactRequest,
         compact_id: String,
-    ) -> psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult> {
+    ) -> psychevo::Result<psychevo::compaction::CompactionResult> {
         let thread_id = match request.thread_id.clone() {
             Some(thread_id) => thread_id,
             None => {
@@ -1006,7 +1010,7 @@ impl Gateway {
                     .expect("checked legacy runtime identity"),
             )),
             _ => {
-                psychevo_runtime::compaction::compact_session(psychevo_runtime::compaction::CompactSessionOptions {
+                psychevo::compaction::compact_session(psychevo::compaction::CompactSessionOptions {
                     state: self.state.clone(),
                     cwd,
                     session: thread_id,
@@ -1038,7 +1042,7 @@ impl Gateway {
         queue_key: &str,
         request: SendShellRequest,
         shell_id: String,
-    ) -> psychevo_runtime::Result<GatewayShellResult> {
+    ) -> psychevo::Result<GatewayShellResult> {
         let (control_handle, control) = run_control();
         self.register_active(
             queue_key,
@@ -1060,7 +1064,7 @@ impl Gateway {
         request: SendShellRequest,
         shell_id: String,
         inject_into: RunControlHandle,
-    ) -> psychevo_runtime::Result<GatewayShellResult> {
+    ) -> psychevo::Result<GatewayShellResult> {
         let (_control_handle, control) = run_control();
         self.run_shell_with_control(request, shell_id, control, Some(inject_into), None)
             .await
@@ -1073,7 +1077,7 @@ impl Gateway {
         control: RunControl,
         inject_into: Option<RunControlHandle>,
         queue_key: Option<&str>,
-    ) -> psychevo_runtime::Result<GatewayShellResult> {
+    ) -> psychevo::Result<GatewayShellResult> {
         let queue_source = request.source.clone();
         let bind_source = request.bind_source.clone().or_else(|| queue_source.clone());
         let bind_source_generation = bind_source
@@ -1237,7 +1241,7 @@ impl Gateway {
         })
     }
 
-    async fn thread_cwd(&self, thread_id: &str) -> psychevo_runtime::Result<PathBuf> {
+    async fn thread_cwd(&self, thread_id: &str) -> psychevo::Result<PathBuf> {
         let summary = self
             .state
 
@@ -1248,6 +1252,7 @@ impl Gateway {
     }
 }
 
+#[cfg(test)]
 fn gateway_delivery_input_parts(request: &SendTurnRequest) -> Vec<GatewayInputPart> {
     if !request.input.is_empty() {
         return request.input.clone();
@@ -1309,6 +1314,7 @@ fn durable_activity_status_for_turn(status: GatewayTurnStatus) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn terminal_message_for_result(result: &RunResult) -> Option<String> {
     if result.outcome == Outcome::Normal {
         return None;
@@ -1330,6 +1336,7 @@ fn terminal_message_for_result(result: &RunResult) -> Option<String> {
         })
 }
 
+#[cfg(test)]
 fn classified_terminal_error_for_result(result: &RunResult) -> Option<GatewayTurnError> {
     result.terminal_error.as_ref().map(|error| AgentErrorView {
         message: error.message.clone(),

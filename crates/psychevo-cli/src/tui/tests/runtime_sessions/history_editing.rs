@@ -4,7 +4,7 @@ pub(crate) use super::*;
 async fn bind_native(app: &TuiApp, session_id: &str) {
     let cwd = app.cwd.display().to_string();
     app.state_runtime
-        .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
             thread_id: session_id,
             agent_ref: None,
             agent_fingerprint: "test-agent",
@@ -19,7 +19,7 @@ async fn bind_native(app: &TuiApp, session_id: &str) {
             profile_config_json: "{}",
             adapter_kind: "native",
             adapter_revision: "test",
-            ownership: psychevo_runtime::state::GatewayRuntimeBindingOwnership::ReadWrite,
+            ownership: psychevo::state::GatewayRuntimeBindingOwnership::ReadWrite,
             parent_thread_id: None,
         })
         .await
@@ -30,17 +30,17 @@ async fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
     app.state_runtime
         .append_message_with_undo_snapshot_metadata_and_context_evidence(
             session_id,
-            &psychevo_agent_core::Message::User {
+            &psychevo::__agent_core::Message::User {
                 content: vec![
-                    psychevo_agent_core::UserContentBlock::text("before hidden context after"),
-                    psychevo_agent_core::UserContentBlock::image_url(
+                    psychevo::__agent_core::UserContentBlock::text("before hidden context after"),
+                    psychevo::__agent_core::UserContentBlock::image_url(
                         "https://example.test/history.png",
                     ),
                 ],
                 timestamp_ms: 1,
             },
             Some(serde_json::json!({
-                psychevo_runtime::types::EDITABLE_INPUT_METADATA_KEY: {
+                psychevo::types::EDITABLE_INPUT_METADATA_KEY: {
                     "version": 1,
                     "parts": [
                         {"type": "text", "text": "before "},
@@ -78,19 +78,19 @@ pub(crate) async fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope
     assert_eq!(
         metadata.editable_input.expect("exact envelope").parts,
         vec![
-            psychevo_runtime::types::StoredEditableInputPart::Text {
+            psychevo::types::StoredEditableInputPart::Text {
                 text: "before ".to_string(),
             },
-            psychevo_runtime::types::StoredEditableInputPart::Image {
+            psychevo::types::StoredEditableInputPart::Image {
                 image_block_index: 0,
             },
-            psychevo_runtime::types::StoredEditableInputPart::Text {
+            psychevo::types::StoredEditableInputPart::Text {
                 text: " middle ".to_string(),
             },
-            psychevo_runtime::types::StoredEditableInputPart::Image {
+            psychevo::types::StoredEditableInputPart::Image {
                 image_block_index: 1,
             },
-            psychevo_runtime::types::StoredEditableInputPart::Text {
+            psychevo::types::StoredEditableInputPart::Text {
                 text: " after".to_string(),
             },
         ]

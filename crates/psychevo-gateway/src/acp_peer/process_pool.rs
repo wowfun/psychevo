@@ -6,14 +6,14 @@ const ACP_AUTH_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const ACP_AUTH_STATUS_DETAIL_MAX_CHARS: usize = 1_024;
 
 pub(crate) type AcpSessionReadyCallback =
-    Arc<dyn Fn(String) -> BoxFuture<'static, psychevo_runtime::Result<()>> + Send + Sync>;
+    Arc<dyn Fn(String) -> BoxFuture<'static, psychevo::Result<()>> + Send + Sync>;
 
 pub(crate) struct AcpSetControlInput {
     pub(crate) peer: ResolvedPeerTurn,
     pub(crate) cwd: PathBuf,
     pub(crate) local_session_id: String,
     pub(crate) native_session_id: String,
-    pub(crate) mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
+    pub(crate) mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
     pub(crate) control_id: String,
     pub(crate) value: Value,
 }
@@ -167,7 +167,7 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         context: AcpPeerTurnContext,
         session_ready: AcpSessionReadyCallback,
-    ) -> psychevo_runtime::Result<AcpTurnOutput> {
+    ) -> psychevo::Result<AcpTurnOutput> {
         let handle = self.actor(&peer, &context.cwd)?;
         self.inner
             .resident_actors
@@ -204,8 +204,8 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         local_session_id: String,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-    ) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         self.inner
             .resident_actors
@@ -234,7 +234,7 @@ impl AcpProcessPool {
         old_local_session_id: String,
         new_local_session_id: String,
         native_session_id: String,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let handle = self
             .inner
             .resident_actors
@@ -274,8 +274,8 @@ impl AcpProcessPool {
         cwd: PathBuf,
         local_session_id: String,
         native_session_id: String,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-    ) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
         handle
@@ -301,8 +301,8 @@ impl AcpProcessPool {
         cwd: PathBuf,
         local_session_id: String,
         native_session_id: String,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-    ) -> psychevo_runtime::Result<AcpSessionLoadOutput> {
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    ) -> psychevo::Result<AcpSessionLoadOutput> {
         let handle = self.actor(&peer, &cwd)?;
         let resident_local_session_id = local_session_id.clone();
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
@@ -334,7 +334,7 @@ impl AcpProcessPool {
         &self,
         local_session_id: String,
         native_session_id: String,
-    ) -> psychevo_runtime::Result<Option<AcpSessionSnapshot>> {
+    ) -> psychevo::Result<Option<AcpSessionSnapshot>> {
         let handle = self
             .inner
             .resident_actors
@@ -363,7 +363,7 @@ impl AcpProcessPool {
     pub(crate) async fn set_control(
         &self,
         input: AcpSetControlInput,
-    ) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+    ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&input.peer, &input.cwd)?;
         let AcpSetControlInput {
             peer: _,
@@ -400,7 +400,7 @@ impl AcpProcessPool {
         invocation_cwd: PathBuf,
         cwd_filter: Option<PathBuf>,
         cursor: Option<String>,
-    ) -> psychevo_runtime::Result<AcpSessionListPage> {
+    ) -> psychevo::Result<AcpSessionListPage> {
         let handle = self.actor(&peer, &invocation_cwd)?;
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
         handle
@@ -423,8 +423,8 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         session: AcpResidentSessionRef,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-    ) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let local_session_id = session.local_session_id.clone();
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
@@ -457,7 +457,7 @@ impl AcpProcessPool {
         cwd: PathBuf,
         source: AcpResidentSessionRef,
         fork_local_session_id: String,
-    ) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+    ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let resident_local_session_id = fork_local_session_id.clone();
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
@@ -489,7 +489,7 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         session: AcpResidentSessionRef,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let handle = self.actor(&peer, &cwd)?;
         let local_session_id = session.local_session_id.clone();
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
@@ -517,7 +517,7 @@ impl AcpProcessPool {
     pub(crate) async fn release_session(
         &self,
         session: AcpResidentSessionRef,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let local_session_id = session.local_session_id.clone();
         let handle = self
             .inner
@@ -555,7 +555,7 @@ impl AcpProcessPool {
         cwd: PathBuf,
         native_session_id: String,
         resident: Option<AcpResidentSessionRef>,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let handle = self.actor(&peer, &cwd)?;
         let resident_local_session_id = resident
             .as_ref()
@@ -589,7 +589,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
-    ) -> psychevo_runtime::Result<AcpProtocolDoctorStatus> {
+    ) -> psychevo::Result<AcpProtocolDoctorStatus> {
         let handle = self.actor(&peer, &cwd)?;
         let mut startup_rx = handle.startup_rx.clone();
         tokio::time::timeout(ACP_PROTOCOL_PROBE_TIMEOUT, async move {
@@ -617,7 +617,7 @@ impl AcpProcessPool {
         &self,
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
-    ) -> psychevo_runtime::Result<AcpAuthDoctorStatus> {
+    ) -> psychevo::Result<AcpAuthDoctorStatus> {
         let handle = self.actor(&peer, &cwd)?;
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
         handle
@@ -636,7 +636,7 @@ impl AcpProcessPool {
             })?
     }
 
-    pub(crate) async fn shutdown(&self, force: bool) -> psychevo_runtime::Result<()> {
+    pub(crate) async fn shutdown(&self, force: bool) -> psychevo::Result<()> {
         let actors = {
             let actors = self
                 .inner
@@ -666,7 +666,7 @@ impl AcpProcessPool {
         &self,
         peer: &ResolvedPeerTurn,
         cwd: &Path,
-    ) -> psychevo_runtime::Result<AcpProcessHandle> {
+    ) -> psychevo::Result<AcpProcessHandle> {
         let key = acp_process_key(peer, cwd)?;
         let mut actors = self
             .inner
@@ -751,7 +751,7 @@ fn remove_finished_acp_actor(
     }
 }
 
-fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo_runtime::Result<AcpProcessKey> {
+fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo::Result<AcpProcessKey> {
     let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
     let launch = resolve_acp_backend_launch(peer, &canonical_cwd)?;
     let mut digest = sha2::Sha256::new();
@@ -769,13 +769,13 @@ fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo_runtime::Res
     digest.update(serde_json::to_vec(&acp_backend_effective_env(peer))?);
     digest.update([0]);
     digest.update(
-        psychevo_runtime::host_paths::normalized_native_path(&launch.program)
+        psychevo::host_paths::normalized_native_path(&launch.program)
             .to_string_lossy()
             .as_bytes(),
     );
     digest.update([0]);
     digest.update(
-        psychevo_runtime::host_paths::normalized_native_path(&launch.cwd)
+        psychevo::host_paths::normalized_native_path(&launch.cwd)
             .to_string_lossy()
             .as_bytes(),
     );
@@ -788,7 +788,7 @@ fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo_runtime::Res
 fn acp_auth_observation_key(
     peer: &ResolvedPeerTurn,
     cwd: &Path,
-) -> psychevo_runtime::Result<AcpAuthObservationKey> {
+) -> psychevo::Result<AcpAuthObservationKey> {
     let canonical_cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
     let launch = resolve_acp_backend_launch(peer, &canonical_cwd)?;
     let mut digest = sha2::Sha256::new();
@@ -807,13 +807,13 @@ fn acp_auth_observation_key(
     digest.update(serde_json::to_vec(&acp_backend_effective_env(peer))?);
     digest.update([0]);
     digest.update(
-        psychevo_runtime::host_paths::normalized_native_path(&launch.program)
+        psychevo::host_paths::normalized_native_path(&launch.program)
             .to_string_lossy()
             .as_bytes(),
     );
     digest.update([0]);
     digest.update(
-        psychevo_runtime::host_paths::normalized_native_path(&launch.cwd)
+        psychevo::host_paths::normalized_native_path(&launch.cwd)
             .to_string_lossy()
             .as_bytes(),
     );
@@ -825,7 +825,7 @@ fn acp_auth_observation_key(
 
 fn observe_acp_auth_result<T>(
     observation: &Arc<Mutex<AcpObservedAuthState>>,
-    result: &psychevo_runtime::Result<T>,
+    result: &psychevo::Result<T>,
     clear_on_success: bool,
 ) {
     let next = match result {
@@ -866,84 +866,84 @@ struct AcpTurnCommand {
     context: AcpPeerTurnContext,
     session_ready: AcpSessionReadyCallback,
     delivery: AcpDeliveryMarker,
-    reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpTurnOutput>>,
+    reply: tokio_oneshot::Sender<psychevo::Result<AcpTurnOutput>>,
 }
 
 enum AcpProcessCommand {
     ProbeAuthentication {
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpAuthDoctorStatus>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpAuthDoctorStatus>>,
     },
     Turn(Box<AcpTurnCommand>),
     Prepare {
         local_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionSnapshot>>,
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     Promote {
         old_local_session_id: String,
         new_local_session_id: String,
         native_session_id: String,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<()>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<()>>,
     },
     #[cfg(test)]
     Inspect {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionSnapshot>>,
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     LoadSession {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionLoadOutput>>,
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionLoadOutput>>,
     },
     InspectCached {
         local_session_id: String,
         native_session_id: String,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<Option<AcpSessionSnapshot>>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<Option<AcpSessionSnapshot>>>,
     },
     SetControl {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
         control_id: String,
         value: Value,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionSnapshot>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     ListSessions {
         cwd_filter: Option<PathBuf>,
         cursor: Option<String>,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionListPage>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionListPage>>,
     },
     ResumeSession {
         session: AcpResidentSessionRef,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionSnapshot>>,
+        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     ForkSession {
         source: AcpResidentSessionRef,
         fork_local_session_id: String,
         cwd: PathBuf,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<AcpSessionSnapshot>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     CloseSession {
         session: AcpResidentSessionRef,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<()>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<()>>,
     },
     ReleaseSession {
         session: AcpResidentSessionRef,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<()>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<()>>,
     },
     DeleteSession {
         native_session_id: String,
         resident: Option<AcpResidentSessionRef>,
-        reply: tokio_oneshot::Sender<psychevo_runtime::Result<()>>,
+        reply: tokio_oneshot::Sender<psychevo::Result<()>>,
     },
     Shutdown,
 }
@@ -953,7 +953,7 @@ type AcpSessionLocks = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
 fn acp_session_lock(
     session_locks: &AcpSessionLocks,
     local_session_id: &str,
-) -> psychevo_runtime::Result<Arc<tokio::sync::Mutex<()>>> {
+) -> psychevo::Result<Arc<tokio::sync::Mutex<()>>> {
     let mut locks = session_locks
         .lock()
         .map_err(|_| Error::Message("ACP session lock registry poisoned".to_string()))?;
@@ -1158,14 +1158,14 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
         startup_tx.send_replace(AcpProcessStartupStatus::Failed(
             "ACP process did not expose stdin".to_string(),
         ));
-        psychevo_runtime::process_env::terminate_tokio_child_tree(&mut child).await;
+        psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
         return;
     };
     let Some(stdout) = child.stdout.take() else {
         startup_tx.send_replace(AcpProcessStartupStatus::Failed(
             "ACP process did not expose stdout".to_string(),
         ));
-        psychevo_runtime::process_env::terminate_tokio_child_tree(&mut child).await;
+        psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
         return;
     };
     let transport = AcpProtocolObservingTransport::new(
@@ -2222,7 +2222,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
     }
     let _ = teardown_terminals.terminate_all();
 
-    psychevo_runtime::process_env::terminate_tokio_child_tree(&mut child).await;
+    psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
     let _ = child.wait().await;
 }
 
@@ -2231,7 +2231,7 @@ async fn probe_acp_authentication_status(
     initialized: &InitializeResponse,
     observation: &Arc<Mutex<AcpObservedAuthState>>,
     notification_ingress: &AcpNotificationIngress,
-) -> psychevo_runtime::Result<AcpAuthDoctorStatus> {
+) -> psychevo::Result<AcpAuthDoctorStatus> {
     if reviewed_initialize_capability_pack(initialized) != Some(AcpCapabilityPackKind::Codex) {
         return Ok(match observation.lock() {
             Ok(state) if *state == AcpObservedAuthState::Required => AcpAuthDoctorStatus::Required,
@@ -2281,7 +2281,7 @@ async fn probe_acp_authentication_status(
     Ok(status)
 }
 
-fn validate_acp_auth_status_detail(label: &str, value: &str) -> psychevo_runtime::Result<()> {
+fn validate_acp_auth_status_detail(label: &str, value: &str) -> psychevo::Result<()> {
     if value.chars().count() > ACP_AUTH_STATUS_DETAIL_MAX_CHARS
         || value.chars().any(char::is_control)
     {

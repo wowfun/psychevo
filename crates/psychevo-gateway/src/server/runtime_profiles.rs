@@ -17,7 +17,7 @@ pub(super) struct ThreadDraftPrepareWork {
     pub(super) target_catalog: Arc<RunnableTargetCatalog>,
     pub(super) target: wire::RunnableTargetView,
     pub(super) context: wire::ThreadContextReadResult,
-    pub(super) configured: Vec<psychevo_runtime::types::ConfiguredModel>,
+    pub(super) configured: Vec<psychevo::types::ConfiguredModel>,
     pub(super) source_lane_prepared: bool,
 }
 
@@ -31,7 +31,7 @@ pub(super) struct ImportableAcpProfile {
 pub(super) fn importable_acp_profiles(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<Vec<ImportableAcpProfile>> {
+) -> psychevo::Result<Vec<ImportableAcpProfile>> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
     let views = catalog
         .profile_views
@@ -83,10 +83,7 @@ pub(super) struct ValidatedRunnableTarget {
 }
 
 impl RunnableTargetCatalog {
-    pub(super) fn load(
-        state: &WebState,
-        scope: &ResolvedScope,
-    ) -> psychevo_runtime::Result<Arc<Self>> {
+    pub(super) fn load(state: &WebState, scope: &ResolvedScope) -> psychevo::Result<Arc<Self>> {
         let generation = state
             .inner
             .runnable_target_catalog_generation
@@ -117,7 +114,7 @@ impl RunnableTargetCatalog {
         Ok(catalog)
     }
 
-    fn build(state: &WebState, scope: &ResolvedScope) -> psychevo_runtime::Result<Self> {
+    fn build(state: &WebState, scope: &ResolvedScope) -> psychevo::Result<Self> {
         // Thread Context is a cache-only read. Discover from the effective
         // config without materializing, probing, or launching a backend.
         let agents = discover_agents(&AgentDiscoveryOptions {
@@ -133,7 +130,7 @@ impl RunnableTargetCatalog {
         let profile_views = profile_records
             .values()
             .map(|record| runtime_profile_view_with_backends(state, scope, record, None, &backends))
-            .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+            .collect::<psychevo::Result<Vec<_>>>()?;
         let (compatible_targets, target_revisions) =
             compatible_runnable_targets(&profile_records, &profile_views, &agents, &backends);
         Ok(Self {
@@ -147,7 +144,7 @@ impl RunnableTargetCatalog {
     fn compatible_pair(
         &self,
         target: &wire::RunnableTargetInput,
-    ) -> psychevo_runtime::Result<&wire::RunnableTargetView> {
+    ) -> psychevo::Result<&wire::RunnableTargetView> {
         let runtime_profile_ref = target.runtime_profile_ref.trim();
         if runtime_profile_ref.is_empty() {
             return Err(agent_session_error(
@@ -204,7 +201,7 @@ impl RunnableTargetCatalog {
         &self,
         state: &WebState,
         scope: &ResolvedScope,
-    ) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+    ) -> psychevo::Result<wire::RunnableTargetView> {
         let source_lane = state
             .inner
             .state
@@ -236,7 +233,7 @@ impl RunnableTargetCatalog {
     fn validate(
         &self,
         target: &wire::RunnableTargetInput,
-    ) -> psychevo_runtime::Result<ValidatedRunnableTarget> {
+    ) -> psychevo::Result<ValidatedRunnableTarget> {
         let compatible = self.compatible_pair(target)?;
         if !compatible.ready {
             return Err(agent_session_error(
@@ -284,8 +281,8 @@ impl WebState {
 
     pub(super) fn invalidate_runnable_target_catalog_after<T>(
         &self,
-        result: psychevo_runtime::Result<T>,
-    ) -> psychevo_runtime::Result<T> {
+        result: psychevo::Result<T>,
+    ) -> psychevo::Result<T> {
         if result.is_ok() {
             self.invalidate_runnable_target_catalog();
         }
@@ -306,7 +303,7 @@ pub(super) fn runnable_target_by_id(
     state: &WebState,
     scope: &ResolvedScope,
     target_id: &str,
-) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::RunnableTargetView> {
     RunnableTargetCatalog::load(state, scope)?
         .by_id(target_id)
         .cloned()
@@ -330,7 +327,7 @@ pub(super) async fn runnable_target_for_source(
     scope: &ResolvedScope,
     source: &GatewaySource,
     default_runtime_profile_ref: &str,
-) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::RunnableTargetView> {
     resolve_runnable_target_for_source(state, scope, source, None, default_runtime_profile_ref)
         .await
 }
@@ -340,7 +337,7 @@ pub(super) async fn runnable_target_for_source_profile(
     scope: &ResolvedScope,
     source: &GatewaySource,
     requested_runtime_profile_ref: Option<&str>,
-) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::RunnableTargetView> {
     resolve_runnable_target_for_source(
         state,
         scope,
@@ -357,7 +354,7 @@ async fn resolve_runnable_target_for_source(
     source: &GatewaySource,
     requested_runtime_profile_ref: Option<&str>,
     default_runtime_profile_ref: &str,
-) -> psychevo_runtime::Result<wire::RunnableTargetView> {
+) -> psychevo::Result<wire::RunnableTargetView> {
     let lane = state
         .inner
         .state
@@ -421,7 +418,7 @@ pub(super) async fn thread_context_read_result_for_target_id(
     scope: &ResolvedScope,
     thread_id: Option<String>,
     target_id: &str,
-) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+) -> psychevo::Result<wire::ThreadContextReadResult> {
     let has_binding = if let Some(thread_id) = thread_id.as_deref() {
         state
             .inner
@@ -451,7 +448,7 @@ pub(super) async fn thread_context_read_result_for_target_id(
 pub(super) fn runtime_profile_list_result(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<wire::RuntimeProfileListResult> {
+) -> psychevo::Result<wire::RuntimeProfileListResult> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
     Ok(wire::RuntimeProfileListResult {
         profiles: catalog.profile_views.clone(),
@@ -462,7 +459,7 @@ pub(super) fn runtime_profile_read_result(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::RuntimeProfileReadParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let profiles = runtime_profile_records(state, scope)?;
     let record = profiles
         .get(&params.id)
@@ -477,7 +474,7 @@ pub(super) async fn thread_context_read_result(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
-) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+) -> psychevo::Result<wire::ThreadContextReadResult> {
     thread_context_read_result_with_configured_models(state, scope, params)
         .await
         .map(|(context, _)| context)
@@ -487,9 +484,9 @@ async fn thread_context_read_result_with_configured_models(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
-) -> psychevo_runtime::Result<(
+) -> psychevo::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo_runtime::types::ConfiguredModel>,
+    Vec<psychevo::types::ConfiguredModel>,
 )> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_context_read_result_with_catalog(state, scope, params, target_catalog).await
@@ -500,9 +497,9 @@ async fn thread_context_read_result_with_catalog(
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
     target_catalog: Arc<RunnableTargetCatalog>,
-) -> psychevo_runtime::Result<(
+) -> psychevo::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo_runtime::types::ConfiguredModel>,
+    Vec<psychevo::types::ConfiguredModel>,
 )> {
     let requested_target = params.target.clone();
     let thread_id = match params.thread_id {
@@ -864,7 +861,7 @@ async fn thread_context_read_result_with_catalog(
         (
             false,
             Some(
-                "This Agent target exposes no input kind implemented by ThreadApplication."
+                "This Agent target exposes no input kind implemented by the Framework Adapter."
                     .to_string(),
             ),
             Some("backend/doctor".to_string()),
@@ -905,7 +902,7 @@ pub(super) async fn thread_context_read_result_live(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
-) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+) -> psychevo::Result<wire::ThreadContextReadResult> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_context_read_result_live_with_catalog(state, scope, params, target_catalog).await
 }
@@ -915,7 +912,7 @@ pub(super) async fn thread_context_read_result_live_with_catalog(
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
     target_catalog: Arc<RunnableTargetCatalog>,
-) -> psychevo_runtime::Result<wire::ThreadContextReadResult> {
+) -> psychevo::Result<wire::ThreadContextReadResult> {
     thread_context_read_result_live_with_catalog_and_configured(
         state,
         scope,
@@ -931,9 +928,9 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
     scope: &ResolvedScope,
     params: wire::ThreadContextReadParams,
     target_catalog: Arc<RunnableTargetCatalog>,
-) -> psychevo_runtime::Result<(
+) -> psychevo::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo_runtime::types::ConfiguredModel>,
+    Vec<psychevo::types::ConfiguredModel>,
 )> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
@@ -1049,10 +1046,10 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
 async fn apply_prepared_acp_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
-    configured: &[psychevo_runtime::types::ConfiguredModel],
+    configured: &[psychevo::types::ConfiguredModel],
     context: &mut wire::ThreadContextReadResult,
     snapshot: &crate::acp_peer::AcpSessionSnapshot,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let profile_capability_revision = context
         .profiles
         .iter()
@@ -1086,7 +1083,7 @@ async fn apply_prepared_acp_profile_defaults(
     profile: &RuntimeProfileConfig,
     draft_control_values: &BTreeMap<String, String>,
     mut snapshot: crate::acp_peer::AcpSessionSnapshot,
-) -> psychevo_runtime::Result<crate::acp_peer::AcpSessionSnapshot> {
+) -> psychevo::Result<crate::acp_peer::AcpSessionSnapshot> {
     for (control_id, configured_default) in [
         ("model", profile.default_model.as_deref()),
         ("mode", profile.default_mode.as_deref()),
@@ -1151,7 +1148,7 @@ pub(super) async fn prepare_draft_source_lane(
     state: &WebState,
     scope: &ResolvedScope,
     target: &wire::RunnableTargetView,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let source_key = scope.source.source_key();
     let existing_lane = state.inner.state.gateway_source_lane(&source_key.0).await?;
     let same_target = existing_lane.as_ref().is_some_and(|lane| {
@@ -1188,7 +1185,7 @@ pub(super) async fn prepare_draft_source_lane(
 async fn ensure_draft_source_unbound(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if state
         .inner
         .gateway
@@ -1211,7 +1208,7 @@ pub(super) async fn thread_draft_prepare_result(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadDraftPrepareParams,
-) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+) -> psychevo::Result<wire::ThreadDraftPrepareResult> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_draft_prepare_result_with_catalog(state, scope, params, target_catalog).await
 }
@@ -1221,7 +1218,7 @@ pub(super) async fn thread_draft_prepare_result_with_catalog(
     scope: &ResolvedScope,
     params: wire::ThreadDraftPrepareParams,
     target_catalog: Arc<RunnableTargetCatalog>,
-) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+) -> psychevo::Result<wire::ThreadDraftPrepareResult> {
     ensure_draft_source_unbound(state, scope).await?;
     let target = target_catalog
         .by_id(&params.target_id)
@@ -1273,7 +1270,7 @@ pub(super) async fn thread_draft_prepare_result_with_work(
     scope: &ResolvedScope,
     params: wire::ThreadDraftPrepareParams,
     work: ThreadDraftPrepareWork,
-) -> psychevo_runtime::Result<wire::ThreadDraftPrepareResult> {
+) -> psychevo::Result<wire::ThreadDraftPrepareResult> {
     ensure_draft_source_unbound(state, scope).await?;
     let ThreadDraftPrepareWork {
         target_catalog,
@@ -1442,7 +1439,7 @@ fn apply_draft_preparation_problem(
 const DRAFT_PREPARATION_PROBLEM_KEY: &str = "draftPreparationProblem";
 
 fn source_lane_preparation_problem(
-    lane: &psychevo_runtime::state::GatewaySourceLaneRecord,
+    lane: &psychevo::state::GatewaySourceLaneRecord,
     target: &wire::RunnableTargetView,
 ) -> Option<wire::RuntimeErrorView> {
     if lane.draft_agent_ref != target.agent_ref
@@ -1465,7 +1462,7 @@ async fn persist_source_lane_preparation_problem(
     target: &wire::RunnableTargetView,
     draft_control_values: &BTreeMap<String, String>,
     problem: &wire::RuntimeErrorView,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let source_key = scope.source.source_key();
     state
         .inner
@@ -1519,7 +1516,7 @@ fn runtime_problem_view(error: &Error) -> wire::RuntimeErrorView {
 
 pub(super) fn selected_context_target_id(
     context: &wire::ThreadContextReadResult,
-) -> psychevo_runtime::Result<&str> {
+) -> psychevo::Result<&str> {
     context.selected_target_id.as_deref().ok_or_else(|| {
         runtime_rpc_error(
             "target_not_selected",
@@ -1534,7 +1531,7 @@ pub(super) fn selected_context_target_id(
 async fn persisted_acp_session_snapshot(
     state: &WebState,
     thread_id: &str,
-) -> psychevo_runtime::Result<Option<crate::acp_peer::AcpSessionSnapshot>> {
+) -> psychevo::Result<Option<crate::acp_peer::AcpSessionSnapshot>> {
     let projection = state
         .inner
         .state
@@ -1564,7 +1561,7 @@ async fn persisted_acp_session_snapshot(
 pub(super) async fn cached_thread_history_descriptor(
     state: &WebState,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<wire::ThreadHistoryView> {
+) -> psychevo::Result<wire::ThreadHistoryView> {
     let Some(thread_id) = thread_id else {
         return Ok(unavailable_history(
             "History becomes available after the public Thread is bound.",
@@ -1600,7 +1597,7 @@ pub(super) async fn thread_control_set_result(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::ThreadControlSetParams,
-) -> psychevo_runtime::Result<wire::ThreadControlSetResult> {
+) -> psychevo::Result<wire::ThreadControlSetResult> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
         None => {
@@ -1959,7 +1956,7 @@ pub(super) async fn thread_control_set_result(
 fn validate_control_value(
     control: &wire::ThreadControlDescriptorView,
     value: &Value,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let _ = thread_control_override_string_value(value)?;
     if !control.choices.is_empty() && !control.choices.iter().any(|choice| choice.value == *value) {
         return Err(runtime_rpc_error(
@@ -1989,7 +1986,7 @@ pub(super) fn resolve_runtime_ref_peer_turn(
     state: &WebState,
     scope: &ResolvedScope,
     runtime_ref: &str,
-) -> psychevo_runtime::Result<Option<crate::ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<crate::ResolvedPeerTurn>> {
     resolve_runtime_target_peer_turn(state, scope, runtime_ref, None)
 }
 
@@ -1998,7 +1995,7 @@ pub(super) fn resolve_runtime_target_peer_turn(
     scope: &ResolvedScope,
     runtime_ref: &str,
     agent_ref: Option<&str>,
-) -> psychevo_runtime::Result<Option<crate::ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<crate::ResolvedPeerTurn>> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
     resolve_runtime_target_peer_turn_with_catalog(state, scope, runtime_ref, agent_ref, &catalog)
 }
@@ -2009,7 +2006,7 @@ fn resolve_runtime_target_peer_turn_with_catalog(
     runtime_ref: &str,
     agent_ref: Option<&str>,
     catalog: &RunnableTargetCatalog,
-) -> psychevo_runtime::Result<Option<crate::ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<crate::ResolvedPeerTurn>> {
     let runtime_ref = runtime_ref.trim();
     if runtime_ref.is_empty() || runtime_ref == "native" {
         return Ok(None);
@@ -2040,7 +2037,7 @@ pub(super) fn ensure_turn_runtime_profile_supported(
     state: &WebState,
     scope: &ResolvedScope,
     runtime_ref: Option<&str>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let runtime_ref = runtime_ref
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -2076,7 +2073,7 @@ pub(super) fn validate_turn_runnable_target(
     state: &WebState,
     scope: &ResolvedScope,
     target: &wire::RunnableTargetInput,
-) -> psychevo_runtime::Result<ValidatedRunnableTarget> {
+) -> psychevo::Result<ValidatedRunnableTarget> {
     RunnableTargetCatalog::load(state, scope)?.validate(target)
 }
 
@@ -2084,7 +2081,7 @@ pub(super) fn runtime_backend_kind(
     state: &WebState,
     scope: &ResolvedScope,
     runtime_ref: &str,
-) -> psychevo_runtime::Result<wire::BackendKind> {
+) -> psychevo::Result<wire::BackendKind> {
     let catalog = RunnableTargetCatalog::load(state, scope)?;
     let record = catalog.profile_records.get(runtime_ref).ok_or_else(|| {
         agent_session_error(
@@ -2105,7 +2102,7 @@ pub(super) fn runtime_backend_kind(
 pub(super) async fn resolve_bound_thread_agent_target(
     state: &WebState,
     binding: &GatewayRuntimeBindingRecord,
-) -> psychevo_runtime::Result<crate::BoundGatewayAgentTarget> {
+) -> psychevo::Result<crate::BoundGatewayAgentTarget> {
     let mut options =
         state.run_options(PathBuf::from(&binding.cwd), Some(binding.thread_id.clone()));
     options.runtime_ref = binding.runtime_ref.clone();
@@ -2376,7 +2373,7 @@ pub(super) fn write_runtime_profile(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::RuntimeProfileWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!(
             "invalid runtime profile id: {}",
@@ -2414,7 +2411,7 @@ pub(super) fn set_runtime_profile_enabled(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::RuntimeProfileSetEnabledParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let profiles = runtime_profile_records(state, scope)?;
     let existing = profiles
         .get(&params.id)
@@ -2442,7 +2439,7 @@ pub(super) fn delete_runtime_profile(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::RuntimeProfileDeleteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if !valid_agent_name(&params.id) {
         return Err(Error::Message(format!(
             "invalid runtime profile id: {}",
@@ -2464,7 +2461,7 @@ pub(super) fn delete_runtime_profile(
 fn runtime_profile_records(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<BTreeMap<String, RuntimeProfileRecord>> {
+) -> psychevo::Result<BTreeMap<String, RuntimeProfileRecord>> {
     let configured =
         load_runtime_profile_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     let backends =
@@ -2527,10 +2524,7 @@ fn runtime_profile_records(
     Ok(records)
 }
 
-fn validate_native_runtime_profile_identity(
-    id: &str,
-    runtime: &str,
-) -> psychevo_runtime::Result<()> {
+fn validate_native_runtime_profile_identity(id: &str, runtime: &str) -> psychevo::Result<()> {
     if (runtime == "native") != (id == "native") {
         return Err(Error::Message(
             "Native execution is the singleton Runtime Profile id `native`".to_string(),
@@ -2548,7 +2542,7 @@ pub(super) fn validate_and_capture_team_runtime_members(
     scope: &ResolvedScope,
     agents: &AgentCatalog,
     members: &[AgentTeamMember],
-) -> psychevo_runtime::Result<Vec<AgentTeamMember>> {
+) -> psychevo::Result<Vec<AgentTeamMember>> {
     let profiles = runtime_profile_records(state, scope)?;
     members
         .iter()
@@ -2624,7 +2618,7 @@ fn resolve_team_member_runtime_ref(
     profiles: &BTreeMap<String, RuntimeProfileRecord>,
     agent: &AgentDefinition,
     member: &AgentTeamMember,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     if let Some(runtime_ref) = member
         .runtime_ref
         .as_deref()
@@ -2663,7 +2657,7 @@ fn validate_team_agent_profile_pairing(
     agent: &AgentDefinition,
     profile: &RuntimeProfileConfig,
     member: &AgentTeamMember,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     match profile.runtime {
         RuntimeProfileKind::Native => {
             if agent.backend.is_some() {
@@ -2701,7 +2695,7 @@ fn validate_team_runtime_options(
     profile: &RuntimeProfileConfig,
     options: &BTreeMap<String, String>,
     member_id: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     for (key, value) in options {
         if key.trim().is_empty() || value.trim().is_empty() {
             return Err(Error::Message(format!(
@@ -2809,7 +2803,7 @@ fn runtime_profile_view(
     scope: &ResolvedScope,
     record: &RuntimeProfileRecord,
     checked_at_ms: Option<i64>,
-) -> psychevo_runtime::Result<wire::RuntimeProfileView> {
+) -> psychevo::Result<wire::RuntimeProfileView> {
     let backends =
         load_agent_backend_configs(&state.inner.home, &scope.cwd, &state.inner.inherited_env)?;
     runtime_profile_view_with_backends(state, scope, record, checked_at_ms, &backends)
@@ -2821,7 +2815,7 @@ fn runtime_profile_view_with_backends(
     record: &RuntimeProfileRecord,
     checked_at_ms: Option<i64>,
     backends: &BTreeMap<String, AgentBackendConfig>,
-) -> psychevo_runtime::Result<wire::RuntimeProfileView> {
+) -> psychevo::Result<wire::RuntimeProfileView> {
     let config = &record.config;
     let fingerprint = runtime_profile_fingerprint(config);
     let revision = crate::runtime_profile_config_revision(&fingerprint);
@@ -2881,7 +2875,7 @@ fn runtime_profile_fingerprint(config: &RuntimeProfileConfig) -> String {
 
 fn bound_runtime_profile_record(
     binding: &GatewayRuntimeBindingRecord,
-) -> psychevo_runtime::Result<RuntimeProfileRecord> {
+) -> psychevo::Result<RuntimeProfileRecord> {
     let runtime_ref = binding.runtime_ref.as_deref().ok_or_else(|| {
         runtime_rpc_error(
             "bound_profile_snapshot_missing",
@@ -2952,9 +2946,7 @@ fn bound_runtime_profile_record(
     })
 }
 
-fn validate_bound_agent_snapshot(
-    binding: &GatewayRuntimeBindingRecord,
-) -> psychevo_runtime::Result<()> {
+fn validate_bound_agent_snapshot(binding: &GatewayRuntimeBindingRecord) -> psychevo::Result<()> {
     let diagnostic_ref = Some(format!("agent-binding:{}", binding.thread_id));
     let fingerprint = binding.agent_fingerprint.as_deref().ok_or_else(|| {
         runtime_rpc_error(
@@ -3147,7 +3139,7 @@ fn runtime_profile_health_for_state(
 fn ensure_managed_codex_profile_ready(
     state: &WebState,
     config: &RuntimeProfileConfig,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if config.runtime != RuntimeProfileKind::Acp
         || config.backend_ref.as_deref() != Some(crate::managed_acp::CODEX_ACP_BACKEND_ID)
     {
@@ -3590,7 +3582,7 @@ fn effective_capability_view(
         } else if !adapter_implemented {
             format!("The selected Adapter does not implement `{id}`.")
         } else {
-            format!("ThreadApplication does not expose `{id}`.")
+            format!("The Framework Adapter does not expose `{id}`.")
         }
     });
     wire::RuntimeCapabilityView {
@@ -3887,7 +3879,7 @@ fn acp_session_agent_surface_descriptor(
 fn apply_control_state_precedence(
     controls: &mut [wire::ThreadControlDescriptorView],
     binding: Option<&GatewayRuntimeBindingRecord>,
-    source_lane: Option<&psychevo_runtime::state::GatewaySourceLaneRecord>,
+    source_lane: Option<&psychevo::state::GatewaySourceLaneRecord>,
 ) {
     for control in controls {
         if let Some(value) = binding
@@ -3923,7 +3915,7 @@ fn apply_control_state_precedence(
 
 fn populate_native_control_catalog(
     options: &RunOptions,
-    configured: &[psychevo_runtime::types::ConfiguredModel],
+    configured: &[psychevo::types::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
     if let Some(model_control) = controls.iter_mut().find(|control| control.id == "model") {
@@ -3963,7 +3955,7 @@ fn populate_native_control_catalog(
 }
 
 fn decorate_configured_model_control_labels(
-    configured: &[psychevo_runtime::types::ConfiguredModel],
+    configured: &[psychevo::types::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
     let Some(model_control) = controls
@@ -3987,7 +3979,7 @@ fn decorate_configured_model_control_labels(
 }
 
 fn source_draft_control_revision(
-    source_lane: Option<&psychevo_runtime::state::GatewaySourceLaneRecord>,
+    source_lane: Option<&psychevo::state::GatewaySourceLaneRecord>,
     capability_revision: &str,
 ) -> String {
     let Some(source_lane) = source_lane else {
@@ -4009,7 +4001,7 @@ pub(super) async fn apply_thread_control_precedence(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
     options: &mut BTreeMap<String, String>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if let Some(thread_id) = thread_id
         && let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await?
     {
@@ -4029,9 +4021,7 @@ pub(super) async fn apply_thread_control_precedence(
     Ok(())
 }
 
-pub(super) fn thread_control_override_string_value(
-    value: &Value,
-) -> psychevo_runtime::Result<String> {
+pub(super) fn thread_control_override_string_value(value: &Value) -> psychevo::Result<String> {
     match value {
         Value::String(value) => Ok(value.clone()),
         Value::Bool(value) => Ok(value.to_string()),
@@ -4049,7 +4039,7 @@ pub(super) fn thread_control_override_string_value(
 
 fn runtime_profile_config_json(
     params: &wire::RuntimeProfileWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     validate_runtime_profile_kind(&params.runtime)?;
     let backend_ref = params
         .backend_ref
@@ -4061,11 +4051,7 @@ fn runtime_profile_config_json(
         "acp" => RuntimeProfileKind::Acp,
         _ => unreachable!("runtime kind was validated"),
     };
-    psychevo_runtime::config::validate_runtime_profile_backend_ref(
-        &params.id,
-        runtime_kind,
-        backend_ref,
-    )?;
+    psychevo::config::validate_runtime_profile_backend_ref(&params.id, runtime_kind, backend_ref)?;
     let mut object = serde_json::Map::new();
     object.insert("runtime".to_string(), json!(params.runtime.trim()));
     object.insert("enabled".to_string(), json!(params.enabled.unwrap_or(true)));
@@ -4115,7 +4101,7 @@ fn insert_optional_string(
     }
 }
 
-fn validate_runtime_profile_kind(value: &str) -> psychevo_runtime::Result<()> {
+fn validate_runtime_profile_kind(value: &str) -> psychevo::Result<()> {
     match value.trim() {
         "native" | "acp" => Ok(()),
         "codex" | "opencode" => Err(Error::Config(format!(
@@ -4143,7 +4129,7 @@ fn ensure_profile_config_for_runtime_profile_write(
     state: &WebState,
     scope: &ResolvedScope,
     target: wire::BackendConfigTarget,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if target != wire::BackendConfigTarget::Profile
         || !state
             .inner
@@ -4169,7 +4155,7 @@ fn runtime_profile_source_targets(
     state: &WebState,
     scope: &ResolvedScope,
     id: &str,
-) -> psychevo_runtime::Result<Vec<wire::BackendConfigTarget>> {
+) -> psychevo::Result<Vec<wire::BackendConfigTarget>> {
     let mut targets = Vec::new();
     if runtime_profile_exists_in_config_dir(&active_profile_config_dir(state, scope), id)? {
         targets.push(wire::BackendConfigTarget::Profile);
@@ -4180,10 +4166,7 @@ fn runtime_profile_source_targets(
     Ok(targets)
 }
 
-fn runtime_profile_exists_in_config_dir(
-    config_dir: &Path,
-    id: &str,
-) -> psychevo_runtime::Result<bool> {
+fn runtime_profile_exists_in_config_dir(config_dir: &Path, id: &str) -> psychevo::Result<bool> {
     let config_path = config_dir.join("config.toml");
     if !config_path.exists() {
         return Ok(false);
@@ -4369,10 +4352,10 @@ default_model = "test/default"
         )
         .expect("ACP fixture");
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo_runtime::host_paths::resolve_executable_path(
+        let python = psychevo::host_paths::resolve_executable_path(
             "python3",
             &state.inner.cwd,
-            &psychevo_runtime::host_paths::ExecutableResolveOptions {
+            &psychevo::host_paths::ExecutableResolveOptions {
                 platform: HostPlatform::current(),
                 env: &host_env,
             },
@@ -4430,7 +4413,7 @@ backend_ref = "ephemeral"
         state
             .inner
             .state
-            .create_gateway_runtime_binding(psychevo_runtime::state::GatewayRuntimeBindingInput {
+            .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
                 thread_id: &thread_id,
                 agent_ref: Some("ephemeral"),
                 agent_fingerprint: &agent_fingerprint,

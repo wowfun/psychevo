@@ -28,7 +28,7 @@ impl AcpTerminalRegistry {
     /// Removes every terminal owned by one ACP session and cooperatively kills
     /// any child that is still running. Lifecycle cleanup must call this after
     /// close/delete acknowledgement and during generation teardown.
-    fn terminate_session(&self, session_id: &str) -> psychevo_runtime::Result<()> {
+    fn terminate_session(&self, session_id: &str) -> psychevo::Result<()> {
         let removed = {
             let mut records = self.records.lock().map_err(|_| {
                 Error::Message("ACP terminal registry lock poisoned".to_string())
@@ -49,7 +49,7 @@ impl AcpTerminalRegistry {
         Ok(())
     }
 
-    fn terminate_all(&self) -> psychevo_runtime::Result<()> {
+    fn terminate_all(&self) -> psychevo::Result<()> {
         let removed = {
             let mut records = self.records.lock().map_err(|_| {
                 Error::Message("ACP terminal registry lock poisoned".to_string())
@@ -129,7 +129,7 @@ async fn create_terminal(
         ))
     })?;
     let args = request.args.iter().map(OsString::from).collect::<Vec<_>>();
-    let mut command = psychevo_runtime::process_env::tokio_host_process_command(
+    let mut command = psychevo::process_env::tokio_host_process_command(
         &program,
         &args,
         HostPlatform::current(),
@@ -142,10 +142,10 @@ async fn create_terminal(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    psychevo_runtime::process_env::apply_tokio_process_env(
+    psychevo::process_env::apply_tokio_process_env(
         &mut command,
         &env,
-        psychevo_runtime::process_env::ProcessEnvOptions::new(&[]),
+        psychevo::process_env::ProcessEnvOptions::new(&[]),
     )
     .map_err(acp_internal_error)?;
     let mut child = command.spawn().map_err(acp_internal_error)?;
@@ -189,7 +189,7 @@ async fn create_terminal(
                 Err(error) => TerminalExitStatus::new().signal(error.to_string()),
             },
             _ = kill_rx.changed() => {
-                psychevo_runtime::process_env::terminate_tokio_child_tree(&mut child).await;
+                psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
                 TerminalExitStatus::new().signal("killed".to_string())
             }
         };

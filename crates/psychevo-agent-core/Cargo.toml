@@ -4,10 +4,17 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+description = "Model-agnostic agent loop and tool interfaces for Psychevo"
+documentation = "https://docs.rs/psychevo-agent-core"
+keywords = ["ai", "agent", "llm"]
+categories = ["development-tools"]
 
 [dependencies]
 futures.workspace = true
-psychevo-ai = { path = "../psychevo-ai" }
+psychevo-ai = { version = "0.1.0", path = "../psychevo-ai" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

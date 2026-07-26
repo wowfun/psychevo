@@ -19,9 +19,8 @@ use axum::routing::{get, post};
 #[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use futures::{SinkExt, StreamExt, future::BoxFuture};
-use psychevo_agent_core::{Message as RuntimeMessage, UserContentBlock};
-use psychevo_gateway_protocol as wire;
-use psychevo_runtime::command_registry::{
+use psychevo::__agent_core::{Message as RuntimeMessage, UserContentBlock};
+use psychevo::command_registry::{
     AvailableSlashCommand, CommandArgumentKind, CommandCapability, CommandPresentation,
     DynamicSlashCommand, SharedSlashAlias, SharedSlashConfig, SharedSlashKeybind,
     SlashCommandAction, SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
@@ -32,36 +31,37 @@ use psychevo_runtime::command_registry::{
     split_slash_command_token, validate_configured_alias, validate_configured_slash_target,
     validate_shared_slash_config,
 };
-use psychevo_runtime::state::{
+use psychevo::state::{
     AgentMissionRunInput, AgentTeamRunInput, AutomationRunFinishInput, AutomationRunRecord,
     AutomationTaskInput, AutomationTaskRecord, ChildSessionSnapshotInput, ConversationDraftPart,
     GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
     GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, SessionListProjection,
     SessionRevertKind, StateRuntime,
 };
-use psychevo_runtime::{
-    Error, agents::AgentBackendConfig, agents::AgentCatalog, agents::AgentDefinition,
-    agents::AgentDiagnostic, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
-    agents::AgentRunRecord, agents::AgentSource, agents::AgentTeamCatalog,
-    agents::AgentTeamDefinition, agents::AgentTeamMember, agents::AgentTeamSource,
-    agents::LoadedMainAgent, agents::MAX_AGENT_SPAWN_DEPTH_CAP,
-    agents::MAX_TEAM_PARALLEL_AGENTS_CAP, agents::SESSION_MAIN_AGENT_METADATA_KEY,
-    agents::agent_spawn_paused, agents::agent_status_records,
-    agents::discover_agent_teams_with_catalog, agents::discover_agents,
-    agents::main_agent_default_metadata, agents::main_agent_from_session_metadata,
-    agents::main_agent_metadata, agents::parse_agent_definition_text,
-    agents::parse_agent_team_definition_text, agents::resolve_agent_definition,
-    agents::resolve_agent_team_definition, agents::resume_agent_id, agents::send_agent_message,
-    agents::set_agent_spawn_paused, agents::stop_agent_id_with_grace, agents::valid_agent_name,
-    automations::AutomationSchedule, automations::latest_due_at_ms, automations::next_run_at_ms,
-    config::McpServerConfigInput, config::McpToolPolicyInput, config::REASONING_EFFORT_VALUES,
-    config::RuntimeProfileConfig, config::RuntimeProfileKind, config::auth_status_value,
-    config::clear_mcp_oauth_access_token, config::config_show_value, config::configured_models,
-    config::create_local_toolset, config::fetch_and_cache_model_catalog,
-    config::generated_runtime_profile_id_for_backend, config::image_generation_config_value,
-    config::load_agent_backend_configs, config::load_runtime_profile_configs,
-    config::mcp_server_value, config::mcp_servers_value, config::model_catalog_entry_is_free,
-    config::model_catalog_provider, config::model_catalog_providers, config::normalize_provider_id,
+use psychevo::{
+    Application, Client as FrameworkClient, Error, agents::AgentBackendConfig,
+    agents::AgentCatalog, agents::AgentDefinition, agents::AgentDiagnostic,
+    agents::AgentDiscoveryOptions, agents::AgentEntrypoint, agents::AgentRunRecord,
+    agents::AgentSource, agents::AgentTeamCatalog, agents::AgentTeamDefinition,
+    agents::AgentTeamMember, agents::AgentTeamSource, agents::LoadedMainAgent,
+    agents::MAX_AGENT_SPAWN_DEPTH_CAP, agents::MAX_TEAM_PARALLEL_AGENTS_CAP,
+    agents::SESSION_MAIN_AGENT_METADATA_KEY, agents::agent_spawn_paused,
+    agents::agent_status_records, agents::discover_agent_teams_with_catalog,
+    agents::discover_agents, agents::main_agent_default_metadata,
+    agents::main_agent_from_session_metadata, agents::main_agent_metadata,
+    agents::parse_agent_definition_text, agents::parse_agent_team_definition_text,
+    agents::resolve_agent_definition, agents::resolve_agent_team_definition,
+    agents::resume_agent_id, agents::send_agent_message, agents::set_agent_spawn_paused,
+    agents::stop_agent_id_with_grace, agents::valid_agent_name, automations::AutomationSchedule,
+    automations::latest_due_at_ms, automations::next_run_at_ms, config::McpServerConfigInput,
+    config::McpToolPolicyInput, config::REASONING_EFFORT_VALUES, config::RuntimeProfileConfig,
+    config::RuntimeProfileKind, config::auth_status_value, config::clear_mcp_oauth_access_token,
+    config::config_show_value, config::configured_models, config::create_local_toolset,
+    config::fetch_and_cache_model_catalog, config::generated_runtime_profile_id_for_backend,
+    config::image_generation_config_value, config::load_agent_backend_configs,
+    config::load_runtime_profile_configs, config::mcp_server_value, config::mcp_servers_value,
+    config::model_catalog_entry_is_free, config::model_catalog_provider,
+    config::model_catalog_providers, config::normalize_provider_id,
     config::read_cached_model_catalog, config::remove_config_value, config::remove_local_toolset,
     config::remove_mcp_server, config::resolve_voice_asr_config,
     config::resolve_voice_realtime_config, config::resolve_voice_tts_config,
@@ -102,6 +102,7 @@ use psychevo_runtime::{
     types::SessionUsageOptions, types::UsageReadOptions, types::UserShellContextOptions,
     types::WorkspaceMutationSink, undo::redo_session, undo::undo_session,
 };
+use psychevo_gateway_protocol as wire;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -111,12 +112,13 @@ use uuid::Uuid;
 
 use crate::{
     ACP_PEER_METADATA_KEY, BackendKind, Gateway, GatewayActionKind, GatewayActionOutcome,
-    GatewayActivity, GatewayBackendInfo, GatewayEvent, GatewayEventEmitter, GatewayInputPart,
-    GatewayProfileFields, GatewayShellResult, GatewaySource, GatewaySourceLifetime, GatewayThread,
-    GatewayThreadSelector, GatewayTurnResult, PendingActionView, PermissionDecision,
-    SendCompactRequest, SendShellRequest, SourceKey, TranscriptBlock, TranscriptBlockKind,
-    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole, gateway_now_ms,
-    gateway_profile_mark, transcript,
+    GatewayActivity, GatewayAgentSessionAdapter, GatewayBackendInfo, GatewayEvent,
+    GatewayEventEmitter, GatewayInputPart, GatewayProfileFields, GatewayShellResult, GatewaySource,
+    GatewaySourceLifetime, GatewayThread, GatewayThreadSelector, GatewayTurnResult,
+    PendingActionView, PermissionDecision, SendShellRequest, SourceKey, TranscriptBlock,
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
+    gateway_activity_view, gateway_now_ms, gateway_profile_mark, gateway_turn_status_for_outcome,
+    transcript, unavailable_compaction_result,
 };
 #[cfg(test)]
 use crate::{GatewayTurn, GatewayTurnError, GatewayTurnStatus};
@@ -192,8 +194,9 @@ use thread_application::{
     RoutedThreadTurn, action_descriptors as thread_action_descriptors,
     authoritative_history_projection, authoritative_history_view,
     enqueue_routed_compact_action as enqueue_routed_thread_compact_action,
-    pending_interactions as thread_pending_interactions, prewarm_codex_runtime_inventory,
-    respond_to_routed_interaction_for_selector as thread_routed_interaction_respond_for_selector,
+    framework_gateway_turn_result, pending_interactions as thread_pending_interactions,
+    prewarm_codex_runtime_inventory,
+    respond_to_routed_interaction as thread_routed_interaction_respond,
     run_routed_action as run_routed_thread_action, run_routed_turn as run_routed_thread_turn,
     source_draft_control_values,
 };

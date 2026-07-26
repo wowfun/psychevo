@@ -309,7 +309,7 @@ impl AcpNotificationRouter {
     fn subscribe(
         &self,
         native_session_id: Option<String>,
-    ) -> psychevo_runtime::Result<AcpNotificationSubscription> {
+    ) -> psychevo::Result<AcpNotificationSubscription> {
         let (tx, rx) = tokio_mpsc::unbounded_channel();
         let mut state = self
             .state
@@ -360,7 +360,7 @@ impl AcpNotificationRouter {
         &self,
         subscription_id: u64,
         native_session_id: Option<String>,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let mut state = self
             .state
             .lock()
@@ -383,12 +383,12 @@ impl AcpNotificationSubscription {
     fn set_native_session_id(
         &self,
         native_session_id: impl Into<String>,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         self.router
             .set_native_session_id(self.id, Some(native_session_id.into()))
     }
 
-    fn deactivate(&self) -> psychevo_runtime::Result<()> {
+    fn deactivate(&self) -> psychevo::Result<()> {
         self.router.set_native_session_id(self.id, None)
     }
 
@@ -422,21 +422,21 @@ impl AcpNotificationIngress {
         )
     }
 
-    fn notification(&self, payload: AcpPeerInboundPayload) -> psychevo_runtime::Result<u64> {
+    fn notification(&self, payload: AcpPeerInboundPayload) -> psychevo::Result<u64> {
         self.send(payload)
     }
 
     /// Appends a deterministic ordering fence to the same ingress used by ACP
     /// notifications. Callers reduce through the returned sequence instead of
     /// sleeping or observing a momentarily empty channel.
-    fn barrier(&self) -> psychevo_runtime::Result<u64> {
+    fn barrier(&self) -> psychevo::Result<u64> {
         self.send(AcpPeerInboundPayload::Barrier)
     }
 
     /// Called by the response dispatch interceptor while the SDK's central
     /// dispatch loop is blocked. The map lets the request waiter retrieve the
     /// exact ingress sequence after the typed response is forwarded.
-    fn response_barrier(&self, request_id: Value) -> psychevo_runtime::Result<u64> {
+    fn response_barrier(&self, request_id: Value) -> psychevo::Result<u64> {
         let request_id = serde_json::to_string(&request_id)?;
         let mut state = self.state.lock().map_err(|_| {
             Error::Message("ACP notification projection ingress lock poisoned".to_string())
@@ -446,7 +446,7 @@ impl AcpNotificationIngress {
         Ok(sequence)
     }
 
-    fn take_response_barrier(&self, request_id: &Value) -> psychevo_runtime::Result<Option<u64>> {
+    fn take_response_barrier(&self, request_id: &Value) -> psychevo::Result<Option<u64>> {
         let request_id = serde_json::to_string(request_id)?;
         let mut state = self.state.lock().map_err(|_| {
             Error::Message("ACP notification projection ingress lock poisoned".to_string())
@@ -454,7 +454,7 @@ impl AcpNotificationIngress {
         Ok(state.response_barriers.remove(&request_id))
     }
 
-    fn send(&self, payload: AcpPeerInboundPayload) -> psychevo_runtime::Result<u64> {
+    fn send(&self, payload: AcpPeerInboundPayload) -> psychevo::Result<u64> {
         // Sequence allocation and queue insertion are one operation. Using an
         // atomic counter alone would allow two callback tasks to enqueue in the
         // opposite order and make the later reducer discard the lower number.
@@ -467,7 +467,7 @@ impl AcpNotificationIngress {
     fn send_locked(
         state: &mut AcpNotificationIngressState,
         payload: AcpPeerInboundPayload,
-    ) -> psychevo_runtime::Result<u64> {
+    ) -> psychevo::Result<u64> {
         let sequence = state.next_sequence;
         state.next_sequence = state.next_sequence.checked_add(1).ok_or_else(|| {
             Error::Message("ACP notification projection sequence exhausted".to_string())
@@ -644,7 +644,7 @@ fn new_acp_resident_session(
     }
 }
 
-fn next_acp_session_epoch(next_session_epoch: &AtomicU64) -> psychevo_runtime::Result<u64> {
+fn next_acp_session_epoch(next_session_epoch: &AtomicU64) -> psychevo::Result<u64> {
     next_session_epoch
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
             epoch.checked_add(1)
@@ -941,7 +941,7 @@ async fn reduce_acp_notifications_through_barrier(
     replay_native_session_id: Option<&str>,
     active_native_session_id: Option<&str>,
     mut active_state: Option<&mut AcpPeerStreamState>,
-) -> psychevo_runtime::Result<bool> {
+) -> psychevo::Result<bool> {
     let mut active_session_observed = false;
     loop {
         let envelope = notification_rx.recv().await.ok_or_else(|| {

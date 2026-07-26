@@ -122,7 +122,7 @@ pub(super) async fn retry_unacknowledged_channel_outbox(
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
     channel_gateway: &ChannelGateway,
-) -> psychevo_runtime::Result<usize> {
+) -> psychevo::Result<usize> {
     let records = state
         .inner
         .state
@@ -155,17 +155,17 @@ async fn deliver_channel_outbox_record(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     channel_gateway: &ChannelGateway,
-    record: psychevo_runtime::state::GatewayChannelOutboxRecord,
-) -> psychevo_runtime::Result<()> {
+    record: psychevo::state::GatewayChannelOutboxRecord,
+) -> psychevo::Result<()> {
     let payload = record.payload_text.ok_or_else(|| {
-        psychevo_runtime::Error::Message(format!(
+        psychevo::Error::Message(format!(
             "channel outbox `{}` has no retry payload",
             record.delivery_id
         ))
     })?;
     let actual_hash = format!("{:x}", Sha256::digest(payload.as_bytes()));
     if actual_hash != record.payload_hash {
-        return Err(psychevo_runtime::Error::Message(format!(
+        return Err(psychevo::Error::Message(format!(
             "channel outbox `{}` payload hash mismatch",
             record.delivery_id
         )));
@@ -176,7 +176,7 @@ async fn deliver_channel_outbox_record(
         .gateway_source_lane(&record.source_key)
         .await?
         .ok_or_else(|| {
-            psychevo_runtime::Error::Message(format!(
+            psychevo::Error::Message(format!(
                 "channel outbox `{}` source lane is unavailable",
                 record.delivery_id
             ))
@@ -198,10 +198,7 @@ async fn deliver_channel_outbox_record(
     Ok(())
 }
 
-fn channel_outbox_identity(
-    raw: &Value,
-    connection_id: &str,
-) -> psychevo_runtime::Result<ImIdentity> {
+fn channel_outbox_identity(raw: &Value, connection_id: &str) -> psychevo::Result<ImIdentity> {
     let required = |field: &str| {
         raw.get(field)
             .and_then(Value::as_str)
@@ -209,7 +206,7 @@ fn channel_outbox_identity(
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .ok_or_else(|| {
-                psychevo_runtime::Error::Message(format!(
+                psychevo::Error::Message(format!(
                     "channel outbox source identity is missing `{field}`"
                 ))
             })
@@ -241,7 +238,7 @@ pub(super) async fn handle_channel_message(
     connection: &ChannelRuntimeConnection,
     channel_gateway: &ChannelGateway,
     mut message: ImInboundMessage,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let source = gateway_source_for_im(&message);
     let mut requested_thread_id = None;
     if let Some(action) =
@@ -337,9 +334,7 @@ async fn enqueue_channel_compaction(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     instructions: Option<String>,
-) -> psychevo_runtime::Result<
-    BoxFuture<'static, psychevo_runtime::Result<wire::ThreadActionRunResult>>,
-> {
+) -> psychevo::Result<BoxFuture<'static, psychevo::Result<wire::ThreadActionRunResult>>> {
     let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
     let thread_id = if thread_id.is_some() {
         thread_id
@@ -376,9 +371,13 @@ async fn run_channel_inbound_turn(
     channel_gateway: ChannelGateway,
     message: ImInboundMessage,
     source: GatewaySource,
-    thread_id: Option<String>,
-) -> psychevo_runtime::Result<()> {
+    requested_thread_id: Option<String>,
+) -> psychevo::Result<()> {
     let scope = super::commands::channel_resolved_scope(&state, &connection, &source).await?;
+    let thread_id = match requested_thread_id {
+        Some(thread_id) => Some(thread_id),
+        None => state.inner.gateway.resolve_source_thread(&source).await?,
+    };
     let default_runtime_ref = connection
         .runtime_ref
         .as_deref()
@@ -479,7 +478,7 @@ async fn run_channel_inbound_turn(
     let record = state
         .inner
         .state
-        .upsert_gateway_channel_outbox(psychevo_runtime::state::GatewayChannelOutboxInput {
+        .upsert_gateway_channel_outbox(psychevo::state::GatewayChannelOutboxInput {
             delivery_id: &delivery_id,
             thread_id: &result.thread.id,
             turn_id: &result.turn.id,

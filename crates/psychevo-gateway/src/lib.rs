@@ -1,3 +1,4 @@
+pub mod app_server;
 pub mod history_editing;
 pub mod im;
 pub mod protocol;
@@ -16,16 +17,20 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
-use psychevo_ai::{AbortSignal, Outcome};
-use psychevo_runtime::state::{
+use psychevo::__ai::{AbortSignal, Outcome};
+use psychevo::state::{
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayLiveSnapshotInput, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
-    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, GatewayTurnDeliveryInput,
-    GatewayTurnTerminalInput, StateRuntime,
+    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, GatewayTurnTerminalInput,
+    StateRuntime,
 };
 #[cfg(test)]
-use psychevo_runtime::state::{GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership};
-use psychevo_runtime::{
+use psychevo::state::{
+    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayTurnDeliveryInput,
+};
+#[cfg(test)]
+use psychevo::types::PermissionApprovalRequest;
+use psychevo::{
     Error, agents::AgentDiscoveryOptions, agents::AgentEntrypoint, agents::discover_agents,
     agents::resolve_agent_definition, config::RuntimeProfileConfig, config::RuntimeProfileKind,
     config::load_agent_backend_configs, run::run_live, run::run_live_streaming,
@@ -33,9 +38,9 @@ use psychevo_runtime::{
     types::ClarifyAnswer, types::ClarifyResponse, types::ClarifyResult,
     types::ExternalAgentDelegate, types::ExternalAgentDelegateRequest,
     types::ExternalAgentDelegateResult, types::ImageInput, types::PermissionApprovalDecision,
-    types::PermissionApprovalOutcome, types::PermissionApprovalRequest, types::PermissionMode,
-    types::PromptDisplayMetadata, types::RunControl, types::RunControlHandle, types::RunMode,
-    types::RunOptions, types::RunResult, types::RunStreamEvent, types::RunStreamSink,
+    types::PermissionApprovalOutcome, types::PermissionMode, types::PromptDisplayMetadata,
+    types::RunControl, types::RunControlHandle, types::RunMode, types::RunOptions,
+    types::RunResult, types::RunStreamEvent, types::RunStreamSink,
     types::StoredEditableInputEnvelope, types::StoredEditableInputPart,
     types::UserShellContextOptions, types::UserShellOptions, types::UserShellResult,
     types::WorkspaceMutationSink, types::run_control,
@@ -43,6 +48,7 @@ use psychevo_runtime::{
 };
 use serde_json::{Value, json};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
+#[cfg(test)]
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -171,6 +177,7 @@ include!("gateway/state.rs");
 include!("gateway/agent_session.rs");
 include!("gateway/public_api.rs");
 include!("gateway/source_bindings.rs");
+#[cfg(test)]
 include!("gateway/turn_lifecycle.rs");
 include!("gateway/turn_shell.rs");
 include!("gateway/active_queue.rs");
@@ -180,6 +187,7 @@ include!("gateway/peer_runtime.rs");
 include!("gateway/activity_permission.rs");
 include!("gateway/backend_delegate.rs");
 include!("gateway/stream_input.rs");
+include!("framework_adapter.rs");
 
 #[cfg(test)]
 mod tests {

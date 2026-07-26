@@ -1,310 +1,314 @@
-impl AcpLiveProjection {
+#[derive(Debug, Default)]
+pub(crate) struct AcpTurnProjection {
+    terminal_output: bool,
+    terminal_commands: HashMap<String, String>,
+    terminal_offsets: HashMap<String, usize>,
+}
+
+impl AcpTurnProjection {
     pub(crate) fn new(terminal_output: bool) -> Self {
         Self {
             terminal_output,
             ..Self::default()
         }
     }
+
+    fn runtime_tool_update(&mut self, data: &Value) -> Option<SessionUpdate> {
+        let update = runtime_event_session_update(data)?;
+        if !self.terminal_output
+            || data.get("tool_name").and_then(Value::as_str) != Some("exec_command")
+        {
+            return Some(update);
+        }
+        let SessionUpdate::ToolCallUpdate(mut update) = update else {
+            return Some(update);
+        };
+        let call_id = update.tool_call_id.0.as_ref().to_string();
+        if let Some(command) = data
+            .get("args")
+            .and_then(|args| args.get("cmd"))
+            .and_then(Value::as_str)
+        {
+            self.terminal_commands
+                .insert(call_id.clone(), command.to_string());
+        }
+        let Some(command) = self.terminal_commands.get(&call_id).cloned() else {
+            return Some(SessionUpdate::ToolCallUpdate(update));
+        };
+        update = update.content(vec![ToolCallContent::from(format!("$ {command}"))]);
+        let mut meta = update.meta.value().cloned().unwrap_or_else(Meta::new);
+        let first_update = !self.terminal_offsets.contains_key(&call_id);
+        if first_update {
+            meta.insert(
+                "terminal_info".to_string(),
+                json!({
+                    "terminal_id": call_id,
+                    "command": command,
+                }),
+            );
+        }
+
+        let output = tool_event_output(data).unwrap_or_default();
+        let offset = self.terminal_offsets.entry(call_id.clone()).or_insert(0);
+        if *offset > output.len() || !output.is_char_boundary(*offset) {
+            *offset = 0;
+        }
+        let mut delta = String::new();
+        if first_update {
+            delta.push_str("$ ");
+            delta.push_str(&command);
+            delta.push('\n');
+        }
+        if let Some(tail) = output.get(*offset..) {
+            delta.push_str(tail);
+        }
+        *offset = output.len();
+        if !delta.is_empty() {
+            meta.insert(
+                "terminal_output".to_string(),
+                json!({
+                    "terminal_id": call_id,
+                    "data": delta,
+                }),
+            );
+        }
+        if data.get("type").and_then(Value::as_str) == Some("tool_execution_end") {
+            meta.insert(
+                "terminal_exit".to_string(),
+                json!({
+                    "terminal_id": call_id,
+                    "exit_code": data
+                        .get("result")
+                        .and_then(|result| result.get("exit_code"))
+                        .and_then(Value::as_i64),
+                    "signal": null,
+                }),
+            );
+        }
+        update = update.meta(meta);
+        Some(SessionUpdate::ToolCallUpdate(update))
+    }
 }
 
-pub(crate) fn send_gateway_event_update(
+fn tool_event_output(data: &Value) -> Option<String> {
+    let result = match data.get("type").and_then(Value::as_str) {
+        Some("tool_execution_update") => data.get("partial_result"),
+        Some("tool_execution_end") => data.get("result"),
+        _ => None,
+    }?;
+    result
+        .get("model_content")
+        .and_then(Value::as_str)
+        .or_else(|| result.get("output").and_then(Value::as_str))
+        .or_else(|| result.get("raw_output").and_then(Value::as_str))
+        .or_else(|| {
+            result
+                .get("raw_output")
+                .and_then(|raw| raw.get("output"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| result.get("error").and_then(Value::as_str))
+        .map(ToString::to_string)
+        .or_else(|| Some(compact_tool_result_text(result)))
+}
+
+fn record_completed_message_usage(
+    accumulator: &mut AcpUsageAccumulator,
+    message: Value,
+    usage: Option<Value>,
+    metadata: Option<Value>,
+    accounting: Option<Value>,
+) {
+    let mut runtime_event = serde_json::Map::new();
+    runtime_event.insert("type".to_string(), json!("message_end"));
+    runtime_event.insert("message".to_string(), message);
+    if let Some(value) = usage {
+        runtime_event.insert("usage".to_string(), value);
+    }
+    if let Some(value) = metadata {
+        runtime_event.insert("metadata".to_string(), value);
+    }
+    if let Some(value) = accounting {
+        runtime_event.insert("accounting".to_string(), value);
+    }
+    accumulator.record_stream_event(&RunStreamEvent::value(Value::Object(runtime_event)));
+}
+
+pub(crate) fn send_turn_event_update(
     cx: &ConnectionTo<Client>,
     session_id: &SessionId,
-    event: GatewayEvent,
-    projection: &mut AcpLiveProjection,
+    event: TurnEvent,
+    usage: &Arc<Mutex<AcpUsageAccumulator>>,
+    projection: &mut AcpTurnProjection,
 ) {
     match event {
-        GatewayEvent::EntryStarted { entry, .. }
-        | GatewayEvent::EntryUpdated { entry, .. }
-        | GatewayEvent::EntryCompleted { entry, .. } => {
-            for update in transcript_entry_session_updates(&entry, session_id, projection, true) {
+        TurnEvent::ReasoningDelta { text } if !text.is_empty() => {
+            send_session_update(
+                cx,
+                session_id.clone(),
+                agent_thought_update(session_id, text),
+            );
+        }
+        TurnEvent::Tool { data, .. } => {
+            if let Ok(mut usage) = usage.lock() {
+                usage.record_stream_event(&RunStreamEvent::value(data.clone()));
+            }
+            if let Some(update) = projection.runtime_tool_update(&data) {
                 send_session_update(cx, session_id.clone(), update);
             }
         }
-        GatewayEvent::Warning { message, .. } => send_session_update(
-            cx,
-            session_id.clone(),
-            agent_message_update(session_id, format!("warning: {message}")),
-        ),
-        GatewayEvent::TurnCompleted {
-            committed_entries, ..
+        TurnEvent::Warning { data } => {
+            let message = data
+                .get("message")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+                .unwrap_or_else(|| data.to_string());
+            send_session_update(
+                cx,
+                session_id.clone(),
+                agent_message_update(session_id, format!("warning: {message}")),
+            );
+        }
+        TurnEvent::Message {
+            stage: psychevo::ItemStage::Completed,
+            message,
+            usage: message_usage,
+            metadata,
+            accounting,
         } => {
-            for entry in committed_entries {
-                for update in
-                    transcript_entry_session_updates(&entry, session_id, projection, false)
-                {
-                    send_session_update(cx, session_id.clone(), update);
-                }
+            if let Ok(mut accumulator) = usage.lock() {
+                record_completed_message_usage(
+                    &mut accumulator,
+                    message,
+                    message_usage,
+                    metadata,
+                    accounting,
+                );
             }
         }
-        GatewayEvent::TurnStarted { .. }
-        | GatewayEvent::TurnQueued { .. }
-        | GatewayEvent::ActionRequested { .. }
-        | GatewayEvent::ActionUpdated { .. }
-        | GatewayEvent::ActionResolved { .. }
-        | GatewayEvent::ActionCancelled { .. }
-        | GatewayEvent::ActivityChanged { .. }
-        | GatewayEvent::TitleChanged { .. } => {}
+        TurnEvent::Message { .. } => {}
+        TurnEvent::Accepted { .. }
+        | TurnEvent::Started { .. }
+        | TurnEvent::ReasoningDelta { .. }
+        | TurnEvent::ReasoningCompleted { .. }
+        | TurnEvent::InteractionRequested { .. }
+        | TurnEvent::InteractionResolved { .. }
+        | TurnEvent::Completed { .. }
+        | TurnEvent::Failed { .. }
+        | TurnEvent::ResyncRequired { .. } => {}
     }
 }
 
-fn transcript_entry_session_updates(
-    entry: &TranscriptEntry,
-    session_id: &SessionId,
-    projection: &mut AcpLiveProjection,
-    include_reasoning: bool,
-) -> Vec<SessionUpdate> {
-    let mut updates = Vec::new();
-    for block in &entry.blocks {
-        if include_reasoning
-            && block.kind == TranscriptBlockKind::Reasoning
-            && let Some(delta) = reasoning_block_delta(block, projection)
-        {
-            updates.push(agent_thought_update(session_id, delta));
-        }
-        if let Some(update) = transcript_block_session_update(block, projection, include_reasoning)
-        {
-            updates.push(update);
-        }
-    }
-    updates
-}
+#[cfg(test)]
+mod live_projection_tests {
+    use super::*;
 
-fn transcript_block_session_update(
-    block: &TranscriptBlock,
-    projection: &mut AcpLiveProjection,
-    live_presentation: bool,
-) -> Option<SessionUpdate> {
-    if !matches!(
-        block.kind,
-        TranscriptBlockKind::Tool
-            | TranscriptBlockKind::ToolCall
-            | TranscriptBlockKind::ToolResult
-            | TranscriptBlockKind::Shell
-            | TranscriptBlockKind::File
-            | TranscriptBlockKind::Web
-            | TranscriptBlockKind::Mcp
-            | TranscriptBlockKind::Clarify
-            | TranscriptBlockKind::Diff
-            | TranscriptBlockKind::Artifact
-    ) {
-        return None;
+    #[test]
+    fn framework_tool_event_reuses_the_acp_runtime_projection() {
+        let data = json!({
+            "type": "tool_execution_start",
+            "tool_call_id": "call-1",
+            "tool_name": "edit",
+            "args": {"path": "src/lib.rs"},
+            "started_at_ms": 1_234,
+        });
+        let update = runtime_event_session_update(&data).expect("tool projection");
+        let SessionUpdate::ToolCallUpdate(update) = update else {
+            panic!("expected ToolCallUpdate");
+        };
+        assert_eq!(update.tool_call_id.0.as_ref(), "call-1");
+        assert_eq!(update.status.value(), Some(&ToolCallStatus::InProgress));
     }
-    let call_id = transcript_tool_call_id(block);
-    let tool_name = block
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("tool_name"))
-        .and_then(Value::as_str)
-        .or(block.title.as_deref())
-        .unwrap_or("tool");
-    let use_terminal_output =
-        live_presentation && projection.terminal_output && tool_name == "exec_command";
-    let content = transcript_tool_content(block, tool_name, &call_id, use_terminal_output);
-    let mut update = ToolCallUpdate::new(call_id)
-        .title(transcript_tool_title(block, tool_name))
-        .kind(tool_kind(tool_name))
-        .status(transcript_tool_status(block.status))
-        .content(content)
-        .raw_input(block.metadata.clone());
-    if use_terminal_output
-        && let Some(meta) = terminal_output_meta(block, update.tool_call_id.0.as_ref(), projection)
-    {
-        update = update.meta(meta);
-    }
-    Some(SessionUpdate::ToolCallUpdate(update))
-}
 
-fn reasoning_block_delta(
-    block: &TranscriptBlock,
-    projection: &mut AcpLiveProjection,
-) -> Option<String> {
-    let text = transcript_block_text(block)?.to_string();
-    if text.trim().is_empty() {
-        return None;
+    #[test]
+    fn framework_tool_update_projects_incremental_output() {
+        let data = json!({
+            "type": "tool_execution_update",
+            "tool_call_id": "call-1",
+            "tool_name": "exec_command",
+            "partial_result": {"output": "first line\n"},
+        });
+        let update = runtime_event_session_update(&data).expect("tool projection");
+        let SessionUpdate::ToolCallUpdate(update) = update else {
+            panic!("expected ToolCallUpdate");
+        };
+        assert_eq!(update.tool_call_id.0.as_ref(), "call-1");
+        assert_eq!(update.status.value(), Some(&ToolCallStatus::InProgress));
+        assert_eq!(update.raw_output.value(), Some(&json!({"output": "first line\n"})));
     }
-    let offset = projection
-        .reasoning_offsets
-        .entry(block.id.clone())
-        .or_insert(0);
-    if *offset > text.len() {
-        *offset = 0;
-    }
-    let delta = text.get(*offset..)?.to_string();
-    *offset = text.len();
-    if delta.is_empty() { None } else { Some(delta) }
-}
 
-fn transcript_tool_title(block: &TranscriptBlock, tool_name: &str) -> String {
-    if let Some(title) = block
-        .title
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return title.to_string();
-    }
-    if tool_name == "exec_command"
-        && let Some(command) =
-            exec_command_arg(block.metadata.as_ref()).and_then(first_shell_command_line)
-    {
-        return format!("exec_command {command}");
-    }
-    tool_title(tool_name)
-}
+    #[test]
+    fn negotiated_terminal_output_emits_only_new_output_and_exit_metadata() {
+        let mut projection = AcpTurnProjection::new(true);
+        let start = projection
+            .runtime_tool_update(&json!({
+                "type": "tool_execution_start",
+                "tool_call_id": "call-1",
+                "tool_name": "exec_command",
+                "args": {"cmd": "printf hello"},
+            }))
+            .expect("start");
+        let update = projection
+            .runtime_tool_update(&json!({
+                "type": "tool_execution_update",
+                "tool_call_id": "call-1",
+                "tool_name": "exec_command",
+                "partial_result": {"output": "hello"},
+            }))
+            .expect("update");
+        let end = projection
+            .runtime_tool_update(&json!({
+                "type": "tool_execution_end",
+                "tool_call_id": "call-1",
+                "tool_name": "exec_command",
+                "result": {"output": "hello!", "exit_code": 0},
+                "outcome": "normal",
+            }))
+            .expect("end");
 
-fn transcript_tool_content(
-    block: &TranscriptBlock,
-    tool_name: &str,
-    _call_id: &str,
-    use_terminal_output: bool,
-) -> Vec<ToolCallContent> {
-    if tool_name == "exec_command"
-        && let Some(command) = exec_command_arg(block.metadata.as_ref())
-    {
-        let command_text = format!("$ {command}");
-        if use_terminal_output {
-            return vec![ToolCallContent::from(command_text)];
-        }
-        let mut text = command_text;
-        if let Some(output) = transcript_block_text(block).filter(|value| !value.trim().is_empty())
-        {
-            text.push_str("\n\n");
-            text.push_str(output);
-        }
-        return vec![ToolCallContent::from(text)];
-    }
-    transcript_block_text(block)
-        .filter(|text| !text.trim().is_empty())
-        .map(|text| vec![ToolCallContent::from(text.to_string())])
-        .unwrap_or_default()
-}
-
-fn transcript_block_text(block: &TranscriptBlock) -> Option<&str> {
-    block
-        .result
-        .as_ref()
-        .map(|result| result.content.as_str())
-        .or(block
-            .detail
-            .as_deref()
-            .or(block.body.as_deref())
-            .or(block.preview.as_deref()))
-}
-
-fn exec_command_arg(metadata: Option<&Value>) -> Option<&str> {
-    metadata?
-        .get("args")
-        .and_then(|args| args.get("cmd"))
-        .and_then(Value::as_str)
-}
-
-fn first_shell_command_line(text: &str) -> Option<&str> {
-    let mut first_non_empty = None;
-    for line in text.lines().map(str::trim) {
-        if line.is_empty() {
-            continue;
-        }
-        first_non_empty.get_or_insert(line);
-        if !line.starts_with('#') {
-            return Some(line);
-        }
-    }
-    first_non_empty
-}
-
-fn terminal_output_meta(
-    block: &TranscriptBlock,
-    call_id: &str,
-    projection: &mut AcpLiveProjection,
-) -> Option<Meta> {
-    let command = exec_command_arg(block.metadata.as_ref())?;
-    let first_update = !projection.terminal_offsets.contains_key(call_id);
-    let mut meta = Meta::new();
-    if first_update {
-        meta.insert(
-            "terminal_info".to_string(),
-            json!({
-                "terminal_id": call_id,
-                "command": command,
-            }),
+        let SessionUpdate::ToolCallUpdate(start) = start else {
+            panic!("expected start");
+        };
+        let SessionUpdate::ToolCallUpdate(update) = update else {
+            panic!("expected update");
+        };
+        let SessionUpdate::ToolCallUpdate(end) = end else {
+            panic!("expected end");
+        };
+        let start_meta = start.meta.value().expect("start meta");
+        assert_eq!(
+            start_meta["terminal_info"]["command"],
+            json!("printf hello")
         );
-    }
-
-    let output = transcript_block_text(block).unwrap_or_default();
-    let offset = projection
-        .terminal_offsets
-        .entry(call_id.to_string())
-        .or_insert(0);
-    if *offset > output.len() {
-        *offset = 0;
-    }
-    let mut data = String::new();
-    if first_update {
-        data.push_str("$ ");
-        data.push_str(command);
-        data.push('\n');
-    }
-    if let Some(delta) = output.get(*offset..) {
-        data.push_str(delta);
-    }
-    *offset = output.len();
-    if !data.is_empty() {
-        meta.insert(
-            "terminal_output".to_string(),
-            json!({
-                "terminal_id": call_id,
-                "data": data,
-            }),
+        assert_eq!(
+            start_meta["terminal_output"]["data"],
+            json!("$ printf hello\n")
         );
-    }
-    if matches!(
-        block.status,
-        TranscriptBlockStatus::Completed
-            | TranscriptBlockStatus::Failed
-            | TranscriptBlockStatus::Cancelled
-    ) {
-        meta.insert(
-            "terminal_exit".to_string(),
-            json!({
-                "terminal_id": call_id,
-                "exit_code": exec_exit_code(block.metadata.as_ref()),
-                "signal": null,
-            }),
+        assert_eq!(
+            update.meta.value().expect("update meta")["terminal_output"]["data"],
+            json!("hello")
         );
+        let end_meta = end.meta.value().expect("end meta");
+        assert_eq!(end_meta["terminal_output"]["data"], json!("!"));
+        assert_eq!(end_meta["terminal_exit"]["exit_code"], json!(0));
     }
-    if meta.is_empty() { None } else { Some(meta) }
-}
 
-fn exec_exit_code(metadata: Option<&Value>) -> Option<i64> {
-    metadata?
-        .get("result")
-        .and_then(|result| result.get("exit_code"))
-        .and_then(Value::as_i64)
-}
+    #[test]
+    fn completed_message_records_top_level_accounting() {
+        let mut usage = AcpUsageAccumulator::default();
+        record_completed_message_usage(
+            &mut usage,
+            json!({"role": "assistant"}),
+            Some(json!({"input_tokens": 4, "output_tokens": 3})),
+            Some(json!({"provider": "fake"})),
+            Some(json!({
+                "billable_input_tokens": 4,
+                "billable_output_tokens": 3,
+                "reported_total_tokens": 7,
+            })),
+        );
 
-fn transcript_tool_call_id(block: &TranscriptBlock) -> String {
-    block
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("tool_call_id"))
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .unwrap_or_else(|| {
-            block
-                .id
-                .rsplit_once("tool:")
-                .map(|(_, id)| id)
-                .unwrap_or(block.id.as_str())
-                .to_string()
-        })
-}
-
-fn transcript_tool_status(status: TranscriptBlockStatus) -> ToolCallStatus {
-    match status {
-        TranscriptBlockStatus::Pending => ToolCallStatus::Pending,
-        TranscriptBlockStatus::Running => ToolCallStatus::InProgress,
-        TranscriptBlockStatus::Completed | TranscriptBlockStatus::Info => ToolCallStatus::Completed,
-        TranscriptBlockStatus::Failed | TranscriptBlockStatus::Cancelled => ToolCallStatus::Failed,
-        TranscriptBlockStatus::NeedsInput => ToolCallStatus::Pending,
+        assert_eq!(usage.context_tokens_for_usage_update(), Some(7));
+        assert_eq!(usage.to_usage().expect("usage").total_tokens, 7);
     }
 }

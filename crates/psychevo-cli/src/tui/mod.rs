@@ -21,24 +21,19 @@ pub(crate) use crossterm::execute;
 pub(crate) use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-pub(crate) use psychevo_agent_core::{
+pub(crate) use psychevo::__agent_core::{
     PendingInputId, TerminalReason, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec,
 };
-pub(crate) use psychevo_ai::Outcome;
-pub(crate) use psychevo_gateway::{
-    Gateway, GatewayActionKind, GatewayActionOutcome, GatewayActivity, GatewayEvent,
-    GatewayImageInput, GatewayInputPart, GatewaySource, GatewayThreadSelector, GatewayTurnStatus,
-    ThreadCallerContext, ThreadEditableDraft, ThreadEditableDraftFidelity, ThreadEditableInputPart,
-    ThreadSurface, ThreadTurnIntent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
-    TranscriptEntry, TranscriptEntryRole,
-};
-pub(crate) use psychevo_runtime::state::*;
-pub(crate) use psychevo_runtime::{
-    accounting::effective_usage_total, agents::AgentCatalog, agents::AgentDiscoveryOptions,
-    agents::AgentEntrypoint, agents::AgentSource, agents::LoadedMainAgent,
-    agents::MAX_AGENT_SPAWN_DEPTH_CAP, agents::MAX_TEAM_PARALLEL_AGENTS_CAP,
-    agents::SESSION_MAIN_AGENT_METADATA_KEY, agents::agent_spawn_paused,
-    agents::agent_status_value, agents::discover_agent_teams_with_catalog, agents::discover_agents,
+pub(crate) use psychevo::__ai::Outcome;
+pub(crate) use psychevo::state::*;
+pub(crate) use psychevo::{
+    Application, Client as FrameworkClient, StartThreadRequest, ThreadListQuery, TurnOutcome,
+    TurnRequest, TurnResult, accounting::effective_usage_total, agents::AgentCatalog,
+    agents::AgentDiscoveryOptions, agents::AgentEntrypoint, agents::AgentSource,
+    agents::LoadedMainAgent, agents::MAX_AGENT_SPAWN_DEPTH_CAP,
+    agents::MAX_TEAM_PARALLEL_AGENTS_CAP, agents::SESSION_MAIN_AGENT_METADATA_KEY,
+    agents::agent_spawn_paused, agents::agent_status_value,
+    agents::discover_agent_teams_with_catalog, agents::discover_agents,
     agents::main_agent_default_metadata, agents::main_agent_from_session_metadata,
     agents::main_agent_metadata, agents::resolve_agent_definition,
     agents::resolve_agent_team_definition, agents::session_base_agent_name_from_metadata,
@@ -77,21 +72,27 @@ pub(crate) use psychevo_runtime::{
     tool_argument_display::WriteArgumentPreviewTracker,
     tool_argument_display::write_argument_preview_from_args,
     tool_result_display::decode_persisted_tool_result_for_display, types::AgentSpawnOptions,
-    types::ClarifyAnswer, types::ClarifyQuestion, types::ClarifyRequestEvent,
-    types::ClarifyResolvedEvent, types::ClarifyResolvedReason, types::ClarifyResponse,
-    types::ClarifyResult, types::ConfigScope, types::ConfiguredModel, types::ImageInput,
-    types::ModelCatalogEntry, types::ModelCatalogProvider, types::ModelMetadataCacheTarget,
-    types::PermissionApprovalDecision, types::PermissionApprovalOutcome,
-    types::PermissionApprovalRequest, types::PermissionMode, types::PromptAttachmentDisplay,
-    types::PromptDisplayMetadata, types::ReloadContextOptions, types::RunControlHandle,
-    types::RunMode, types::RunOptions, types::RunStreamEvent, types::RunStreamSink,
-    types::ScopedCustomProviderInput, types::SessionSummary, types::SessionUndoOptions,
-    types::SessionUsageOptions, types::SessionUsageSummary, types::StatsOptions,
-    types::TUI_DISPLAY_METADATA_KEY, types::TuiMessageSummary, types::USER_SHELL_METADATA_KEY,
-    types::UserShellContextOptions, types::UserShellOptions, types::run_control,
-    undo::redo_session, undo::undo_session,
+    types::ApprovalHandler, types::ClarifyAnswer, types::ClarifyQuestion,
+    types::ClarifyRequestEvent, types::ClarifyResolvedEvent, types::ClarifyResolvedReason,
+    types::ClarifyResponse, types::ClarifyResult, types::ConfigScope, types::ConfiguredModel,
+    types::ImageInput, types::ModelCatalogEntry, types::ModelCatalogProvider,
+    types::ModelMetadataCacheTarget, types::PermissionApprovalDecision,
+    types::PermissionApprovalOutcome, types::PermissionApprovalRequest, types::PermissionMode,
+    types::PromptAttachmentDisplay, types::PromptDisplayMetadata, types::ReloadContextOptions,
+    types::RunControlHandle, types::RunMode, types::RunOptions, types::RunStreamEvent,
+    types::RunStreamSink, types::ScopedCustomProviderInput, types::SessionSummary,
+    types::SessionUndoOptions, types::SessionUsageOptions, types::SessionUsageSummary,
+    types::StatsOptions, types::TUI_DISPLAY_METADATA_KEY, types::TuiMessageSummary,
+    types::USER_SHELL_METADATA_KEY, types::UserShellContextOptions, types::UserShellOptions,
+    types::run_control, undo::redo_session, undo::undo_session,
     user_shell::run_user_shell_command_streaming_controlled, workspace_diff::WorkspaceDiff,
     workspace_diff::collect_workspace_diff,
+};
+pub(crate) use psychevo_gateway::{
+    Gateway, GatewayActionKind, GatewayActionOutcome, GatewayActivity, GatewayEvent,
+    GatewayImageInput, GatewaySource, GatewayThreadSelector, GatewayTurnStatus,
+    ThreadEditableDraft, ThreadEditableDraftFidelity, ThreadEditableInputPart, TranscriptBlock,
+    TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole,
 };
 pub(crate) use ratatui::Frame;
 pub(crate) use ratatui::Terminal;
@@ -127,7 +128,7 @@ pub(crate) use crate::env::{
     ensure_home_initialized, env_path, env_value, inherited_env, resolve_explicit_path,
     resolve_psychevo_home, resolve_state_db,
 };
-pub(crate) use psychevo_runtime::command_registry::{mission_prompt_marker, parse_mission_args};
+pub(crate) use psychevo::command_registry::{mission_prompt_marker, parse_mission_args};
 
 pub(crate) const TUI_CONTINUE_SESSION_SOURCES: &[&str] = &["run", "tui"];
 pub(crate) const TUI_INTERNAL_SESSION_SOURCES: &[&str] = &[TUI_SIDE_CONVERSATION_SESSION_SOURCE];
@@ -151,6 +152,16 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     let config_path = env_path("PSYCHEVO_CONFIG", &env_map, &cwd)?;
     let db_path = resolve_state_db(&env_map, &home, &cwd)?;
     let state_runtime = StateRuntime::open(&db_path).await?;
+    let gateway = Gateway::new(state_runtime.clone());
+    let application = Application::__from_open_state(
+        home.clone(),
+        config_path.clone(),
+        state_runtime.clone(),
+        Arc::new(psychevo_gateway::GatewayAgentSessionAdapter::new(
+            gateway.clone(),
+        )),
+    );
+    let framework = application.client();
     let cwd = match &args.cd {
         Some(cd) => resolve_explicit_path(cd, &env_map, &cwd)?,
         None => cwd,
@@ -205,7 +216,6 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
 
     let color = io::stdout().is_terminal() && env_value("NO_COLOR", &env_map).is_none();
     let (clipboard_result_tx, clipboard_result_rx) = std::sync::mpsc::channel();
-    let gateway = Gateway::new(state_runtime.clone());
     let last_gateway_live_event_seq = state_runtime
         .latest_gateway_live_event_seq()
         .await
@@ -218,6 +228,8 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
         model_state_path,
         model_state,
         state_runtime,
+        application,
+        framework,
         gateway,
         db_path,
         config_path,
@@ -269,12 +281,15 @@ pub(crate) async fn run_tui_command(args: &TuiArgs) -> Result<ExitCode> {
     app.refresh_selected_model();
     app.refresh_current_session_title().await?;
     app.refresh_current_session_agent().await?;
+    let application = app.application.clone();
     let run_result = app.run(args.message.join(" ")).await;
+    let shutdown_result = application.shutdown().await;
     let profile_result = app.journey_profile.finish();
-    match (run_result, profile_result) {
-        (Err(err), _) => Err(err),
-        (Ok(_), Err(err)) => Err(err.into()),
-        (Ok(exit_code), Ok(())) => Ok(exit_code),
+    match (run_result, shutdown_result, profile_result) {
+        (Err(err), _, _) => Err(err),
+        (Ok(_), Err(err), _) => Err(err.into()),
+        (Ok(_), Ok(()), Err(err)) => Err(err.into()),
+        (Ok(exit_code), Ok(()), Ok(())) => Ok(exit_code),
     }
 }
 

@@ -314,7 +314,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/session.md".to_string()),
             format: SessionExportFormat::Markdown,
-            include: psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
+            include: psychevo::session_export::SessionExportIncludeSet::default_for(
                 SessionArtifactKind::Export,
             ),
         }),
@@ -338,7 +338,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/session.json".to_string()),
             format: SessionExportFormat::Json,
-            include: psychevo_runtime::session_export::SessionExportIncludeSet::parse(
+            include: psychevo::session_export::SessionExportIncludeSet::parse(
                 "last-provider-request",
                 SessionArtifactKind::Export,
             )
@@ -368,7 +368,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         SlashCommand::Export(crate::tui::slash::TuiExportOptions {
             path: Some("exports/response.json".to_string()),
             format: SessionExportFormat::Json,
-            include: psychevo_runtime::session_export::SessionExportIncludeSet::parse(
+            include: psychevo::session_export::SessionExportIncludeSet::parse(
                 "last-provider-response",
                 SessionArtifactKind::Export,
             )
@@ -403,7 +403,7 @@ pub(crate) async fn fullscreen_export_and_share_write_artifacts() {
         &mut ui,
         SlashCommand::Share(crate::tui::slash::TuiShareOptions {
             path: Some("share.md".to_string()),
-            include: psychevo_runtime::session_export::SessionExportIncludeSet::default_for(
+            include: psychevo::session_export::SessionExportIncludeSet::default_for(
                 SessionArtifactKind::Share,
             ),
         }),
@@ -458,10 +458,10 @@ pub(crate) async fn dynamic_slash_omits_disabled_hidden_and_collision_skills() {
         "---\nname: same\ndescription: Project same\n---\n\nbody\n",
     )
     .expect("project same");
-    psychevo_runtime::skills::set_skill_enabled(
+    psychevo::skills::set_skill_enabled(
         &app.home,
         &app.cwd,
-        psychevo_runtime::skills::SkillTarget::Global,
+        psychevo::skills::SkillTarget::Global,
         "disabled",
         false,
     )

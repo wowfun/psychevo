@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo_runtime::{
+use psychevo::{
     config::channel_list_value, config::channel_summary_value,
     config::resolve_default_workspace_cwd, paths::canonicalize_cwd,
 };

@@ -7,7 +7,7 @@ impl PsychevoAcpAgent {
             return Ok("no runtime session yet".to_string());
         };
         let result =
-            psychevo_runtime::run::reload_session_context(psychevo_runtime::types::ReloadContextOptions {
+            psychevo::run::reload_session_context(psychevo::types::ReloadContextOptions {
                 state: self.state.clone(),
                 session: runtime_session_id,
                 config_path: self.options.config_path.clone(),
@@ -85,9 +85,9 @@ impl PsychevoAcpAgent {
             }
             return Ok(format!("No session matched `{reference}`."));
         };
-        let store = self.state.clone();
-        store
-            .resume_session(&target.id)
+        let thread = self
+            .framework
+            .resume_thread(target.id.clone())
             .await
             .map_err(|_| Error::resource_not_found(Some(target.id.clone())))?;
         let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
@@ -95,6 +95,7 @@ impl PsychevoAcpAgent {
             return Err(Error::resource_not_found(Some(session_id.to_string())));
         };
         current.runtime_session_id = Some(target.id.clone());
+        current.thread = thread;
         current.queued_prompts.clear();
         current.pending_steers.clear();
         Ok(format!(
@@ -346,13 +347,13 @@ impl PsychevoAcpAgent {
             .cloned();
         let Some(session) = session else {
             return available_commands_from(
-                psychevo_runtime::command_registry::AvailableSlashCommands {
+                psychevo::command_registry::AvailableSlashCommands {
                     commands: Vec::new(),
                     hidden_dynamic: 0,
                 },
             );
         };
-        let active_turn = session.control.is_some();
+        let active_turn = session.turn.is_some();
         available_commands_from(self.available_commands_for_session_state(&session, active_turn))
     }
 
@@ -360,8 +361,8 @@ impl PsychevoAcpAgent {
         &self,
         session: &AcpSession,
         active_turn: bool,
-    ) -> psychevo_runtime::command_registry::AvailableSlashCommands {
-        psychevo_runtime::command_registry::available_slash_commands_for_surface(
+    ) -> psychevo::command_registry::AvailableSlashCommands {
+        psychevo::command_registry::available_slash_commands_for_surface(
             acp_command_capabilities(),
             active_turn,
             &self.dynamic_slash_commands(session),
@@ -372,14 +373,14 @@ impl PsychevoAcpAgent {
     pub(crate) fn dynamic_slash_commands(
         &self,
         session: &AcpSession,
-    ) -> Vec<psychevo_runtime::command_registry::DynamicSlashCommand> {
+    ) -> Vec<psychevo::command_registry::DynamicSlashCommand> {
         let mut commands = Vec::new();
         if let Ok(bundles) = list_skill_bundles(&self.options.home, &session.cwd) {
             for bundle in bundles {
-                commands.push(psychevo_runtime::command_registry::DynamicSlashCommand {
+                commands.push(psychevo::command_registry::DynamicSlashCommand {
                     name: bundle.slug.clone(),
                     summary: bundle.description,
-                    prompt: psychevo_runtime::command_registry::skill_prompt_marker(
+                    prompt: psychevo::command_registry::skill_prompt_marker(
                         &bundle.slug,
                         "",
                     ),
@@ -396,10 +397,10 @@ impl PsychevoAcpAgent {
             no_skills: false,
         }) {
             for skill in catalog.skills {
-                commands.push(psychevo_runtime::command_registry::DynamicSlashCommand {
+                commands.push(psychevo::command_registry::DynamicSlashCommand {
                     name: skill.name.clone(),
                     summary: skill.description,
-                    prompt: psychevo_runtime::command_registry::skill_prompt_marker(
+                    prompt: psychevo::command_registry::skill_prompt_marker(
                         &skill.name,
                         "",
                     ),
@@ -432,12 +433,12 @@ impl PsychevoAcpAgent {
         let Some(session) = sessions.get_mut(&session_id.to_string()) else {
             return 0;
         };
-        let control = session.control.clone();
+        let turn = session.turn.clone();
         let mut canceled = 0usize;
         for id in session.pending_steers.drain(..) {
-            if control
+            if turn
                 .as_ref()
-                .is_some_and(|control| control.cancel_pending_user_message(id))
+                .is_some_and(|turn| turn.__cancel_steer(id))
             {
                 canceled += 1;
             }
@@ -458,10 +459,10 @@ impl PsychevoAcpAgent {
         let Some(session) = sessions.get_mut(&session_id.to_string()) else {
             return Err(Error::resource_not_found(Some(session_id.to_string())));
         };
-        let Some(control) = session.control.clone() else {
+        let Some(turn) = session.turn.clone() else {
             return Ok(SlashPromptAction::RunPrompt(prompt));
         };
-        let Some(id) = control.steer_user_message(user_text_message(&prompt)) else {
+        let Some(id) = turn.__steer(&prompt) else {
             session.queued_prompts.push_back(prompt.clone());
             return Ok(send_slash_text(
                 cx,

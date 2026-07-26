@@ -32,7 +32,7 @@ impl Gateway {
     async fn claim_durable_gateway_activity(
         &self,
         claim: DurableGatewayActivityClaim<'_>,
-    ) -> psychevo_runtime::Result<DurableGatewayActivity> {
+    ) -> psychevo::Result<DurableGatewayActivity> {
         let record = self
             .state
 
@@ -551,7 +551,7 @@ impl Gateway {
     pub async fn takeover_turn(
         &self,
         selector: GatewayThreadSelector,
-    ) -> psychevo_runtime::Result<(bool, GatewayActivity)> {
+    ) -> psychevo::Result<(bool, GatewayActivity)> {
         let now = gateway_now_ms();
         for key in self.selector_keys(&selector) {
             let Some(record) = self.durable_activity_for_key(&key).await? else {
@@ -938,7 +938,7 @@ fn permission_decision_label(decision: &PermissionApprovalDecision) -> &'static 
 
 fn permission_decision_from_label(
     label: &str,
-    filesystem_scope: Option<psychevo_runtime::types::FilesystemApprovalScope>,
+    filesystem_scope: Option<psychevo::types::FilesystemApprovalScope>,
 ) -> Option<PermissionApprovalDecision> {
     match label {
         "allow_once" => Some(PermissionApprovalDecision::allow_once()),
@@ -965,7 +965,7 @@ mod event_ingress_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use psychevo_runtime::state::StateRuntime;
+    use psychevo::state::StateRuntime;
 
     use super::*;
 

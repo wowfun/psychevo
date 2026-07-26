@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn requested_peer_mcp_server_names(
     peer: &ResolvedPeerTurn,
-) -> psychevo_runtime::Result<std::collections::BTreeSet<String>> {
+) -> psychevo::Result<std::collections::BTreeSet<String>> {
     for name in &peer.agent.tool_policy.mcp_servers {
         if !peer.backend.mcp_servers.contains(name) {
             return Err(crate::agent_session_error(
@@ -23,9 +23,9 @@ pub(super) fn requested_peer_mcp_server_names(
 
 pub(super) fn acp_mcp_server_declarations(
     peer: &ResolvedPeerTurn,
-    resolved_servers: &[psychevo_runtime::types::ResolvedMcpServerInput],
+    resolved_servers: &[psychevo::types::ResolvedMcpServerInput],
     capabilities: &AgentCapabilities,
-) -> psychevo_runtime::Result<Vec<McpServer>> {
+) -> psychevo::Result<Vec<McpServer>> {
     resolved_servers
         .iter()
         .map(|resolved| {
@@ -78,7 +78,7 @@ pub(super) fn acp_mcp_server_declarations(
                     let mut wire_headers = headers
                         .iter()
                         .map(|(name, value)| acp_mcp_http_header(&server.name, name, value))
-                        .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+                        .collect::<psychevo::Result<Vec<_>>>()?;
                     if let Some(token) = resolved.bearer_token.as_deref() {
                         if token.contains(['\r', '\n']) {
                             return Err(Error::Message(format!(
@@ -109,8 +109,8 @@ pub(super) fn acp_mcp_server_declarations(
 }
 
 fn validate_portable_acp_mcp_policy(
-    server: &psychevo_runtime::types::McpServerInput,
-) -> psychevo_runtime::Result<()> {
+    server: &psychevo::types::McpServerInput,
+) -> psychevo::Result<()> {
     let policy = &server.policy;
     if policy.required
         || policy.enabled_tools.is_some()
@@ -127,11 +127,7 @@ fn validate_portable_acp_mcp_policy(
     Ok(())
 }
 
-fn acp_mcp_http_header(
-    server_name: &str,
-    name: &str,
-    value: &str,
-) -> psychevo_runtime::Result<HttpHeader> {
+fn acp_mcp_http_header(server_name: &str, name: &str, value: &str) -> psychevo::Result<HttpHeader> {
     let valid_name = !name.is_empty()
         && name.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()

@@ -64,7 +64,7 @@ impl TuiApp {
 
     pub(crate) fn sandbox_status_text(&self) -> Result<String> {
         let options = self.run_options(String::new());
-        Ok(psychevo_runtime::sandbox::sandbox_status_text(
+        Ok(psychevo::sandbox::sandbox_status_text(
             &options,
             self.current_mode,
         )?)
@@ -291,7 +291,7 @@ impl TuiApp {
     pub(crate) async fn reload_context_for_current_session(
         &self,
         ui: &FullscreenUi<'_>,
-    ) -> Result<psychevo_runtime::types::ReloadContextResult> {
+    ) -> Result<psychevo::types::ReloadContextResult> {
         if ui.running.is_some() {
             return Err(anyhow!("finish the current turn before reloading context"));
         }
@@ -325,39 +325,31 @@ impl TuiApp {
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
             writeln!(stdout, "Prompt: {prompt}")?;
         }
-        let turn_for_sink = Arc::clone(&turn);
-        let stdout_for_sink = Arc::clone(&stdout);
-        let event_observer = move |event| {
-            let mut turn = turn_for_sink.lock().expect("turn lock poisoned");
-            let mut stdout = stdout_for_sink.lock().expect("stdout lock poisoned");
-            let _ = turn.render_gateway_event(&event, &mut *stdout);
-        };
-        let (mut caller, mut intent) = self.thread_turn_request(prompt);
-        let source = self.gateway_source();
-        let bind_source = self.canonical_gateway_source();
-        let reset_source_binding = self.force_new_once && self.current_session.is_none();
-        intent.source = Some(source);
-        intent.bind_source = Some(bind_source);
-        intent.reset_source_binding = reset_source_binding;
-        caller.observe_gateway_events(event_observer);
-        let result = self
-            .gateway
-            .start_turn(caller, intent)
-            .await?
-            .wait()
-            .await?
-            .result;
+        let turn_for_events = Arc::clone(&turn);
+        let stdout_for_events = Arc::clone(&stdout);
+        let mut request = self.framework_turn_request_with_images(prompt, Vec::new());
+        request.__set_adapter_options(psychevo::AdapterTurnOptions {
+            snapshot_root: Some(self.home.join("snapshots")),
+            run_stream_observer: Some(Arc::new(move |event| {
+                let mut turn = turn_for_events.lock().expect("turn lock poisoned");
+                let mut stdout = stdout_for_events.lock().expect("stdout lock poisoned");
+                let _ = turn.render_event(&event, &mut *stdout);
+            })),
+            ..Default::default()
+        });
+        let thread = self.framework_thread().await?;
+        let result = thread.start_turn(request).await?.wait().await?;
         self.last_context_snapshot = result.context_snapshot.clone();
         {
             let mut turn = turn.lock().expect("turn lock poisoned");
             let mut stdout = stdout.lock().expect("stdout lock poisoned");
             turn.finish(&mut *stdout)?;
         }
-        self.current_session = Some(result.session_id);
+        self.current_session = Some(result.thread_id);
         self.reset_live_agent_reload_poll();
         self.refresh_current_session_title().await?;
         self.clear_new_session_draft();
-        let success = result.outcome == Outcome::Normal && result.tool_failures == 0;
+        let success = result.outcome == TurnOutcome::Completed && result.tool_failures == 0;
         if !success {
             self.had_error = true;
         }

@@ -4,7 +4,7 @@ pub(super) async fn acp_prompt_blocks(
     peer: &ResolvedPeerTurn,
     turn: &AcpPeerTurnContext,
     capabilities: &AgentCapabilities,
-) -> psychevo_runtime::Result<Vec<ContentBlock>> {
+) -> psychevo::Result<Vec<ContentBlock>> {
     if !turn.images.is_empty() && !capabilities.prompt_capabilities.image {
         return Err(Error::Message(format!(
             "ACP peer `{}` does not advertise image prompt capability",
@@ -135,7 +135,7 @@ pub(super) async fn acp_prompt_blocks(
 async fn acp_image_block(
     image: &ImageInput,
     turn: &AcpPeerTurnContext,
-) -> psychevo_runtime::Result<ContentBlock> {
+) -> psychevo::Result<ContentBlock> {
     let (source, uri) = match image {
         ImageInput::LocalPath(path) => (path.display().to_string(), None),
         ImageInput::ImageUrl(url) => (

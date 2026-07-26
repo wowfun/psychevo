@@ -32,6 +32,92 @@ pub(crate) async fn clarify_request_opens_bottom_panel_and_renders_options() {
 }
 
 #[tokio::test]
+pub(crate) async fn foreground_framework_clarify_answer_uses_running_turn_control() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let (control, _) = run_control();
+    let (_live_tx, live_rx) = mpsc::unbounded_channel();
+    let running_task = tokio::spawn(async {
+        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+    });
+    ui.running = Some(RunningTurn {
+        session_id: None,
+        control: control.clone(),
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(live_rx),
+        task: RunningTask::Agent(running_task),
+    });
+    let (stream_tx, mut stream_rx) = mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        let _ = stream_tx.send(event);
+    });
+    let RunStreamEvent::ClarifyRequest(mut request) = clarify_request_event() else {
+        panic!("clarify request");
+    };
+    request.questions.truncate(1);
+    let interaction =
+        tokio::spawn(async move { control.request_clarification(request, stream, None).await });
+    let requested = stream_rx.recv().await.expect("clarify requested event");
+    ui.apply_stream_event(requested, true, false);
+
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .expect("answer clarify");
+
+    let psychevo::types::ClarifyInteractionOutcome::Answered(response) =
+        interaction.await.expect("clarify interaction")
+    else {
+        panic!("clarify should be answered");
+    };
+    assert_eq!(response.answers.len(), 1);
+    assert_eq!(response.answers[0].answers, ["Fast (Recommended)"]);
+    assert!(ui.bottom_panel.is_none());
+}
+
+#[tokio::test]
+pub(crate) async fn foreground_framework_clarify_cancel_uses_running_turn_control() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    let (control, _) = run_control();
+    let (_live_tx, live_rx) = mpsc::unbounded_channel();
+    let running_task = tokio::spawn(async {
+        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+    });
+    ui.running = Some(RunningTurn {
+        session_id: None,
+        control: control.clone(),
+        selector: None,
+        turn_id: None,
+        events: RunningTurnEvents::Runtime(live_rx),
+        task: RunningTask::Agent(running_task),
+    });
+    let (stream_tx, mut stream_rx) = mpsc::unbounded_channel();
+    let stream: RunStreamSink = Arc::new(move |event| {
+        let _ = stream_tx.send(event);
+    });
+    let RunStreamEvent::ClarifyRequest(request) = clarify_request_event() else {
+        panic!("clarify request");
+    };
+    let interaction =
+        tokio::spawn(async move { control.request_clarification(request, stream, None).await });
+    let requested = stream_rx.recv().await.expect("clarify requested event");
+    ui.apply_stream_event(requested, true, false);
+
+    app.handle_bottom_panel_key(&mut ui, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .expect("cancel clarify");
+
+    assert_eq!(
+        interaction.await.expect("clarify interaction"),
+        psychevo::types::ClarifyInteractionOutcome::Cancelled
+    );
+    assert!(ui.bottom_panel.is_none());
+}
+
+#[tokio::test]
 pub(crate) async fn clarify_panel_supports_other_text_and_optional_note_modes() {
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
@@ -275,7 +361,7 @@ pub(crate) async fn clarify_resolved_restores_previous_bottom_panel() {
     ui.apply_stream_event(
         RunStreamEvent::ClarifyResolved(ClarifyResolvedEvent {
             call_id: "call_clarify".to_string(),
-            reason: psychevo_runtime::types::ClarifyResolvedReason::TimedOut,
+            reason: psychevo::types::ClarifyResolvedReason::TimedOut,
         }),
         true,
         false,
@@ -594,8 +680,8 @@ pub(crate) async fn filesystem_approval_expands_before_selecting_a_canonical_sco
                 matched_rule: None,
                 suggested_rule: Some("filesystem:linked/result.txt".to_string()),
                 allow_always: false,
-                filesystem: Some(psychevo_runtime::types::FilesystemApprovalRequest {
-                    targets: vec![psychevo_runtime::types::FilesystemApprovalTarget {
+                filesystem: Some(psychevo::types::FilesystemApprovalRequest {
+                    targets: vec![psychevo::types::FilesystemApprovalTarget {
                         requested_path: "linked/result.txt".to_string(),
                         resolved_path: "/tmp/shared/result.txt".to_string(),
                     }],
@@ -678,8 +764,8 @@ pub(crate) async fn filesystem_scope_keyboard_navigation_keeps_selection_visible
             matched_rule: None,
             suggested_rule: None,
             allow_always: false,
-            filesystem: Some(psychevo_runtime::types::FilesystemApprovalRequest {
-                targets: vec![psychevo_runtime::types::FilesystemApprovalTarget {
+            filesystem: Some(psychevo::types::FilesystemApprovalRequest {
+                targets: vec![psychevo::types::FilesystemApprovalTarget {
                     requested_path: "linked/result.txt".to_string(),
                     resolved_path: "/tmp/a/b/c/d/e/f/result.txt".to_string(),
                 }],
@@ -813,11 +899,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "Which mode should we use?".to_string(),
             options: vec![
-                psychevo_runtime::types::ClarifyQuestionOption {
+                psychevo::types::ClarifyQuestionOption {
                     label: "Fast (Recommended)".to_string(),
                     description: "Prioritize speed".to_string(),
                 },
-                psychevo_runtime::types::ClarifyQuestionOption {
+                psychevo::types::ClarifyQuestionOption {
                     label: "Careful".to_string(),
                     description: "Prioritize review".to_string(),
                 },
@@ -830,11 +916,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "How much detail should the answer include?".to_string(),
             options: vec![
-                psychevo_runtime::types::ClarifyQuestionOption {
+                psychevo::types::ClarifyQuestionOption {
                     label: "Brief".to_string(),
                     description: "Keep it concise".to_string(),
                 },
-                psychevo_runtime::types::ClarifyQuestionOption {
+                psychevo::types::ClarifyQuestionOption {
                     label: "Deep".to_string(),
                     description: "Cover tradeoffs".to_string(),
                 },
@@ -847,11 +933,11 @@ pub(crate) fn clarify_questions() -> Vec<ClarifyQuestion> {
             header: String::new(),
             question: "Which output format should be used?".to_string(),
             options: vec![
-                psychevo_runtime::types::ClarifyQuestionOption {
+                psychevo::types::ClarifyQuestionOption {
                     label: "Markdown".to_string(),
                     description: "Use prose and bullets".to_string(),
                 },
-                psychevo_runtime::types::ClarifyQuestionOption {
+                psychevo::types::ClarifyQuestionOption {
                     label: "JSON".to_string(),
                     description: "Use structured data".to_string(),
                 },

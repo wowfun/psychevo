@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use clap::CommandFactory;
-use psychevo_runtime::{
+use psychevo::{
     skills::InstallOptions, skills::ListSkillsOptions, skills::SaveSkillBundleOptions,
     skills::SkillBundle, skills::SkillCatalog, skills::SkillDiscoveryOptions, skills::SkillTarget,
     skills::delete_skill_bundle, skills::discover_skills, skills::install_skill,
@@ -216,7 +216,7 @@ pub(crate) fn audit_skills(
                 scan_skill_path(&skill.base_dir)
                     .map(|scan| json!({"name": skill.name, "path": skill.base_dir, "scan": scan}))
             })
-            .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+            .collect::<psychevo::Result<Vec<_>>>()?;
         json!({"success": true, "scans": scans})
     };
     print_value(value, args.json)
@@ -240,7 +240,7 @@ pub(crate) fn publish_skill(
 ) -> Result<()> {
     let path = resolve_explicit_path(&args.path, env_map, cwd)?;
     let scan = scan_skill_path(&path)?;
-    if scan.verdict == psychevo_runtime::skills::ScanVerdict::Dangerous {
+    if scan.verdict == psychevo::skills::ScanVerdict::Dangerous {
         return Err(anyhow!(
             "cannot publish a skill with dangerous scanner verdict"
         ));

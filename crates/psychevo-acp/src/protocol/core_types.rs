@@ -1,7 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
-#[cfg(test)]
 pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdate> {
     let event_type = value.get("type").and_then(Value::as_str)?;
     let update = match event_type {
@@ -43,6 +42,31 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
             }
             SessionUpdate::ToolCallUpdate(tool_call)
         }
+        "tool_execution_update" => {
+            let call_id = value
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            let tool_name = value
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
+            let partial_result = value.get("partial_result").cloned();
+            let content = partial_result
+                .as_ref()
+                .map(compact_tool_result_text)
+                .filter(|text| !text.is_empty())
+                .map(|text| vec![ToolCallContent::from(text)])
+                .unwrap_or_default();
+            SessionUpdate::ToolCallUpdate(
+                ToolCallUpdate::new(call_id.to_string())
+                    .title(tool_title(tool_name))
+                    .kind(tool_kind(tool_name))
+                    .status(ToolCallStatus::InProgress)
+                    .content(content)
+                    .raw_output(partial_result),
+            )
+        }
         "tool_execution_end" => {
             let call_id = value
                 .get("tool_call_id")
@@ -82,7 +106,6 @@ pub(crate) fn runtime_event_session_update(value: &Value) -> Option<SessionUpdat
     Some(update)
 }
 
-#[cfg(test)]
 pub(crate) fn tool_timing_meta(
     field_name: &str,
     field_value: Option<Value>,
@@ -91,7 +114,7 @@ pub(crate) fn tool_timing_meta(
     let mut timing = serde_json::Map::new();
     timing.insert(
         "source".to_string(),
-        Value::String("psychevo_runtime".to_string()),
+        Value::String("psychevo".to_string()),
     );
     timing.insert(field_name.to_string(), field_value);
     let mut psychevo = serde_json::Map::new();
@@ -101,7 +124,6 @@ pub(crate) fn tool_timing_meta(
     Some(meta)
 }
 
-#[cfg(test)]
 pub(crate) fn tool_call_pending_raw_input(value: &Value) -> Value {
     let arguments_json = value
         .get("arguments_json")
@@ -800,7 +822,6 @@ pub(crate) fn tool_kind(tool_name: &str) -> ToolKind {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn compact_tool_result_text(value: &Value) -> String {
     value
         .get("model_content")
@@ -810,12 +831,12 @@ pub(crate) fn compact_tool_result_text(value: &Value) -> String {
         .unwrap_or_else(|| serde_json::to_string(value).unwrap_or_default())
 }
 
-pub(crate) fn stop_reason(outcome: psychevo_ai::Outcome) -> StopReason {
+pub(crate) fn stop_reason(outcome: psychevo::TurnOutcome) -> StopReason {
     match outcome {
-        psychevo_ai::Outcome::Normal => StopReason::EndTurn,
-        psychevo_ai::Outcome::Aborted => StopReason::Cancelled,
-        psychevo_ai::Outcome::Stopped => StopReason::EndTurn,
-        psychevo_ai::Outcome::Failed => StopReason::Refusal,
+        psychevo::TurnOutcome::Completed => StopReason::EndTurn,
+        psychevo::TurnOutcome::Interrupted => StopReason::Cancelled,
+        psychevo::TurnOutcome::Stopped => StopReason::EndTurn,
+        psychevo::TurnOutcome::Failed => StopReason::Refusal,
     }
 }
 

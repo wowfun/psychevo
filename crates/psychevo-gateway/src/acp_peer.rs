@@ -37,9 +37,9 @@ use agent_client_protocol::{
 use agent_client_protocol_schema::v1::InitializeResponse;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use futures::{StreamExt, channel::mpsc};
-use psychevo_agent_core::{AssistantBlock, Message, ToolCallBlock, UserContentBlock};
-use psychevo_ai::{AbortSignal, Outcome};
-use psychevo_runtime::{
+use psychevo::__agent_core::{AssistantBlock, Message, ToolCallBlock, UserContentBlock};
+use psychevo::__ai::{AbortSignal, Outcome};
+use psychevo::{
     Error, agents::AgentDefinition, extensions::resolve_mcp_server_handoffs,
     host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
     host_paths::resolve_executable_path, media::resolve_explicit_image_source,
@@ -69,7 +69,7 @@ struct AcpBackendLaunch {
     platform: HostPlatform,
 }
 
-fn acp_backend_command_text(peer: &ResolvedPeerTurn) -> psychevo_runtime::Result<&str> {
+fn acp_backend_command_text(peer: &ResolvedPeerTurn) -> psychevo::Result<&str> {
     peer.backend
         .command
         .as_deref()
@@ -110,7 +110,7 @@ fn apply_managed_codex_default_auth(backend_id: &str, env: &mut BTreeMap<String,
 fn resolve_acp_backend_launch(
     peer: &ResolvedPeerTurn,
     invocation_cwd: &Path,
-) -> psychevo_runtime::Result<AcpBackendLaunch> {
+) -> psychevo::Result<AcpBackendLaunch> {
     resolve_acp_backend_launch_for_platform(peer, invocation_cwd, HostPlatform::current())
 }
 
@@ -118,7 +118,7 @@ fn resolve_acp_backend_launch_for_platform(
     peer: &ResolvedPeerTurn,
     invocation_cwd: &Path,
     platform: HostPlatform,
-) -> psychevo_runtime::Result<AcpBackendLaunch> {
+) -> psychevo::Result<AcpBackendLaunch> {
     let command = acp_backend_command_text(peer)?;
     let cwd = backend_cwd(&peer.backend.cwd, invocation_cwd);
     let env = acp_backend_effective_env(peer);
@@ -152,14 +152,14 @@ fn resolve_acp_backend_launch_for_platform(
 fn acp_backend_command_from_launch(
     peer: &ResolvedPeerTurn,
     launch: &AcpBackendLaunch,
-) -> psychevo_runtime::Result<Command> {
+) -> psychevo::Result<Command> {
     let args = peer
         .backend
         .args
         .iter()
         .map(OsString::from)
         .collect::<Vec<_>>();
-    let mut command = psychevo_runtime::process_env::tokio_host_process_command(
+    let mut command = psychevo::process_env::tokio_host_process_command(
         &launch.program,
         &args,
         launch.platform,
@@ -171,10 +171,10 @@ fn acp_backend_command_from_launch(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let _ = psychevo_runtime::process_env::apply_tokio_process_env(
+    let _ = psychevo::process_env::apply_tokio_process_env(
         &mut command,
         &launch.env,
-        psychevo_runtime::process_env::ProcessEnvOptions::new(&[]),
+        psychevo::process_env::ProcessEnvOptions::new(&[]),
     );
     Ok(command)
 }
@@ -182,7 +182,7 @@ fn acp_backend_command_from_launch(
 fn acp_backend_command(
     peer: &ResolvedPeerTurn,
     invocation_cwd: &Path,
-) -> psychevo_runtime::Result<(Command, PathBuf)> {
+) -> psychevo::Result<(Command, PathBuf)> {
     let launch = resolve_acp_backend_launch(peer, invocation_cwd)?;
     let cwd = launch.cwd.clone();
     Ok((acp_backend_command_from_launch(peer, &launch)?, cwd))
@@ -597,13 +597,13 @@ mod tests {
                 instructions: String::new(),
                 enabled: true,
                 file_path: None,
-                source: psychevo_runtime::agents::AgentSource::Generated,
-                backend: Some(psychevo_runtime::agents::AgentBackendRef {
+                source: psychevo::agents::AgentSource::Generated,
+                backend: Some(psychevo::agents::AgentBackendRef {
                     name: "opencode".to_string(),
                 }),
-                entrypoints: BTreeSet::from([psychevo_runtime::agents::AgentEntrypoint::Peer]),
+                entrypoints: BTreeSet::from([psychevo::agents::AgentEntrypoint::Peer]),
                 model: None,
-                tool_policy: psychevo_runtime::agents::AgentToolPolicy::default(),
+                tool_policy: psychevo::agents::AgentToolPolicy::default(),
                 skills: Vec::new(),
                 optional_contributions: BTreeSet::new(),
                 hooks: None,
@@ -615,9 +615,9 @@ mod tests {
                 effort: None,
                 diagnostics: Vec::new(),
             },
-            backend: psychevo_runtime::agents::AgentBackendConfig {
+            backend: psychevo::agents::AgentBackendConfig {
                 id: "opencode".to_string(),
-                kind: psychevo_runtime::agents::AgentBackendKind::Acp,
+                kind: psychevo::agents::AgentBackendKind::Acp,
                 enabled: true,
                 label: "OpenCode".to_string(),
                 description: None,
@@ -625,7 +625,7 @@ mod tests {
                 args: vec!["acp".to_string()],
                 env: BTreeMap::new(),
                 cwd: "invocation".to_string(),
-                entrypoints: BTreeSet::from([psychevo_runtime::agents::AgentEntrypoint::Peer]),
+                entrypoints: BTreeSet::from([psychevo::agents::AgentEntrypoint::Peer]),
                 client_capabilities: BTreeSet::new(),
                 mcp_servers: BTreeSet::new(),
             },
@@ -848,7 +848,7 @@ mod tests {
         assert_eq!(request.questions[0].header, "workspace");
         assert!(!request.questions[0].custom);
 
-        let (handle, control) = psychevo_runtime::types::run_control();
+        let (handle, control) = psychevo::types::run_control();
         let abort = control.abort_signal();
         let events = Arc::new(Mutex::new(Vec::<RunStreamEvent>::new()));
         let stream: RunStreamSink = {
@@ -871,13 +871,11 @@ mod tests {
         }
         assert!(handle.submit_clarify_result(
             "acp-elicit-1",
-            psychevo_runtime::types::ClarifyResult::Answered(
-                psychevo_runtime::types::ClarifyResponse {
-                    answers: vec![ClarifyAnswer {
-                        answers: vec!["Repository".to_string()],
-                    }],
-                }
-            ),
+            psychevo::types::ClarifyResult::Answered(psychevo::types::ClarifyResponse {
+                answers: vec![ClarifyAnswer {
+                    answers: vec!["Repository".to_string()],
+                }],
+            }),
         ));
         let ClarifyInteractionOutcome::Answered(answer) = waiter.await.expect("interaction task")
         else {
@@ -1239,11 +1237,11 @@ mod tests {
         (peer, log)
     }
 
-    fn lifecycle_mcp_fixture() -> psychevo_runtime::types::ResolvedMcpServerInput {
-        psychevo_runtime::types::ResolvedMcpServerInput {
-            server: psychevo_runtime::types::McpServerInput::new(
+    fn lifecycle_mcp_fixture() -> psychevo::types::ResolvedMcpServerInput {
+        psychevo::types::ResolvedMcpServerInput {
+            server: psychevo::types::McpServerInput::new(
                 "repo",
-                psychevo_runtime::types::McpTransportInput::Stdio {
+                psychevo::types::McpTransportInput::Stdio {
                     command: PathBuf::from("/fixture/bin/repo-mcp"),
                     args: vec!["--serve".to_string()],
                     env: BTreeMap::from([("FIXTURE_SCOPE".to_string(), "workspace".to_string())]),
@@ -1791,7 +1789,7 @@ mod tests {
     #[test]
     fn successful_turn_clears_an_observed_generic_auth_requirement() {
         let observation = Arc::new(Mutex::new(AcpObservedAuthState::Required));
-        let successful_turn: psychevo_runtime::Result<()> = Ok(());
+        let successful_turn: psychevo::Result<()> = Ok(());
         observe_acp_auth_result(&observation, &successful_turn, true);
         assert_eq!(
             *observation.lock().expect("auth observation"),

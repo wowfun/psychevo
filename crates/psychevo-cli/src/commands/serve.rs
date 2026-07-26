@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow};
+use psychevo::paths::canonicalize_cwd;
+use psychevo::state::StateRuntime;
 use psychevo_gateway::{Gateway, GatewayWebServerConfig, bind_gateway_web_server};
-use psychevo_runtime::paths::canonicalize_cwd;
-use psychevo_runtime::state::StateRuntime;
 use serde_json::json;
 
 use crate::args::ServeArgs;
@@ -65,10 +65,10 @@ pub(crate) async fn run_serve_command(args: ServeArgs) -> Result<ExitCode> {
     let (_managed_lease, _managed_process_tree) = if let Some((instance, lease_path)) =
         managed_instance
     {
-        let lease = psychevo_runtime::host_process::InstanceLease::try_acquire(lease_path)
+        let lease = psychevo::host_process::InstanceLease::try_acquire(lease_path)
             .with_context(|| format!("acquire managed instance lease {}", lease_path.display()))?
             .ok_or_else(|| anyhow!("managed instance lease is already held"))?;
-        let process_tree = psychevo_runtime::host_process::enter_managed_process_tree(instance)
+        let process_tree = psychevo::host_process::enter_managed_process_tree(instance)
             .context("enter managed process ownership domain")?;
         (Some(lease), Some(process_tree))
     } else {

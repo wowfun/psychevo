@@ -24,13 +24,13 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
         }"#,
     )
     .expect("manifest");
-    psychevo_runtime::plugins::install_plugin(
+    psychevo::plugins::install_plugin(
         &state.inner.home,
         &state.inner.cwd,
-        psychevo_runtime::plugins::PluginInstallOptions {
+        psychevo::plugins::PluginInstallOptions {
             source: source.display().to_string(),
             source_kind: None,
-            scope: psychevo_runtime::plugins::PluginScope::Global,
+            scope: psychevo::plugins::PluginScope::Global,
             git_ref: None,
             npm_version: None,
             npm_registry: None,
@@ -1722,7 +1722,7 @@ async fn capability_rpc(
     state: &WebState,
     method: &str,
     params: Value,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let (tx, _rx) = mpsc::unbounded_channel();
     handle_rpc(
         state.clone(),

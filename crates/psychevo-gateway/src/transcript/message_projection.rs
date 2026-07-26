@@ -178,7 +178,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                             *timestamp_ms,
                         ))
                     }
-                    AssistantBlock::Source(psychevo_ai::AssistantSource::UrlCitation(source)) => Some(block(
+                    AssistantBlock::Source(psychevo::__ai::AssistantSource::UrlCitation(source)) => Some(block(
                         format!("message:{}:source:{index}", summary.session_seq),
                         TranscriptBlockKind::Web,
                         TranscriptBlockStatus::Completed,
@@ -190,7 +190,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                         Some(json!({"projection":"url_citation", "url":source.url, "title":source.title, "start_index":source.start_index, "end_index":source.end_index})),
                         *timestamp_ms,
                     )),
-                    AssistantBlock::Source(psychevo_ai::AssistantSource::Image(source)) => Some(block(
+                    AssistantBlock::Source(psychevo::__ai::AssistantSource::Image(source)) => Some(block(
                         format!("message:{}:source:{index}", summary.session_seq),
                         TranscriptBlockKind::Web,
                         TranscriptBlockStatus::Completed,
@@ -202,7 +202,7 @@ fn project_message_entry(thread_id: &str, summary: &TuiMessageSummary) -> Option
                         Some(json!({"projection":"web_image_source", "image_url":source.image_url, "thumbnail_url":source.thumbnail_url, "source_website_url":source.source_website_url, "caption":source.caption})),
                         *timestamp_ms,
                     )),
-                    AssistantBlock::Source(psychevo_ai::AssistantSource::Provider { kind, data }) => Some(block(
+                    AssistantBlock::Source(psychevo::__ai::AssistantSource::Provider { kind, data }) => Some(block(
                         format!("message:{}:source:{index}", summary.session_seq),
                         TranscriptBlockKind::Web,
                         TranscriptBlockStatus::Completed,

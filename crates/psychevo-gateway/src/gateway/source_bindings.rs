@@ -3,7 +3,7 @@ impl Gateway {
         &self,
         source: &GatewaySource,
         new_thread_id: &str,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let source_key = source.source_key();
         match source.lifetime {
             GatewaySourceLifetime::Invocation => {
@@ -57,7 +57,7 @@ impl Gateway {
     pub async fn clear_source_binding(
         &self,
         source: &GatewaySource,
-    ) -> psychevo_runtime::Result<Option<String>> {
+    ) -> psychevo::Result<Option<String>> {
         let source_key = source.source_key();
         let previous = match source.lifetime {
             GatewaySourceLifetime::Invocation => return Ok(None),
@@ -85,7 +85,7 @@ impl Gateway {
     pub async fn reset_source_to_empty(
         &self,
         source: &GatewaySource,
-    ) -> psychevo_runtime::Result<Option<String>> {
+    ) -> psychevo::Result<Option<String>> {
         let previous = self.clear_source_binding(source).await?;
         if let Some(previous) = previous.as_deref() {
             self.state
@@ -99,7 +99,7 @@ impl Gateway {
     pub async fn rotate_channel_connection_sources(
         &self,
         connection_id: &str,
-    ) -> psychevo_runtime::Result<usize> {
+    ) -> psychevo::Result<usize> {
         let bindings = self
             .state
             .gateway_source_bindings_for_connection_id(connection_id)
@@ -141,7 +141,7 @@ impl Gateway {
         thread_id: &str,
         backend: &GatewayBackendInfo,
         lineage: Option<Value>,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let source_key = source.source_key();
         match source.lifetime {
             GatewaySourceLifetime::Invocation => {

@@ -1,5 +1,5 @@
 use super::*;
-use psychevo_ai::{
+use psychevo::__ai::{
     AbortSignal, FakeAsrProvider, FakeRealtimeProvider, FakeTtsProvider, VoiceAsrProvider,
     VoiceAsrRequest, VoiceAudioInput as AiVoiceAudioInput, VoiceRealtimeEvent,
     VoiceRealtimeProvider, VoiceRealtimeStartRequest, VoiceTtsProvider, VoiceTtsRequest,
@@ -16,7 +16,7 @@ pub(super) async fn voice_asr_transcribe_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::VoiceAsrTranscribeParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     let options = state.run_options(scope.cwd, None);
     let resolved = resolve_voice_asr_config(
@@ -70,7 +70,7 @@ pub(super) async fn voice_tts_synthesize_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::VoiceTtsSynthesizeParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     let options = state.run_options(scope.cwd, None);
     let resolved = resolve_voice_tts_config(
@@ -125,7 +125,7 @@ pub(super) async fn voice_policy_read_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::VoicePolicyReadParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let target = voice_policy_target(
         state,
         auth,
@@ -152,7 +152,7 @@ pub(super) async fn voice_policy_update_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::VoicePolicyUpdateParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let target = voice_policy_target(
         state,
         auth,
@@ -182,7 +182,7 @@ pub(super) async fn start_realtime(
     auth: &AuthContext,
     out_tx: ConnectionSender,
     params: wire::ThreadRealtimeStartParams,
-) -> psychevo_runtime::Result<wire::ThreadRealtimeStartResult> {
+) -> psychevo::Result<wire::ThreadRealtimeStartResult> {
     authorize_thread(state, auth, &params.thread_id).await?;
     let scope = resolve_optional_scope(state, auth, params.scope.clone())?;
     let mut options = state.run_options(scope.cwd, Some(params.thread_id.clone()));
@@ -268,7 +268,7 @@ pub(super) async fn start_realtime(
 pub(super) fn append_realtime_audio(
     state: &WebState,
     params: wire::ThreadRealtimeAppendAudioParams,
-) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
+) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
     ensure_realtime_session(state, &params.session_id)?;
     Ok(realtime_accepted())
 }
@@ -276,7 +276,7 @@ pub(super) fn append_realtime_audio(
 pub(super) fn append_realtime_text(
     state: &WebState,
     params: wire::ThreadRealtimeAppendTextParams,
-) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
+) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
     ensure_realtime_session(state, &params.session_id)?;
     Ok(realtime_accepted())
 }
@@ -284,7 +284,7 @@ pub(super) fn append_realtime_text(
 pub(super) fn append_realtime_speech(
     state: &WebState,
     params: wire::ThreadRealtimeAppendSpeechParams,
-) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
+) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
     ensure_realtime_session(state, &params.session_id)?;
     Ok(realtime_accepted())
 }
@@ -293,7 +293,7 @@ pub(super) fn stop_realtime(
     state: &WebState,
     out_tx: ConnectionSender,
     params: wire::ThreadRealtimeSessionParams,
-) -> psychevo_runtime::Result<wire::ThreadRealtimeMutationResult> {
+) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
     let removed = state
         .inner
         .realtime_sessions
@@ -320,7 +320,7 @@ pub(super) fn stop_realtime(
 pub(super) fn list_realtime_voices(
     state: &WebState,
     params: wire::ThreadRealtimeSessionParams,
-) -> psychevo_runtime::Result<wire::ThreadRealtimeListVoicesResult> {
+) -> psychevo::Result<wire::ThreadRealtimeListVoicesResult> {
     let session = ensure_realtime_session(state, &params.session_id)?;
     let voices = if session.provider == "fake" {
         vec![wire::ThreadRealtimeVoiceView {
@@ -372,7 +372,7 @@ async fn voice_policy_target(
     scope: Option<wire::GatewayRequestScope>,
     source_key: Option<SourceKey>,
     thread_id: Option<String>,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     if let Some(thread_id) = thread_id {
         authorize_thread(state, auth, &thread_id).await?;
         return Ok(format!("thread:{thread_id}"));
@@ -387,7 +387,7 @@ async fn voice_policy_target(
 fn ensure_realtime_session(
     state: &WebState,
     session_id: &str,
-) -> psychevo_runtime::Result<RealtimeSessionState> {
+) -> psychevo::Result<RealtimeSessionState> {
     state
         .inner
         .realtime_sessions
@@ -478,7 +478,7 @@ fn is_xiaomi_voice_provider(provider: &str) -> bool {
     matches!(provider, "xiaomi" | "xiaomi-token-plan")
 }
 
-fn voice_runtime_error(err: psychevo_ai::Error) -> Error {
+fn voice_runtime_error(err: psychevo::__ai::Error) -> Error {
     Error::Message(format!("voice provider failed: {err}"))
 }
 
@@ -491,27 +491,27 @@ fn missing_voice_credentials(api_key_env: &Option<String>) -> Error {
     ))
 }
 
-fn ai_audio_format(format: wire::VoiceAudioFormat) -> psychevo_ai::VoiceAudioFormat {
+fn ai_audio_format(format: wire::VoiceAudioFormat) -> psychevo::__ai::VoiceAudioFormat {
     match format {
-        wire::VoiceAudioFormat::Wav => psychevo_ai::VoiceAudioFormat::Wav,
-        wire::VoiceAudioFormat::Mp3 => psychevo_ai::VoiceAudioFormat::Mp3,
-        wire::VoiceAudioFormat::Pcm16 => psychevo_ai::VoiceAudioFormat::Pcm16,
+        wire::VoiceAudioFormat::Wav => psychevo::__ai::VoiceAudioFormat::Wav,
+        wire::VoiceAudioFormat::Mp3 => psychevo::__ai::VoiceAudioFormat::Mp3,
+        wire::VoiceAudioFormat::Pcm16 => psychevo::__ai::VoiceAudioFormat::Pcm16,
     }
 }
 
-fn wire_audio_format(format: psychevo_ai::VoiceAudioFormat) -> wire::VoiceAudioFormat {
+fn wire_audio_format(format: psychevo::__ai::VoiceAudioFormat) -> wire::VoiceAudioFormat {
     match format {
-        psychevo_ai::VoiceAudioFormat::Wav => wire::VoiceAudioFormat::Wav,
-        psychevo_ai::VoiceAudioFormat::Mp3 => wire::VoiceAudioFormat::Mp3,
-        psychevo_ai::VoiceAudioFormat::Pcm16 => wire::VoiceAudioFormat::Pcm16,
+        psychevo::__ai::VoiceAudioFormat::Wav => wire::VoiceAudioFormat::Wav,
+        psychevo::__ai::VoiceAudioFormat::Mp3 => wire::VoiceAudioFormat::Mp3,
+        psychevo::__ai::VoiceAudioFormat::Pcm16 => wire::VoiceAudioFormat::Pcm16,
     }
 }
 
 fn ai_realtime_transport(
     transport: wire::RealtimeTransport,
-) -> psychevo_ai::VoiceRealtimeTransport {
+) -> psychevo::__ai::VoiceRealtimeTransport {
     match transport {
-        wire::RealtimeTransport::Webrtc => psychevo_ai::VoiceRealtimeTransport::Webrtc,
-        wire::RealtimeTransport::Websocket => psychevo_ai::VoiceRealtimeTransport::Websocket,
+        wire::RealtimeTransport::Webrtc => psychevo::__ai::VoiceRealtimeTransport::Webrtc,
+        wire::RealtimeTransport::Websocket => psychevo::__ai::VoiceRealtimeTransport::Websocket,
     }
 }

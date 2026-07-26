@@ -6,9 +6,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use serde_json::Value;
 
 use super::{
-    GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptEntry, TranscriptEntryRole,
+    GatewayEvent, RunStreamEvent, TranscriptBlock, TranscriptBlockKind, TranscriptEntry,
+    TranscriptEntryRole,
 };
 
 pub(crate) const TUI_PROFILE_PATH_ENV: &str = "PSYCHEVO_TUI_PROFILE_PATH";
@@ -43,7 +45,7 @@ pub(crate) struct TuiProfileFrameObservation {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct GatewayEventProfileKind {
+pub(crate) struct LiveEventProfileKind {
     first_assistant: bool,
     turn_completed: bool,
 }
@@ -119,17 +121,50 @@ impl TuiJourneyProfileProbe {
     pub(crate) fn observe_gateway_event_received(
         &mut self,
         event: &GatewayEvent,
-    ) -> GatewayEventProfileKind {
-        let kind = GatewayEventProfileKind::from_event(event);
-        self.observe_gateway_event(kind, false);
+    ) -> LiveEventProfileKind {
+        let kind = LiveEventProfileKind::from_gateway_event(event);
+        self.observe_live_event(kind, false);
         kind
     }
 
-    pub(crate) fn observe_gateway_event_applied(&mut self, event_kind: GatewayEventProfileKind) {
-        self.observe_gateway_event(event_kind, true);
+    pub(crate) fn observe_gateway_event_applied(&mut self, event_kind: LiveEventProfileKind) {
+        self.observe_live_event(event_kind, true);
     }
 
-    fn observe_gateway_event(&mut self, kind: GatewayEventProfileKind, applied: bool) {
+    pub(crate) fn observe_runtime_event_received(
+        &mut self,
+        event: &RunStreamEvent,
+    ) -> LiveEventProfileKind {
+        let kind = LiveEventProfileKind::from_runtime_event(event);
+        self.observe_live_event(kind, false);
+        kind
+    }
+
+    pub(crate) fn observe_runtime_event_applied(&mut self, event_kind: LiveEventProfileKind) {
+        self.observe_live_event(event_kind, true);
+    }
+
+    pub(crate) fn observe_turn_completion_received(&mut self) {
+        self.observe_live_event(
+            LiveEventProfileKind {
+                first_assistant: false,
+                turn_completed: true,
+            },
+            false,
+        );
+    }
+
+    pub(crate) fn observe_turn_completion_applied(&mut self) {
+        self.observe_live_event(
+            LiveEventProfileKind {
+                first_assistant: false,
+                turn_completed: true,
+            },
+            true,
+        );
+    }
+
+    fn observe_live_event(&mut self, kind: LiveEventProfileKind, applied: bool) {
         let Some(sample) = self.active_sample.as_mut() else {
             return;
         };
@@ -149,9 +184,9 @@ impl TuiJourneyProfileProbe {
         if first_assistant {
             self.mark(
                 if applied {
-                    "gateway_first_assistant_event_applied"
+                    "first_assistant_event_applied"
                 } else {
-                    "gateway_first_assistant_event_received"
+                    "first_assistant_event_received"
                 },
                 Some(sample_index),
             );
@@ -226,8 +261,8 @@ impl Default for TuiJourneyProfileProbe {
     }
 }
 
-impl GatewayEventProfileKind {
-    fn from_event(event: &GatewayEvent) -> Self {
+impl LiveEventProfileKind {
+    fn from_gateway_event(event: &GatewayEvent) -> Self {
         match event {
             GatewayEvent::EntryStarted { entry, .. }
             | GatewayEvent::EntryUpdated { entry, .. }
@@ -246,6 +281,49 @@ impl GatewayEventProfileKind {
             _ => Self::default(),
         }
     }
+
+    fn from_runtime_event(event: &RunStreamEvent) -> Self {
+        let first_assistant = match event {
+            RunStreamEvent::Event(value) => runtime_value_has_nonempty_assistant_text(value),
+            RunStreamEvent::Scoped { event, .. } => Self::from_runtime_event(event).first_assistant,
+            RunStreamEvent::ReasoningDelta { .. }
+            | RunStreamEvent::ReasoningEnd
+            | RunStreamEvent::ClarifyRequest(_)
+            | RunStreamEvent::ClarifyResolved(_) => false,
+        };
+        Self {
+            first_assistant,
+            turn_completed: false,
+        }
+    }
+}
+
+fn runtime_value_has_nonempty_assistant_text(value: &Value) -> bool {
+    match value.get("type").and_then(Value::as_str) {
+        Some("message_start" | "message_update" | "message_end") => value
+            .get("message")
+            .is_some_and(runtime_message_has_nonempty_assistant_text),
+        Some("agent_message") => value
+            .get("message")
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty()),
+        _ => false,
+    }
+}
+
+fn runtime_message_has_nonempty_assistant_text(message: &Value) -> bool {
+    message.get("role").and_then(Value::as_str) == Some("assistant")
+        && match message.get("content") {
+            Some(Value::String(text)) => !text.trim().is_empty(),
+            Some(Value::Array(blocks)) => blocks.iter().any(|block| {
+                block.get("type").and_then(Value::as_str) == Some("text")
+                    && block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| !text.trim().is_empty())
+            }),
+            _ => false,
+        }
 }
 
 fn entry_has_nonempty_assistant_text(entry: &TranscriptEntry) -> bool {
@@ -361,8 +439,6 @@ impl Drop for ProfileWriter {
 mod tests {
     use std::collections::BTreeSet;
 
-    use serde_json::Value;
-
     use super::*;
 
     #[test]
@@ -375,7 +451,7 @@ mod tests {
                 Some("visible"),
             ),
         };
-        assert!(GatewayEventProfileKind::from_event(&assistant).first_assistant);
+        assert!(LiveEventProfileKind::from_gateway_event(&assistant).first_assistant);
 
         for event in [
             GatewayEvent::EntryUpdated {
@@ -403,7 +479,41 @@ mod tests {
                 ),
             },
         ] {
-            assert!(!GatewayEventProfileKind::from_event(&event).first_assistant);
+            assert!(!LiveEventProfileKind::from_gateway_event(&event).first_assistant);
+        }
+    }
+
+    #[test]
+    fn runtime_classification_uses_visible_assistant_text_only() {
+        let visible = RunStreamEvent::value(serde_json::json!({
+            "type": "message_update",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "visible"}]
+            }
+        }));
+        assert!(LiveEventProfileKind::from_runtime_event(&visible).first_assistant);
+
+        for event in [
+            RunStreamEvent::ReasoningDelta {
+                text: "hidden reasoning".to_string(),
+            },
+            RunStreamEvent::value(serde_json::json!({
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "  "}]
+                }
+            })),
+            RunStreamEvent::value(serde_json::json!({
+                "type": "message_update",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "prompt"}]
+                }
+            })),
+        ] {
+            assert!(!LiveEventProfileKind::from_runtime_event(&event).first_assistant);
         }
     }
 
@@ -441,16 +551,16 @@ mod tests {
                 "input_ready",
                 "send_committed",
                 "send_feedback_surface_committed",
-                "gateway_first_assistant_event_received",
-                "gateway_first_assistant_event_applied",
+                "first_assistant_event_received",
+                "first_assistant_event_applied",
                 "first_output_surface_committed",
                 "turn_completed_received",
                 "turn_completed_applied",
                 "turn_settled_surface_committed",
                 "send_committed",
                 "send_feedback_surface_committed",
-                "gateway_first_assistant_event_received",
-                "gateway_first_assistant_event_applied",
+                "first_assistant_event_received",
+                "first_assistant_event_applied",
                 "first_output_surface_committed",
                 "turn_completed_received",
                 "turn_completed_applied",
@@ -514,13 +624,13 @@ mod tests {
             composer_focused: true,
             compaction_running: false,
         });
-        let assistant = GatewayEventProfileKind {
+        let assistant = LiveEventProfileKind {
             first_assistant: true,
             turn_completed: false,
         };
-        probe.observe_gateway_event(assistant, false);
-        probe.observe_gateway_event(assistant, false);
-        probe.observe_gateway_event(assistant, true);
+        probe.observe_live_event(assistant, false);
+        probe.observe_live_event(assistant, false);
+        probe.observe_live_event(assistant, true);
         probe.observe_frame(TuiProfileFrameObservation {
             input_ready: true,
             send_feedback_ready: true,
@@ -528,12 +638,8 @@ mod tests {
             composer_focused: true,
             compaction_running: false,
         });
-        let completed = GatewayEventProfileKind {
-            first_assistant: false,
-            turn_completed: true,
-        };
-        probe.observe_gateway_event(completed, false);
-        probe.observe_gateway_event(completed, true);
+        probe.observe_turn_completion_received();
+        probe.observe_turn_completion_applied();
         probe.observe_frame(TuiProfileFrameObservation {
             input_ready: true,
             send_feedback_ready: false,

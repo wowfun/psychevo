@@ -10,6 +10,8 @@ pub(crate) struct TuiApp {
     pub(crate) model_state_path: PathBuf,
     pub(crate) model_state: ModelState,
     pub(crate) state_runtime: StateRuntime,
+    pub(crate) application: Application,
+    pub(crate) framework: FrameworkClient,
     pub(crate) gateway: Gateway,
     pub(crate) db_path: PathBuf,
     pub(crate) config_path: Option<PathBuf>,
@@ -219,9 +221,9 @@ impl TuiApp {
                         SkillSearchMatch {
                             name: skill.name,
                             description: skill.description,
-                            source_label: psychevo_runtime::skills::skill_source_display_label(
-                                Some(skill.source.as_str()),
-                            )
+                            source_label: psychevo::skills::skill_source_display_label(Some(
+                                skill.source.as_str(),
+                            ))
                             .map(ToString::to_string),
                         },
                     )
@@ -255,9 +257,9 @@ impl TuiApp {
                         AgentSearchMatch {
                             name: agent.name,
                             description: agent.description,
-                            source_label: psychevo_runtime::agents::agent_source_display_label(
-                                Some(agent.source.as_str()),
-                            )
+                            source_label: psychevo::agents::agent_source_display_label(Some(
+                                agent.source.as_str(),
+                            ))
                             .map(ToString::to_string),
                         },
                     )

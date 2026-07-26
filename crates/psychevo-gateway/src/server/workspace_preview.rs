@@ -14,8 +14,8 @@ use axum::http::header::{
 };
 use axum::http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use futures::stream;
+use psychevo::Error;
 use psychevo_gateway_protocol as wire;
-use psychevo_runtime::Error;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -475,7 +475,7 @@ pub(super) fn workspace_file_preview_open_value(
     state: &WebState,
     scope: &ResolvedScope,
     path: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let workspace_root = normalized_workspace_path_identity(&std::fs::canonicalize(&scope.cwd)?);
     let canonical_path = resolve_workspace_relative_path(&workspace_root, path)?;
     let mut file = File::open(&canonical_path)?;
@@ -564,7 +564,7 @@ pub(super) fn workspace_file_preview_open_value(
 pub(super) fn workspace_file_preview_release_value(
     state: &WebState,
     resource_id: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(
         wire::WorkspaceFilePreviewReleaseResult {
             released: state.inner.workspace_preview.release(resource_id),

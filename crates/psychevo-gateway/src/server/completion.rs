@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{
+use psychevo::{
     agents::AgentEntrypoint, agents::agent_source_display_label, skills::ListSkillsOptions,
     skills::list_skills_value_with_options, skills::skill_source_display_label,
 };
+use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 
 use super::{
@@ -36,7 +36,7 @@ pub(super) async fn completion_list_value(
     state: &WebState,
     scope: &ResolvedScope,
     params: wire::CompletionListParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let Some(token) = active_completion_token(&params.text, params.cursor) else {
         return Ok(serde_json::to_value(wire::CompletionListResult {
             items: Vec::new(),
@@ -95,7 +95,7 @@ async fn slash_completion_items(
     scope: &ResolvedScope,
     thread_id: Option<&str>,
     query: &str,
-) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::CompletionItem>> {
     let active_turn = match thread_id {
         Some(thread_id) => state.activity(&scope.source, Some(thread_id)).await.running,
         None => state.activity(&scope.source, None).await.running,
@@ -177,7 +177,7 @@ fn dollar_completion_items(
     state: &WebState,
     scope: &ResolvedScope,
     query: &str,
-) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::CompletionItem>> {
     let mut items = Vec::new();
     let skill_catalog = discover_gateway_skills(state, scope)?;
     let skills = list_skills_value_with_options(
@@ -254,7 +254,7 @@ fn at_completion_items(
     state: &WebState,
     scope: &ResolvedScope,
     query: &str,
-) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::CompletionItem>> {
     let mut items =
         agent_completion_items(state, scope, query, '@', Some(AgentEntrypoint::Subagent))?;
     items.extend(file_completion_items(&scope.cwd, query)?);
@@ -268,7 +268,7 @@ fn agent_completion_items(
     query: &str,
     sigil: char,
     required_entrypoint: Option<AgentEntrypoint>,
-) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+) -> psychevo::Result<Vec<wire::CompletionItem>> {
     let mut items = Vec::new();
     let agent_catalog = discover_gateway_agents(state, scope)?;
     for agent in agent_catalog.agents {
@@ -339,10 +339,7 @@ fn completion_sort_text(query: &str, name: &str, description: Option<&str>, kind
     format!("{rank}:{kind}:{name_lower}")
 }
 
-fn file_completion_items(
-    cwd: &Path,
-    query: &str,
-) -> psychevo_runtime::Result<Vec<wire::CompletionItem>> {
+fn file_completion_items(cwd: &Path, query: &str) -> psychevo::Result<Vec<wire::CompletionItem>> {
     let mut items = Vec::new();
     collect_file_completion_items(cwd, cwd, query, 0, &mut items);
     sort_grouped_completion_items(&mut items);

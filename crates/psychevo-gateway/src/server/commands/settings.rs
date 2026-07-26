@@ -2,7 +2,7 @@ pub(super) fn slash_settings_read_value(
     state: &WebState,
     scope: &ResolvedScope,
     cwd: &Path,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(slash_settings_result(
         state,
         scope,
@@ -17,7 +17,7 @@ pub(super) fn slash_settings_update_value(
     scope: &ResolvedScope,
     cwd: &Path,
     params: wire::SlashSettingsUpdateParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if params.scope != wire::ModelSettingsScope::Global {
         return Err(Error::Config(
             "slash settings writes support only global scope".to_string(),
@@ -54,7 +54,7 @@ fn slash_settings_result(
     cwd: &Path,
     config: GatewaySlashConfig,
     diagnostics: Vec<String>,
-) -> psychevo_runtime::Result<wire::SlashSettingsResult> {
+) -> psychevo::Result<wire::SlashSettingsResult> {
     Ok(wire::SlashSettingsResult {
         scope: wire::ModelSettingsScope::Global,
         cwd: cwd.display().to_string(),
@@ -85,7 +85,7 @@ fn slash_settings_result(
 fn effective_slash_config(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<GatewaySlashConfig> {
+) -> psychevo::Result<GatewaySlashConfig> {
     let options = state.run_options(scope.cwd.clone(), None);
     let document = match config_show_value(&options, ConfigScope::Effective) {
         Ok(document) => document,
@@ -100,13 +100,13 @@ fn effective_slash_config(
 fn profile_slash_config(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<GatewaySlashConfig> {
+) -> psychevo::Result<GatewaySlashConfig> {
     let path = active_profile_config_dir(state, scope).join("config.toml");
     let value = read_toml_config_value(&path)?;
     parse_gateway_slash_config(&value)
 }
 
-fn read_toml_config_value(path: &Path) -> psychevo_runtime::Result<Value> {
+fn read_toml_config_value(path: &Path) -> psychevo::Result<Value> {
     if !path.exists() {
         return Ok(json!({}));
     }
@@ -119,7 +119,7 @@ fn read_toml_config_value(path: &Path) -> psychevo_runtime::Result<Value> {
     Ok(serde_json::to_value(parsed)?)
 }
 
-fn parse_gateway_slash_config(root: &Value) -> psychevo_runtime::Result<GatewaySlashConfig> {
+fn parse_gateway_slash_config(root: &Value) -> psychevo::Result<GatewaySlashConfig> {
     parse_shared_slash_config(root)
 }
 
@@ -129,7 +129,7 @@ fn default_gateway_slash_config() -> GatewaySlashConfig {
 
 fn slash_config_from_update(
     params: wire::SlashSettingsUpdateParams,
-) -> psychevo_runtime::Result<GatewaySlashConfig> {
+) -> psychevo::Result<GatewaySlashConfig> {
     let leader_key = match params.leader_key {
         Some(value) => parse_key_chord_display(&value, "leaderKey")?,
         None => default_gateway_slash_config().leader_key,
@@ -151,7 +151,7 @@ fn slash_config_from_update(
                 target: validate_configured_slash_target(&entry.target, "aliases[].target")?,
             })
         })
-        .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+        .collect::<psychevo::Result<Vec<_>>>()?;
     let keybinds = params
         .keybinds
         .into_iter()
@@ -167,7 +167,7 @@ fn slash_config_from_update(
                 target: validate_configured_slash_target(&target, "keybinds[].target")?,
             })
         })
-        .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+        .collect::<psychevo::Result<Vec<_>>>()?;
     let config = GatewaySlashConfig {
         leader_key,
         leader_timeout_ms,
@@ -202,6 +202,6 @@ fn slash_keybinds_config_value(keybinds: &[GatewaySlashKeybind]) -> Value {
 
 fn slash_target_summary(target: &str) -> Option<String> {
     let (command, _) = split_slash_command_token(target);
-    psychevo_runtime::command_registry::slash_command_spec(command)
+    psychevo::command_registry::slash_command_spec(command)
         .map(|spec| spec.summary.to_string())
 }

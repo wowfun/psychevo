@@ -163,6 +163,7 @@ impl GatewaySupervisor {
         );
     }
 
+    #[cfg(test)]
     pub(crate) fn spawn_permitted_activity<F>(
         &self,
         name: impl Into<Arc<str>>,

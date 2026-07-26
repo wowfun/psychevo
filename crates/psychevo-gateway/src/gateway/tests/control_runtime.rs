@@ -215,7 +215,7 @@
                 .steer_turn(
                     selector.clone(),
                     Some("turn-1"),
-                    psychevo_agent_core::user_text_message("unsupported steer"),
+                    psychevo::__agent_core::user_text_message("unsupported steer"),
                 )
                 .await.is_none()
         );
@@ -225,7 +225,7 @@
                 .steer_foreign_turn(
                     selector,
                     Some("turn-1"),
-                    psychevo_agent_core::user_text_message("unsupported foreign steer"),
+                    psychevo::__agent_core::user_text_message("unsupported foreign steer"),
                 )
                 .await
         );

@@ -14,7 +14,7 @@ use crate::im::{
     ChannelGateway, ImIdentity, ImInboundMessage, ImOutboundMessage, gateway_input_parts_for_im,
     gateway_source_for_im,
 };
-use psychevo_runtime::{config::ChannelRuntimeConnection, config::channel_runtime_connections};
+use psychevo::{config::ChannelRuntimeConnection, config::channel_runtime_connections};
 use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
@@ -44,7 +44,7 @@ pub(super) async fn channel_effective_profile_ref(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     Ok(channel_bound_profile_ref(state, source)
         .await?
         .or_else(|| connection.runtime_ref.clone())
@@ -57,7 +57,7 @@ pub(super) async fn channel_bind_target_draft(
     state: &WebState,
     source: &GatewaySource,
     target: &wire::RunnableTargetView,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     let agent_ref = target.agent_ref.as_deref();
     let profile_ref = target.runtime_profile_ref.as_str();
     let source_key = source.source_key();
@@ -124,7 +124,7 @@ pub(super) async fn channel_bind_target_draft(
 pub(super) async fn channel_draft_agent_ref(
     state: &WebState,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     Ok(state
         .inner
         .state
@@ -136,7 +136,7 @@ pub(super) async fn channel_draft_agent_ref(
 async fn channel_bound_profile_ref(
     state: &WebState,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     let source_key = source.source_key();
     let lane = state.inner.state.gateway_source_lane(&source_key.0).await?;
     let bound = if let Some(thread_id) = lane.as_ref().and_then(|lane| lane.thread_id.as_deref()) {

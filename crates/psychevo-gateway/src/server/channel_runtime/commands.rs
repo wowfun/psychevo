@@ -29,7 +29,7 @@ pub(super) async fn route_channel_command(
     connection: &ChannelRuntimeConnection,
     message: &ImInboundMessage,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<Option<ChannelCommandAction>> {
+) -> psychevo::Result<Option<ChannelCommandAction>> {
     let text = message.text.trim();
     let Some((command, args)) = parse_channel_command(text) else {
         return Ok(None);
@@ -179,7 +179,7 @@ async fn channel_permission_reply(
     token: &str,
     decision: PermissionDecision,
     command: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     if token.is_empty() {
         return Ok(format!("Usage: /{command} <token>"));
     }
@@ -227,7 +227,7 @@ async fn channel_interaction_thread_id(
     state: &WebState,
     route: &super::state::ChannelInteractionRoute,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     route
         .thread_id
         .clone()
@@ -243,17 +243,11 @@ async fn submit_channel_interaction(
     route: &super::state::ChannelInteractionRoute,
     expected_kind: GatewayActionKind,
     response: wire::ThreadInteractionResponse,
-) -> psychevo_runtime::Result<bool> {
-    channel_interaction_thread_id(state, route, source).await?;
-    thread_routed_interaction_respond_for_selector(
-        state,
-        GatewayThreadSelector::source(source.source_key()),
-        &route.action_id,
-        expected_kind,
-        response,
-    )
-    .await
-    .map(|result| result.accepted)
+) -> psychevo::Result<bool> {
+    let thread_id = channel_interaction_thread_id(state, route, source).await?;
+    thread_routed_interaction_respond(state, &thread_id, &route.action_id, expected_kind, response)
+        .await
+        .map(|result| result.accepted)
 }
 
 async fn route_shared_channel_command(
@@ -262,7 +256,7 @@ async fn route_shared_channel_command(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     text: &str,
-) -> psychevo_runtime::Result<Option<ChannelCommandAction>> {
+) -> psychevo::Result<Option<ChannelCommandAction>> {
     let scope = channel_resolved_scope(state, connection, source).await?;
     let context = ChannelCommandContext {
         state,
@@ -319,7 +313,7 @@ async fn channel_command_action_from_effect(
     context: &ChannelCommandContext<'_>,
     action: SlashCommandAction,
     effect: SlashCommandEffect,
-) -> psychevo_runtime::Result<ChannelCommandAction> {
+) -> psychevo::Result<ChannelCommandAction> {
     let action = match effect {
         SlashCommandEffect::LocalText => match action {
             SlashCommandAction::Help => {
@@ -442,7 +436,7 @@ async fn channel_command_action_from_effect(
             let options = context
                 .state
                 .run_options(context.scope.cwd.clone(), thread_id);
-            ChannelCommandAction::Reply(psychevo_runtime::sandbox::sandbox_status_text(
+            ChannelCommandAction::Reply(psychevo::sandbox::sandbox_status_text(
                 &options,
                 RunMode::Default,
             )?)
@@ -520,7 +514,7 @@ async fn channel_runtime_control_reply(
     context: &ChannelCommandContext<'_>,
     role: wire::ThreadControlSurfaceRoleView,
     requested: Option<&str>,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let (runtime_ref, runtime_context) =
         channel_runtime_context(context).await.map_err(|error| {
             Error::Message(format!(
@@ -638,7 +632,7 @@ async fn channel_runtime_control_reply(
 
 async fn channel_runtime_context(
     context: &ChannelCommandContext<'_>,
-) -> psychevo_runtime::Result<(String, wire::ThreadContextReadResult)> {
+) -> psychevo::Result<(String, wire::ThreadContextReadResult)> {
     let default_runtime_ref = context
         .connection
         .runtime_ref
@@ -676,7 +670,7 @@ pub(super) async fn run_channel_thread_action(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     action: wire::ThreadActionInput,
-) -> psychevo_runtime::Result<wire::ThreadActionRunResult> {
+) -> psychevo::Result<wire::ThreadActionRunResult> {
     let thread_id = state.inner.gateway.resolve_source_thread(source).await?;
     let thread_id = if thread_id.is_some() {
         thread_id
@@ -727,7 +721,7 @@ fn channel_runtime_control_command_role_label(
 
 async fn ensure_channel_mission_thread(
     context: &ChannelCommandContext<'_>,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     if let Some(thread_id) = context
         .state
         .inner
@@ -776,9 +770,7 @@ fn channel_action_visible(action: SlashCommandAction) -> bool {
     )
 }
 
-async fn channel_help_text(
-    context: &ChannelCommandContext<'_>,
-) -> psychevo_runtime::Result<String> {
+async fn channel_help_text(context: &ChannelCommandContext<'_>) -> psychevo::Result<String> {
     let thread_id = context
         .state
         .inner
@@ -883,7 +875,7 @@ fn channel_voice_reply(
     state: &WebState,
     source: &GatewaySource,
     mode: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let mode = match mode {
         "status" => voice_policy_for_source(state, source),
         "on" => {
@@ -920,7 +912,7 @@ async fn channel_status_text(
     runtime: &ChannelRuntimeState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let runner = runtime.runner_view(&connection.id);
     let thread = state.inner.gateway.resolve_source_thread(source).await?;
     let profile_ref = channel_effective_profile_ref(state, connection, source).await?;
@@ -941,10 +933,7 @@ async fn channel_status_text(
     ))
 }
 
-fn channel_history_status(
-    _state: &WebState,
-    thread_id: Option<&str>,
-) -> psychevo_runtime::Result<String> {
+fn channel_history_status(_state: &WebState, thread_id: Option<&str>) -> psychevo::Result<String> {
     let Some(_thread_id) = thread_id else {
         return Ok("unavailable".to_string());
     };
@@ -956,7 +945,7 @@ async fn channel_profile_reply(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     args: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let (subcommand, rest) = split_first_arg(args);
     let scope = channel_resolved_scope(state, connection, source).await?;
     match subcommand {
@@ -1031,7 +1020,7 @@ async fn channel_agent_reply(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     args: &str,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let scope = channel_resolved_scope(state, connection, source).await?;
     let default_runtime_ref = connection
         .runtime_ref
@@ -1123,7 +1112,7 @@ async fn channel_profile_status_text(
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let profile_ref = channel_effective_profile_ref(state, connection, source).await?;
     let profiles = runtime_profile_list_result(state, scope)?.profiles;
     let Some(profile) = profiles.iter().find(|profile| profile.id == profile_ref) else {
@@ -1137,10 +1126,7 @@ async fn channel_profile_status_text(
     ))
 }
 
-fn channel_profile_list_text(
-    state: &WebState,
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
+fn channel_profile_list_text(state: &WebState, scope: &ResolvedScope) -> psychevo::Result<String> {
     let profiles = runtime_profile_list_result(state, scope)?.profiles;
     let enabled_count = profiles.iter().filter(|profile| profile.enabled).count();
     let mut lines = vec!["Runtime Profiles:".to_string()];
@@ -1156,10 +1142,7 @@ fn channel_profile_list_text(
     Ok(lines.join("\n"))
 }
 
-fn channel_skills_text(
-    state: &WebState,
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
+fn channel_skills_text(state: &WebState, scope: &ResolvedScope) -> psychevo::Result<String> {
     let dynamic = dynamic_slash_commands(state, scope)?;
     if dynamic.is_empty() {
         return Ok("No channel-available skills found for this workspace.".to_string());
@@ -1174,10 +1157,7 @@ fn channel_skills_text(
     Ok(lines.join("\n"))
 }
 
-fn channel_agents_text(
-    state: &WebState,
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<String> {
+fn channel_agents_text(state: &WebState, scope: &ResolvedScope) -> psychevo::Result<String> {
     let catalog = discover_gateway_agents(state, scope)?;
     let mut callable = Vec::new();
     let mut peer_only = Vec::new();
@@ -1231,7 +1211,7 @@ fn channel_agents_text(
 async fn reset_channel_source_reply(
     state: &WebState,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<String> {
+) -> psychevo::Result<String> {
     let previous = state.inner.gateway.reset_source_to_empty(source).await?;
     Ok(if previous.is_some() {
         "Started a new channel thread. The next message will use this channel's current default workspace.".to_string()
@@ -1245,7 +1225,7 @@ pub(super) async fn channel_resolved_scope(
     state: &WebState,
     connection: &ChannelRuntimeConnection,
     source: &GatewaySource,
-) -> psychevo_runtime::Result<ResolvedScope> {
+) -> psychevo::Result<ResolvedScope> {
     let cwd = match state.inner.gateway.resolve_source_thread(source).await? {
         Some(thread_id) => state
             .inner

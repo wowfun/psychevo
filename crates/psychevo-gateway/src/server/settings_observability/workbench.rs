@@ -2,8 +2,8 @@ async fn settings_read_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
-    let normalized_cwd = psychevo_runtime::host_paths::normalized_native_path(cwd);
+) -> psychevo::Result<Value> {
+    let normalized_cwd = psychevo::host_paths::normalized_native_path(cwd);
     let cwd = normalized_cwd.as_path();
     let controls = workbench_controls_value(state, cwd, thread_id).await?;
     let project = workbench_project_value(cwd);
@@ -20,9 +20,9 @@ async fn settings_read_value(
     }))
 }
 
-fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo_runtime::Result<Value> {
+fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo::Result<Value> {
     let options = state.run_options(cwd.to_path_buf(), None);
-    let value = psychevo_runtime::config::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
+    let value = psychevo::config::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
         json!({
             "execution": "local", "backend": "exa", "external_access": "live",
             "context_size": "medium", "return_token_budget": "default",
@@ -53,7 +53,7 @@ fn web_search_settings_update_value(
     state: &WebState,
     cwd: &Path,
     params: wire::WebSearchSettingsUpdateParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let search = params.search;
     let value = json!({
         "execution": search.execution,
@@ -68,7 +68,7 @@ fn web_search_settings_update_value(
         "location": search.location,
         "image": search.image,
     });
-    psychevo_runtime::config::update_global_web_search_settings(
+    psychevo::config::update_global_web_search_settings(
         &state.inner.home,
         value,
         params.credential_values,
@@ -80,7 +80,7 @@ async fn workbench_controls_value(
     state: &WebState,
     cwd: &Path,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<wire::WorkbenchControlsView> {
+) -> psychevo::Result<wire::WorkbenchControlsView> {
     let options = state.run_options(cwd.to_path_buf(), None);
     let agent = session_control_agent(state, thread_id).await?;
     let model_state = ModelState::load(&ModelState::path_for_home(&state.inner.home))?;
@@ -174,7 +174,7 @@ struct ComposerModelSelection {
 async fn session_model_state_selection(
     state: &WebState,
     thread_id: &str,
-) -> psychevo_runtime::Result<Option<ComposerModelSelection>> {
+) -> psychevo::Result<Option<ComposerModelSelection>> {
     let Some(summary) = state.inner.state.session_summary(thread_id).await? else {
         return Ok(None);
     };
@@ -219,7 +219,7 @@ fn native_runtime_mode_option() -> wire::RuntimeConfigOptionView {
 async fn session_control_agent(
     state: &WebState,
     thread_id: Option<&str>,
-) -> psychevo_runtime::Result<Option<String>> {
+) -> psychevo::Result<Option<String>> {
     let Some(thread_id) = thread_id else {
         return Ok(None);
     };
@@ -235,7 +235,7 @@ async fn update_session_agent_setting(
     scope: &ResolvedScope,
     thread_id: &str,
     input: Option<&str>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let summary = state
         .inner
         .state
@@ -298,7 +298,7 @@ async fn update_session_agent_setting(
 }
 
 fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
-    let cwd = psychevo_runtime::host_paths::normalized_native_path(cwd);
+    let cwd = psychevo::host_paths::normalized_native_path(cwd);
     wire::WorkbenchProjectView {
         path: cwd.display().to_string(),
         display_path: display_cwd(&cwd),
@@ -307,11 +307,11 @@ fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
 }
 
 fn display_cwd(cwd: &Path) -> String {
-    let cwd_display = psychevo_runtime::host_paths::display_path_for_native_path(cwd);
+    let cwd_display = psychevo::host_paths::display_path_for_native_path(cwd);
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
         && let Some(display) = display_relative_to_home(
             &cwd_display,
-            &psychevo_runtime::host_paths::display_path_for_native_path(&home),
+            &psychevo::host_paths::display_path_for_native_path(&home),
         )
     {
         return display;

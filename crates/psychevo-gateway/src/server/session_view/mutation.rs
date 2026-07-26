@@ -2,7 +2,7 @@ async fn guard_session_mutation(
     state: &WebState,
     auth: &AuthContext,
     session_id: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let scope = default_resolved_scope(state, auth)?;
     let activity = state.activity(&scope.source, Some(session_id)).await;
     if activity.running {
@@ -16,7 +16,7 @@ async fn guard_session_mutation(
 async fn session_summary_by_id(
     state: &WebState,
     session_id: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let projection = state
         .inner
         .state
@@ -24,10 +24,20 @@ async fn session_summary_by_id(
         .session_list_projection(session_id)
         .await?
         .ok_or_else(|| Error::Message(format!("session not found: {session_id}")))?;
-    let activity = state
+    let mut activity = state
         .inner
         .gateway
         .activity_for_selector(GatewayThreadSelector::thread_id(session_id))
         .await;
+    if let Ok(thread) = state.inner.framework.resume_thread(session_id).await {
+        let (running, active_turn_id, queued_turns) = thread.__activity();
+        if running {
+            activity.running = true;
+        }
+        if active_turn_id.is_some() {
+            activity.active_turn_id = active_turn_id;
+        }
+        activity.queued_turns = activity.queued_turns.saturating_add(queued_turns);
+    }
     Ok(session_summary_value(projection, activity))
 }

@@ -1,7 +1,7 @@
 fn discover_gateway_agents(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<psychevo_runtime::agents::AgentCatalog> {
+) -> psychevo::Result<psychevo::agents::AgentCatalog> {
     materialize_local_acp_backends(state, scope)?;
     discover_agents(&AgentDiscoveryOptions {
         home: state.inner.home.clone(),
@@ -15,7 +15,7 @@ fn discover_gateway_agents(
 fn discover_gateway_skills(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<psychevo_runtime::skills::SkillCatalog> {
+) -> psychevo::Result<psychevo::skills::SkillCatalog> {
     discover_skills(&SkillDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: scope.cwd.clone(),
@@ -30,7 +30,7 @@ fn discover_gateway_skills(
 fn dynamic_slash_commands(
     state: &WebState,
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<Vec<DynamicSlashCommand>> {
+) -> psychevo::Result<Vec<DynamicSlashCommand>> {
     let mut commands = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for bundle in list_skill_bundles(&state.inner.home, &scope.cwd)? {

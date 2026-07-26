@@ -8,13 +8,13 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{
+use psychevo::{
     Error, host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
     host_paths::resolve_executable_path, process_env::ProcessEnvOptions,
     process_env::apply_tokio_process_env, process_env::effective_process_env,
     process_env::tokio_host_process_command,
 };
+use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 
 use super::ResolvedScope;
@@ -100,7 +100,7 @@ trait WorkspaceExternalLauncher: Send + Sync {
     fn launch(
         &self,
         request: WorkspaceExternalLaunchRequest,
-    ) -> BoxFuture<'_, psychevo_runtime::Result<()>>;
+    ) -> BoxFuture<'_, psychevo::Result<()>>;
 }
 
 struct ProductionWorkspaceExternalLauncher {
@@ -112,7 +112,7 @@ impl WorkspaceExternalLauncher for ProductionWorkspaceExternalLauncher {
     fn launch(
         &self,
         request: WorkspaceExternalLaunchRequest,
-    ) -> BoxFuture<'_, psychevo_runtime::Result<()>> {
+    ) -> BoxFuture<'_, psychevo::Result<()>> {
         Box::pin(async move {
             match request.action {
                 wire::WorkspaceExternalFileAction::Vscode => {
@@ -192,7 +192,7 @@ pub(super) fn workspace_file_external_actions_value(
     state: &WorkspaceExternalState,
     scope: &ResolvedScope,
     path: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let resolved = resolve_regular_workspace_file(scope, path)?;
     let classification = classify_external_file(&resolved)?;
     let vscode_available = classification.text_like && state.vscode_launcher().is_some();
@@ -221,7 +221,7 @@ pub(super) async fn workspace_file_open_external_value(
     state: &WorkspaceExternalState,
     scope: &ResolvedScope,
     params: wire::WorkspaceFileOpenExternalParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let resolved = resolve_regular_workspace_file(scope, &params.path)?;
     let classification = classify_external_file(&resolved)?;
     let vscode_launcher = if classification.text_like {
@@ -264,10 +264,7 @@ pub(super) async fn workspace_file_open_external_value(
     )?)
 }
 
-fn resolve_regular_workspace_file(
-    scope: &ResolvedScope,
-    path: &str,
-) -> psychevo_runtime::Result<PathBuf> {
+fn resolve_regular_workspace_file(scope: &ResolvedScope, path: &str) -> psychevo::Result<PathBuf> {
     let resolved = resolve_workspace_relative_path(&scope.cwd, path)?;
     if !std::fs::metadata(&resolved)?.is_file() {
         return Err(Error::Message(
@@ -277,7 +274,7 @@ fn resolve_regular_workspace_file(
     Ok(resolved)
 }
 
-fn workspace_relative_path(root: &Path, file: &Path) -> psychevo_runtime::Result<String> {
+fn workspace_relative_path(root: &Path, file: &Path) -> psychevo::Result<String> {
     path_from_root(root, file)
         .ok_or_else(|| Error::Message("workspace path is outside the workspace".to_string()))
 }
@@ -288,13 +285,13 @@ struct ExternalFileClassification {
     text_like: bool,
 }
 
-fn classify_external_file(path: &Path) -> psychevo_runtime::Result<ExternalFileClassification> {
+fn classify_external_file(path: &Path) -> psychevo::Result<ExternalFileClassification> {
     Ok(classify_external_file_with_probe(path, bounded_text_probe))
 }
 
 fn classify_external_file_with_probe(
     path: &Path,
-    probe: impl FnOnce(&Path) -> psychevo_runtime::Result<bool>,
+    probe: impl FnOnce(&Path) -> psychevo::Result<bool>,
 ) -> ExternalFileClassification {
     let extension = path
         .extension()
@@ -361,7 +358,7 @@ fn available_actions(
     actions
 }
 
-fn bounded_text_probe(path: &Path) -> psychevo_runtime::Result<bool> {
+fn bounded_text_probe(path: &Path) -> psychevo::Result<bool> {
     let mut bytes = Vec::new();
     Read::by_ref(&mut File::open(path)?)
         .take(MAX_TEXT_PROBE_BYTES)
@@ -492,7 +489,7 @@ fn required_host_executable(
     cwd: &Path,
     platform: HostPlatform,
     environment: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     resolve_executable_path(
         command,
         cwd,
@@ -518,7 +515,7 @@ async fn spawn_host_command(
     platform: HostPlatform,
     environment: &BTreeMap<String, String>,
     operation: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     spawn_host_command_with_observation(
         program,
         args,
@@ -539,7 +536,7 @@ async fn spawn_host_command_with_observation(
     environment: &BTreeMap<String, String>,
     operation: &str,
     observation_window: Duration,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let mut command = tokio_host_process_command(program, args, platform, environment)?;
     command
         .current_dir(cwd)
@@ -563,7 +560,7 @@ async fn observe_early_process_exit(
     child: &mut tokio::process::Child,
     observation_window: Duration,
     operation: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let deadline = tokio::time::Instant::now() + observation_window;
     loop {
         match child.try_wait() {
@@ -591,7 +588,7 @@ async fn observe_early_process_exit(
 fn early_process_observation_result(
     observation: EarlyProcessObservation,
     operation: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     match observation {
         EarlyProcessObservation::Running => Ok(()),
         EarlyProcessObservation::Exited(status) if status.success() => Ok(()),
@@ -605,7 +602,7 @@ async fn reveal_linux_file(
     file: &Path,
     workspace_root: &Path,
     environment: &BTreeMap<String, String>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if let Some(busctl) = resolve_executable_path(
         "busctl",
         workspace_root,
@@ -681,14 +678,14 @@ fn linux_file_uri(path: &Path) -> String {
 }
 
 #[cfg(windows)]
-async fn windows_open_default(path: PathBuf) -> psychevo_runtime::Result<()> {
+async fn windows_open_default(path: PathBuf) -> psychevo::Result<()> {
     tokio::task::spawn_blocking(move || windows_open_default_blocking(&path))
         .await
         .map_err(|error| Error::Message(format!("default application task failed: {error}")))?
 }
 
 #[cfg(windows)]
-fn windows_open_default_blocking(path: &Path) -> psychevo_runtime::Result<()> {
+fn windows_open_default_blocking(path: &Path) -> psychevo::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -713,14 +710,14 @@ fn windows_open_default_blocking(path: &Path) -> psychevo_runtime::Result<()> {
 }
 
 #[cfg(not(windows))]
-async fn windows_open_default(_path: PathBuf) -> psychevo_runtime::Result<()> {
+async fn windows_open_default(_path: PathBuf) -> psychevo::Result<()> {
     Err(Error::Message(
         "Windows external file opening is unavailable on this host".to_string(),
     ))
 }
 
 #[cfg(any(windows, test))]
-fn shell_execute_code_result(code: isize) -> psychevo_runtime::Result<()> {
+fn shell_execute_code_result(code: isize) -> psychevo::Result<()> {
     if code <= 32 {
         Err(Error::Message(format!(
             "failed to open the file with its default application (ShellExecuteW code {code})"
@@ -731,14 +728,14 @@ fn shell_execute_code_result(code: isize) -> psychevo_runtime::Result<()> {
 }
 
 #[cfg(windows)]
-async fn windows_reveal_file(path: PathBuf) -> psychevo_runtime::Result<()> {
+async fn windows_reveal_file(path: PathBuf) -> psychevo::Result<()> {
     tokio::task::spawn_blocking(move || windows_reveal_file_blocking(&path))
         .await
         .map_err(|error| Error::Message(format!("File Explorer task failed: {error}")))?
 }
 
 #[cfg(windows)]
-fn windows_reveal_file_blocking(path: &Path) -> psychevo_runtime::Result<()> {
+fn windows_reveal_file_blocking(path: &Path) -> psychevo::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
 
@@ -775,7 +772,7 @@ impl Drop for StaComGuard {
 }
 
 #[cfg(windows)]
-fn initialize_sta_com(operation: &str) -> psychevo_runtime::Result<StaComGuard> {
+fn initialize_sta_com(operation: &str) -> psychevo::Result<StaComGuard> {
     use windows_sys::Win32::System::Com::{
         COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx,
     };
@@ -796,7 +793,7 @@ fn initialize_sta_com(operation: &str) -> psychevo_runtime::Result<StaComGuard> 
 }
 
 #[cfg(not(windows))]
-async fn windows_reveal_file(_path: PathBuf) -> psychevo_runtime::Result<()> {
+async fn windows_reveal_file(_path: PathBuf) -> psychevo::Result<()> {
     Err(Error::Message(
         "Windows file reveal is unavailable on this host".to_string(),
     ))

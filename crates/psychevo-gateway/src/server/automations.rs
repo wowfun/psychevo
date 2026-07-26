@@ -1,7 +1,7 @@
 use super::*;
 use futures::future::BoxFuture;
-use psychevo_agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
-use psychevo_ai::AbortSignal;
+use psychevo::__agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
+use psychevo::__ai::AbortSignal;
 
 const AUTOMATION_RUN_HISTORY_LIMIT: usize = 5;
 const AUTOMATION_DUE_LIMIT: usize = 10;
@@ -34,8 +34,8 @@ pub(super) fn automation_runtime_tools(
     state: WebState,
     cwd: PathBuf,
     current_thread_id: Option<String>,
-) -> Vec<psychevo_runtime::types::RuntimeTool> {
-    vec![psychevo_runtime::types::RuntimeTool::new(Arc::new(
+) -> Vec<psychevo::types::RuntimeTool> {
+    vec![psychevo::types::RuntimeTool::new(Arc::new(
         AutomationTool {
             state,
             cwd,

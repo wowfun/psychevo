@@ -12,7 +12,7 @@ impl WorkspaceExternalLauncher for FakeLauncher {
     fn launch(
         &self,
         request: WorkspaceExternalLaunchRequest,
-    ) -> BoxFuture<'_, psychevo_runtime::Result<()>> {
+    ) -> BoxFuture<'_, psychevo::Result<()>> {
         self.requests
             .lock()
             .expect("fake launcher requests")

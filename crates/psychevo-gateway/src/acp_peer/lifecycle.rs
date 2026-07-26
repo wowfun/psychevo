@@ -100,7 +100,7 @@ impl AcpLifecycleCapability {
 fn require_acp_lifecycle_capability(
     initialized: &InitializeResponse,
     capability: AcpLifecycleCapability,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if capability.advertised(initialized) {
         return Ok(());
     }
@@ -138,7 +138,7 @@ fn lifecycle_client_context(peer: &ResolvedPeerTurn, cwd: PathBuf) -> Arc<AcpCli
     })
 }
 
-fn mcp_declaration_fingerprint(mcp_servers: &[McpServer]) -> psychevo_runtime::Result<String> {
+fn mcp_declaration_fingerprint(mcp_servers: &[McpServer]) -> psychevo::Result<String> {
     Ok(format!(
         "{:x}",
         sha2::Sha256::digest(serde_json::to_vec(mcp_servers)?)
@@ -149,7 +149,7 @@ fn insert_acp_context(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     native_session_id: &str,
     context: Arc<AcpClientContext>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     contexts
         .lock()
         .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
@@ -160,7 +160,7 @@ fn insert_acp_context(
 fn remove_acp_context(
     contexts: &Arc<Mutex<BTreeMap<String, Arc<AcpClientContext>>>>,
     native_session_id: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     contexts
         .lock()
         .map_err(|_| Error::Message("ACP session context lock poisoned".to_string()))?
@@ -171,7 +171,7 @@ fn remove_acp_context(
 fn validate_lifecycle_session_identity(
     session: &AcpResidentSession,
     expected: &AcpResidentSessionRef,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if session.native_session_id == expected.native_session_id {
         return Ok(());
     }
@@ -187,7 +187,7 @@ fn validate_lifecycle_session_identity(
 async fn validate_resident_session_ref(
     sessions: &AcpResidentSessions,
     session_ref: &AcpResidentSessionRef,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let sessions = sessions.lock().await;
     let session = sessions.get(&session_ref.local_session_id).ok_or_else(|| {
         acp_lifecycle_error(
@@ -202,7 +202,7 @@ async fn validate_delete_session_ref(
     sessions: &AcpResidentSessions,
     native_session_id: &str,
     resident: Option<&AcpResidentSessionRef>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if let Some(resident) = resident {
         if resident.native_session_id != native_session_id {
             return Err(acp_lifecycle_error(
@@ -239,7 +239,7 @@ async fn listed_acp_sessions(
     notification_rx: &mut AcpNotificationSubscription,
     generation: u64,
     input: AcpListSessionsInput,
-) -> psychevo_runtime::Result<AcpSessionListPage> {
+) -> psychevo::Result<AcpSessionListPage> {
     let AcpListSessionsInput { cwd, cursor } = input;
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::List)?;
     if cwd.as_ref().is_some_and(|cwd| !cwd.is_absolute()) {
@@ -330,7 +330,7 @@ async fn listed_acp_sessions(
                     .map(|updated_at| bounded_acp_text(updated_at, ACP_MAX_UPDATED_AT_CHARS)),
             })
         })
-        .collect::<psychevo_runtime::Result<Vec<_>>>()?;
+        .collect::<psychevo::Result<Vec<_>>>()?;
     Ok(AcpSessionListPage {
         sessions,
         next_cursor,
@@ -350,8 +350,8 @@ async fn resume_resident_acp_session(
     generation: u64,
     session_ref: AcpResidentSessionRef,
     cwd: PathBuf,
-    resolved_mcp_servers: Vec<psychevo_runtime::types::ResolvedMcpServerInput>,
-) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+    resolved_mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+) -> psychevo::Result<AcpSessionSnapshot> {
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Resume)?;
     if !cwd.is_absolute() {
         return Err(acp_lifecycle_error(
@@ -468,7 +468,7 @@ async fn fork_resident_acp_session(
     source: AcpResidentSessionRef,
     fork_local_session_id: String,
     cwd: PathBuf,
-) -> psychevo_runtime::Result<AcpSessionSnapshot> {
+) -> psychevo::Result<AcpSessionSnapshot> {
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Fork)?;
     if !cwd.is_absolute() {
         return Err(acp_lifecycle_error(
@@ -582,7 +582,7 @@ async fn fork_resident_acp_session(
 fn cooperative_acp_session_cancel(
     cx: &ConnectionTo<Agent>,
     native_session_id: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     cx.send_notification(CancelNotification::new(native_session_id.to_string()))
         .map_err(|error| {
             acp_lifecycle_error(
@@ -600,7 +600,7 @@ async fn remove_resident_session_resources(
     sessions: &AcpResidentSessions,
     terminals: &AcpTerminalRegistry,
     session_ref: &AcpResidentSessionRef,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let removed = {
         let mut sessions = sessions.lock().await;
         let session = sessions.get(&session_ref.local_session_id).ok_or_else(|| {
@@ -631,7 +631,7 @@ async fn close_resident_acp_session(
     notification_rx: &mut AcpNotificationSubscription,
     generation: u64,
     session_ref: AcpResidentSessionRef,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Close)?;
     {
         let sessions = sessions.lock().await;
@@ -678,7 +678,7 @@ async fn delete_acp_session(
     generation: u64,
     native_session_id: String,
     resident: Option<AcpResidentSessionRef>,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Delete)?;
     validate_delete_session_ref(sessions, &native_session_id, resident.as_ref()).await?;
     let (_, response_barrier) = acp_response_with_projection_barrier(

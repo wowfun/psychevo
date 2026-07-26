@@ -3,11 +3,11 @@ impl PsychevoAcpAgent {
         &self,
         session_id: &SessionId,
         session: &AcpSession,
-        effect: psychevo_runtime::command_registry::SlashCommandEffect,
-        action: Option<psychevo_runtime::command_registry::SlashCommandAction>,
+        effect: psychevo::command_registry::SlashCommandEffect,
+        action: Option<psychevo::command_registry::SlashCommandAction>,
         cx: &ConnectionTo<Client>,
     ) -> Result<SlashPromptAction, Error> {
-        use psychevo_runtime::command_registry::{SlashCommandAction, SlashCommandEffect};
+        use psychevo::command_registry::{SlashCommandAction, SlashCommandEffect};
 
         match effect {
             SlashCommandEffect::LocalText => {
@@ -435,7 +435,7 @@ impl PsychevoAcpAgent {
             "ACP session: {session_id}\nruntime session: {runtime_session}\ncwd: {}\nmode: {}\nmodel: {model}\ncommands: {}",
             session.cwd.display(),
             session.mode.as_str(),
-            self.available_commands_for_session_state(session, session.control.is_some())
+            self.available_commands_for_session_state(session, session.turn.is_some())
                 .commands
                 .len()
         )
@@ -444,7 +444,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn toolsets_status_text(
         &self,
         session: &AcpSession,
-    ) -> Result<String, psychevo_runtime::Error> {
+    ) -> Result<String, psychevo::Error> {
         let options = self.run_options(session, String::new(), Vec::new(), None);
         let value = toolsets_value(&options, ConfigScope::Effective)?;
         let mode_key = session.mode.as_str();
@@ -473,7 +473,7 @@ impl PsychevoAcpAgent {
     pub(crate) fn agents_status_text(
         &self,
         session: &AcpSession,
-    ) -> Result<String, psychevo_runtime::Error> {
+    ) -> Result<String, psychevo::Error> {
         let catalog = discover_agents(&AgentDiscoveryOptions {
             home: self.options.home.clone(),
             cwd: session.cwd.clone(),
@@ -502,7 +502,7 @@ impl PsychevoAcpAgent {
 
     pub(crate) fn help_command_text(&self, session: &AcpSession) -> String {
         let available =
-            self.available_commands_for_session_state(session, session.control.is_some());
+            self.available_commands_for_session_state(session, session.turn.is_some());
         let hidden_dynamic = available.hidden_dynamic;
         let mut lines = vec!["Available commands:".to_string()];
         lines.extend(available_command_lines_from(available_commands_from(
@@ -518,7 +518,7 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) async fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
-        let value = usage_stats(psychevo_runtime::types::StatsOptions {
+        let value = usage_stats(psychevo::types::StatsOptions {
             state: self.state.clone(),
             cwd: session.cwd.clone(),
             all: false,

@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 
-use psychevo_agent_core::{AssistantBlock, Message, UserContentBlock};
-use psychevo_runtime::state::{
-    AgentEdgeRecord, GatewayTurnTerminalRecord, SessionCompactionRecord,
-};
-use psychevo_runtime::{
+use psychevo::__agent_core::{AssistantBlock, Message, UserContentBlock};
+use psychevo::state::{AgentEdgeRecord, GatewayTurnTerminalRecord, SessionCompactionRecord};
+use psychevo::{
     thread_lineage::side_inherited_metadata_hidden,
     tool_argument_display::write_argument_preview_from_args,
     tool_argument_display::write_argument_preview_from_json,
@@ -219,6 +217,7 @@ pub(crate) fn merge_entries_at_session_boundaries(
     merged
 }
 
+#[cfg(test)]
 pub(crate) fn transient_compaction_entry(
     thread_id: &str,
     turn_id: &str,

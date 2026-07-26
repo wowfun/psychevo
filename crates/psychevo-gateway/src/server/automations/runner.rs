@@ -1,4 +1,4 @@
-pub(super) async fn run_due_automations_once(state: WebState) -> psychevo_runtime::Result<usize> {
+pub(super) async fn run_due_automations_once(state: WebState) -> psychevo::Result<usize> {
     recover_stale_automation_runs(&state).await?;
     let now = gateway_now_ms();
     let due = state
@@ -23,7 +23,7 @@ pub(super) async fn run_due_automations_once(state: WebState) -> psychevo_runtim
     Ok(accepted)
 }
 
-async fn recover_stale_automation_runs(state: &WebState) -> psychevo_runtime::Result<usize> {
+async fn recover_stale_automation_runs(state: &WebState) -> psychevo::Result<usize> {
     let now = gateway_now_ms();
     let candidates = state
         .inner
@@ -79,7 +79,7 @@ async fn start_automation_run(
     task: AutomationTaskRecord,
     trigger: &str,
     out_tx: Option<ConnectionSender>,
-) -> psychevo_runtime::Result<Option<AutomationRunRecord>> {
+) -> psychevo::Result<Option<AutomationRunRecord>> {
     let Some(run) = state
         .inner
         .state
@@ -157,9 +157,9 @@ async fn send_automation_turn(
     state: &WebState,
     task: &AutomationTaskRecord,
     out_tx: Option<ConnectionSender>,
-) -> psychevo_runtime::Result<GatewayTurnResult> {
+) -> psychevo::Result<GatewayTurnResult> {
     let cwd = PathBuf::from(&task.cwd);
-    let (thread_id, source, bind_source) = match automation_kind_from_str(&task.kind)? {
+    let (mut thread_id, source, bind_source) = match automation_kind_from_str(&task.kind)? {
         wire::AutomationTaskKind::Project => {
             let source = automation_source(&task.id, &task.title);
             let thread_id = state.inner.gateway.resolve_source_thread(&source).await?;
@@ -172,6 +172,29 @@ async fn send_automation_turn(
             (Some(thread_id), None, None)
         }
     };
+    if thread_id.is_none() {
+        let mut start = psychevo::StartThreadRequest::new(&cwd);
+        start.source = "automation".to_string();
+        start.metadata = Some(json!({"automationId": task.id}));
+        let thread = state.inner.framework.start_thread(start).await?;
+        thread_id = Some(thread.id().to_string());
+        if let Some(source) = source.as_ref() {
+            state
+                .inner
+                .gateway
+                .bind_source_thread(
+                    source,
+                    thread.id(),
+                    &GatewayBackendInfo {
+                        kind: BackendKind::Native,
+                        runtime_ref: None,
+                        native_id: None,
+                    },
+                    Some(json!({"automationId": task.id})),
+                )
+                .await?;
+        }
+    }
     let event_selector = thread_id
         .as_ref()
         .map(GatewayThreadSelector::thread_id)
@@ -214,6 +237,7 @@ async fn send_automation_turn(
         "automation".to_string(),
     ];
     intent.lineage = Some(json!({"automationId": task.id}));
+    intent.turn_id = Some(Uuid::now_v7().to_string());
     caller.observe_gateway_events(move |event| {
         let context = event_selector
             .as_ref()
@@ -228,11 +252,14 @@ async fn send_automation_turn(
             event_tx.as_ref(),
         );
     });
-    state
+    let submission = intent.into_framework_request(caller)?;
+    let thread = state
         .inner
-        .gateway
-        .start_turn(caller, intent)
-        .await?
-        .wait()
-        .await
+        .framework
+        .resume_thread(&submission.thread_id)
+        .await?;
+    let handle = thread.start_turn(submission.request).await?;
+    let receipt = handle.receipt().clone();
+    let result = handle.wait().await?;
+    framework_gateway_turn_result(state, receipt, result)
 }

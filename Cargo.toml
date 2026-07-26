@@ -2,7 +2,7 @@
 members = [
     "crates/psychevo-ai",
     "crates/psychevo-agent-core",
-    "crates/psychevo-runtime",
+    "crates/psychevo",
     "crates/psychevo-gateway-protocol",
     "crates/psychevo-gateway",
     "crates/psychevo-acp",
@@ -15,6 +15,8 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.97.0"
 license = "MIT"
+repository = "https://github.com/wowfun/psychevo"
+homepage = "https://github.com/wowfun/psychevo"
 
 [workspace.dependencies]
 anyhow = "1.0"

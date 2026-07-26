@@ -12,7 +12,7 @@ struct PendingGatewayLiveSnapshot {
 }
 
 #[derive(Clone)]
-pub struct ThreadApplication {
+pub struct Gateway {
     state: StateRuntime,
     agent_sessions: AgentSessionHost,
     event_ingress: GatewayEventIngress,
@@ -27,14 +27,10 @@ pub struct ThreadApplication {
     owner_id: Arc<String>,
 }
 
-/// Compatibility-free internal application kernel. The public `Gateway` name is
-/// an API-facing alias; caller adapters do not own Agent execution policy.
-pub type Gateway = ThreadApplication;
-
-impl fmt::Debug for ThreadApplication {
+impl fmt::Debug for Gateway {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ThreadApplication")
+            .debug_struct("Gateway")
             .field("state", &self.state)
             .field("agent_sessions", &self.agent_sessions)
             .field("event_ingress", &self.event_ingress)

@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use psychevo_runtime::state::{
+use psychevo::state::{
     GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
     GatewayRuntimeBindingStatus, StateRuntime,
 };
-use psychevo_runtime::{
+use psychevo::{
     Error, agents::AgentDefinition, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
     agents::discover_agents, agents::resolve_agent_definition, config::RuntimeProfileConfig,
     config::RuntimeProfileKind, config::load_agent_backend_configs,
@@ -73,7 +73,7 @@ pub(super) fn resolve_gateway_agent_binding_snapshot(
     profile: &RuntimeProfileConfig,
     existing: Option<&GatewayRuntimeBindingRecord>,
     entrypoint: AgentEntrypoint,
-) -> psychevo_runtime::Result<GatewayAgentBindingSnapshot> {
+) -> psychevo::Result<GatewayAgentBindingSnapshot> {
     let requested_agent_ref = options
         .agent
         .as_deref()
@@ -159,7 +159,7 @@ pub(super) fn resolve_gateway_agent_binding_snapshot(
 pub(crate) async fn resolve_bound_gateway_agent_target(
     options: &RunOptions,
     requested_runtime_ref: Option<&str>,
-) -> psychevo_runtime::Result<Option<BoundGatewayAgentTarget>> {
+) -> psychevo::Result<Option<BoundGatewayAgentTarget>> {
     let Some(thread_id) = options.session.as_deref() else {
         return Ok(None);
     };
@@ -194,7 +194,7 @@ fn resolve_captured_bound_peer(
     binding: &GatewayRuntimeBindingRecord,
     profile: &RuntimeProfileConfig,
     profile_fingerprint: &str,
-) -> psychevo_runtime::Result<Option<ResolvedPeerTurn>> {
+) -> psychevo::Result<Option<ResolvedPeerTurn>> {
     if profile.runtime == RuntimeProfileKind::Native {
         return Ok(None);
     }
@@ -317,7 +317,7 @@ fn resolve_captured_bound_peer(
 
 pub(super) async fn resolve_gateway_runtime_profile(
     options: &RunOptions,
-) -> psychevo_runtime::Result<(RuntimeProfileConfig, u64, String)> {
+) -> psychevo::Result<(RuntimeProfileConfig, u64, String)> {
     if let Some(thread_id) = options.session.as_deref()
         && let Some(bound) = resolve_bound_gateway_runtime_profile(
             &options.state,
@@ -405,7 +405,7 @@ pub(super) async fn resolve_bound_gateway_runtime_profile(
     state: &StateRuntime,
     thread_id: &str,
     requested_runtime_ref: Option<&str>,
-) -> psychevo_runtime::Result<Option<BoundGatewayRuntimeProfile>> {
+) -> psychevo::Result<Option<BoundGatewayRuntimeProfile>> {
     let Some(binding) = state.gateway_runtime_binding(thread_id).await? else {
         return Ok(None);
     };
@@ -530,7 +530,7 @@ pub(super) async fn ensure_gateway_runtime_binding(
     profile: &RuntimeProfileConfig,
     revision: u64,
     fingerprint: &str,
-) -> psychevo_runtime::Result<GatewayRuntimeBindingRecord> {
+) -> psychevo::Result<GatewayRuntimeBindingRecord> {
     if let Some(existing) = state.gateway_runtime_binding(thread_id).await? {
         if existing.status != GatewayRuntimeBindingStatus::Resolved {
             return Err(agent_session_configuration_error(
@@ -607,7 +607,7 @@ pub(crate) fn runtime_session_handle(
     let digest = Sha256::digest(
         format!(
             "agent-session-v1\0{runtime_ref}\0{}\0{native_session_id}",
-            psychevo_runtime::host_paths::normalized_native_path(&canonical).display()
+            psychevo::host_paths::normalized_native_path(&canonical).display()
         )
         .as_bytes(),
     );

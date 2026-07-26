@@ -103,7 +103,7 @@ impl ToolBinding for AutomationTool {
 }
 
 impl AutomationTool {
-    async fn execute_automation_action(&self, args: Value) -> psychevo_runtime::Result<Value> {
+    async fn execute_automation_action(&self, args: Value) -> psychevo::Result<Value> {
         let action = tool_string(&args, "action")?;
         match action.as_str() {
             "list" => self.list().await,
@@ -145,7 +145,7 @@ impl AutomationTool {
         }
     }
 
-    async fn list(&self) -> psychevo_runtime::Result<Value> {
+    async fn list(&self) -> psychevo::Result<Value> {
         let value = automation_list_result(
             &self.state,
             &AuthContext::Bearer,
@@ -161,7 +161,7 @@ impl AutomationTool {
         &self,
         args: Value,
         automation_id: Option<String>,
-    ) -> psychevo_runtime::Result<Value> {
+    ) -> psychevo::Result<Value> {
         let existing = match automation_id.as_deref() {
             Some(id) => Some(
                 automation_task_for_request(&self.state, &AuthContext::Bearer, id).await?,
@@ -180,7 +180,7 @@ impl AutomationTool {
         ))
     }
 
-    async fn set_enabled(&self, args: Value, enabled: bool) -> psychevo_runtime::Result<Value> {
+    async fn set_enabled(&self, args: Value, enabled: bool) -> psychevo::Result<Value> {
         let automation_id = tool_string(&args, "automationId")?;
         let value = automation_set_enabled_result(
             &self.state,
@@ -197,7 +197,7 @@ impl AutomationTool {
         args: &Value,
         automation_id: Option<String>,
         existing: Option<&AutomationTaskRecord>,
-    ) -> psychevo_runtime::Result<wire::AutomationWriteParams> {
+    ) -> psychevo::Result<wire::AutomationWriteParams> {
         let title = optional_tool_string(args, "title")
             .or_else(|| existing.map(|record| record.title.clone()))
             .ok_or_else(|| Error::Message("automation title is required".to_string()))?;
@@ -255,7 +255,7 @@ impl AutomationTool {
     fn target_from_args(
         &self,
         args: &Value,
-    ) -> psychevo_runtime::Result<wire::AutomationTargetInput> {
+    ) -> psychevo::Result<wire::AutomationTargetInput> {
         if let Some(thread_id) = optional_tool_string(args, "threadId") {
             return Ok(wire::AutomationTargetInput::ThreadHeartbeat { thread_id });
         }
@@ -295,7 +295,7 @@ pub(super) async fn automation_tool_execute_for_test(
     cwd: PathBuf,
     current_thread_id: Option<String>,
     args: Value,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     AutomationTool {
         state,
         cwd,
@@ -319,7 +319,7 @@ pub(super) fn automation_tool_declaration_for_test(
     (tool.description().to_string(), tool.parameters())
 }
 
-fn tool_string(args: &Value, key: &str) -> psychevo_runtime::Result<String> {
+fn tool_string(args: &Value, key: &str) -> psychevo::Result<String> {
     optional_tool_string(args, key)
         .ok_or_else(|| Error::Message(format!("automation tool requires `{key}`")))
 }

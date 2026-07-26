@@ -61,6 +61,10 @@ impl TuiApp {
             .is_some_and(|running| running.task.is_finished())
         {
             let mut running = ui.running.take().expect("checked running");
+            let agent_completion = matches!(&running.task, RunningTask::Agent(_));
+            if agent_completion {
+                self.journey_profile.observe_turn_completion_received();
+            }
             let owner_session = running.session_id.clone();
             let task = running.task;
             let completed = match task {
@@ -144,6 +148,9 @@ impl TuiApp {
                         ui.push_error(format!("task failed: {err}"));
                     }
                 },
+            }
+            if agent_completion {
+                self.journey_profile.observe_turn_completion_applied();
             }
             ui.update_turn_meta(self.debug, true, true, true);
             ui.finish_turn();
@@ -715,6 +722,9 @@ impl TuiApp {
             }
         }
         let event_session = event_session_id.as_deref();
+        let profile_event = self
+            .journey_profile
+            .observe_runtime_event_received(&event);
         if let RunStreamEvent::Event(value) = &event {
             if value.get("type").and_then(Value::as_str) == Some("context_snapshot")
                 && let Ok(snapshot) =
@@ -730,13 +740,19 @@ impl TuiApp {
                 self.debug,
                 event_session,
             );
+            self.journey_profile
+                .observe_runtime_event_applied(profile_event);
             if run_started && let Err(err) = self.start_pending_auxiliary_shells(ui) {
                 self.had_error = true;
                 ui.push_error(format!("error: {err:#}"));
             }
             return active_tool_frame_requested;
         }
-        ui.apply_stream_event_for_session(event, self.thinking_visible, self.debug, event_session)
+        let active_tool_frame_requested =
+            ui.apply_stream_event_for_session(event, self.thinking_visible, self.debug, event_session);
+        self.journey_profile
+            .observe_runtime_event_applied(profile_event);
+        active_tool_frame_requested
     }
 
 }

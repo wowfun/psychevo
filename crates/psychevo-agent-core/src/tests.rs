@@ -818,3 +818,15 @@ pub(crate) async fn reasoning_details_attach_to_reasoning_block_evidence() {
         "thinking"
     );
 }
+
+#[test]
+fn control_state_is_retained_after_receivers_are_dropped() {
+    let (control, receivers) = ControlHandle::new();
+    drop(receivers);
+
+    control.stop();
+    control.abort();
+
+    assert!(control.is_stopped());
+    assert!(control.is_aborted());
+}

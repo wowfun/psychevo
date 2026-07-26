@@ -1,7 +1,7 @@
 fn current_browser_session(
     state: &WebState,
     auth: &AuthContext,
-) -> psychevo_runtime::Result<BrowserSession> {
+) -> psychevo::Result<BrowserSession> {
     let AuthContext::Browser { session_id } = auth else {
         return Err(Error::Message(
             "browser session is required for this operation".to_string(),
@@ -21,7 +21,7 @@ async fn authorize_thread(
     state: &WebState,
     auth: &AuthContext,
     thread_id: &str,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     if matches!(auth, AuthContext::Bearer) {
         return Ok(());
     }
@@ -99,7 +99,7 @@ fn now_ms() -> i64 {
 fn apply_mentions_to_run_options(
     options: &mut RunOptions,
     mentions: &[wire::GatewayMention],
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     apply_mentions_to_turn_intent(
         options.runtime_ref.as_deref(),
         &mut options.skill_inputs,
@@ -110,7 +110,7 @@ fn apply_mentions_to_run_options(
 fn apply_mentions_to_turn_policy(
     policy: &mut crate::ThreadTurnPolicy,
     mentions: &[wire::GatewayMention],
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     apply_mentions_to_turn_intent(
         policy.runtime_profile_ref.as_deref(),
         &mut policy.skill_inputs,
@@ -122,7 +122,7 @@ fn apply_mentions_to_turn_intent(
     runtime_profile_ref: Option<&str>,
     skill_inputs: &mut Vec<String>,
     mentions: &[wire::GatewayMention],
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let peer_runtime = runtime_profile_ref
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "native");
@@ -157,11 +157,11 @@ fn apply_mentions_to_turn_intent(
 }
 
 trait TurnStartInputExt {
-    fn input_parts(&self) -> psychevo_runtime::Result<Vec<GatewayInputPart>>;
+    fn input_parts(&self) -> psychevo::Result<Vec<GatewayInputPart>>;
 }
 
 impl TurnStartInputExt for wire::TurnStartParams {
-    fn input_parts(&self) -> psychevo_runtime::Result<Vec<GatewayInputPart>> {
+    fn input_parts(&self) -> psychevo::Result<Vec<GatewayInputPart>> {
         let input = self.input.clone();
         if input.is_empty() {
             return Err(Error::Message("turn/start requires input".to_string()));

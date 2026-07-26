@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
-use psychevo_runtime::{Error, Result};
+use psychevo::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 

@@ -1,56 +1,59 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 impl TuiApp {
-    pub(crate) fn thread_turn_request(
-        &self,
-        prompt: String,
-    ) -> (ThreadCallerContext, ThreadTurnIntent) {
-        self.thread_turn_request_with_images(prompt, Vec::new())
-    }
-
-    pub(crate) fn thread_turn_request_with_images(
+    pub(crate) fn framework_turn_request_with_images(
         &self,
         prompt: String,
         image_inputs: Vec<ImageInput>,
-    ) -> (ThreadCallerContext, ThreadTurnIntent) {
-        let mut input = Vec::with_capacity(1 + image_inputs.len());
-        if !prompt.is_empty() {
-            input.push(GatewayInputPart::Text { text: prompt });
+    ) -> TurnRequest {
+        let mut request = TurnRequest::new(prompt);
+        request.image_inputs = image_inputs;
+        request.extract_prompt_image_sources = false;
+        request.source = "tui".to_string();
+        request.config_path = self.config_path.clone();
+        request.model = self.current_model.clone();
+        request.reasoning_effort = self.current_variant.clone();
+        request.mode = self.current_mode;
+        request.permission_mode = Some(self.current_permission_mode);
+        request.inherited_env = Some(self.env_map.clone());
+        request.agent = self.current_agent.clone();
+        request.no_agents = self.no_agents;
+        request.no_skills = self.no_skills;
+        request.clarify_enabled = true;
+        request.skill_inputs = self.skill_inputs.clone();
+        request
+    }
+
+    pub(crate) async fn framework_thread(&self) -> psychevo::Result<psychevo::Thread> {
+        if let Some(thread_id) = self.current_session.as_ref()
+            && let Ok(thread) = self.framework.resume_thread(thread_id.clone()).await
+        {
+            return Ok(thread);
         }
-        input.extend(
-            image_inputs
+        if !self.force_new_once
+            && let Some(snapshot) = self
+                .framework
+                .list_threads(ThreadListQuery {
+                    cwd: Some(self.cwd.clone()),
+                    archived: false,
+                    sources: TUI_CONTINUE_SESSION_SOURCES
+                        .iter()
+                        .map(|source| (*source).to_string())
+                        .collect(),
+                })
+                .await?
                 .into_iter()
-                .map(|image| GatewayInputPart::Image {
-                    input: match image {
-                        ImageInput::LocalPath(path) => GatewayImageInput::LocalPath {
-                            path: path.display().to_string(),
-                        },
-                        ImageInput::ImageUrl(url) => GatewayImageInput::Url { url },
-                    },
-                }),
-        );
-        let mut caller = ThreadCallerContext::new(ThreadSurface::Tui, self.cwd.clone());
-        caller.runtime_source = "tui".to_string();
-        caller.continue_sources = TUI_CONTINUE_SESSION_SOURCES
-            .iter()
-            .map(|source| (*source).to_string())
-            .collect();
-        let mut intent = ThreadTurnIntent::new(input);
-        intent.thread_id = self.current_session.clone();
-        intent.policy.snapshot_root = Some(self.home.join("snapshots"));
-        intent.policy.continue_latest = self.current_session.is_none() && !self.force_new_once;
-        intent.policy.config_path = self.config_path.clone();
-        intent.policy.model = self.current_model.clone();
-        intent.policy.reasoning_effort = self.current_variant.clone();
-        intent.policy.mode = self.current_mode;
-        intent.policy.permission_mode = Some(self.current_permission_mode);
-        intent.policy.clarify_enabled = true;
-        intent.policy.inherited_env = Some(self.env_map.clone());
-        intent.policy.agent_ref = self.current_agent.clone();
-        intent.policy.no_agents = self.no_agents;
-        intent.policy.no_skills = self.no_skills;
-        intent.policy.skill_inputs = self.skill_inputs.clone();
-        (caller, intent)
+                .next()
+        {
+            return self.framework.resume_thread(snapshot.id).await;
+        }
+        let mut request = StartThreadRequest::new(&self.cwd);
+        request.source = "tui".to_string();
+        request.metadata = Some(serde_json::json!({
+            "caller": "pevo TUI",
+            "pid": std::process::id(),
+        }));
+        self.framework.start_thread(request).await
     }
 
     pub(crate) fn run_options(&self, prompt: String) -> RunOptions {

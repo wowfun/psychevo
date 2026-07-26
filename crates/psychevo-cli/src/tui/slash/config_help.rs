@@ -476,7 +476,7 @@ pub(crate) fn configured_custom_command_row(target: &str, config: &EffectiveSlas
 }
 
 pub(crate) fn parse_effective_slash_config(root: &Value) -> Result<EffectiveSlashConfig> {
-    let shared = psychevo_runtime::command_registry::parse_shared_slash_config(root)?;
+    let shared = psychevo::command_registry::parse_shared_slash_config(root)?;
     let aliases = shared.alias_map();
     let leader_key = parse_key_chord(&shared.leader_key, "tui.leader_key")?;
     let leader_timeout = Duration::from_millis(shared.leader_timeout_ms);

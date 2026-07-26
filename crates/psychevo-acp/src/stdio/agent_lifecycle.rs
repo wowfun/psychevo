@@ -1,34 +1,23 @@
 impl PsychevoAcpAgent {
-    pub(crate) async fn new(options: AcpOptions) -> psychevo_runtime::Result<Self> {
-        let state = StateRuntime::open(&options.db_path).await?;
-        let gateway = Gateway::new(state.clone());
+    pub(crate) async fn new(options: AcpOptions) -> psychevo::Result<Self> {
+        let mut builder = Application::builder()
+            .home(&options.home)
+            .database_path(&options.db_path);
+        if let Some(config_path) = options.config_path.as_ref() {
+            builder = builder.config_path(config_path);
+        }
+        let application = builder.build().await?;
+        let framework = application.client();
+        let state = application.__state_runtime();
         Ok(Self {
             options,
+            application,
+            framework,
             state,
-            gateway,
             sessions: Arc::default(),
             client_terminal_auth: Arc::new(Mutex::new(false)),
             client_terminal_output: Arc::new(Mutex::new(false)),
         })
-    }
-
-    fn gateway_source(&self, session_id: &SessionId, session: &AcpSession) -> GatewaySource {
-        GatewaySource::new("acp", session_id.to_string())
-            .persistent()
-            .with_visible_name(format!("ACP {session_id}"))
-            .with_raw_identity(json!({
-                "kind": "acp",
-                "session_id": session_id.to_string(),
-                "cwd": session.cwd.display().to_string(),
-            }))
-    }
-
-    fn gateway_selector(&self, session_id: &SessionId) -> GatewayThreadSelector {
-        GatewayThreadSelector::source(
-            GatewaySource::new("acp", session_id.to_string())
-                .persistent()
-                .source_key(),
-        )
     }
 
     pub(crate) async fn serve(
@@ -223,9 +212,16 @@ impl PsychevoAcpAgent {
         if self.ready_auth_provider().is_none() && !self.terminal_auth_available() {
             return Err(Error::auth_required().data("provider credentials are not configured"));
         }
-        let session_id = SessionId::new(format!("acp-{}", Uuid::now_v7()));
+        let mut start = StartThreadRequest::new(&request.cwd);
+        start.source = "acp".to_string();
+        let thread = self
+            .framework
+            .start_thread(start)
+            .await
+            .map_err(acp_internal_error)?;
+        let session_id = SessionId::new(thread.id().to_string());
         let mcp_servers = acp_mcp_servers(request.mcp_servers);
-        let session = AcpSession::new(request.cwd, None, mcp_servers);
+        let session = AcpSession::new(request.cwd, thread, mcp_servers);
         let config_options = self.session_config_options_for_session(&session);
         self.sessions
             .lock()
@@ -239,14 +235,14 @@ impl PsychevoAcpAgent {
         request: ResumeSessionRequest,
     ) -> Result<ResumeSessionResponse, Error> {
         let runtime_session_id = request.session_id.to_string();
-        let store = self.state.clone();
-        store
-            .resume_session(&runtime_session_id)
+        let thread = self
+            .framework
+            .resume_thread(runtime_session_id.clone())
             .await
             .map_err(|_| Error::resource_not_found(Some(runtime_session_id.clone())))?;
         let session = AcpSession::new(
             request.cwd,
-            Some(runtime_session_id),
+            thread,
             acp_mcp_servers(request.mcp_servers),
         );
         let config_options = self.session_config_options_for_session(&session);
@@ -283,18 +279,14 @@ impl PsychevoAcpAgent {
         &self,
         request: CloseSessionRequest,
     ) -> Result<CloseSessionResponse, Error> {
-        let selector = self.gateway_selector(&request.session_id);
-        let interrupted = self.gateway.interrupt_turn(selector.clone()).await;
-        self.gateway.clear_queue(selector);
         if let Some(session) = self
             .sessions
             .lock()
             .expect("acp session lock poisoned")
             .remove(&request.session_id.to_string())
-            && let Some(control) = session.control
-            && !interrupted
+            && let Some(turn) = session.turn
         {
-            control.abort();
+            turn.interrupt();
         }
         Ok(CloseSessionResponse::new())
     }
@@ -407,16 +399,14 @@ impl PsychevoAcpAgent {
         usage: Arc<Mutex<AcpUsageAccumulator>>,
     ) -> Result<StopReason, Error> {
         let session_key = session_id.to_string();
-        let (handle, control) = run_control();
         let session = {
             let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
             let Some(session) = sessions.get_mut(&session_key) else {
                 return Err(Error::resource_not_found(Some(session_key)));
             };
-            if session.control.is_some() {
+            if session.turn.is_some() {
                 return Err(Error::invalid_params().data("session already has an active prompt"));
             }
-            session.control = Some(handle.clone());
             session.clone()
         };
         send_session_update(
@@ -430,36 +420,39 @@ impl PsychevoAcpAgent {
             session_id: session_id.clone(),
             cx: cx.clone(),
         });
-        let stream_usage = Arc::clone(&usage);
-        let stream = Arc::new(move |event| {
-            if let Ok(mut usage) = stream_usage.lock() {
-                usage.record_stream_event(&event);
-            }
-        });
+        let request =
+            self.turn_request(&session, prompt, image_inputs, Some(approval_handler));
+        let handle = session
+            .thread
+            .start_turn(request)
+            .await
+            .map_err(acp_internal_error)?;
+        {
+            let mut sessions = self.sessions.lock().expect("acp session lock poisoned");
+            let Some(session) = sessions.get_mut(&session_key) else {
+                handle.interrupt();
+                return Err(Error::resource_not_found(Some(session_key)));
+            };
+            session.turn = Some(handle.clone());
+        }
+        let mut events = handle.events();
         let event_session_id = session_id.clone();
         let event_cx = cx.clone();
-        let event_projection = Arc::new(Mutex::new(AcpLiveProjection::new(
-            self.terminal_output_available(),
-        )));
-        let event_observer = move |event| {
-            if let Ok(mut projection) = event_projection.lock() {
-                send_gateway_event_update(&event_cx, &event_session_id, event, &mut projection);
+        let event_usage = Arc::clone(&usage);
+        let terminal_output = self.terminal_output_available();
+        let event_task = async move {
+            let mut projection = AcpTurnProjection::new(terminal_output);
+            while let Some(event) = events.next().await {
+                send_turn_event_update(
+                    &event_cx,
+                    &event_session_id,
+                    event,
+                    &event_usage,
+                    &mut projection,
+                );
             }
         };
-        let (mut caller, mut intent) =
-            self.thread_turn_request(&session, prompt, image_inputs, Some(approval_handler));
-        let source = self.gateway_source(&session_id, &session);
-        intent.source = Some(source);
-        caller.runtime_source = "acp".to_string();
-        caller.continue_sources =
-            vec!["acp".to_string(), "run".to_string(), "tui".to_string()];
-        caller.observe_runtime_events(move |event| stream(event));
-        caller.observe_gateway_events(event_observer);
-        caller.set_control(handle, control);
-        let result = match self.gateway.start_turn(caller, intent).await {
-            Ok(accepted) => accepted.wait().await.map(|turn| turn.result),
-            Err(error) => Err(error),
-        };
+        let (result, ()) = tokio::join!(handle.wait(), event_task);
         match result {
             Ok(result) => {
                 if !result.final_answer.trim().is_empty() {
@@ -488,8 +481,8 @@ impl PsychevoAcpAgent {
                 if let Ok(mut sessions) = self.sessions.lock()
                     && let Some(session) = sessions.get_mut(&session_id.to_string())
                 {
-                    session.runtime_session_id = Some(result.session_id);
-                    session.control = None;
+                    session.runtime_session_id = Some(result.thread_id);
+                    session.turn = None;
                 }
                 send_session_update(
                     &cx,
@@ -504,7 +497,7 @@ impl PsychevoAcpAgent {
                 if let Ok(mut sessions) = self.sessions.lock()
                     && let Some(session) = sessions.get_mut(&session_id.to_string())
                 {
-                    session.control = None;
+                    session.turn = None;
                 }
                 send_session_update(
                     &cx,
@@ -519,10 +512,7 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) async fn cancel(&self, notification: CancelSessionNotification) {
-        let selector = self.gateway_selector(&notification.session_id);
-        let interrupted = self.gateway.interrupt_turn(selector.clone()).await;
-        self.gateway.clear_queue(selector);
-        let control = self
+        let turn = self
             .sessions
             .lock()
             .expect("acp session lock poisoned")
@@ -530,10 +520,10 @@ impl PsychevoAcpAgent {
             .and_then(|session| {
                 session.queued_prompts.clear();
                 session.pending_steers.clear();
-                session.control.clone()
+                session.turn.clone()
             });
-        if !interrupted && let Some(control) = control {
-            control.abort();
+        if let Some(turn) = turn {
+            turn.interrupt();
         }
     }
 

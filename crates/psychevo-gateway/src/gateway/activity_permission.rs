@@ -32,7 +32,7 @@ enum ShellStartState {
     Standalone,
     Auxiliary(RunControlHandle),
     Queued {
-        receiver: oneshot::Receiver<psychevo_runtime::Result<GatewayShellResult>>,
+        receiver: oneshot::Receiver<psychevo::Result<GatewayShellResult>>,
         active_activity_id: Option<String>,
         queue_position: usize,
     },
@@ -40,23 +40,25 @@ enum ShellStartState {
 
 #[derive(Debug)]
 enum PendingQueuedActivity {
+    #[cfg(test)]
     Turn(Box<PendingQueuedTurn>),
     Shell(Box<PendingQueuedShell>),
     Compact(Box<PendingQueuedCompact>),
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct PendingQueuedTurn {
     turn_id: String,
     request: SendTurnRequest,
-    responder: oneshot::Sender<psychevo_runtime::Result<GatewayTurnResult>>,
+    responder: oneshot::Sender<psychevo::Result<GatewayTurnResult>>,
 }
 
 #[derive(Debug)]
 struct PendingQueuedShell {
     shell_id: String,
     request: SendShellRequest,
-    responder: oneshot::Sender<psychevo_runtime::Result<GatewayShellResult>>,
+    responder: oneshot::Sender<psychevo::Result<GatewayShellResult>>,
 }
 
 #[derive(Debug)]
@@ -64,7 +66,7 @@ struct PendingQueuedCompact {
     _admission: supervisor::GatewayActivityPermit,
     compact_id: String,
     request: SendCompactRequest,
-    responder: oneshot::Sender<psychevo_runtime::Result<psychevo_runtime::compaction::CompactionResult>>,
+    responder: oneshot::Sender<psychevo::Result<psychevo::compaction::CompactionResult>>,
 }
 
 type PendingPermissionMap = Arc<Mutex<HashMap<String, PendingPermission>>>;
@@ -74,6 +76,7 @@ struct PendingPermission {
     responder: oneshot::Sender<PermissionApprovalDecision>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Default)]
 struct GatewayPendingActionContext {
     thread_id: Option<String>,
@@ -83,6 +86,7 @@ struct GatewayPendingActionContext {
     owner_id: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct GatewayApprovalHandler {
     selector_key: Option<String>,
@@ -93,6 +97,7 @@ struct GatewayApprovalHandler {
     session_authorization_lifetime: Option<&'static str>,
 }
 
+#[cfg(test)]
 impl GatewayApprovalHandler {
     fn new(
         selector_key: Option<String>,
@@ -112,6 +117,7 @@ impl GatewayApprovalHandler {
     }
 }
 
+#[cfg(test)]
 impl fmt::Debug for GatewayApprovalHandler {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -122,6 +128,7 @@ impl fmt::Debug for GatewayApprovalHandler {
     }
 }
 
+#[cfg(test)]
 impl ApprovalHandler for GatewayApprovalHandler {
     fn timeout_secs(&self) -> u64 {
         self.timeout_secs
@@ -226,11 +233,11 @@ pub struct ThreadTurnPolicy {
     pub snapshot_root: Option<PathBuf>,
     pub continue_latest: bool,
     pub extract_prompt_image_sources: bool,
-    pub prompt_display: Option<psychevo_runtime::types::PromptDisplayMetadata>,
+    pub prompt_display: Option<psychevo::types::PromptDisplayMetadata>,
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
-    pub project_context_override: Option<psychevo_runtime::types::ProjectContextInstructionMode>,
-    pub sandbox_override: Option<psychevo_runtime::types::RunSandboxOverride>,
+    pub project_context_override: Option<psychevo::types::ProjectContextInstructionMode>,
+    pub sandbox_override: Option<psychevo::types::RunSandboxOverride>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub runtime_profile_ref: Option<String>,
@@ -239,16 +246,16 @@ pub struct ThreadTurnPolicy {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<psychevo_runtime::types::ApprovalMode>,
+    pub approval_mode: Option<psychevo::types::ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub agent_ref: Option<String>,
     pub no_agents: bool,
     pub no_skills: bool,
-    pub selected_capability_roots: Vec<psychevo_runtime::extensions::SelectedCapabilityRoot>,
+    pub selected_capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
-    pub mcp_servers: Vec<psychevo_runtime::types::McpServerInput>,
+    pub mcp_servers: Vec<psychevo::types::McpServerInput>,
 }
 
 impl fmt::Debug for ThreadTurnPolicy {
@@ -339,7 +346,7 @@ pub struct ThreadCallerContext {
     workspace_mutations: Option<WorkspaceMutationSink>,
     control_handle: Option<RunControlHandle>,
     control: Option<RunControl>,
-    runtime_tools: Vec<psychevo_runtime::types::RuntimeTool>,
+    runtime_tools: Vec<psychevo::types::RuntimeTool>,
 }
 
 impl ThreadCallerContext {
@@ -387,14 +394,14 @@ impl ThreadCallerContext {
 
     pub(crate) fn set_runtime_tools(
         &mut self,
-        tools: Vec<psychevo_runtime::types::RuntimeTool>,
+        tools: Vec<psychevo::types::RuntimeTool>,
     ) {
         self.runtime_tools = tools;
     }
 
     pub(crate) fn extend_runtime_tools(
         &mut self,
-        tools: impl IntoIterator<Item = psychevo_runtime::types::RuntimeTool>,
+        tools: impl IntoIterator<Item = psychevo::types::RuntimeTool>,
     ) {
         self.runtime_tools.extend(tools);
     }
@@ -443,6 +450,7 @@ impl ThreadTurnIntent {
         }
     }
 
+    #[cfg(test)]
     fn into_queue_request(
         self,
         caller: ThreadCallerContext,
@@ -503,6 +511,405 @@ impl ThreadTurnIntent {
             lineage: self.lineage,
         }
     }
+
+    pub(crate) fn into_framework_request(
+        self,
+        mut caller: ThreadCallerContext,
+    ) -> psychevo::Result<FrameworkTurnSubmission> {
+        let prepared_source_key = self.source.as_ref().map(|source| source.source_key().0);
+        let thread_id = self.thread_id.ok_or_else(|| {
+            Error::Message("Framework Turn submission requires a materialized Thread".to_string())
+        })?;
+        let (prompt, image_inputs, prompt_display, _) = framework_input_parts(&self.input)?;
+        let input_parts = self
+            .input
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()?;
+        let turn_id = self.turn_id.clone();
+        let event_sink = caller.event_observer.clone();
+        let turn_event_observer = event_sink.clone().map(|event_sink| {
+            let thread_id = thread_id.clone();
+            let turn_id = turn_id.clone();
+            Arc::new(move |event: psychevo::TurnEvent| {
+                if let Some(event) =
+                    gateway_event_from_framework_turn(event, &thread_id, turn_id.as_deref())
+                {
+                    emit_framework_gateway_event(
+                        &event_sink,
+                        &thread_id,
+                        turn_id.as_deref(),
+                        event,
+                    );
+                }
+            }) as Arc<dyn Fn(psychevo::TurnEvent) + Send + Sync>
+        });
+        let run_stream_observer = match (caller.stream_observer.take(), event_sink.clone()) {
+            (observer, Some(event_sink)) => {
+                let turn_id = turn_id.clone().ok_or_else(|| {
+                    Error::Message(
+                        "Gateway Framework projection requires an accepted Turn identity"
+                            .to_string(),
+                    )
+                })?;
+                Some(framework_run_stream_observer(
+                    turn_id,
+                    thread_id.clone(),
+                    observer,
+                    event_sink,
+                ))
+            }
+            (observer, None) => observer,
+        };
+        let policy = self.policy;
+        let mut request = psychevo::TurnRequest::new(prompt);
+        request.image_inputs = image_inputs;
+        request.extract_prompt_image_sources = policy.extract_prompt_image_sources;
+        request.prompt_display = policy.prompt_display.or(Some(prompt_display));
+        request.client_turn_id = self.client_turn_id;
+        request.source = caller.runtime_source;
+        request.config_path = policy.config_path;
+        request.model = policy.model;
+        request.reasoning_effort = policy.reasoning_effort;
+        request.runtime_ref = policy.runtime_profile_ref;
+        request.runtime_options = policy.control_values;
+        request.include_reasoning = policy.include_reasoning;
+        request.mode = policy.mode;
+        request.permission_mode = policy.permission_mode;
+        request.approval_mode = policy.approval_mode;
+        request.approval_handler = policy.approval_handler;
+        request.clarify_enabled = policy.clarify_enabled;
+        request.inherited_env = policy.inherited_env;
+        request.project_context = policy.project_context_override;
+        request.sandbox = policy.sandbox_override;
+        request.agent = policy.agent_ref;
+        request.no_agents = policy.no_agents;
+        request.no_skills = policy.no_skills;
+        request.skill_inputs = policy.skill_inputs;
+        request.mcp_servers = policy.mcp_servers;
+        request.tools = std::mem::take(&mut caller.runtime_tools);
+        request.__set_adapter_options(psychevo::AdapterTurnOptions {
+            snapshot_root: policy.snapshot_root,
+            max_context_messages: policy.max_context_messages,
+            selected_capability_roots: policy.selected_capability_roots,
+            workspace_mutations: caller.workspace_mutations.take(),
+            input_parts,
+            run_stream_observer,
+            initial_thread_preferences: policy.initial_thread_preferences,
+            prepared_source_key,
+            turn_event_observer,
+        });
+        if let Some(turn_id) = self.turn_id {
+            request.__set_turn_id(turn_id);
+        }
+        match (caller.control_handle.take(), caller.control.take()) {
+            (Some(handle), Some(control)) => request.__set_control(handle, control),
+            (None, None) => {}
+            _ => {
+                return Err(Error::Message(
+                    "Framework Turn control must provide both handle and receiver".to_string(),
+                ));
+            }
+        }
+        Ok(FrameworkTurnSubmission {
+            thread_id,
+            request,
+        })
+    }
+}
+
+fn framework_run_stream_observer(
+    turn_id: String,
+    thread_id: String,
+    observer: Option<RunStreamSink>,
+    event_sink: GatewayEventEmitter,
+) -> RunStreamSink {
+    let projector = Arc::new(Mutex::new(GatewayLiveProjector::new(Some(
+        thread_id.clone(),
+    ))));
+    Arc::new(move |event: RunStreamEvent| {
+        if let Some(observer) = observer.as_ref() {
+            observer(event.clone());
+        }
+        if framework_lifecycle_owns_run_stream_interaction(&event) {
+            return;
+        }
+        if let Some(projected) = projector
+            .lock()
+            .expect("Gateway Framework live projector poisoned")
+            .project(&turn_id, &event)
+            && !matches!(
+                projected,
+                GatewayEvent::TurnStarted { .. } | GatewayEvent::TurnCompleted { .. }
+            )
+        {
+            emit_framework_gateway_event(&event_sink, &thread_id, Some(&turn_id), projected);
+        }
+    })
+}
+
+fn framework_lifecycle_owns_run_stream_interaction(event: &RunStreamEvent) -> bool {
+    match event {
+        RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => true,
+        RunStreamEvent::Event(event) => matches!(
+            &event.payload,
+            psychevo::types::SessionEventPayload::BlockingActionRequested { .. }
+                | psychevo::types::SessionEventPayload::BlockingActionUpdated { .. }
+                | psychevo::types::SessionEventPayload::BlockingActionResolved { .. }
+                | psychevo::types::SessionEventPayload::BlockingActionCancelled { .. }
+        ),
+        RunStreamEvent::Scoped { event, .. } => {
+            framework_lifecycle_owns_run_stream_interaction(event)
+        }
+        RunStreamEvent::ReasoningDelta { .. } | RunStreamEvent::ReasoningEnd => false,
+    }
+}
+
+fn emit_framework_gateway_event(
+    event_sink: &GatewayEventEmitter,
+    thread_id: &str,
+    turn_id: Option<&str>,
+    event: GatewayEvent,
+) {
+    let fields = journey_profile::gateway_profile_event_fields(&event);
+    gateway_profile_mark(
+        "gateway_event_emitted",
+        turn_id,
+        Some(thread_id),
+        fields,
+    );
+    if matches!(&event, GatewayEvent::TurnCompleted { .. }) {
+        gateway_profile_mark(
+            "gateway_turn_completed",
+            turn_id,
+            Some(thread_id),
+            GatewayProfileFields::default(),
+        );
+    }
+    let _ = event_sink.emit(event);
+}
+
+fn gateway_event_from_framework_turn(
+    event: psychevo::TurnEvent,
+    fallback_thread_id: &str,
+    fallback_turn_id: Option<&str>,
+) -> Option<GatewayEvent> {
+    match event {
+        psychevo::TurnEvent::Started { thread_id, turn_id } => {
+            Some(GatewayEvent::TurnStarted {
+                thread_id: Some(thread_id),
+                turn_id,
+                selected_skills: Vec::new(),
+            })
+        }
+        psychevo::TurnEvent::Completed {
+            thread_id,
+            turn_id,
+            outcome,
+        } => {
+            let (status, outcome) = match outcome {
+                psychevo::TurnOutcome::Completed => (GatewayTurnStatus::Completed, "normal"),
+                psychevo::TurnOutcome::Stopped => (GatewayTurnStatus::Interrupted, "stopped"),
+                psychevo::TurnOutcome::Failed => (GatewayTurnStatus::Failed, "failed"),
+                psychevo::TurnOutcome::Interrupted => {
+                    (GatewayTurnStatus::Interrupted, "aborted")
+                }
+            };
+            let turn = GatewayTurn {
+                id: turn_id.clone(),
+                thread_id: Some(thread_id.clone()),
+                status,
+                outcome: Some(outcome.to_string()),
+                error: None,
+                started_at_ms: None,
+                completed_at_ms: Some(gateway_now_ms()),
+            };
+            Some(GatewayEvent::TurnCompleted {
+                thread_id: Some(thread_id),
+                turn_id,
+                turn,
+                committed_entries: Vec::new(),
+            })
+        }
+        psychevo::TurnEvent::Failed {
+            thread_id,
+            turn_id,
+            message,
+        } => {
+            let turn = GatewayTurn {
+                id: turn_id.clone(),
+                thread_id: Some(thread_id.clone()),
+                status: GatewayTurnStatus::Failed,
+                outcome: Some("failed".to_string()),
+                error: Some(gateway_turn_error(&message, None)),
+                started_at_ms: None,
+                completed_at_ms: Some(gateway_now_ms()),
+            };
+            Some(GatewayEvent::TurnCompleted {
+                thread_id: Some(thread_id),
+                turn_id,
+                turn,
+                committed_entries: Vec::new(),
+            })
+        }
+        psychevo::TurnEvent::InteractionRequested {
+            interaction_id,
+            kind,
+            payload,
+        } => {
+            let kind = match kind.as_str() {
+                "permission" => GatewayActionKind::Permission,
+                "clarify" | "user_input" => GatewayActionKind::Clarify,
+                _ => return None,
+            };
+            let title = payload
+                .get("toolName")
+                .or_else(|| payload.get("title"))
+                .or_else(|| payload.get("message"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            let summary = payload
+                .get("summary")
+                .or_else(|| payload.get("reason"))
+                .or_else(|| payload.get("message"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+            Some(GatewayEvent::ActionRequested {
+                action: PendingActionView {
+                    action_id: interaction_id,
+                    kind,
+                    title,
+                    summary,
+                    payload,
+                    thread_id: Some(fallback_thread_id.to_string()),
+                    turn_id: fallback_turn_id.map(ToString::to_string),
+                    activity_id: None,
+                    source_key: None,
+                    owner_id: None,
+                    lease_expires_at_ms: None,
+                },
+            })
+        }
+        psychevo::TurnEvent::InteractionResolved {
+            interaction_id,
+            kind,
+            reason,
+        } => {
+            let kind = match kind.as_str() {
+                "permission" => GatewayActionKind::Permission,
+                "clarify" | "user_input" => GatewayActionKind::Clarify,
+                _ => return None,
+            };
+            Some(GatewayEvent::ActionResolved {
+                action_id: interaction_id,
+                kind,
+                outcome: match reason.as_str() {
+                    "deny" | "rejected" => GatewayActionOutcome::Rejected,
+                    "cancelled" | "timed_out" | "turn_finished" => {
+                        GatewayActionOutcome::Cancelled
+                    }
+                    _ => GatewayActionOutcome::Accepted,
+                },
+                payload: json!({ "reason": reason }),
+            })
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod framework_projection_tests {
+    use super::*;
+
+    #[test]
+    fn framework_stream_keeps_stateful_acp_plan_projection() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&events);
+        let stream = framework_run_stream_observer(
+            "turn-1".to_string(),
+            "thread-1".to_string(),
+            None,
+            GatewayEventEmitter::new(move |event| {
+                observed
+                    .lock()
+                    .expect("observed Gateway events poisoned")
+                    .push(event);
+            }),
+        );
+
+        stream(RunStreamEvent::value(json!({
+            "type": "acp_peer_plan",
+            "body": "- [~] Project through the common application path",
+            "plan": {
+                "sessionUpdate": "plan",
+                "entries": [{
+                    "content": "Project through the common application path",
+                    "priority": "high",
+                    "status": "in_progress"
+                }]
+            }
+        })));
+
+        let events = events.lock().expect("observed Gateway events poisoned");
+        let entry = events
+            .iter()
+            .find_map(|event| match event {
+                GatewayEvent::EntryStarted { entry, .. }
+                | GatewayEvent::EntryUpdated { entry, .. }
+                | GatewayEvent::EntryCompleted { entry, .. } => Some(entry),
+                _ => None,
+            })
+            .expect("ACP plan must be live-projected");
+        assert_eq!(entry.thread_id, "thread-1");
+        assert!(entry.blocks.iter().any(|block| {
+            block.title.as_deref() == Some("Plan")
+                && block
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| body.contains("common application path"))
+        }));
+    }
+
+    #[test]
+    fn framework_stream_does_not_duplicate_application_owned_interactions() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&events);
+        let stream = framework_run_stream_observer(
+            "turn-1".to_string(),
+            "thread-1".to_string(),
+            None,
+            GatewayEventEmitter::new(move |event| {
+                observed
+                    .lock()
+                    .expect("observed Gateway events poisoned")
+                    .push(event);
+            }),
+        );
+
+        stream(RunStreamEvent::value(json!({
+            "type": "action_requested",
+            "action_id": "clarify-1",
+            "kind": "clarify",
+            "payload": {
+                "questions": [{
+                    "question": "Which workspace?"
+                }]
+            }
+        })));
+
+        assert!(
+            events
+                .lock()
+                .expect("observed Gateway events poisoned")
+                .is_empty(),
+            "Application TurnEvent projection owns the public interaction lifecycle"
+        );
+    }
+}
+
+pub(crate) struct FrameworkTurnSubmission {
+    pub(crate) thread_id: String,
+    pub(crate) request: psychevo::TurnRequest,
 }
 
 impl fmt::Debug for ThreadTurnIntent {
@@ -539,7 +946,7 @@ impl AcceptedTurn {
         self.completion
     }
 
-    pub async fn wait(self) -> psychevo_runtime::Result<GatewayTurnResult> {
+    pub async fn wait(self) -> psychevo::Result<GatewayTurnResult> {
         self.completion.wait().await
     }
 }
@@ -554,11 +961,11 @@ impl fmt::Debug for AcceptedTurn {
 }
 
 pub struct AcceptedTurnCompletion {
-    receiver: oneshot::Receiver<psychevo_runtime::Result<GatewayTurnResult>>,
+    receiver: oneshot::Receiver<psychevo::Result<GatewayTurnResult>>,
 }
 
 impl AcceptedTurnCompletion {
-    pub async fn wait(self) -> psychevo_runtime::Result<GatewayTurnResult> {
+    pub async fn wait(self) -> psychevo::Result<GatewayTurnResult> {
         self.receiver.await.map_err(|_| {
             Error::Message(
                 "accepted turn ended without publishing a completion result".to_string(),
@@ -575,6 +982,7 @@ impl fmt::Debug for AcceptedTurnCompletion {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct SendTurnRequest {
     pub thread_id: Option<String>,
     pub explicit_thread: bool,
@@ -593,6 +1001,7 @@ pub(crate) struct SendTurnRequest {
     pub lineage: Option<Value>,
 }
 
+#[cfg(test)]
 impl fmt::Debug for SendTurnRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -641,7 +1050,7 @@ pub struct SendCompactRequest {
     pub reasoning_effort: Option<String>,
     pub instructions: Option<String>,
     pub force: bool,
-    pub reason: psychevo_runtime::compaction::CompactionReason,
+    pub reason: psychevo::compaction::CompactionReason,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub event_sink: Option<GatewayEventEmitter>,
 }

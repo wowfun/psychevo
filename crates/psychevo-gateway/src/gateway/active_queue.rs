@@ -35,6 +35,7 @@ impl Gateway {
             let gateway = self.clone();
             let run_key = queue_key.clone();
             match next {
+                #[cfg(test)]
                 PendingQueuedActivity::Turn(next) => {
                     gateway.clone().spawn_accepted_turn(
                         format!("queued-turn:{}", next.turn_id),
@@ -94,7 +95,7 @@ impl Gateway {
         &self,
         request: &SendCompactRequest,
         thread_id: &str,
-    ) -> psychevo_runtime::Result<Option<String>> {
+    ) -> psychevo::Result<Option<String>> {
         if let Some(binding) = self.state.gateway_runtime_binding(thread_id).await? {
             if binding.status == GatewayRuntimeBindingStatus::Resolved {
                 return Ok(binding
@@ -158,10 +159,11 @@ impl Gateway {
         });
     }
 
+    #[cfg(test)]
     async fn queue_key_for_request(
         &self,
         request: &SendTurnRequest,
-    ) -> psychevo_runtime::Result<String> {
+    ) -> psychevo::Result<String> {
         if let Some(thread_id) = &request.thread_id {
             return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
@@ -182,7 +184,7 @@ impl Gateway {
     async fn queue_key_for_shell_request(
         &self,
         request: &SendShellRequest,
-    ) -> psychevo_runtime::Result<String> {
+    ) -> psychevo::Result<String> {
         if let Some(thread_id) = &request.thread_id {
             return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
@@ -201,7 +203,7 @@ impl Gateway {
     async fn queue_key_for_compact_request(
         &self,
         request: &SendCompactRequest,
-    ) -> psychevo_runtime::Result<String> {
+    ) -> psychevo::Result<String> {
         if let Some(thread_id) = &request.thread_id {
             return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
         }
@@ -217,7 +219,7 @@ impl Gateway {
     async fn lookup_source_thread(
         &self,
         source: &GatewaySource,
-    ) -> psychevo_runtime::Result<Option<String>> {
+    ) -> psychevo::Result<Option<String>> {
         match source.lifetime {
             GatewaySourceLifetime::Invocation => Ok(None),
             GatewaySourceLifetime::Process => Ok(self
@@ -235,6 +237,7 @@ impl Gateway {
         }
     }
 
+    #[cfg(test)]
     fn active_thread_for_source(&self, source: &GatewaySource) -> Option<String> {
         let source_key = source_key_key(&source.source_key());
         self.active_aliases
@@ -264,6 +267,7 @@ impl Gateway {
         *generation = generation.saturating_add(1);
     }
 
+    #[cfg(test)]
     async fn bind_source_to_result(
         &self,
         source: &GatewaySource,
@@ -271,7 +275,7 @@ impl Gateway {
         backend: &GatewayBackendInfo,
         lineage: Option<Value>,
         expected_generation: Option<u64>,
-    ) -> psychevo_runtime::Result<()> {
+    ) -> psychevo::Result<()> {
         let source_key = source.source_key();
         if let Some(expected_generation) = expected_generation
             && self.source_generation(source) != expected_generation
@@ -427,10 +431,10 @@ impl Gateway {
 
 fn unavailable_compaction_result(
     thread_id: &str,
-    reason: psychevo_runtime::compaction::CompactionReason,
+    reason: psychevo::compaction::CompactionReason,
     runtime_ref: &str,
-) -> psychevo_runtime::compaction::CompactionResult {
-    psychevo_runtime::compaction::CompactionResult {
+) -> psychevo::compaction::CompactionResult {
+    psychevo::compaction::CompactionResult {
         session_id: thread_id.to_string(),
         compacted: false,
         reason: reason.as_str().to_string(),

@@ -235,7 +235,7 @@ impl TuiApp {
         let Some(edge) = store.find_agent_edge(&session_id).await? else {
             return Ok(false);
         };
-        if edge.status != psychevo_runtime::state::AgentEdgeStatus::Open {
+        if edge.status != psychevo::state::AgentEdgeStatus::Open {
             return Ok(false);
         }
         let message_count = store.load_tui_message_summaries(&session_id).await?.len();
@@ -424,6 +424,7 @@ impl TuiApp {
                     control: running.control,
                     rx: match running.events {
                         RunningTurnEvents::Runtime(rx) => rx,
+                        #[cfg(test)]
                         RunningTurnEvents::Gateway(_) => {
                             let (_tx, rx) = mpsc::unbounded_channel();
                             rx

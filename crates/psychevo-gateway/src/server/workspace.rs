@@ -4,12 +4,12 @@ use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use psychevo_gateway_protocol as wire;
-use psychevo_runtime::{
+use psychevo::{
     Error, config::resolve_workspace_root, host_paths::normalized_native_path,
     paths::canonicalize_cwd, types::WorkspaceMutation, workspace_diff::WorkspaceDiffFileStatus,
     workspace_diff::collect_workspace_diff,
 };
+use psychevo_gateway_protocol as wire;
 use serde_json::Value;
 
 use super::{
@@ -199,7 +199,7 @@ impl WorkspaceReviewState {
         scope: &ResolvedScope,
         turn_id: &str,
         path: &str,
-    ) -> psychevo_runtime::Result<wire::WorkspaceChangeMutationResult> {
+    ) -> psychevo::Result<wire::WorkspaceChangeMutationResult> {
         let path = normalize_workspace_path(path);
         let mut accepted = false;
         {
@@ -226,7 +226,7 @@ impl WorkspaceReviewState {
         scope: &ResolvedScope,
         turn_id: &str,
         path: &str,
-    ) -> psychevo_runtime::Result<wire::WorkspaceChangeMutationResult> {
+    ) -> psychevo::Result<wire::WorkspaceChangeMutationResult> {
         let path = normalize_workspace_path(path);
         let file = {
             let inner = self.inner.lock().expect("workspace review state poisoned");
@@ -290,7 +290,7 @@ impl WorkspaceReviewState {
     }
 }
 
-pub(super) fn workspace_files_value(scope: &ResolvedScope) -> psychevo_runtime::Result<Value> {
+pub(super) fn workspace_files_value(scope: &ResolvedScope) -> psychevo::Result<Value> {
     let mut entries = Vec::new();
     let mut truncated = false;
     collect_workspace_file_entries(&scope.cwd, &scope.cwd, 0, &mut entries, &mut truncated);
@@ -305,7 +305,7 @@ pub(super) fn workspace_folder_list_value(
     _state: &WebState,
     scope: &ResolvedScope,
     requested_path: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let requested = requested_path
         .map(PathBuf::from)
         .unwrap_or_else(|| scope.cwd.clone());
@@ -394,16 +394,14 @@ fn filesystem_roots_match(candidate: &str, current_root: &Path) -> bool {
     }
 }
 
-pub(super) fn workspace_git_branches_value(
-    scope: &ResolvedScope,
-) -> psychevo_runtime::Result<Value> {
+pub(super) fn workspace_git_branches_value(scope: &ResolvedScope) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(workspace_git_branches(scope)?)?)
 }
 
 pub(super) fn workspace_git_checkout_value(
     scope: &ResolvedScope,
     params: wire::WorkspaceGitCheckoutParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let branch = params.branch.trim();
     if branch.is_empty() {
         return Err(Error::Message(
@@ -436,7 +434,7 @@ pub(super) fn workspace_git_checkout_value(
 
 fn workspace_git_branches(
     scope: &ResolvedScope,
-) -> psychevo_runtime::Result<wire::WorkspaceGitBranchesResult> {
+) -> psychevo::Result<wire::WorkspaceGitBranchesResult> {
     let branches = run_git(
         &scope.cwd,
         &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
@@ -459,7 +457,7 @@ fn workspace_git_branches(
     Ok(wire::WorkspaceGitBranchesResult { current, branches })
 }
 
-fn run_git(cwd: &Path, args: &[&str]) -> psychevo_runtime::Result<String> {
+fn run_git(cwd: &Path, args: &[&str]) -> psychevo::Result<String> {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(cwd)
@@ -482,7 +480,7 @@ pub(super) fn workspace_create_value(
     state: &WebState,
     auth: &AuthContext,
     params: wire::WorkspaceCreateParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let dir_name = workspace_dir_name(&params.name)?;
     let parent = if let Some(parent) = params.parent.as_deref() {
         canonical_existing_directory(Path::new(parent))?
@@ -502,7 +500,7 @@ pub(super) fn workspace_create_value(
     })?)
 }
 
-fn canonical_existing_directory(path: &Path) -> psychevo_runtime::Result<PathBuf> {
+fn canonical_existing_directory(path: &Path) -> psychevo::Result<PathBuf> {
     let canonical = normalized_native_path(&std::fs::canonicalize(path)?);
     if !canonical.is_dir() {
         return Err(Error::Message(format!(
@@ -513,7 +511,7 @@ fn canonical_existing_directory(path: &Path) -> psychevo_runtime::Result<PathBuf
     Ok(canonical)
 }
 
-pub(super) fn workspace_dir_name(input: &str) -> psychevo_runtime::Result<String> {
+pub(super) fn workspace_dir_name(input: &str) -> psychevo::Result<String> {
     let name = input.trim();
     if name.is_empty() {
         return Err(Error::Message(
@@ -600,7 +598,7 @@ fn collect_workspace_file_entries(
 pub(super) fn workspace_file_read_value(
     scope: &ResolvedScope,
     path: &str,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     let resolved = resolve_workspace_relative_path(&scope.cwd, path)?;
     let display_path =
         path_from_root(&scope.cwd, &resolved).unwrap_or_else(|| normalize_workspace_path(path));
@@ -614,7 +612,7 @@ pub(super) fn workspace_file_read_value(
 pub(super) fn workspace_file_write_value(
     scope: &ResolvedScope,
     params: wire::WorkspaceFileWriteParams,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     if params.content.len() > MAX_WORKSPACE_TEXT_FILE_BYTES {
         return Err(Error::Message(
             "workspace file is larger than 1 MB".to_string(),
@@ -648,7 +646,7 @@ pub(super) fn workspace_file_write_value(
 pub(super) fn resolve_workspace_relative_path(
     root: &Path,
     path: &str,
-) -> psychevo_runtime::Result<PathBuf> {
+) -> psychevo::Result<PathBuf> {
     let raw = Path::new(path);
     if raw.is_absolute() || path.contains('\0') {
         return Err(Error::Message(
@@ -672,7 +670,7 @@ pub(super) fn resolve_workspace_relative_path(
     Ok(canonical)
 }
 
-fn resolve_workspace_write_path(root: &Path, path: &str) -> psychevo_runtime::Result<PathBuf> {
+fn resolve_workspace_write_path(root: &Path, path: &str) -> psychevo::Result<PathBuf> {
     let raw = Path::new(path);
     if raw.is_absolute() || path.contains('\0') {
         return Err(Error::Message(
@@ -704,7 +702,7 @@ fn resolve_workspace_write_path(root: &Path, path: &str) -> psychevo_runtime::Re
     Ok(candidate)
 }
 
-fn canonical_workspace_path_identity(path: &Path) -> psychevo_runtime::Result<PathBuf> {
+fn canonical_workspace_path_identity(path: &Path) -> psychevo::Result<PathBuf> {
     Ok(normalized_workspace_path_identity(&path.canonicalize()?))
 }
 
@@ -737,14 +735,14 @@ struct WorkspaceTextSnapshot {
     line_ending: Option<String>,
 }
 
-fn read_workspace_text_snapshot(path: &Path) -> psychevo_runtime::Result<WorkspaceTextSnapshot> {
+fn read_workspace_text_snapshot(path: &Path) -> psychevo::Result<WorkspaceTextSnapshot> {
     let mut file = std::fs::File::open(path)?;
     read_workspace_text_snapshot_from_file(&mut file)
 }
 
 fn read_workspace_text_snapshot_from_file(
     file: &mut std::fs::File,
-) -> psychevo_runtime::Result<WorkspaceTextSnapshot> {
+) -> psychevo::Result<WorkspaceTextSnapshot> {
     let metadata = file.metadata()?;
     let size_bytes = metadata.len() as usize;
     file.seek(SeekFrom::Start(0))?;
@@ -816,7 +814,7 @@ fn unreadable_workspace_file_read_result(
 }
 
 #[cfg(test)]
-pub(super) fn workspace_file_snapshot_revision(path: &Path) -> psychevo_runtime::Result<String> {
+pub(super) fn workspace_file_snapshot_revision(path: &Path) -> psychevo::Result<String> {
     Ok(read_workspace_text_snapshot(path)?.revision)
 }
 
@@ -830,7 +828,7 @@ fn workspace_editable_reason(snapshot: &WorkspaceTextSnapshot) -> Option<String>
     }
 }
 
-fn workspace_path_revision(root: &Path, path: &str) -> psychevo_runtime::Result<String> {
+fn workspace_path_revision(root: &Path, path: &str) -> psychevo::Result<String> {
     let resolved = resolve_workspace_write_path(root, path)?;
     if !resolved.exists() {
         return Ok("missing".to_string());
@@ -863,14 +861,14 @@ fn detect_line_ending(content: &str) -> Option<String> {
 pub(super) fn workspace_diff_value(
     scope: &ResolvedScope,
     path: Option<&str>,
-) -> psychevo_runtime::Result<Value> {
+) -> psychevo::Result<Value> {
     Ok(serde_json::to_value(workspace_diff_result(scope, path)?)?)
 }
 
 pub(super) fn workspace_diff_result(
     scope: &ResolvedScope,
     path: Option<&str>,
-) -> psychevo_runtime::Result<wire::WorkspaceDiffResult> {
+) -> psychevo::Result<wire::WorkspaceDiffResult> {
     let diff = collect_workspace_diff(&scope.cwd)?;
     let selected = path
         .map(|path| {
@@ -1004,7 +1002,7 @@ fn baseline_matches_current(
     cwd: &Path,
     path: &str,
     baseline: &ReviewBaseline,
-) -> psychevo_runtime::Result<bool> {
+) -> psychevo::Result<bool> {
     let resolved = resolve_workspace_write_path(cwd, path)?;
     match baseline {
         ReviewBaseline::Text { content } => {
@@ -1023,7 +1021,7 @@ fn restore_review_baseline(
     cwd: &Path,
     path: &str,
     baseline: &ReviewBaseline,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let resolved = resolve_workspace_write_path(cwd, path)?;
     match baseline {
         ReviewBaseline::Text { content } => {

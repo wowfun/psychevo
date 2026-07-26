@@ -72,7 +72,7 @@ impl GatewayWebServerConfig {
 pub struct BoundGatewayWebServer {
     listener: TcpListener,
     app: Router,
-    gateway: Gateway,
+    application: Application,
     local_addr: SocketAddr,
     token: String,
     managed_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
@@ -91,21 +91,21 @@ impl BoundGatewayWebServer {
         format!("http://{}", self.local_addr)
     }
 
-    pub async fn run(self) -> psychevo_runtime::Result<()> {
+    pub async fn run(self) -> psychevo::Result<()> {
         self.run_with_shutdown_signal(std::future::pending()).await
     }
 
     pub async fn run_with_shutdown_signal<F>(
         self,
         shutdown_signal: F,
-    ) -> psychevo_runtime::Result<()>
+    ) -> psychevo::Result<()>
     where
         F: std::future::Future<Output = ()> + Send,
     {
         let Self {
             listener,
             app,
-            gateway,
+            application,
             managed_shutdown_rx,
             ..
         } = self;
@@ -140,8 +140,8 @@ impl BoundGatewayWebServer {
 
         tokio::select! {
             result = &mut server => {
-                let shutdown = shutdown_runtimes_with_deadlines(
-                    &gateway,
+                let shutdown = shutdown_application_with_deadlines(
+                    &application,
                     RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
                     RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
                 ).await;
@@ -150,8 +150,8 @@ impl BoundGatewayWebServer {
             }
             _ = &mut shutdown_signal => {
                 let _ = server_shutdown_tx.send(());
-                let shutdown = shutdown_runtimes_with_deadlines(
-                    &gateway,
+                let shutdown = shutdown_application_with_deadlines(
+                    &application,
                     RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
                     RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
                 ).await;
@@ -165,13 +165,13 @@ impl BoundGatewayWebServer {
     }
 }
 
-async fn shutdown_runtimes_with_deadlines(
-    gateway: &Gateway,
+async fn shutdown_application_with_deadlines(
+    application: &Application,
     graceful_timeout: Duration,
     force_timeout: Duration,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let graceful =
-        tokio::time::timeout(graceful_timeout, gateway.shutdown_application(false)).await;
+        tokio::time::timeout(graceful_timeout, application.shutdown()).await;
     let graceful_failure = match graceful {
         Ok(Ok(())) => return Ok(()),
         Ok(Err(error)) => format!("graceful runtime shutdown failed: {error}"),
@@ -180,7 +180,7 @@ async fn shutdown_runtimes_with_deadlines(
             graceful_timeout.as_millis()
         ),
     };
-    match tokio::time::timeout(force_timeout, gateway.shutdown_application(true)).await {
+    match tokio::time::timeout(force_timeout, application.shutdown_force()).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(Error::Message(format!(
             "{graceful_failure}; forced runtime shutdown failed: {error}"
@@ -194,20 +194,20 @@ async fn shutdown_runtimes_with_deadlines(
 
 pub async fn bind_gateway_web_server(
     config: GatewayWebServerConfig,
-) -> psychevo_runtime::Result<BoundGatewayWebServer> {
+) -> psychevo::Result<BoundGatewayWebServer> {
     let listener = bind_tcp_listener(config.bind_addr, config.bind_port_fallbacks).await?;
     let local_addr = listener.local_addr()?;
     let token = config.token.clone();
     if let Some(path) = &config.managed_state_path {
         write_managed_state(path, local_addr, &config)?;
     }
-    let gateway = config.gateway.clone();
     let managed = config.managed_instance_id.is_some();
     let (managed_shutdown_tx, managed_shutdown_rx) = tokio::sync::watch::channel(false);
     let state = WebState::new_with_managed_shutdown(
         config,
         managed.then_some(managed_shutdown_tx),
     );
+    let application = state.inner.application.clone();
     spawn_gateway_live_event_tailer(state.clone());
     let mut app = Router::new()
         .route("/readyz", get(readyz))
@@ -235,7 +235,7 @@ pub async fn bind_gateway_web_server(
     Ok(BoundGatewayWebServer {
         listener,
         app,
-        gateway,
+        application,
         local_addr,
         token,
         managed_shutdown_rx: managed.then_some(managed_shutdown_rx),
@@ -277,7 +277,7 @@ fn write_managed_state(
     path: &Path,
     local_addr: SocketAddr,
     config: &GatewayWebServerConfig,
-) -> psychevo_runtime::Result<()> {
+) -> psychevo::Result<()> {
     let executable = executable_fingerprint(&std::env::current_exe()?)?;
     let state = wire::ManagedServerState {
         instance_id: config.managed_instance_id.clone(),
@@ -299,7 +299,7 @@ fn write_managed_state(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    psychevo_runtime::host_process::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
+    psychevo::host_process::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
     Ok(())
 }
 
@@ -310,7 +310,7 @@ struct ExecutableFingerprint {
     inode: Option<u64>,
 }
 
-fn executable_fingerprint(path: &Path) -> psychevo_runtime::Result<ExecutableFingerprint> {
+fn executable_fingerprint(path: &Path) -> psychevo::Result<ExecutableFingerprint> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let metadata = std::fs::metadata(&path)?;
     let modified_ms = metadata
@@ -327,7 +327,7 @@ fn executable_fingerprint(path: &Path) -> psychevo_runtime::Result<ExecutableFin
     })
 }
 
-fn canonical_path_string(path: &Path) -> psychevo_runtime::Result<String> {
+fn canonical_path_string(path: &Path) -> psychevo::Result<String> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     Ok(path.display().to_string())
 }
@@ -351,6 +351,8 @@ struct WebState {
 
 struct WebStateInner {
     gateway: Gateway,
+    application: Application,
+    framework: FrameworkClient,
     state: StateRuntime,
     event_hub: GatewayEventHub,
     home: PathBuf,
@@ -524,6 +526,13 @@ impl WebState {
         managed_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Self {
         let state = config.gateway.state().clone();
+        let application = Application::__from_open_state(
+            config.home.clone(),
+            config.config_path.clone(),
+            state.clone(),
+            Arc::new(GatewayAgentSessionAdapter::new(config.gateway.clone())),
+        );
+        let framework = application.client();
         let source = cwd_source(&config.cwd);
         let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
         let codex_capability_broker =
@@ -533,6 +542,8 @@ impl WebState {
         let web_state = Self {
             inner: Arc::new(WebStateInner {
                 gateway: config.gateway,
+                application,
+                framework,
                 state,
                 event_hub: GatewayEventHub::default(),
                 home: config.home,
@@ -597,7 +608,7 @@ impl WebState {
     }
 
     async fn activity(&self, source: &GatewaySource, thread_id: Option<&str>) -> GatewayActivity {
-        match thread_id {
+        let mut activity = match thread_id {
             Some(thread_id) => self
                 .inner
                 .gateway
@@ -608,7 +619,30 @@ impl WebState {
                 .gateway
                 .activity_for_selector(self.selector(source))
                 .await,
+        };
+        let framework_thread_id = match thread_id {
+            Some(thread_id) => Some(thread_id.to_string()),
+            None => self
+                .inner
+                .gateway
+                .resolve_source_thread(source)
+                .await
+                .ok()
+                .flatten(),
+        };
+        if let Some(thread_id) = framework_thread_id
+            && let Ok(thread) = self.inner.framework.resume_thread(thread_id).await
+        {
+            let (running, active_turn_id, queued_turns) = thread.__activity();
+            if running {
+                activity.running = true;
+            }
+            if active_turn_id.is_some() {
+                activity.active_turn_id = active_turn_id;
+            }
+            activity.queued_turns = activity.queued_turns.saturating_add(queued_turns);
         }
+        activity
     }
 
     fn run_options(&self, cwd: PathBuf, thread_id: Option<String>) -> RunOptions {
@@ -748,7 +782,7 @@ impl WebState {
 
     async fn pending_context_for_live_event(
         &self,
-        record: &psychevo_runtime::state::GatewayLiveEventRecord,
+        record: &psychevo::state::GatewayLiveEventRecord,
     ) -> PendingInteractionContext {
         let mut context = PendingInteractionContext {
             thread_id: record.thread_id.clone(),

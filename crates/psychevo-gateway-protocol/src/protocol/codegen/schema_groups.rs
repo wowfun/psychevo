@@ -1,4 +1,7 @@
 fn schema_group_module(name: &str) -> &'static str {
+    if name.starts_with("App") {
+        return "app-server";
+    }
     if name.starts_with("JsonRpc")
         || name.starts_with("JsonSafe")
         || matches!(name, "ClientRequest" | "ServerNotification")
@@ -292,6 +295,7 @@ fn schema_group_module(name: &str) -> &'static str {
 
 fn schema_group_const(module: &str) -> &'static str {
     match module {
+        "app-server" => "appServerSchemas",
         "automations/definitions" => "automationDefinitionSchemas",
         "automations/list-results" => "automationListResultSchemas",
         "automations/mutation-results" => "automationMutationResultSchemas",
@@ -349,6 +353,7 @@ fn schema_group_const(module: &str) -> &'static str {
 
 fn schema_group_refs_const(module: &str) -> &'static str {
     match module {
+        "app-server" => "appServerSchemaRefs",
         "automations/definitions" => "automationDefinitionSchemaRefs",
         "automations/list-results" => "automationListResultSchemaRefs",
         "automations/mutation-results" => "automationMutationResultSchemaRefs",

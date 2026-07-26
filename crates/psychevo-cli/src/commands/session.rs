@@ -3,8 +3,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo_runtime::state::StateRuntime;
-use psychevo_runtime::{
+use psychevo::state::StateRuntime;
+use psychevo::{
     paths::canonicalize_cwd, run::reload_session_context, session_export::SessionArtifactKind,
     session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
     session_export::SessionExportOptions, session_export::SessionExportWriteResult,
@@ -219,7 +219,7 @@ pub(crate) async fn share_session(
 pub(crate) fn parse_include(
     include: Option<&str>,
     artifact_kind: SessionArtifactKind,
-) -> psychevo_runtime::Result<SessionExportIncludeSet> {
+) -> psychevo::Result<SessionExportIncludeSet> {
     match include {
         Some(value) => SessionExportIncludeSet::parse(value, artifact_kind),
         None => Ok(SessionExportIncludeSet::default_for(artifact_kind)),

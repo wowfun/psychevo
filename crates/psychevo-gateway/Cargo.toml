@@ -4,6 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish = false
+
+[[bin]]
+name = "psychevo-app-server"
+path = "src/bin/psychevo-app-server.rs"
 
 [features]
 default = ["native-channels"]
@@ -21,10 +26,8 @@ getrandom.workspace = true
 http.workspace = true
 percent-encoding.workspace = true
 portable-pty.workspace = true
-psychevo-agent-core = { path = "../psychevo-agent-core" }
-psychevo-ai = { path = "../psychevo-ai" }
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
-psychevo-runtime = { path = "../psychevo-runtime" }
+psychevo = { path = "../psychevo", features = ["internal"] }
 qrcode = { workspace = true, optional = true }
 reqwest.workspace = true
 regex-lite.workspace = true
@@ -43,3 +46,4 @@ windows-sys.workspace = true
 [dev-dependencies]
 rusqlite.workspace = true
 tempfile.workspace = true
+tungstenite = "0.28"
