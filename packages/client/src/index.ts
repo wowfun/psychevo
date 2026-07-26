@@ -1,4 +1,5 @@
 import {
+  gatewayResponseResultSchema,
   RpcNotificationSchema,
   RpcResponseSchema,
   ThreadSnapshotSchema,
@@ -56,7 +57,8 @@ export type {
   ThreadSessionLoadInput,
   ThreadSessionOptions,
   ThreadSessionSendInput,
-  ThreadSessionSendOutcome
+  ThreadSessionSendOutcome,
+  ThreadSessionView
 } from "./thread-session";
 
 export type NotificationHandler = (notification: RpcNotification) => void;
@@ -70,9 +72,12 @@ export interface GatewayTransport {
   send(data: string): void;
 }
 
-export type GatewayRequestInit<M extends GatewayMethod> =
-  | GatewayRequestParams[M]
-  | Partial<GatewayRequestParams[M]>;
+export type GatewayRequestInit<M extends GatewayMethod> = GatewayRequestParams[M];
+
+export type GatewayRequestArguments<M extends GatewayMethod> =
+  Record<string, never> extends GatewayRequestParams[M]
+    ? [params?: GatewayRequestParams[M], options?: GatewayRequestOptions]
+    : [params: GatewayRequestParams[M], options?: GatewayRequestOptions];
 
 export function scopeForCwd(cwd: string): GatewayRequestScope {
   return {
@@ -178,6 +183,7 @@ export interface GatewayClientDiagnostic {
 
 type PendingRequest = {
   generation: number;
+  method: GatewayMethod;
   reject: (error: Error) => void;
   resolve: (value: unknown) => void;
   timeout: ReturnType<typeof setTimeout> | null;
@@ -297,9 +303,9 @@ export class GatewayClient {
 
   request<M extends GatewayMethod>(
     method: M,
-    params?: GatewayRequestInit<M>,
-    options: GatewayRequestOptions = {}
+    ...arguments_: GatewayRequestArguments<M>
   ): Promise<GatewayRequestResults[M]> {
+    const [params, options = {}] = arguments_;
     if (this.connection.state !== "connected") {
       return Promise.reject(
         new GatewayClientError(
@@ -327,6 +333,7 @@ export class GatewayClient {
     const promise = new Promise<GatewayRequestResults[M]>((resolve, reject) => {
       const pending: PendingRequest = {
         generation,
+        method,
         resolve: (value) => resolve(value as GatewayRequestResults[M]),
         reject,
         timeout: null,
@@ -405,8 +412,8 @@ export class GatewayClient {
       if (!pending || pending.generation !== this.connection.generation) {
         return;
       }
-      this.takePending(key);
       if ("error" in response) {
+        this.takePending(key);
         pending.reject(new GatewayClientError(
           "server_error",
           "acknowledged",
@@ -418,11 +425,16 @@ export class GatewayClient {
           }
         ));
       } else {
-        pending.resolve(response.result);
+        const result = gatewayResponseResultSchema(pending.method).parse(response.result);
+        this.takePending(key);
+        pending.resolve(result);
       }
     } catch (error) {
       const message = `Gateway protocol fault: ${errorMessage(error)}`;
       this.emitDiagnostic("protocol", message);
+      this.rejectPending(
+        new GatewayClientError("protocol_fault", "unknown", message)
+      );
       this.transport.close();
       this.handleDisconnect(message, "protocol_fault");
     }

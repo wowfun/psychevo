@@ -26,15 +26,17 @@ export function sortTranscriptEntries(entries: TranscriptEntry[]): TranscriptEnt
   return [...entries]
     .map((entry) => ({ ...entry, blocks: sortBlocks(blocksForEntry(entry)) }))
     .sort((left, right) => {
-      if (left.messageSeq !== null && right.messageSeq !== null && left.messageSeq !== right.messageSeq) {
-        return left.messageSeq - right.messageSeq;
+      const leftMessageSeq = left.messageSeq ?? null;
+      const rightMessageSeq = right.messageSeq ?? null;
+      if (leftMessageSeq !== null && rightMessageSeq !== null && leftMessageSeq !== rightMessageSeq) {
+        return leftMessageSeq - rightMessageSeq;
       }
-      if (left.messageSeq !== right.messageSeq) {
+      if (leftMessageSeq !== rightMessageSeq) {
         const timelineComparison = compareTimelineMs(left, right);
         if (timelineComparison !== 0) {
           return timelineComparison;
         }
-        return left.messageSeq !== null ? -1 : 1;
+        return leftMessageSeq !== null ? -1 : 1;
       }
       const sameTurn = Boolean(left.turnId) && left.turnId === right.turnId;
       if (sameTurn) {
@@ -224,7 +226,7 @@ export function stringValue(value: unknown): string | null {
 
 export function threadForTurn(snapshot: ThreadSnapshot, threadId: string | null): GatewayThread | null {
   if (!threadId) {
-    return snapshot.thread;
+    return snapshot.thread ?? null;
   }
   if (snapshot.thread?.id === threadId) {
     return snapshot.thread;

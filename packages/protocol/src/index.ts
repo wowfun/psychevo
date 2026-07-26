@@ -4,6 +4,13 @@ import {
   gatewaySchemas,
   type GatewaySchemaName
 } from "./generated/schemas";
+import {
+  gatewayMethodContracts,
+  type GatewayMethod,
+  type GatewayRequestParams,
+  type GatewayRequestResults,
+  type GatewayResultValidation
+} from "./generated/methods";
 export * from "./generated";
 export type {
   GatewayActivityView as GatewayActivity,
@@ -63,6 +70,11 @@ export type SafeParseResult<T> =
 export interface RuntimeSchema<T> {
   parse(value: unknown): T;
   safeParse(value: unknown): SafeParseResult<T>;
+}
+
+export interface GatewayMethodValidation {
+  params: "precise";
+  result: GatewayResultValidation;
 }
 
 export const RpcNotificationSchema = schema<JsonRpcNotification>("JsonRpcNotification");
@@ -125,6 +137,54 @@ export const RpcResponseSchema: RuntimeSchema<JsonRpcSuccess | JsonRpcErrorRespo
       return success.data;
     }
     return JsonRpcErrorResponseSchema.parse(value);
+  },
+  safeParse(value) {
+    try {
+      return { data: this.parse(value), success: true };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error : new Error(String(error)),
+        success: false
+      };
+    }
+  }
+};
+
+export function gatewayMethodValidation(
+  method: GatewayMethod
+): GatewayMethodValidation {
+  return {
+    params: "precise",
+    result: gatewayMethodContracts[method].resultValidation
+  };
+}
+
+export function gatewayRequestParamsSchema<M extends GatewayMethod>(
+  method: M
+): RuntimeSchema<GatewayRequestParams[M]> {
+  return schema<GatewayRequestParams[M]>(
+    gatewayMethodContracts[method].paramsSchema as GatewaySchemaName
+  );
+}
+
+export function gatewayResponseResultSchema<M extends GatewayMethod>(
+  method: M
+): RuntimeSchema<GatewayRequestResults[M]> {
+  const contract = gatewayMethodContracts[method];
+  if (contract.resultSchema === null) {
+    return opaqueObjectSchema as RuntimeSchema<GatewayRequestResults[M]>;
+  }
+  return schema<GatewayRequestResults[M]>(
+    contract.resultSchema as GatewaySchemaName
+  );
+}
+
+const opaqueObjectSchema: RuntimeSchema<Record<string, unknown>> = {
+  parse(value) {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    throw new Error("opaque Gateway result validation failed: expected an object");
   },
   safeParse(value) {
     try {

@@ -1,7 +1,6 @@
 [build-system]
-requires = []
-build-backend = "build_backend"
-backend-path = ["."]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
 
 [project]
 name = "psychevo"
@@ -10,7 +9,11 @@ description = "Async Python SDK for Psychevo"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["psychevo-app-server-bin==0.1.0"]
+license-files = ["LICENSE"]
+dependencies = [
+    "psychevo-app-server-bin==0.1.0",
+    "websockets>=15,<16",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
@@ -32,3 +35,14 @@ Repository = "https://github.com/wowfun/psychevo"
 kind = "pure"
 package = "psychevo"
 package-root = "src"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/psychevo"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/psychevo",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+]

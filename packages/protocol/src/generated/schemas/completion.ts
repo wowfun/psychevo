@@ -154,7 +154,7 @@ export const completionSchemas = {
         },
         {
           "properties": {
-            "backend_ref": {
+            "backendRef": {
               "default": null,
               "type": [
                 "string",
@@ -202,14 +202,14 @@ export const completionSchemas = {
             "path": {
               "type": "string"
             },
-            "relative_path": {
+            "relativePath": {
               "type": "string"
             }
           },
           "required": [
             "kind",
             "path",
-            "relative_path"
+            "relativePath"
           ],
           "type": "object"
         },
@@ -227,7 +227,7 @@ export const completionSchemas = {
             "label": {
               "type": "string"
             },
-            "target_kind": {
+            "targetKind": {
               "type": "string"
             },
             "uri": {
@@ -242,7 +242,7 @@ export const completionSchemas = {
             "id",
             "kind",
             "label",
-            "target_kind"
+            "targetKind"
           ],
           "type": "object"
         }
@@ -442,7 +442,7 @@ export const completionSchemas = {
         },
         {
           "properties": {
-            "backend_ref": {
+            "backendRef": {
               "default": null,
               "type": [
                 "string",
@@ -490,14 +490,14 @@ export const completionSchemas = {
             "path": {
               "type": "string"
             },
-            "relative_path": {
+            "relativePath": {
               "type": "string"
             }
           },
           "required": [
             "kind",
             "path",
-            "relative_path"
+            "relativePath"
           ],
           "type": "object"
         },
@@ -515,7 +515,7 @@ export const completionSchemas = {
             "label": {
               "type": "string"
             },
-            "target_kind": {
+            "targetKind": {
               "type": "string"
             },
             "uri": {
@@ -530,7 +530,7 @@ export const completionSchemas = {
             "id",
             "kind",
             "label",
-            "target_kind"
+            "targetKind"
           ],
           "type": "object"
         }

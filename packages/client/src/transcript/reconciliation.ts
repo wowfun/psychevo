@@ -266,13 +266,13 @@ function mergeLiveToolBlockIntoMessageBlock(
   return {
     ...current,
     status: monotonicBlockStatus(current.status, liveBlock.status),
-    title: liveBlock.title ?? current.title,
-    body: liveBlock.body ?? current.body,
-    preview: liveBlock.preview ?? current.preview,
-    detail: liveBlock.detail ?? current.detail,
+    title: liveBlock.title ?? current.title ?? null,
+    body: liveBlock.body ?? current.body ?? null,
+    preview: liveBlock.preview ?? current.preview ?? null,
+    detail: liveBlock.detail ?? current.detail ?? null,
     artifactIds: liveArtifactIds.length > 0 ? liveArtifactIds : currentArtifactIds,
     metadata: mergeBlockMetadata(current, liveBlock),
-    result: liveBlock.result ?? current.result,
+    result: liveBlock.result ?? current.result ?? null,
     updatedAtMs: Math.max(current.updatedAtMs, liveBlock.updatedAtMs)
   };
 }

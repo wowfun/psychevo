@@ -61,6 +61,13 @@ export const serverNotificationGatewayEventSchema = {
       ],
       "type": "object"
     },
+    "FrameworkTurnKind": {
+      "enum": [
+        "root",
+        "delegated_child"
+      ],
+      "type": "string"
+    },
     "GatewayActionKind": {
       "enum": [
         "permission",
@@ -88,6 +95,13 @@ export const serverNotificationGatewayEventSchema = {
             "string",
             "null"
           ]
+        },
+        "activities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadActivityView"
+          },
+          "type": "array"
         },
         "leaseExpiresAtMs": {
           "anyOf": [
@@ -493,6 +507,12 @@ export const serverNotificationGatewayEventSchema = {
         }
       ]
     },
+    "GatewayLocalOperationView": {
+      "enum": [
+        "shell"
+      ],
+      "type": "string"
+    },
     "GatewaySelectedSkill": {
       "properties": {
         "name": {
@@ -657,6 +677,90 @@ export const serverNotificationGatewayEventSchema = {
         "kind"
       ],
       "type": "object"
+    },
+    "ThreadActivityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/FrameworkTurnKind"
+            },
+            "owner": {
+              "enum": [
+                "framework_turn"
+              ],
+              "type": "string"
+            },
+            "queuedTurns": {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "kind",
+            "owner",
+            "queuedTurns",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/GatewayLocalOperationView"
+            },
+            "owner": {
+              "enum": [
+                "gateway_local"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "operation",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "owner": {
+              "enum": [
+                "foreign"
+              ],
+              "type": "string"
+            },
+            "ownerId": {
+              "type": "string"
+            },
+            "ownerSurface": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "activityId",
+            "owner",
+            "ownerId"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TranscriptBlock": {
       "properties": {

@@ -18,6 +18,9 @@ from psychevo import (
     ToolResult,
     TransportError,
 )
+from psychevo._client import TurnHandle, _RpcClient
+from psychevo._transport import Transport
+from psychevo._types import TurnReceipt
 
 
 _FAKE_SERVER = r"""
@@ -323,6 +326,173 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
                 os.environ.pop("PATH", None)
             else:
                 os.environ["PATH"] = old_path
+
+
+class _FailingTransport(Transport):
+    def __init__(self) -> None:
+        self.sent: list[dict[str, object]] = []
+        self.fail = asyncio.Event()
+        self.closed = False
+        self.send_error: TransportError | None = None
+
+    async def send(self, value: dict[str, object]) -> None:
+        self.sent.append(value)
+        if self.send_error is not None:
+            raise self.send_error
+
+    async def receive(self) -> dict[str, object]:
+        await self.fail.wait()
+        raise TransportError("reader broken")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class RpcLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_request_send_failure_is_a_permanent_terminal_transition(
+        self,
+    ) -> None:
+        transport = _FailingTransport()
+        transport.send_error = TransportError("request send broken")
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+
+        with self.assertRaisesRegex(TransportError, "request send broken"):
+            await rpc.request("thread/archive", {"threadId": "thread-1"})
+        sends_after_failure = len(transport.sent)
+        with self.assertRaisesRegex(TransportError, "request send broken"):
+            await rpc.request("thread/read", {"threadId": "thread-1"})
+
+        self.assertEqual(len(transport.sent), sends_after_failure)
+        self.assertFalse(rpc._pending)
+
+    async def test_notification_send_failure_is_a_permanent_terminal_transition(
+        self,
+    ) -> None:
+        transport = _FailingTransport()
+        transport.send_error = TransportError("notification send broken")
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+
+        with self.assertRaisesRegex(TransportError, "notification send broken"):
+            await rpc.notify("initialized", {})
+        sends_after_failure = len(transport.sent)
+        with self.assertRaisesRegex(TransportError, "notification send broken"):
+            await rpc.notify("initialized", {})
+
+        self.assertEqual(len(transport.sent), sends_after_failure)
+
+    async def test_callback_response_send_failure_is_terminal(self) -> None:
+        transport = _FailingTransport()
+        transport.send_error = TransportError("callback send broken")
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+
+        with self.assertRaisesRegex(TransportError, "callback send broken"):
+            await rpc._handle_callback_request(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "server:callback-1",
+                    "method": "unknown/callback",
+                    "params": {},
+                }
+            )
+        sends_after_failure = len(transport.sent)
+        with self.assertRaisesRegex(TransportError, "callback send broken"):
+            await rpc.request("thread/read", {"threadId": "thread-1"})
+
+        self.assertEqual(len(transport.sent), sends_after_failure)
+
+    async def test_reader_failure_is_the_single_permanent_terminal_transition(
+        self,
+    ) -> None:
+        transport = _FailingTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        rpc._reader = asyncio.create_task(rpc._read_loop())
+        callback_started = asyncio.Event()
+        callback_cancelled = asyncio.Event()
+
+        async def callback() -> None:
+            callback_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                callback_cancelled.set()
+
+        rpc._spawn_callback(callback())
+        await callback_started.wait()
+        pending = asyncio.create_task(rpc.request("thread/list", {}))
+        while not transport.sent:
+            await asyncio.sleep(0)
+
+        transport.fail.set()
+        with self.assertRaisesRegex(TransportError, "reader broken"):
+            await pending
+        await rpc._reader
+        await asyncio.wait_for(callback_cancelled.wait(), timeout=1)
+
+        sends_after_failure = len(transport.sent)
+        with self.assertRaisesRegex(TransportError, "reader broken"):
+            await rpc.request("thread/read", {"threadId": "thread-1"})
+        with self.assertRaisesRegex(TransportError, "reader broken"):
+            await rpc.notify("initialized", {})
+        self.assertEqual(len(transport.sent), sends_after_failure)
+        self.assertFalse(rpc._pending)
+        self.assertFalse(rpc._callbacks)
+
+    async def test_terminal_turn_event_releases_all_connection_registry_state(
+        self,
+    ) -> None:
+        transport = _FailingTransport()
+        rpc = _RpcClient(
+            transport,
+            tools=(),
+            approval_handler=None,
+            clarify_handler=None,
+        )
+        receipt = TurnReceipt(
+            accepted=True,
+            thread_id="thread-1",
+            turn_id="turn-1",
+            client_turn_id=None,
+        )
+        turn = TurnHandle(None, receipt)  # type: ignore[arg-type]
+        rpc._early_missed[receipt.turn_id] = 2
+        rpc._early_events[receipt.turn_id].append(
+            {
+                "type": "completed",
+                "threadId": receipt.thread_id,
+                "turnId": receipt.turn_id,
+                "outcome": "completed",
+            }
+        )
+
+        rpc.register_turn(turn)
+
+        self.assertNotIn(receipt.turn_id, rpc._turns)
+        self.assertNotIn(receipt.turn_id, rpc._early_events)
+        self.assertNotIn(receipt.turn_id, rpc._early_missed)
+        self.assertEqual(
+            [event.type async for event in turn.events()],
+            ["resync_required", "completed"],
+        )
 
 
 if __name__ == "__main__":

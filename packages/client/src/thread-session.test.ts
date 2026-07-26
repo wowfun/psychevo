@@ -1,5 +1,7 @@
 import type {
   GatewayEvent,
+  GatewayMethod,
+  GatewayRequestResults,
   GatewayRequestScope,
   RpcNotification,
   ThreadContextReadResult,
@@ -9,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   GatewayClientError,
+  type GatewayRequestArguments,
   type GatewayConnectionSnapshot
 } from "./index";
 import {
@@ -18,6 +21,201 @@ import {
 import { emptyThreadSnapshot } from "./thread-controller";
 
 describe("ThreadSession", () => {
+  it("publishes one immutable composite view for a context-only update", () => {
+    const session = new ThreadSession({
+      context: readyContext(),
+      snapshot: emptyThreadSnapshot(scope())
+    });
+    const before = session.getView();
+    const listener = vi.fn();
+    session.subscribe(listener);
+    const context = { ...readyContext(), contextRevision: "context-2" };
+
+    session.setContext(context);
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(session.getView()).not.toBe(before);
+    expect(session.getView()).toEqual({
+      context,
+      threadSnapshot: before.threadSnapshot
+    });
+  });
+
+  it("publishes a control receipt once to snapshot and context consumers", async () => {
+    const client = new FakeThreadSessionClient();
+    const session = readySession(client);
+    const context = { ...readyContext(), controlRevision: "control-2" };
+    client.respond("thread/control/set", {
+      bindingRevision: 0,
+      changed: true,
+      context,
+      contextRevision: "context-1",
+      control: {
+        capabilityRevision: "capability-1",
+        applyScope: "session",
+        channelSafe: true,
+        choices: [],
+        effectiveSource: "runtimeObserved",
+        effectiveValue: "high",
+        enabled: true,
+        id: "reasoning",
+        isDefault: false,
+        label: "Reasoning",
+        mutability: "selectable",
+        required: false,
+        stability: "stable",
+        surfaceRole: "reasoning",
+        unavailableReason: null
+      },
+      controlRevision: "control-2",
+      status: "observed"
+    });
+    const listener = vi.fn();
+    session.subscribe(listener);
+
+    await session.setControl({
+      control: {
+        capabilityRevision: "capability-1",
+        applyScope: "session",
+        channelSafe: true,
+        choices: [],
+        effectiveSource: "runtimeObserved",
+        effectiveValue: "medium",
+        enabled: true,
+        id: "reasoning",
+        isDefault: false,
+        label: "Reasoning",
+        mutability: "selectable",
+        required: false,
+        stability: "stable",
+        surfaceRole: "reasoning",
+        unavailableReason: null
+      },
+      scope: scope(),
+      targetId: "agent-1",
+      threadId: null,
+      value: "high"
+    });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(session.getView().context?.controlRevision).toBe("control-2");
+  });
+
+  it("does not apply a control receipt after the Session view changes", async () => {
+    const client = new FakeThreadSessionClient();
+    const session = readySession(client);
+    const pending = deferred<GatewayRequestResults["thread/control/set"]>();
+    client.handle("thread/control/set", () => pending.promise);
+    const mutation = session.setControl({
+      control: {
+        capabilityRevision: "capability-1",
+        applyScope: "session",
+        channelSafe: true,
+        choices: [],
+        effectiveSource: "runtimeObserved",
+        effectiveValue: "medium",
+        enabled: true,
+        id: "reasoning",
+        isDefault: false,
+        label: "Reasoning",
+        mutability: "selectable",
+        required: false,
+        stability: "stable",
+        surfaceRole: "reasoning",
+        unavailableReason: null
+      },
+      scope: scope(),
+      targetId: "agent-1",
+      threadId: null,
+      value: "high"
+    });
+    const replacement = { ...readyContext(), controlRevision: "replacement-control" };
+    session.reset(emptyThreadSnapshot(scope()), replacement);
+    const listener = vi.fn();
+    session.subscribe(listener);
+
+    pending.resolve({
+      bindingRevision: 0,
+      changed: true,
+      context: { ...readyContext(), controlRevision: "stale-control" },
+      contextRevision: "context-1",
+      control: {
+        capabilityRevision: "capability-1",
+        applyScope: "session",
+        channelSafe: true,
+        choices: [],
+        effectiveSource: "runtimeObserved",
+        effectiveValue: "high",
+        enabled: true,
+        id: "reasoning",
+        isDefault: false,
+        label: "Reasoning",
+        mutability: "selectable",
+        required: false,
+        stability: "stable",
+        surfaceRole: "reasoning",
+        unavailableReason: null
+      },
+      controlRevision: "stale-control",
+      status: "observed"
+    });
+    await mutation;
+
+    expect(session.getContext()).toBe(replacement);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("prepends one strictly older history page and advances its cursor", async () => {
+    const client = new FakeThreadSessionClient();
+    const latest = entryEvent("entryUpdated", "latest").entry;
+    const older = {
+      ...entryEvent("entryUpdated", "older").entry,
+      id: "entry-older",
+      messageSeq: 1
+    };
+    const session = readySession(client, {
+      ...runningSnapshot(),
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      entries: [latest],
+      history: { owner: "psychevo", fidelity: "full", cursor: "message:2", hint: null }
+    });
+    client.respond("thread/history/read", {
+      threadId: "thread-1",
+      entries: [older],
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+      nextCursor: null
+    });
+
+    await session.loadOlder();
+
+    expect(session.getSnapshot()?.entries.map((entry) => entry.id))
+      .toEqual(["entry-older", latest.id]);
+    expect(session.getSnapshot()?.history.cursor).toBeNull();
+  });
+
+  it("drops an older history page after the Session view changes", async () => {
+    const client = new FakeThreadSessionClient();
+    const pending = deferred<GatewayRequestResults["thread/history/read"]>();
+    client.handle("thread/history/read", () => pending.promise);
+    const session = readySession(client, {
+      ...runningSnapshot(),
+      history: { owner: "psychevo", fidelity: "full", cursor: "message:2", hint: null }
+    });
+
+    const load = session.loadOlder();
+    const replacement = emptyThreadSnapshot(scope());
+    session.reset(replacement, readyContext());
+    pending.resolve({
+      threadId: "thread-1",
+      entries: [entryEvent("entryUpdated", "stale").entry],
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+      nextCursor: null
+    });
+    await load;
+
+    expect(session.getSnapshot()).toBe(replacement);
+  });
+
   it("owns optimistic Send and Gateway acceptance", async () => {
     const client = new FakeThreadSessionClient();
     const session = readySession(client);
@@ -224,12 +422,16 @@ class FakeThreadSessionClient implements ThreadSessionClient {
     return { ...this.connection };
   }
 
-  request(method: string, params?: unknown): Promise<any> {
+  request<M extends GatewayMethod>(
+    method: M,
+    ...arguments_: GatewayRequestArguments<M>
+  ): Promise<GatewayRequestResults[M]> {
+    const [params] = arguments_;
     this.requests.push({ method, params });
     const responder = this.responders.get(method);
     if (!responder) return Promise.reject(new Error(`No response for ${method}`));
     try {
-      return Promise.resolve(responder(params));
+      return Promise.resolve(responder(params)) as Promise<GatewayRequestResults[M]>;
     } catch (error) {
       return Promise.reject(error);
     }

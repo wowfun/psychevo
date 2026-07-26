@@ -53,6 +53,7 @@ class _RpcClient:
         self._early_missed: dict[str, int] = defaultdict(int)
         self._reader: asyncio.Task[None] | None = None
         self._callbacks: set[asyncio.Task[None]] = set()
+        self._terminal_error: TransportError | None = None
         self._tools = {tool.name: tool for tool in tools}
         if len(self._tools) != len(tools):
             raise ValueError("custom Tool names must be unique")
@@ -88,6 +89,7 @@ class _RpcClient:
             )
 
     async def request(self, method: str, params: object = None) -> object:
+        self._raise_if_terminal()
         self._next_id += 1
         request_id = self._next_id
         loop = asyncio.get_running_loop()
@@ -101,16 +103,23 @@ class _RpcClient:
         if params is not None:
             message["params"] = params
         try:
-            await self._transport.send(message)
+            self._raise_if_terminal()
+            await self._send(message)
             return await future
+        except BaseException:
+            if future.done() and not future.cancelled():
+                future.exception()
+            raise
         finally:
             self._pending.pop(request_id, None)
 
     async def notify(self, method: str, params: object = None) -> None:
+        self._raise_if_terminal()
         message: dict[str, object] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             message["params"] = params
-        await self._transport.send(message)
+        self._raise_if_terminal()
+        await self._send(message)
 
     def register_turn(self, turn: TurnHandle) -> None:
         self._turns[turn.receipt.turn_id] = turn
@@ -120,8 +129,12 @@ class _RpcClient:
         for event in self._early_events.pop(turn.receipt.turn_id, ()):
             turn._receive_event(event)
             self._maybe_handle_clarify(turn.receipt.turn_id, event)
+            if _terminal_event(event):
+                self._forget_turn(turn.receipt.turn_id)
+                break
 
     async def close(self) -> None:
+        self._transition_terminal(TransportError("App Server connection closed"))
         await self._transport.close()
         if self._reader is not None:
             self._reader.cancel()
@@ -129,14 +142,6 @@ class _RpcClient:
                 await self._reader
             except asyncio.CancelledError:
                 pass
-        error = TransportError("App Server connection closed")
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(error)
-        for turn in self._turns.values():
-            turn._close_events()
-        for task in self._callbacks:
-            task.cancel()
         if self._callbacks:
             await asyncio.gather(*self._callbacks, return_exceptions=True)
 
@@ -158,11 +163,48 @@ class _RpcClient:
                 if isinstance(error, TransportError)
                 else TransportError(f"App Server reader failed: {error}")
             )
-            for future in self._pending.values():
-                if not future.done():
-                    future.set_exception(transport_error)
-            for turn in self._turns.values():
-                turn._close_events()
+            self._transition_terminal(transport_error)
+
+    def _raise_if_terminal(self) -> None:
+        if self._terminal_error is not None:
+            raise self._terminal_error
+
+    async def _send(self, message: dict[str, object]) -> None:
+        self._raise_if_terminal()
+        try:
+            await self._transport.send(message)
+        except BaseException as error:
+            transport_error = (
+                error
+                if isinstance(error, TransportError)
+                else TransportError(f"App Server send failed: {error}")
+            )
+            self._transition_terminal(transport_error)
+            raise transport_error
+
+    def _transition_terminal(self, error: TransportError) -> None:
+        if self._terminal_error is not None:
+            return
+        self._terminal_error = error
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(error)
+        for turn in self._turns.values():
+            turn._close_events()
+        current_task = asyncio.current_task()
+        if self._reader is not None and self._reader is not current_task:
+            self._reader.cancel()
+        for task in self._callbacks:
+            if task is not current_task:
+                task.cancel()
+        self._turns.clear()
+        self._early_events.clear()
+        self._early_missed.clear()
+
+    def _forget_turn(self, turn_id: str) -> None:
+        self._turns.pop(turn_id, None)
+        self._early_events.pop(turn_id, None)
+        self._early_missed.pop(turn_id, None)
 
     def _receive_response(self, message: dict[str, object]) -> None:
         request_id = message.get("id")
@@ -202,6 +244,8 @@ class _RpcClient:
         else:
             turn._receive_event(event)
             self._maybe_handle_clarify(turn_id, event)
+            if _terminal_event(event):
+                self._forget_turn(turn_id)
 
     def _maybe_handle_clarify(
         self, turn_id: str, event: Mapping[str, object]
@@ -213,8 +257,10 @@ class _RpcClient:
         ):
             interaction_id = event.get("interactionId")
             if isinstance(interaction_id, str):
+                turn = self._turns.get(turn_id)
                 self._spawn_callback(
                     self._handle_clarify(
+                        turn.receipt.thread_id if turn is not None else "",
                         turn_id,
                         interaction_id,
                         event.get("payload"),
@@ -255,7 +301,7 @@ class _RpcClient:
                     "message": str(error),
                 },
             }
-        await self._transport.send(response)
+        await self._send(response)
 
     async def _call_tool(self, params: dict[str, Any]) -> dict[str, object]:
         name = params.get("toolName")
@@ -306,6 +352,7 @@ class _RpcClient:
 
     async def _handle_clarify(
         self,
+        thread_id: str,
         turn_id: str,
         interaction_id: str,
         questions: object,
@@ -315,9 +362,7 @@ class _RpcClient:
         result = self._clarify_handler(
             ClarifyRequest(
                 interaction_id=interaction_id,
-                thread_id=self._turns[turn_id].receipt.thread_id
-                if turn_id in self._turns
-                else "",
+                thread_id=thread_id,
                 turn_id=turn_id,
                 questions=questions,  # type: ignore[arg-type]
             )
@@ -664,6 +709,10 @@ def _object(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TransportError("App Server result must be a JSON object")
     return value
+
+
+def _terminal_event(value: Mapping[str, object]) -> bool:
+    return value.get("type") in {"completed", "failed"}
 
 
 def _string(value: Mapping[str, object], key: str) -> str:

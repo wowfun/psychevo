@@ -8,23 +8,23 @@ export type AppProductInfo = { name: string, version: string, };
 
 export type AppClientCapabilities = Record<string, never>;
 
-export type AppInitializeParams = { client: AppProductInfo, protocolMin: number, protocolMax: number, capabilities: AppClientCapabilities, };
+export type AppInitializeParams = { client: AppProductInfo, protocolMin: number, protocolMax: number, capabilities?: AppClientCapabilities, };
 
 export type AppServerCapabilities = { threads: boolean, turns: boolean, eventReplay: string, interactions: boolean, customTools: boolean, };
 
 export type AppInitializeResult = { server: AppProductInfo, protocolVersion: number, protocolMin: number, protocolMax: number, capabilities: AppServerCapabilities, };
 
-export type AppThreadStartParams = { cwd: string, source: string | null, metadata: unknown, };
+export type AppThreadStartParams = { cwd: string, source?: string | null, metadata?: unknown, };
 
 export type AppThreadIdParams = { threadId: string, };
 
-export type AppThreadForkParams = { threadId: string, beforeSessionSeq: number | null, };
+export type AppThreadForkParams = { threadId: string, beforeSessionSeq?: number | null, };
 
-export type AppThreadCompactParams = { threadId: string, model: string | null, reasoningEffort: string | null, instructions: string | null, force: boolean, };
+export type AppThreadCompactParams = { threadId: string, model?: string | null, reasoningEffort?: string | null, instructions?: string | null, force?: boolean, };
 
-export type AppThreadListParams = { cwd: string | null, archived: boolean, sources: Array<string>, };
+export type AppThreadListParams = { cwd?: string | null, archived?: boolean, sources?: Array<string>, };
 
-export type AppTurnStartParams = { threadId: string, prompt: string, clientTurnId: string | null, source: string | null, model: string | null, reasoningEffort: string | null, noAgents: boolean, noSkills: boolean, inheritedEnv: { [key in string]?: string } | null, useRegisteredApprovalHandler: boolean, useRegisteredClarifyHandler: boolean, };
+export type AppTurnStartParams = { threadId: string, prompt: string, clientTurnId?: string | null, source?: string | null, model?: string | null, reasoningEffort?: string | null, noAgents?: boolean, noSkills?: boolean, inheritedEnv?: { [key in string]?: string } | null, useRegisteredApprovalHandler?: boolean, useRegisteredClarifyHandler?: boolean, };
 
 export type AppTurnIdParams = { turnId: string, };
 
@@ -36,35 +36,35 @@ export type AppInteractionResponse = { "kind": "permission", outcome: AppApprova
 
 export type AppToolExecutionMode = "parallel" | "sequential";
 
-export type AppToolDefinition = { name: string, description: string, parameters: unknown, executionMode: AppToolExecutionMode, timeoutMs: number, };
+export type AppToolDefinition = { name: string, description: string, parameters: unknown, executionMode: AppToolExecutionMode, timeoutMs?: number, };
 
-export type AppToolRegisterParams = { tools: Array<AppToolDefinition>, approvalHandler: boolean, clarifyHandler: boolean, };
+export type AppToolRegisterParams = { tools?: Array<AppToolDefinition>, approvalHandler?: boolean, clarifyHandler?: boolean, };
 
 export type AppToolCallParams = { callId: string, toolName: string, arguments: unknown, threadId: string, turnId: string, };
 
-export type AppToolCallResult = { result: unknown, modelContent: string | null, isError: boolean, };
+export type AppToolCallResult = { result: unknown, modelContent?: string | null, isError?: boolean, };
 
-export type AppApprovalRequestParams = { callId: string, threadId: string, turnId: string, toolCallId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, filesystem: unknown, };
+export type AppApprovalRequestParams = { callId: string, threadId: string, turnId: string, toolCallId: string, toolName: string, summary: string, reason: string, matchedRule?: string | null, suggestedRule?: string | null, allowAlways: boolean, filesystem?: unknown, };
 
 export type AppApprovalOutcome = "allow_once" | "allow_turn" | "allow_session" | "allow_always" | "deny";
 
-export type AppApprovalResult = { outcome: AppApprovalOutcome, filesystemDirectory: string | null, };
+export type AppApprovalResult = { outcome: AppApprovalOutcome, filesystemDirectory?: string | null, };
 
-export type AppPendingInteraction = { interactionId: string, threadId: string, turnId: string, kind: string, status: string, payload: unknown, resolution: unknown, requestedAtMs: number, resolvedAtMs: number | null, };
+export type AppPendingInteraction = { interactionId: string, threadId: string, turnId: string, kind: string, status: string, payload: unknown, resolution?: unknown, requestedAtMs: number, resolvedAtMs?: number | null, };
 
-export type AppThreadItem = { sessionSeq: number, message: unknown, usage: unknown, metadata: unknown, accounting: unknown, };
+export type AppThreadItem = { sessionSeq: number, message: unknown, usage?: unknown, metadata?: unknown, accounting?: unknown, };
 
-export type AppThreadSummary = { id: string, source: string, cwd: string, title: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId: string | null, };
+export type AppThreadSummary = { id: string, source: string, cwd: string, title?: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId?: string | null, };
 
-export type AppThreadSnapshot = { id: string, source: string, cwd: string, title: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId: string | null, pendingInteractions: Array<AppPendingInteraction>, items: Array<AppThreadItem>, };
+export type AppThreadSnapshot = { id: string, source: string, cwd: string, title?: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId?: string | null, pendingInteractions?: Array<AppPendingInteraction>, items?: Array<AppThreadItem>, };
 
 export type AppThreadListResult = { threads: Array<AppThreadSummary>, };
 
-export type AppTurnReceipt = { accepted: boolean, threadId: string, turnId: string, clientTurnId: string | null, };
+export type AppTurnReceipt = { accepted: boolean, threadId: string, turnId: string, clientTurnId?: string | null, };
 
 export type AppTurnOutcome = "completed" | "stopped" | "failed" | "interrupted";
 
-export type AppTurnResult = { threadId: string, outcome: AppTurnOutcome, finalAnswer: string, provider: string, model: string, reasoningEffort: string | null, toolFailures: number, contextLimit: number | null, contextSnapshot: unknown, warnings: Array<unknown>, terminalReason: unknown, terminalError: unknown, selectedAgent: unknown, selectedSkills: Array<unknown>, };
+export type AppTurnResult = { threadId: string, outcome: AppTurnOutcome, finalAnswer: string, provider: string, model: string, reasoningEffort?: string | null, toolFailures: number, contextLimit?: number | null, contextSnapshot?: unknown, warnings?: Array<unknown>, terminalReason?: unknown, terminalError?: unknown, selectedAgent?: unknown, selectedSkills?: Array<unknown>, };
 
 export type AppItemStage = "started" | "updated" | "completed";
 
@@ -76,9 +76,9 @@ export type SourceKey = string;
 
 export type GatewaySourceLifetime = "invocation" | "process" | "persistent";
 
-export type GatewaySource = { kind: string, rawId: string, lifetime: GatewaySourceLifetime, rawIdentity: unknown | null, visibleName: string | null, };
+export type GatewaySource = { kind: string, rawId: string, lifetime: GatewaySourceLifetime, rawIdentity?: unknown | null, visibleName?: string | null, };
 
-export type GatewaySourceInput = { kind: string, rawId: string | null, lifetime: GatewaySourceLifetime | null, rawIdentity: unknown | null, visibleName: string | null, };
+export type GatewaySourceInput = { kind: string, rawId?: string | null, lifetime?: GatewaySourceLifetime | null, rawIdentity?: unknown | null, visibleName?: string | null, };
 
 export type GatewayRequestScope = { cwd: string, source: GatewaySourceInput, };
 
@@ -86,15 +86,15 @@ export type GatewayThreadSelector = { "type": "threadId", threadId: string, } | 
 
 export type BackendKind = "native" | "acp";
 
-export type GatewayBackendInfo = { kind: BackendKind, runtimeRef?: string, sessionHandle: string | null, };
+export type GatewayBackendInfo = { kind: BackendKind, runtimeRef?: string, sessionHandle?: string | null, };
 
-export type GatewayThread = { id: string, backend: GatewayBackendInfo, sourceKey: SourceKey | null, forkedFromThreadId?: string, };
+export type GatewayThread = { id: string, backend: GatewayBackendInfo, sourceKey?: SourceKey | null, forkedFromThreadId?: string, };
 
-export type GatewayTurn = { id: string, threadId: string | null, status: GatewayTurnStatus, outcome: string | null, error: AgentErrorView | null, startedAtMs?: number | null, completedAtMs?: number | null, };
+export type GatewayTurn = { id: string, threadId?: string | null, status: GatewayTurnStatus, outcome?: string | null, error?: AgentErrorView | null, startedAtMs?: number | null, completedAtMs?: number | null, };
 
 export type AgentDeliveryStatusView = "notDelivered" | "unknown" | "delivered";
 
-export type AgentErrorView = { message: string, code: string | null, stage: string | null, retryClass: string | null, delivery: AgentDeliveryStatusView, recoveryAction: string | null, diagnosticRef: string | null, };
+export type AgentErrorView = { message: string, code?: string | null, stage?: string | null, retryClass?: string | null, delivery?: AgentDeliveryStatusView, recoveryAction?: string | null, diagnosticRef?: string | null, };
 
 export type GatewayTurnStatus = "queued" | "running" | "completed" | "failed" | "interrupted";
 
@@ -124,33 +124,39 @@ export type TranscriptBlockKind = "text" | "reasoning" | "toolCall" | "toolResul
 
 export type TranscriptBlockStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "needsInput" | "info";
 
-export type TranscriptToolResult = { resultMessageSeq: number, status: TranscriptBlockStatus, content: string, isError: boolean, metadata: unknown | null, createdAtMs: number, updatedAtMs: number, };
+export type TranscriptToolResult = { resultMessageSeq: number, status: TranscriptBlockStatus, content: string, isError: boolean, metadata?: unknown | null, createdAtMs: number, updatedAtMs: number, };
 
-export type TranscriptBlock = { id: string, kind: TranscriptBlockKind, status: TranscriptBlockStatus, order: number, phaseOrdinal?: number, source: string, title: string | null, body: string | null, preview: string | null, detail: string | null, artifactIds: Array<string>, metadata: unknown | null, result: TranscriptToolResult | null, createdAtMs: number, updatedAtMs: number, };
+export type TranscriptBlock = { id: string, kind: TranscriptBlockKind, status: TranscriptBlockStatus, order: number, phaseOrdinal?: number, source: string, title?: string | null, body?: string | null, preview?: string | null, detail?: string | null, artifactIds: Array<string>, metadata?: unknown | null, result?: TranscriptToolResult | null, createdAtMs: number, updatedAtMs: number, };
 
-export type TranscriptEntry = { id: string, threadId: string, turnId: string | null, messageSeq: number | null, role: TranscriptEntryRole, status: TranscriptBlockStatus, source: string, blocks: Array<TranscriptBlock>, metadata: unknown | null, usage: unknown | null, accounting: unknown | null, createdAtMs: number, updatedAtMs: number, };
+export type TranscriptEntry = { id: string, threadId: string, turnId?: string | null, messageSeq?: number | null, role: TranscriptEntryRole, status: TranscriptBlockStatus, source: string, blocks: Array<TranscriptBlock>, metadata?: unknown | null, usage?: unknown | null, accounting?: unknown | null, createdAtMs: number, updatedAtMs: number, };
 
-export type GatewayActivityView = { running: boolean, activeTurnId: string | null, queuedTurns: number, startedAtMs?: number | null, updatedAtMs?: number | null, ownerId?: string, ownerSurface?: string, leaseExpiresAtMs?: number | null, takeoverState?: string, };
+export type GatewayActivityView = { activities?: Array<ThreadActivityView>, running: boolean, activeTurnId?: string | null, queuedTurns: number, startedAtMs?: number | null, updatedAtMs?: number | null, ownerId?: string, ownerSurface?: string, leaseExpiresAtMs?: number | null, takeoverState?: string, };
 
-export type PendingActionView = { actionId: string, kind: GatewayActionKind, title?: string, summary?: string, payload: unknown, threadId?: string, turnId?: string, activityId?: string, sourceKey?: string, ownerId?: string, leaseExpiresAtMs?: number | null, };
+export type ThreadActivityView = { "owner": "framework_turn", activityId: string, turnId: string, kind: FrameworkTurnKind, queuedTurns: number, } | { "owner": "gateway_local", operation: GatewayLocalOperationView, activityId: string, } | { "owner": "foreign", ownerId: string, activityId: string, ownerSurface?: string, };
+
+export type FrameworkTurnKind = "root" | "delegated_child";
+
+export type GatewayLocalOperationView = "shell";
+
+export type PendingActionView = { actionId: string, kind: GatewayActionKind, title?: string, summary?: string, payload?: unknown, threadId?: string, turnId?: string, activityId?: string, sourceKey?: string, ownerId?: string, leaseExpiresAtMs?: number | null, };
 
 export type TurnStartReceipt = { clientTurnId: string, turnId: string, };
 
-export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread: GatewayThread | null, history: ThreadHistoryView, entries: Array<TranscriptEntry>, activity: GatewayActivityView, turnStartReceipts?: Array<TurnStartReceipt>, pendingActions: Array<PendingActionView>, historyEditing?: ThreadHistoryEditingView, };
+export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread?: GatewayThread | null, history: ThreadHistoryView, entries: Array<TranscriptEntry>, activity: GatewayActivityView, turnStartReceipts?: Array<TurnStartReceipt>, pendingActions: Array<PendingActionView>, historyEditing?: ThreadHistoryEditingView, };
 
 export type ThreadHistoryOwnerView = "psychevo" | "agent" | "process";
 
 export type ThreadHistoryFidelityView = "full" | "summary" | "partial" | "unavailable";
 
-export type ThreadHistoryView = { owner: ThreadHistoryOwnerView, fidelity: ThreadHistoryFidelityView, cursor: string | null, hint: string | null, };
+export type ThreadHistoryView = { owner: ThreadHistoryOwnerView, fidelity: ThreadHistoryFidelityView, cursor?: string | null, hint?: string | null, };
 
 export type SessionProjectView = { cwd: string, label: string, displayPath: string, };
 
-export type SessionSummaryView = { id: string, cwd: string, project: SessionProjectView, model: string | null, provider: string | null, startedAtMs: number, updatedAtMs: number | null, endedAtMs: number | null, endReason: string | null, archivedAtMs: number | null, messageCount: number, toolCallCount: number, activity: GatewayActivityView, title: string | null, displayTitle: string | null, lifecycle?: SessionLifecycleView, forkedFromThreadId?: string, };
+export type SessionSummaryView = { id: string, cwd: string, project: SessionProjectView, model?: string | null, provider?: string | null, startedAtMs: number, updatedAtMs?: number | null, endedAtMs?: number | null, endReason?: string | null, archivedAtMs?: number | null, messageCount: number, toolCallCount: number, activity?: GatewayActivityView, title?: string | null, displayTitle?: string | null, lifecycle?: SessionLifecycleView, forkedFromThreadId?: string, };
 
 export type InitializeParams = Record<string, never>;
 
-export type InitializeResult = { server: string, version: string, cwd: string, displayCwd: string, scope: GatewayRequestScope, source: GatewaySource, profile: GatewayProfileView | null, capabilities: Record<string, unknown>, };
+export type InitializeResult = { server: string, version: string, cwd: string, displayCwd: string, scope: GatewayRequestScope, source: GatewaySource, profile?: GatewayProfileView | null, capabilities: Record<string, unknown>, };
 
 export type GatewayProfileView = { name: string, home: string, default: boolean, };
 
@@ -158,27 +164,27 @@ export type ThreadDraftTargetIntent = { "kind": "default" } | { "kind": "exact",
 
 export type ThreadDraftOpenParams = { origin: GatewayRequestScope, targetIntent: ThreadDraftTargetIntent, };
 
-export type ThreadCompactionCheckpointView = { checkpointId: number, reason: string, createdAtMs: number, firstKeptSessionSeq: number, tokensBefore: number | null, tokensAfter: number | null, summaryProvider: string | null, summaryModel: string | null, summary: string | null, };
+export type ThreadCompactionCheckpointView = { checkpointId: number, reason: string, createdAtMs: number, firstKeptSessionSeq: number, tokensBefore?: number | null, tokensAfter?: number | null, summaryProvider?: string | null, summaryModel?: string | null, summary?: string | null, };
 
-export type ThreadCompactionResult = { accepted: boolean, threadId: string | null, compacted: boolean, reason: string, message: string, checkpoint: ThreadCompactionCheckpointView | null, tokensBefore: number | null, tokensAfter: number | null, summaryProvider: string | null, summaryModel: string | null, unavailable: boolean, error: string | null, };
+export type ThreadCompactionResult = { accepted: boolean, threadId?: string | null, compacted: boolean, reason: string, message: string, checkpoint?: ThreadCompactionCheckpointView | null, tokensBefore?: number | null, tokensAfter?: number | null, summaryProvider?: string | null, summaryModel?: string | null, unavailable?: boolean, error?: string | null, };
 
-export type ThreadResumeParams = { threadId: string | null, scope: GatewayRequestScope | null, };
+export type ThreadResumeParams = { threadId?: string | null, scope?: GatewayRequestScope | null, };
 
 export type ThreadReadParams = { threadId: string, };
 
-export type ThreadTraceParams = { threadId: string, afterSeq: number | null, limit: number | null, };
+export type ThreadTraceParams = { threadId: string, afterSeq?: number | null, limit?: number | null, };
 
-export type ThreadTraceResult = { threadId: string, available: boolean, events: Array<Record<string, unknown>>, warnings: Array<string>, truncated: boolean, nextAfterSeq: number | null, };
+export type ThreadTraceResult = { threadId: string, available: boolean, events: Array<Record<string, unknown>>, warnings: Array<string>, truncated: boolean, nextAfterSeq?: number | null, };
 
-export type ThreadListParams = { cwd: string | null, archived: boolean | null, limit: number | null, };
+export type ThreadListParams = { cwd?: string | null, archived?: boolean | null, limit?: number | null, };
 
-export type ThreadBrowserParams = { cwd: string | null, archived: boolean | null, cursor: ThreadBrowserCursor | null, includeSessionIds: Array<string>, recentDays: number | null, limit: number | null, };
+export type ThreadBrowserParams = { cwd?: string | null, archived?: boolean | null, cursor?: ThreadBrowserCursor | null, includeSessionIds?: Array<string>, recentDays?: number | null, limit?: number | null, };
 
 export type ThreadBrowserCursor = { cwd: string, offset: number, };
 
 export type ThreadBrowserResult = { workspaces: Array<ThreadBrowserWorkspace>, };
 
-export type ThreadBrowserWorkspace = { cwd: string, project: SessionProjectView, sessions: Array<SessionSummaryView>, hiddenCount: number, nextCursor: ThreadBrowserCursor | null, };
+export type ThreadBrowserWorkspace = { cwd: string, project: SessionProjectView, sessions: Array<SessionSummaryView>, hiddenCount?: number, nextCursor?: ThreadBrowserCursor | null, };
 
 export type ThreadIdParams = { threadId: string, };
 
@@ -190,87 +196,87 @@ export type ThreadMutationResult = { session: SessionSummaryView, };
 
 export type ThreadDeleteResult = { deleted: boolean, threadId: string, };
 
-export type CompletionListParams = { scope: GatewayRequestScope, threadId: string | null, text: string, cursor: number, };
+export type CompletionListParams = { scope: GatewayRequestScope, threadId?: string | null, text: string, cursor: number, };
 
 export type CompletionReplacement = { start: number, end: number, };
 
-export type CompletionItem = { id: string, sigil: string, label: string, insertText: string, kind: string, detail: string | null, target: GatewayMentionTarget | null, sortText: string | null, group: string | null, groupLabel: string | null, scopeLabel: string | null, };
+export type CompletionItem = { id: string, sigil: string, label: string, insertText: string, kind: string, detail?: string | null, target?: GatewayMentionTarget | null, sortText?: string | null, group?: string | null, groupLabel?: string | null, scopeLabel?: string | null, };
 
-export type CompletionListResult = { items: Array<CompletionItem>, replacement: CompletionReplacement | null, };
+export type CompletionListResult = { items: Array<CompletionItem>, replacement?: CompletionReplacement | null, };
 
-export type CommandListParams = { scope: GatewayRequestScope | null, threadId: string | null, };
+export type CommandListParams = { scope?: GatewayRequestScope | null, threadId?: string | null, };
 
 export type CommandAlternateAction = { type: string, target: string, label: string, };
 
-export type CommandListItem = { name: string, slash: string, usage: string, summary: string, aliases: Array<string>, argumentKind: string, source: string, expandsTo: string | null, presentationKind: string | null, destination: string | null, feedbackAnchor: string | null, alternateAction: CommandAlternateAction | null, };
+export type CommandListItem = { name: string, slash: string, usage: string, summary: string, aliases?: Array<string>, argumentKind: string, source: string, expandsTo?: string | null, presentationKind?: string | null, destination?: string | null, feedbackAnchor?: string | null, alternateAction?: CommandAlternateAction | null, };
 
-export type CommandListResult = { commands: Array<CommandListItem>, hiddenDynamic: number, };
+export type CommandListResult = { commands: Array<CommandListItem>, hiddenDynamic?: number, };
 
-export type CommandExecuteParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
+export type CommandExecuteParams = { scope: GatewayRequestScope, threadId?: string | null, command: string, };
 
-export type CommandExecuteResult = { accepted: boolean, command: string, known: boolean | null, presentationKind: string | null, feedbackAnchor: string | null, alternateAction: CommandAlternateAction | null, message: string | null, action: unknown | null, };
+export type CommandExecuteResult = { accepted: boolean, command: string, known?: boolean | null, presentationKind?: string | null, feedbackAnchor?: string | null, alternateAction?: CommandAlternateAction | null, message?: string | null, action?: unknown | null, };
 
-export type SlashSettingsReadParams = { scope: ModelSettingsScope | null, cwd: string | null, };
+export type SlashSettingsReadParams = { scope?: ModelSettingsScope | null, cwd?: string | null, };
 
-export type SlashSettingsUpdateParams = { scope: ModelSettingsScope, cwd: string | null, leaderKey: string | null, leaderTimeoutMs: number | null, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, };
+export type SlashSettingsUpdateParams = { scope: ModelSettingsScope, cwd?: string | null, leaderKey?: string | null, leaderTimeoutMs?: number | null, aliases?: Array<SlashAliasSetting>, keybinds?: Array<SlashKeybindSetting>, };
 
-export type SlashAliasSetting = { alias: string, target: string, targetSummary: string | null, };
+export type SlashAliasSetting = { alias: string, target: string, targetSummary?: string | null, };
 
-export type SlashKeybindSetting = { shortcut: string, target: string, targetSummary: string | null, };
+export type SlashKeybindSetting = { shortcut: string, target: string, targetSummary?: string | null, };
 
-export type SlashSettingsResult = { scope: ModelSettingsScope, cwd: string, leaderKey: string, leaderTimeoutMs: number, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, diagnostics: Array<string>, };
+export type SlashSettingsResult = { scope: ModelSettingsScope, cwd: string, leaderKey: string, leaderTimeoutMs: number, aliases: Array<SlashAliasSetting>, keybinds: Array<SlashKeybindSetting>, diagnostics?: Array<string>, };
 
 export type AgentConfigTarget = "project" | "profile";
 
-export type AgentListParams = { scope: GatewayRequestScope | null, };
+export type AgentListParams = { scope?: GatewayRequestScope | null, };
 
-export type AgentReadParams = { name: string, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
+export type AgentReadParams = { name: string, target?: AgentConfigTarget | null, scope?: GatewayRequestScope | null, };
 
 export type AgentBackendRefInput = { ref: string, };
 
-export type AgentWriteParams = { name: string, description: string, target: AgentConfigTarget | null, enabled: boolean | null, instructions: string, backend: AgentBackendRefInput | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, optionalContributions: Array<string>, rawMarkdown: string | null, scope: GatewayRequestScope | null, };
+export type AgentWriteParams = { name: string, description: string, target?: AgentConfigTarget | null, enabled?: boolean | null, instructions?: string, backend?: AgentBackendRefInput | null, entrypoints?: Array<string>, tools?: Array<string>, mcpServers?: Array<string>, optionalContributions?: Array<string>, rawMarkdown?: string | null, scope?: GatewayRequestScope | null, };
 
-export type AgentSetEnabledParams = { name: string, enabled: boolean, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
+export type AgentSetEnabledParams = { name: string, enabled: boolean, target?: AgentConfigTarget | null, scope?: GatewayRequestScope | null, };
 
-export type AgentDeleteParams = { name: string, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
+export type AgentDeleteParams = { name: string, target?: AgentConfigTarget | null, scope?: GatewayRequestScope | null, };
 
-export type AgentStatusParams = { scope: GatewayRequestScope | null, threadId: string | null, all: boolean | null, };
+export type AgentStatusParams = { scope?: GatewayRequestScope | null, threadId?: string | null, all?: boolean | null, };
 
-export type TeamListParams = { scope: GatewayRequestScope | null, };
+export type TeamListParams = { scope?: GatewayRequestScope | null, };
 
-export type TeamReadParams = { name: string, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
+export type TeamReadParams = { name: string, target?: AgentConfigTarget | null, scope?: GatewayRequestScope | null, };
 
-export type TeamMemberInput = { id: string, agent: string, runtimeRef: string | null, runtimeOptions: { [key in string]?: string }, runtimeProfileRevision: string | null, role: string | null, description: string | null, maxTurns: number | null, };
+export type TeamMemberInput = { id: string, agent: string, runtimeRef?: string | null, runtimeOptions?: { [key in string]?: string }, runtimeProfileRevision?: string | null, role?: string | null, description?: string | null, maxTurns?: number | null, };
 
-export type TeamWriteParams = { name: string, description: string, target: AgentConfigTarget | null, enabled: boolean | null, leader: string, members: Array<TeamMemberInput>, maxParallelAgents: number | null, instructions: string, rawMarkdown: string | null, scope: GatewayRequestScope | null, };
+export type TeamWriteParams = { name: string, description: string, target?: AgentConfigTarget | null, enabled?: boolean | null, leader: string, members?: Array<TeamMemberInput>, maxParallelAgents?: number | null, instructions?: string, rawMarkdown?: string | null, scope?: GatewayRequestScope | null, };
 
-export type TeamDeleteParams = { name: string, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
+export type TeamDeleteParams = { name: string, target?: AgentConfigTarget | null, scope?: GatewayRequestScope | null, };
 
-export type TeamSetEnabledParams = { name: string, enabled: boolean, target: AgentConfigTarget | null, scope: GatewayRequestScope | null, };
+export type TeamSetEnabledParams = { name: string, enabled: boolean, target?: AgentConfigTarget | null, scope?: GatewayRequestScope | null, };
 
-export type TeamStatusParams = { scope: GatewayRequestScope | null, threadId: string | null, };
+export type TeamStatusParams = { scope?: GatewayRequestScope | null, threadId?: string | null, };
 
-export type AgentControlParams = { action: string, target: string | null, message: string | null, scope: GatewayRequestScope | null, };
+export type AgentControlParams = { action: string, target?: string | null, message?: string | null, scope?: GatewayRequestScope | null, };
 
 export type AgentBackendRefView = { ref: string, };
 
-export type AgentDiagnosticView = { kind: string, message: string, path: string | null, };
+export type AgentDiagnosticView = { kind: string, message: string, path?: string | null, };
 
 export type AgentContributionView = "instructions" | "tools" | "mcp" | "skills";
 
-export type AgentDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, generated: boolean, target: AgentConfigTarget | null, mutable: boolean, path: string | null, backend: AgentBackendRefView | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, contributions: Array<AgentContributionView>, optionalContributions: Array<string>, diagnostics: Array<AgentDiagnosticView>, };
+export type AgentDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, generated: boolean, target?: AgentConfigTarget | null, mutable: boolean, path?: string | null, backend?: AgentBackendRefView | null, entrypoints: Array<string>, tools: Array<string>, mcpServers: Array<string>, contributions?: Array<AgentContributionView>, optionalContributions?: Array<string>, diagnostics: Array<AgentDiagnosticView>, };
 
-export type TeamMemberView = { id: string, agent: string, runtimeRef: string | null, runtimeOptions: { [key in string]?: string }, runtimeProfileRevision: string | null, role: string | null, description: string | null, maxTurns: number | null, };
+export type TeamMemberView = { id: string, agent: string, runtimeRef?: string | null, runtimeOptions?: { [key in string]?: string }, runtimeProfileRevision?: string | null, role?: string | null, description?: string | null, maxTurns?: number | null, };
 
-export type TeamDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, target: AgentConfigTarget | null, mutable: boolean, path: string | null, leader: string, members: Array<TeamMemberView>, maxParallelAgents: number, diagnostics: Array<AgentDiagnosticView>, };
+export type TeamDefinitionView = { name: string, description: string, enabled: boolean, source: string, sourceLabel: string, target?: AgentConfigTarget | null, mutable: boolean, path?: string | null, leader: string, members: Array<TeamMemberView>, maxParallelAgents: number, diagnostics: Array<AgentDiagnosticView>, };
 
-export type AgentRunView = { id: string, taskName: string | null, agentName: string, task: string, parentSessionId: string, childSessionId: string | null, role: string, background: boolean, status: string, edgeStatus: string | null, startedAtMs: number, endedAtMs: number | null, outcome: string | null, finalAnswer: string | null, error: string | null, effectiveMaxSpawnDepth: number | null, teamRunId: string | null, missionRunId: string | null, teamName: string | null, teamMemberId: string | null, agentPath: string | null, };
+export type AgentRunView = { id: string, taskName?: string | null, agentName: string, task: string, parentSessionId: string, childSessionId?: string | null, role: string, background: boolean, status: string, edgeStatus?: string | null, startedAtMs: number, endedAtMs?: number | null, outcome?: string | null, finalAnswer?: string | null, error?: string | null, effectiveMaxSpawnDepth?: number | null, teamRunId?: string | null, missionRunId?: string | null, teamName?: string | null, teamMemberId?: string | null, agentPath?: string | null, };
 
-export type AgentStatusControlView = { spawningPaused: boolean, maxSpawnDepthCap: number, concurrencyCap: number | null, };
+export type AgentStatusControlView = { spawningPaused: boolean, maxSpawnDepthCap: number, concurrencyCap?: number | null, };
 
-export type TeamRunView = { id: string, parentSessionId: string, missionRunId: string | null, teamName: string, description: string | null, sourcePath: string | null, leaderAgentName: string, members: Array<TeamMemberView>, maxParallelAgents: number, status: string, startedAtMs: number, endedAtMs: number | null, finalSummary: string | null, };
+export type TeamRunView = { id: string, parentSessionId: string, missionRunId?: string | null, teamName: string, description?: string | null, sourcePath?: string | null, leaderAgentName: string, members: Array<TeamMemberView>, maxParallelAgents: number, status: string, startedAtMs: number, endedAtMs?: number | null, finalSummary?: string | null, };
 
-export type MissionRunView = { id: string, parentSessionId: string, teamRunId: string | null, teamName: string | null, goal: string, leadAgentName: string, status: string, startedAtMs: number, endedAtMs: number | null, finalSummary: string | null, };
+export type MissionRunView = { id: string, parentSessionId: string, teamRunId?: string | null, teamName?: string | null, goal: string, leadAgentName: string, status: string, startedAtMs: number, endedAtMs?: number | null, finalSummary?: string | null, };
 
 export type AgentListResult = { agents: Array<AgentDefinitionView>, shadowedAgents: Array<AgentDefinitionView>, disabledAgents: Array<AgentDefinitionView>, diagnostics: Array<AgentDiagnosticView>, };
 
@@ -294,129 +300,129 @@ export type TeamDeleteResult = { deleted: boolean, name: string, path: string, t
 
 export type TeamSetEnabledResult = { written: boolean, name: string, path: string, target: AgentConfigTarget, team: TeamDefinitionView, };
 
-export type TeamStatusResult = { team: TeamRunView | null, mission: MissionRunView | null, agents: Array<AgentRunView>, control: AgentStatusControlView, };
+export type TeamStatusResult = { team?: TeamRunView | null, mission?: MissionRunView | null, agents: Array<AgentRunView>, control: AgentStatusControlView, };
 
-export type AgentControlResult = { accepted: boolean, agent: AgentRunView | null, control: AgentStatusControlView, };
+export type AgentControlResult = { accepted: boolean, agent?: AgentRunView | null, control: AgentStatusControlView, };
 
 export type BackendConfigTarget = "project" | "profile";
 
-export type BackendListParams = { scope: GatewayRequestScope | null, };
+export type BackendListParams = { scope?: GatewayRequestScope | null, };
 
-export type BackendDoctorParams = { id: string, scope: GatewayRequestScope | null, };
+export type BackendDoctorParams = { id: string, scope?: GatewayRequestScope | null, };
 
-export type BackendManageParams = { id: string, scope: GatewayRequestScope | null, };
+export type BackendManageParams = { id: string, scope?: GatewayRequestScope | null, };
 
-export type BackendWriteParams = { id: string, target: BackendConfigTarget, enabled: boolean | null, label: string | null, description: string | null, command: string | null, args: Array<string>, env: { [key in string]?: string }, cwd: string | null, entrypoints: Array<string>, clientCapabilities: Array<string>, mcpServers: Array<string>, scope: GatewayRequestScope | null, };
+export type BackendWriteParams = { id: string, target: BackendConfigTarget, enabled?: boolean | null, label?: string | null, description?: string | null, command?: string | null, args?: Array<string>, env?: { [key in string]?: string }, cwd?: string | null, entrypoints?: Array<string>, clientCapabilities?: Array<string>, mcpServers?: Array<string>, scope?: GatewayRequestScope | null, };
 
-export type BackendDeleteParams = { id: string, target: BackendConfigTarget, scope: GatewayRequestScope | null, };
+export type BackendDeleteParams = { id: string, target: BackendConfigTarget, scope?: GatewayRequestScope | null, };
 
-export type RuntimeProfileListParams = { scope: GatewayRequestScope | null, };
+export type RuntimeProfileListParams = { scope?: GatewayRequestScope | null, };
 
-export type RuntimeProfileReadParams = { id: string, scope: GatewayRequestScope | null, };
+export type RuntimeProfileReadParams = { id: string, scope?: GatewayRequestScope | null, };
 
-export type RuntimeProfileSetEnabledParams = { id: string, target: BackendConfigTarget, enabled: boolean, scope: GatewayRequestScope | null, };
+export type RuntimeProfileSetEnabledParams = { id: string, target: BackendConfigTarget, enabled: boolean, scope?: GatewayRequestScope | null, };
 
-export type RuntimeProfileWriteParams = { id: string, target: BackendConfigTarget, runtime: string, enabled: boolean | null, label: string | null, backendRef: string | null, defaultModel: string | null, defaultMode: string | null, defaultAgent: string | null, approvalMode: string | null, sandbox: string | null, workspaceRoots: Array<string>, options: unknown | null, scope: GatewayRequestScope | null, };
+export type RuntimeProfileWriteParams = { id: string, target: BackendConfigTarget, runtime: string, enabled?: boolean | null, label?: string | null, backendRef?: string | null, defaultModel?: string | null, defaultMode?: string | null, defaultAgent?: string | null, approvalMode?: string | null, sandbox?: string | null, workspaceRoots?: Array<string>, options?: unknown | null, scope?: GatewayRequestScope | null, };
 
-export type RuntimeProfileDeleteParams = { id: string, target: BackendConfigTarget, scope: GatewayRequestScope | null, };
+export type RuntimeProfileDeleteParams = { id: string, target: BackendConfigTarget, scope?: GatewayRequestScope | null, };
 
-export type ThreadContextReadParams = { threadId: string | null, target: RunnableTargetInput | null, scope: GatewayRequestScope | null, };
+export type ThreadContextReadParams = { threadId?: string | null, target?: RunnableTargetInput | null, scope?: GatewayRequestScope | null, };
 
 export type ThreadDraftPrepareParams = { targetId: string, scope: GatewayRequestScope, };
 
-export type ThreadControlSetParams = { threadId: string | null, targetId: string, controlId: string, value: unknown, expectedCapabilityRevision: string, expectedBindingRevision: number, expectedContextRevision: string, expectedControlRevision: string, scope: GatewayRequestScope | null, };
+export type ThreadControlSetParams = { threadId?: string | null, targetId: string, controlId: string, value: unknown, expectedCapabilityRevision: string, expectedBindingRevision: number, expectedContextRevision: string, expectedControlRevision: string, scope?: GatewayRequestScope | null, };
 
 export type ThreadActionRunParams = { scope: GatewayRequestScope, threadId: string, action: ThreadActionInput, };
 
 export type ThreadInteractionRespondParams = { scope: GatewayRequestScope, threadId: string, interactionId: string, response: ThreadInteractionResponse, };
 
-export type ThreadHistoryReadParams = { scope: GatewayRequestScope, threadId: string, cursor: string | null, limit: number | null, };
+export type ThreadHistoryReadParams = { scope: GatewayRequestScope, threadId: string, cursor?: string | null, limit?: number | null, };
 
 export type ThreadHistoryDraftReadParams = { scope: GatewayRequestScope, threadId: string, messageId: string, };
 
-export type ThreadImportListParams = { scope: GatewayRequestScope, cursors: { [key in string]?: string }, };
+export type ThreadImportListParams = { scope: GatewayRequestScope, cursors?: { [key in string]?: string }, };
 
-export type ThreadImportParams = { scope: GatewayRequestScope, candidateId: string, targetId: string, archived: boolean, };
+export type ThreadImportParams = { scope: GatewayRequestScope, candidateId: string, targetId: string, archived?: boolean, };
 
-export type PluginListParams = { scope: GatewayRequestScope | null, };
+export type PluginListParams = { scope?: GatewayRequestScope | null, };
 
-export type PluginReadParams = { selector: string, scope: GatewayRequestScope | null, };
+export type PluginReadParams = { selector: string, scope?: GatewayRequestScope | null, };
 
-export type PluginDoctorParams = { selector: string | null, scope: GatewayRequestScope | null, };
+export type PluginDoctorParams = { selector?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginInspectParams = { source: string, sourceKind: string | null, gitRef: string | null, npmVersion: string | null, npmRegistry: string | null, scope: GatewayRequestScope | null, };
+export type PluginInspectParams = { source: string, sourceKind?: string | null, gitRef?: string | null, npmVersion?: string | null, npmRegistry?: string | null, scope?: GatewayRequestScope | null, };
 
-export type SkillListParams = { scope: GatewayRequestScope | null, };
+export type SkillListParams = { scope?: GatewayRequestScope | null, };
 
-export type SkillReadParams = { name: string, path: string | null, scope: GatewayRequestScope | null, };
+export type SkillReadParams = { name: string, path?: string | null, scope?: GatewayRequestScope | null, };
 
-export type SkillInstallParams = { source: string, name: string | null, all: boolean, target: string | null, force: boolean, scope: GatewayRequestScope | null, };
+export type SkillInstallParams = { source: string, name?: string | null, all?: boolean, target?: string | null, force?: boolean, scope?: GatewayRequestScope | null, };
 
-export type SkillUninstallParams = { name: string, path: string | null, target: string | null, scope: GatewayRequestScope | null, };
+export type SkillUninstallParams = { name: string, path?: string | null, target?: string | null, scope?: GatewayRequestScope | null, };
 
-export type SkillSetEnabledParams = { name: string, enabled: boolean, target: string | null, scope: GatewayRequestScope | null, };
+export type SkillSetEnabledParams = { name: string, enabled: boolean, target?: string | null, scope?: GatewayRequestScope | null, };
 
-export type SkillWriteParams = { name: string, path: string | null, target: string | null, rawMarkdown: string, scope: GatewayRequestScope | null, };
+export type SkillWriteParams = { name: string, path?: string | null, target?: string | null, rawMarkdown: string, scope?: GatewayRequestScope | null, };
 
 export type SkillWriteResult = { written: boolean, name: string, path: string, target: string, };
 
-export type PluginInstallParams = { source: string, sourceKind: string | null, gitRef: string | null, npmVersion: string | null, npmRegistry: string | null, scopeName: string | null, force: boolean, scope: GatewayRequestScope | null, };
+export type PluginInstallParams = { source: string, sourceKind?: string | null, gitRef?: string | null, npmVersion?: string | null, npmRegistry?: string | null, scopeName?: string | null, force?: boolean, scope?: GatewayRequestScope | null, };
 
-export type PluginUninstallParams = { selector: string, scopeName: string | null, scope: GatewayRequestScope | null, };
+export type PluginUninstallParams = { selector: string, scopeName?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginSetEnabledParams = { selector: string, enabled: boolean | null, scopeName: string | null, scope: GatewayRequestScope | null, };
+export type PluginSetEnabledParams = { selector: string, enabled?: boolean | null, scopeName?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginAuthorityWriteParams = { enabled: boolean, binary: string | null, scope: GatewayRequestScope | null, };
+export type PluginAuthorityWriteParams = { enabled: boolean, binary?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginAuthorityRefreshParams = { scope: GatewayRequestScope | null, };
+export type PluginAuthorityRefreshParams = { scope?: GatewayRequestScope | null, };
 
-export type PluginAuthoritySetTrustParams = { selector: string, trusted: boolean, scope: GatewayRequestScope | null, };
+export type PluginAuthoritySetTrustParams = { selector: string, trusted: boolean, scope?: GatewayRequestScope | null, };
 
-export type PluginCatalogListParams = { authority: string | null, scopeName: string | null, scope: GatewayRequestScope | null, };
+export type PluginCatalogListParams = { authority?: string | null, scopeName?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginCatalogAddParams = { authority: string | null, name: string, source: string, kind: string, gitRef: string | null, sparsePaths: Array<string>, npmVersion: string | null, npmRegistry: string | null, scopeName: string | null, scope: GatewayRequestScope | null, };
+export type PluginCatalogAddParams = { authority?: string | null, name: string, source: string, kind?: string, gitRef?: string | null, sparsePaths?: Array<string>, npmVersion?: string | null, npmRegistry?: string | null, scopeName?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginCatalogRemoveParams = { authority: string | null, name: string, scopeName: string | null, scope: GatewayRequestScope | null, };
+export type PluginCatalogRemoveParams = { authority?: string | null, name: string, scopeName?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginCatalogUpgradeParams = { name: string, authority: string | null, source: string | null, gitRef: string | null, sparsePaths: Array<string>, scope: GatewayRequestScope | null, };
+export type PluginCatalogUpgradeParams = { name: string, authority?: string | null, source?: string | null, gitRef?: string | null, sparsePaths?: Array<string>, scope?: GatewayRequestScope | null, };
 
-export type PluginConnectStartParams = { selector: string, componentId: string, kind: string | null, scope: GatewayRequestScope | null, };
+export type PluginConnectStartParams = { selector: string, componentId: string, kind?: string | null, scope?: GatewayRequestScope | null, };
 
-export type PluginConnectStatusParams = { sessionId: string, scope: GatewayRequestScope | null, };
+export type PluginConnectStatusParams = { sessionId: string, scope?: GatewayRequestScope | null, };
 
-export type ToolListParams = { scope: GatewayRequestScope | null, };
+export type ToolListParams = { scope?: GatewayRequestScope | null, };
 
-export type ToolReadParams = { name: string, scope: GatewayRequestScope | null, };
+export type ToolReadParams = { name: string, scope?: GatewayRequestScope | null, };
 
-export type ToolSetEnabledParams = { name: string, mode: string, enabled: boolean, local: boolean, scope: GatewayRequestScope | null, };
+export type ToolSetEnabledParams = { name: string, mode: string, enabled: boolean, local?: boolean, scope?: GatewayRequestScope | null, };
 
-export type ToolCreateParams = { name: string, description: string | null, tools: Array<string>, includes: Array<string>, force: boolean, local: boolean, scope: GatewayRequestScope | null, };
+export type ToolCreateParams = { name: string, description?: string | null, tools?: Array<string>, includes?: Array<string>, force?: boolean, local?: boolean, scope?: GatewayRequestScope | null, };
 
-export type ToolRemoveParams = { name: string, local: boolean, scope: GatewayRequestScope | null, };
+export type ToolRemoveParams = { name: string, local?: boolean, scope?: GatewayRequestScope | null, };
 
-export type McpListParams = { scope: GatewayRequestScope | null, };
+export type McpListParams = { scope?: GatewayRequestScope | null, };
 
-export type McpReadParams = { name: string, scope: GatewayRequestScope | null, };
+export type McpReadParams = { name: string, scope?: GatewayRequestScope | null, };
 
-export type McpUpsertParams = { name: string, transport: string, enabled: boolean | null, required: boolean | null, command: string | null, args: Array<string>, env: { [key in string]?: string }, cwd: string | null, url: string | null, headers: { [key in string]?: string }, bearerTokenEnvVar: string | null, scopes: Array<string>, oauthResource: string | null, oauthClientId: string | null, enabledTools: Array<string> | null, disabledTools: Array<string>, supportsParallelToolCalls: boolean | null, startupTimeoutSecs: number | null, toolTimeoutSecs: number | null, scope: GatewayRequestScope | null, };
+export type McpUpsertParams = { name: string, transport: string, enabled?: boolean | null, required?: boolean | null, command?: string | null, args?: Array<string>, env?: { [key in string]?: string }, cwd?: string | null, url?: string | null, headers?: { [key in string]?: string }, bearerTokenEnvVar?: string | null, scopes?: Array<string>, oauthResource?: string | null, oauthClientId?: string | null, enabledTools?: Array<string> | null, disabledTools?: Array<string>, supportsParallelToolCalls?: boolean | null, startupTimeoutSecs?: number | null, toolTimeoutSecs?: number | null, scope?: GatewayRequestScope | null, };
 
-export type McpNameParams = { name: string, scope: GatewayRequestScope | null, };
+export type McpNameParams = { name: string, scope?: GatewayRequestScope | null, };
 
-export type McpSetEnabledParams = { name: string, enabled: boolean, scope: GatewayRequestScope | null, };
+export type McpSetEnabledParams = { name: string, enabled: boolean, scope?: GatewayRequestScope | null, };
 
-export type McpSetToolPolicyParams = { name: string, enabledTools: Array<string> | null, disabledTools: Array<string>, scope: GatewayRequestScope | null, };
+export type McpSetToolPolicyParams = { name: string, enabledTools?: Array<string> | null, disabledTools?: Array<string>, scope?: GatewayRequestScope | null, };
 
-export type McpOAuthStartParams = { name: string, scope: GatewayRequestScope | null, };
+export type McpOAuthStartParams = { name: string, scope?: GatewayRequestScope | null, };
 
-export type McpOAuthStatusParams = { sessionId: string, scope: GatewayRequestScope | null, };
+export type McpOAuthStatusParams = { sessionId: string, scope?: GatewayRequestScope | null, };
 
-export type BackendConfigView = { id: string, kind: string, enabled: boolean, label: string, description: string | null, command: string | null, args: Array<string>, cwd: string, entrypoints: Array<string>, clientCapabilities: Array<string>, mcpServers: Array<string>, envKeys: Array<string>, sourceTargets: Array<BackendConfigTarget>, diagnostics: Array<BackendDiagnosticView>, };
+export type BackendConfigView = { id: string, kind: string, enabled: boolean, label: string, description?: string | null, command?: string | null, args?: Array<string>, cwd: string, entrypoints?: Array<string>, clientCapabilities?: Array<string>, mcpServers?: Array<string>, envKeys?: Array<string>, sourceTargets?: Array<BackendConfigTarget>, diagnostics: Array<BackendDiagnosticView>, };
 
 export type BackendListResult = { backends: Array<BackendConfigView>, };
 
 export type BackendDiagnosticView = { kind: string, message: string, };
 
-export type BackendDoctorCheck = { name: string, ok: boolean, message: string, path: string | null, };
+export type BackendDoctorCheck = { name: string, ok: boolean, message: string, path?: string | null, };
 
 export type BackendDoctorResult = { id: string, kind: string, ok: boolean, checks: Array<BackendDoctorCheck>, };
 
@@ -426,21 +432,21 @@ export type BackendDeleteResult = { deleted: boolean, changed: boolean, id: stri
 
 export type BackendManageResult = { id: string, operation: string, changed: boolean, status: string, path: string, message: string, };
 
-export type RuntimeProfileView = { id: string, runtime: string, enabled: boolean, label: string, generated: boolean, configured: boolean, backendRef: string | null, provenance: string, profileRevision: string, capabilityRevision: string, stability: RuntimeStabilityView | null, capabilities: Array<RuntimeCapabilityView>, defaultModel: string | null, defaultMode: string | null, defaultAgent: string | null, approvalMode: string | null, sandbox: string | null, workspaceRoots: Array<string>, optionKeys: Array<string>, sourceTargets: Array<BackendConfigTarget>, health: RuntimeHealthView, readinessStages: Array<RuntimeReadinessStageView>, diagnostics: Array<BackendDiagnosticView>, };
+export type RuntimeProfileView = { id: string, runtime: string, enabled: boolean, label: string, generated: boolean, configured?: boolean, backendRef?: string | null, provenance?: string, profileRevision?: string, capabilityRevision?: string, stability?: RuntimeStabilityView | null, capabilities?: Array<RuntimeCapabilityView>, defaultModel?: string | null, defaultMode?: string | null, defaultAgent?: string | null, approvalMode?: string | null, sandbox?: string | null, workspaceRoots?: Array<string>, optionKeys?: Array<string>, sourceTargets?: Array<BackendConfigTarget>, health: RuntimeHealthView, readinessStages?: Array<RuntimeReadinessStageView>, diagnostics?: Array<BackendDiagnosticView>, };
 
-export type RuntimeHealthView = { status: string, summary: string, commandPath: string | null, checkedAtMs: number | null, };
+export type RuntimeHealthView = { status: string, summary: string, commandPath?: string | null, checkedAtMs?: number | null, };
 
 export type RuntimeReadinessStatusView = "unchecked" | "ready" | "missing" | "needsAuth" | "unsupported" | "error";
 
-export type RuntimeReadinessStageView = { id: string, status: RuntimeReadinessStatusView, summary: string, observedAtMs: number | null, };
+export type RuntimeReadinessStageView = { id: string, status: RuntimeReadinessStatusView, summary: string, observedAtMs?: number | null, };
 
 export type RuntimeStabilityView = "stable" | "experimental" | "unavailable";
 
-export type RuntimeCapabilityView = { id: string, enabled: boolean, stability: RuntimeStabilityView, unavailableReason: string | null, };
+export type RuntimeCapabilityView = { id: string, enabled: boolean, stability: RuntimeStabilityView, unavailableReason?: string | null, };
 
 export type RuntimeProfileListResult = { profiles: Array<RuntimeProfileView>, };
 
-export type RuntimeProfileReadResult = { profile: RuntimeProfileView, options: unknown | null, };
+export type RuntimeProfileReadResult = { profile: RuntimeProfileView, options?: unknown | null, };
 
 export type RuntimeProfileWriteResult = { written: boolean, changed: boolean, path: string, target: BackendConfigTarget, profile: RuntimeProfileView, };
 
@@ -456,25 +462,25 @@ export type ThreadControlEffectiveSourceView = "runtimeDefault" | "profileDefaul
 
 export type ThreadControlApplyScopeView = "turnDraft" | "session";
 
-export type ThreadControlChoiceView = { value: unknown, label: string, description: string | null, };
+export type ThreadControlChoiceView = { value: unknown, label: string, description?: string | null, };
 
 export type ThreadControlDependencyView = { controlId: string, value: unknown, };
 
-export type ThreadControlDescriptorView = { id: string, label: string, surfaceRole: ThreadControlSurfaceRoleView, mutability: ThreadControlMutabilityView, enabled: boolean, required: boolean, unavailableReason: string | null, effectiveValue: unknown | null, effectiveSource: ThreadControlEffectiveSourceView, isDefault: boolean, choices: Array<ThreadControlChoiceView>, dependsOn: ThreadControlDependencyView | null, applyScope: ThreadControlApplyScopeView, stability: RuntimeStabilityView, channelSafe: boolean, capabilityRevision: string, };
+export type ThreadControlDescriptorView = { id: string, label: string, surfaceRole: ThreadControlSurfaceRoleView, mutability: ThreadControlMutabilityView, enabled: boolean, required: boolean, unavailableReason?: string | null, effectiveValue?: unknown | null, effectiveSource: ThreadControlEffectiveSourceView, isDefault: boolean, choices?: Array<ThreadControlChoiceView>, dependsOn?: ThreadControlDependencyView | null, applyScope: ThreadControlApplyScopeView, stability: RuntimeStabilityView, channelSafe?: boolean, capabilityRevision: string, };
 
-export type RuntimeBindingView = { threadId: string, agentRef: string | null, agentFingerprint: string, runtimeRef: string, backendKind: string, nativeKind: string | null, sessionHandle: string | null, cwd: string, profileFingerprint: string, ownership: RuntimeBindingOwnershipView, bindingRevision: number, };
+export type RuntimeBindingView = { threadId: string, agentRef?: string | null, agentFingerprint: string, runtimeRef: string, backendKind: string, nativeKind?: string | null, sessionHandle?: string | null, cwd: string, profileFingerprint: string, ownership: RuntimeBindingOwnershipView, bindingRevision: number, };
 
-export type RunnableTargetView = { targetId: string, agentRef: string | null, runtimeProfileRef: string, agentLabel: string, profileLabel: string, label: string, ready: boolean, unavailableReason: string | null, };
+export type RunnableTargetView = { targetId: string, agentRef?: string | null, runtimeProfileRef: string, agentLabel: string, profileLabel: string, label: string, ready: boolean, unavailableReason?: string | null, };
 
-export type ThreadInputCapabilityView = { kind: string, enabled: boolean, unavailableReason: string | null, };
+export type ThreadInputCapabilityView = { kind: string, enabled: boolean, unavailableReason?: string | null, };
 
-export type ThreadActionDescriptorView = { id: ThreadActionKind, label: string, enabled: boolean, stability: RuntimeStabilityView, channelSafe: boolean, unavailableReason: string | null, };
+export type ThreadActionDescriptorView = { id: ThreadActionKind, label: string, enabled: boolean, stability: RuntimeStabilityView, channelSafe?: boolean, unavailableReason?: string | null, };
 
 export type ThreadActionKind = "interrupt" | "steer" | "compact" | "fork" | "forkBefore" | "revertConversation" | "unrevertConversation";
 
 export type ThreadEditableInputPart = { "type": "text", text: string, } | { "type": "image", input: GatewayImageInput, };
 
-export type ThreadEditableDraft = { parts: Array<ThreadEditableInputPart>, };
+export type ThreadEditableDraft = { parts?: Array<ThreadEditableInputPart>, };
 
 export type ThreadEditableDraftFidelity = "exact" | "bestEffort";
 
@@ -486,13 +492,13 @@ export type ThreadInteractionResponse = { "kind": "permission", decision: Permis
 
 export type ThreadInteractionRespondResult = { accepted: boolean, interactionId: string, outcome: GatewayActionOutcome, };
 
-export type ThreadHistoryReadResult = { threadId: string, history: ThreadHistoryView, entries: Array<TranscriptEntry>, nextCursor: string | null, };
+export type ThreadHistoryReadResult = { threadId: string, history: ThreadHistoryView, entries: Array<TranscriptEntry>, nextCursor?: string | null, };
 
-export type ThreadHistoryDraftReadResult = { threadId: string, messageId: string, messageSeq: number | null, parts: Array<ThreadEditableInputPart>, fidelity: ThreadEditableDraftFidelity, warning: string | null, unavailableReason: string | null, };
+export type ThreadHistoryDraftReadResult = { threadId: string, messageId: string, messageSeq?: number | null, parts?: Array<ThreadEditableInputPart>, fidelity: ThreadEditableDraftFidelity, warning?: string | null, unavailableReason?: string | null, };
 
-export type ThreadImportCandidateView = { candidateId: string, cwd: string, title: string | null, updatedAt: string | null, };
+export type ThreadImportCandidateView = { candidateId: string, cwd: string, title?: string | null, updatedAt?: string | null, };
 
-export type ThreadImportProfileView = { runtimeProfileRef: string, profileLabel: string, targets: Array<RunnableTargetView>, status: string, sessions: Array<ThreadImportCandidateView>, nextCursor: string | null, alreadyImportedCount: number, error: AgentErrorView | null, };
+export type ThreadImportProfileView = { runtimeProfileRef: string, profileLabel: string, targets?: Array<RunnableTargetView>, status: string, sessions?: Array<ThreadImportCandidateView>, nextCursor?: string | null, alreadyImportedCount?: number, error?: AgentErrorView | null, };
 
 export type ThreadImportListResult = { profiles: Array<ThreadImportProfileView>, };
 
@@ -500,23 +506,23 @@ export type ThreadImportResult = { snapshot: ThreadSnapshot, };
 
 export type SessionLifecycleActionKind = "fork" | "delete";
 
-export type SessionLifecycleActionView = { id: SessionLifecycleActionKind, enabled: boolean, unavailableReason: string | null, };
+export type SessionLifecycleActionView = { id: SessionLifecycleActionKind, enabled: boolean, unavailableReason?: string | null, };
 
-export type SessionLifecycleView = { targetLabel: string | null, actions: Array<SessionLifecycleActionView>, };
+export type SessionLifecycleView = { targetLabel?: string | null, actions?: Array<SessionLifecycleActionView>, };
 
 export type ThreadHistoryEditingKind = "workspaceUndo" | "conversationEdit";
 
 export type ThreadHistoryRecoveryActionKind = "redoWorkspace" | "restoreHistory";
 
-export type ThreadHistoryEditingView = { kind: ThreadHistoryEditingKind, boundaryMessageId: string | null, hiddenEntryCount: number, replacementDraft: ThreadEditableDraft | null, availableActions: Array<ThreadHistoryRecoveryActionKind>, };
+export type ThreadHistoryEditingView = { kind: ThreadHistoryEditingKind, boundaryMessageId?: string | null, hiddenEntryCount?: number, replacementDraft?: ThreadEditableDraft | null, availableActions?: Array<ThreadHistoryRecoveryActionKind>, };
 
-export type ThreadSendabilityView = { allowed: boolean, reason: string | null, recoveryAction: string | null, };
+export type ThreadSendabilityView = { allowed: boolean, reason?: string | null, recoveryAction?: string | null, };
 
-export type ThreadContextReadResult = { selectedTargetId: string | null, suggestedTargetId: string | null, runtimeProfileRef: string, selectionState: string, profiles: Array<RuntimeProfileView>, binding: RuntimeBindingView | null, controls: Array<ThreadControlDescriptorView>, stability: RuntimeStabilityView | null, capabilities: Array<RuntimeCapabilityView>, compatibleTargets: Array<RunnableTargetView>, inputCapabilities: Array<ThreadInputCapabilityView>, actions: Array<ThreadActionDescriptorView>, sendability: ThreadSendabilityView, history: ThreadHistoryView, pendingInteractions: Array<PendingActionView>, contextRevision: string, controlRevision: string, };
+export type ThreadContextReadResult = { selectedTargetId?: string | null, suggestedTargetId?: string | null, runtimeProfileRef: string, selectionState: string, profiles?: Array<RuntimeProfileView>, binding?: RuntimeBindingView | null, controls?: Array<ThreadControlDescriptorView>, stability?: RuntimeStabilityView | null, capabilities?: Array<RuntimeCapabilityView>, compatibleTargets?: Array<RunnableTargetView>, inputCapabilities?: Array<ThreadInputCapabilityView>, actions?: Array<ThreadActionDescriptorView>, sendability: ThreadSendabilityView, history: ThreadHistoryView, pendingInteractions?: Array<PendingActionView>, contextRevision: string, controlRevision: string, };
 
-export type ThreadDraftOpenResult = { snapshot: ThreadSnapshot, context: ThreadContextReadResult, problem: RuntimeErrorView | null, };
+export type ThreadDraftOpenResult = { snapshot: ThreadSnapshot, context: ThreadContextReadResult, problem?: RuntimeErrorView | null, };
 
-export type ThreadDraftPrepareResult = { context: ThreadContextReadResult, problem: RuntimeErrorView | null, };
+export type ThreadDraftPrepareResult = { context: ThreadContextReadResult, problem?: RuntimeErrorView | null, };
 
 export type ThreadControlReceiptStatusView = "rejected" | "stored" | "applied" | "observed";
 
@@ -524,39 +530,39 @@ export type ThreadControlSetResult = { changed: boolean, status: ThreadControlRe
 
 export type RuntimeRetryClassView = "never" | "userAction" | "safeRetry" | "reconnect" | "unknownDelivery";
 
-export type RuntimeErrorView = { code: string, stage: string, retryClass: RuntimeRetryClassView, message: string, diagnosticRef: string | null, };
+export type RuntimeErrorView = { code: string, stage: string, retryClass: RuntimeRetryClassView, message: string, diagnosticRef?: string | null, };
 
-export type ChannelListParams = { scope: GatewayRequestScope | null, };
+export type ChannelListParams = { scope?: GatewayRequestScope | null, };
 
-export type ChannelIdParams = { id: string, scope: GatewayRequestScope | null, };
+export type ChannelIdParams = { id: string, scope?: GatewayRequestScope | null, };
 
-export type ChannelEnableParams = { id: string, enabled: boolean, scope: GatewayRequestScope | null, };
+export type ChannelEnableParams = { id: string, enabled: boolean, scope?: GatewayRequestScope | null, };
 
-export type ChannelUpdateParams = { id: string, scope: GatewayRequestScope | null, label: string | null, enabled: boolean | null, cwd: string | null, runtimeRef: string | null, model: string | null, permissionMode: string | null, requireMention: boolean | null, allowUsers: Array<string> | null, allowGroups: Array<string> | null, credentialEnv: string | null, accountEnv: string | null, baseUrlEnv: string | null, appIdEnv: string | null, };
+export type ChannelUpdateParams = { id: string, scope?: GatewayRequestScope | null, label?: string | null, enabled?: boolean | null, cwd?: string | null, runtimeRef?: string | null, model?: string | null, permissionMode?: string | null, requireMention?: boolean | null, allowUsers?: Array<string> | null, allowGroups?: Array<string> | null, credentialEnv?: string | null, accountEnv?: string | null, baseUrlEnv?: string | null, appIdEnv?: string | null, };
 
-export type ChannelDoctorParams = { id: string | null, live: boolean | null, scope: GatewayRequestScope | null, };
+export type ChannelDoctorParams = { id?: string | null, live?: boolean | null, scope?: GatewayRequestScope | null, };
 
-export type ChannelWechatQrStartParams = { id: string | null, label: string | null, ilinkBaseUrl: string | null, scope: GatewayRequestScope | null, };
+export type ChannelWechatQrStartParams = { id?: string | null, label?: string | null, ilinkBaseUrl?: string | null, scope?: GatewayRequestScope | null, };
 
-export type ChannelWechatQrStartResult = { sessionId: string, qrUrl: string, qrImage: string | null, qrSvg: string | null, status: string, message: string, intervalMs: number, expiresAtMs: number, };
+export type ChannelWechatQrStartResult = { sessionId: string, qrUrl: string, qrImage?: string | null, qrSvg?: string | null, status: string, message: string, intervalMs: number, expiresAtMs: number, };
 
-export type ChannelWechatQrPollParams = { sessionId: string, enable: boolean | null, scope: GatewayRequestScope | null, };
+export type ChannelWechatQrPollParams = { sessionId: string, enable?: boolean | null, scope?: GatewayRequestScope | null, };
 
-export type ChannelWechatQrPollResult = { done: boolean, status: string, message: string, channel: ChannelConfigView | null, expiresAtMs: number | null, };
+export type ChannelWechatQrPollResult = { done: boolean, status: string, message: string, channel?: ChannelConfigView | null, expiresAtMs?: number | null, };
 
-export type ChannelCredentialView = { env: string | null, status: string, };
+export type ChannelCredentialView = { env?: string | null, status: string, };
 
-export type ChannelAllowlistView = { users: Array<string>, groups: Array<string>, status: string, };
+export type ChannelAllowlistView = { users?: Array<string>, groups?: Array<string>, status: string, };
 
-export type ChannelConfigView = { id: string, channel: string, domain: string | null, enabled: boolean, label: string, transport: string, cwd: string | null, runtimeRef: string | null, model: string | null, permissionMode: string | null, requireMention: boolean, credential: ChannelCredentialView, account: ChannelCredentialView | null, baseUrl: ChannelCredentialView | null, appId: ChannelCredentialView | null, allowlist: ChannelAllowlistView, runtimeStatus: string, runner: ChannelRunnerView, };
+export type ChannelConfigView = { id: string, channel: string, domain?: string | null, enabled: boolean, label: string, transport: string, cwd?: string | null, runtimeRef?: string | null, model?: string | null, permissionMode?: string | null, requireMention: boolean, credential: ChannelCredentialView, account?: ChannelCredentialView | null, baseUrl?: ChannelCredentialView | null, appId?: ChannelCredentialView | null, allowlist: ChannelAllowlistView, runtimeStatus: string, runner: ChannelRunnerView, };
 
-export type ChannelRunnerView = { state: string, reason: string | null, lastPollAtMs: number | null, lastHealthyPollAtMs: number | null, lastInboundAtMs: number | null, lastOutboundAtMs: number | null, lastIlinkErrcode: number | null, lastError: string | null, };
+export type ChannelRunnerView = { state: string, reason?: string | null, lastPollAtMs?: number | null, lastHealthyPollAtMs?: number | null, lastInboundAtMs?: number | null, lastOutboundAtMs?: number | null, lastIlinkErrcode?: number | null, lastError?: string | null, };
 
 export type ChannelListResult = { channels: Array<ChannelConfigView>, };
 
 export type ChannelEnableResult = { channel: ChannelConfigView, };
 
-export type ChannelSourceBindingView = { sourceKey: string, connectionId: string, platform: string, domain: string | null, chatType: string | null, chatLabel: string | null, userLabel: string | null, visibleName: string | null, threadId: string, threadTitle: string | null, cwd: string, activityStatus: string, queuedTurns: number, updatedAtMs: number, };
+export type ChannelSourceBindingView = { sourceKey: string, connectionId: string, platform: string, domain?: string | null, chatType?: string | null, chatLabel?: string | null, userLabel?: string | null, visibleName?: string | null, threadId: string, threadTitle?: string | null, cwd: string, activityStatus: string, queuedTurns: number, updatedAtMs: number, };
 
 export type ChannelSourceListResult = { sources: Array<ChannelSourceBindingView>, };
 
@@ -574,37 +580,37 @@ export type RealtimeTransport = "webrtc" | "websocket";
 
 export type RealtimeOutputModality = "text" | "audio";
 
-export type VoiceAudioInput = { data: string, format: VoiceAudioFormat, mimeType: string | null, };
+export type VoiceAudioInput = { data: string, format: VoiceAudioFormat, mimeType?: string | null, };
 
 export type VoiceAudioOutput = { data: string, format: VoiceAudioFormat, mimeType: string, };
 
-export type VoiceAsrTranscribeParams = { scope: GatewayRequestScope | null, audio: VoiceAudioInput, provider: string | null, model: string | null, language: string | null, };
+export type VoiceAsrTranscribeParams = { scope?: GatewayRequestScope | null, audio: VoiceAudioInput, provider?: string | null, model?: string | null, language?: string | null, };
 
-export type VoiceAsrTranscribeResult = { transcript: string, provider: string, model: string, language: string | null, metadata: unknown | null, };
+export type VoiceAsrTranscribeResult = { transcript: string, provider: string, model: string, language?: string | null, metadata?: unknown | null, };
 
-export type VoiceTtsSynthesizeParams = { scope: GatewayRequestScope | null, text: string, provider: string | null, model: string | null, voice: string | null, format: VoiceAudioFormat | null, };
+export type VoiceTtsSynthesizeParams = { scope?: GatewayRequestScope | null, text: string, provider?: string | null, model?: string | null, voice?: string | null, format?: VoiceAudioFormat | null, };
 
-export type VoiceTtsSynthesizeResult = { audio: VoiceAudioOutput, provider: string, model: string, voice: string, metadata: unknown | null, };
+export type VoiceTtsSynthesizeResult = { audio: VoiceAudioOutput, provider: string, model: string, voice: string, metadata?: unknown | null, };
 
-export type VoicePolicyReadParams = { scope: GatewayRequestScope | null, sourceKey: SourceKey | null, threadId: string | null, };
+export type VoicePolicyReadParams = { scope?: GatewayRequestScope | null, sourceKey?: SourceKey | null, threadId?: string | null, };
 
-export type VoicePolicyUpdateParams = { scope: GatewayRequestScope | null, sourceKey: SourceKey | null, threadId: string | null, mode: VoicePolicyMode, };
+export type VoicePolicyUpdateParams = { scope?: GatewayRequestScope | null, sourceKey?: SourceKey | null, threadId?: string | null, mode: VoicePolicyMode, };
 
 export type VoicePolicyResult = { mode: VoicePolicyMode, target: string, };
 
-export type ThreadRealtimeStartParams = { threadId: string, scope: GatewayRequestScope | null, provider: string | null, model: string | null, transport: RealtimeTransport | null, outputModality: RealtimeOutputModality | null, voice: string | null, sdpOffer: string | null, };
+export type ThreadRealtimeStartParams = { threadId: string, scope?: GatewayRequestScope | null, provider?: string | null, model?: string | null, transport?: RealtimeTransport | null, outputModality?: RealtimeOutputModality | null, voice?: string | null, sdpOffer?: string | null, };
 
 export type ThreadRealtimeSessionParams = { sessionId: string, };
 
-export type ThreadRealtimeAppendAudioParams = { sessionId: string, audio: VoiceAudioInput, sampleRate: number | null, channels: number | null, };
+export type ThreadRealtimeAppendAudioParams = { sessionId: string, audio: VoiceAudioInput, sampleRate?: number | null, channels?: number | null, };
 
-export type ThreadRealtimeAppendTextParams = { sessionId: string, text: string, role: string | null, };
+export type ThreadRealtimeAppendTextParams = { sessionId: string, text: string, role?: string | null, };
 
 export type ThreadRealtimeAppendSpeechParams = { sessionId: string, text: string, };
 
 export type ThreadRealtimeStartResult = { accepted: boolean, sessionId: string, threadId: string, };
 
-export type ThreadRealtimeMutationResult = { accepted: boolean, message: string | null, };
+export type ThreadRealtimeMutationResult = { accepted: boolean, message?: string | null, };
 
 export type ThreadRealtimeVoiceView = { id: string, label: string, };
 
@@ -614,7 +620,7 @@ export type ThreadRealtimeStartedNotification = { sessionId: string, threadId: s
 
 export type ThreadRealtimeSdpNotification = { sessionId: string, sdp: string, };
 
-export type ThreadRealtimeItemAddedNotification = { sessionId: string, item: unknown | null, };
+export type ThreadRealtimeItemAddedNotification = { sessionId: string, item?: unknown | null, };
 
 export type ThreadRealtimeTranscriptNotification = { sessionId: string, role: string, text: string, };
 
@@ -624,13 +630,13 @@ export type ThreadRealtimeErrorNotification = { sessionId: string, message: stri
 
 export type ThreadRealtimeClosedNotification = { sessionId: string, reason: string, };
 
-export type ShellStartParams = { scope: GatewayRequestScope, threadId: string | null, command: string, };
+export type ShellStartParams = { scope: GatewayRequestScope, threadId?: string | null, command: string, };
 
-export type ShellStartResult = { accepted: boolean, threadId: string | null, message: string | null, };
+export type ShellStartResult = { accepted: boolean, threadId?: string | null, message?: string | null, };
 
-export type TerminalStartParams = { scope: GatewayRequestScope, cwd: string | null, cols: number, rows: number, };
+export type TerminalStartParams = { scope: GatewayRequestScope, cwd?: string | null, cols: number, rows: number, };
 
-export type TerminalStartResult = { terminalId: string, cwd: string, pid: number | null, };
+export type TerminalStartResult = { terminalId: string, cwd: string, pid?: number | null, };
 
 export type TerminalWriteParams = { terminalId: string, dataBase64: string, };
 
@@ -642,11 +648,11 @@ export type TerminalMutationResult = { accepted: boolean, };
 
 export type TerminalOutputPayload = { terminalId: string, stream: string, dataBase64: string, };
 
-export type TerminalExitedPayload = { terminalId: string, exitCode: number | null, reason: string, };
+export type TerminalExitedPayload = { terminalId: string, exitCode?: number | null, reason: string, };
 
-export type RunnableTargetInput = { agentRef: string | null, runtimeProfileRef: string, };
+export type RunnableTargetInput = { agentRef?: string | null, runtimeProfileRef: string, };
 
-export type TurnStartParams = { scope: GatewayRequestScope, clientTurnId: string, threadId: string | null, target: RunnableTargetInput | null, input: Array<GatewayInputPart>, mentions: Array<GatewayMention>, turnOverrides: Record<string, unknown>, expectedContextRevision: string | null, expectedControlRevision: string | null, };
+export type TurnStartParams = { scope: GatewayRequestScope, clientTurnId: string, threadId?: string | null, target?: RunnableTargetInput | null, input?: Array<GatewayInputPart>, mentions?: Array<GatewayMention>, turnOverrides?: Record<string, unknown>, expectedContextRevision?: string | null, expectedControlRevision?: string | null, };
 
 export type AutomationScheduleInput = { "kind": "interval", everyMinutes: number, } | { "kind": "delay", afterMinutes: number, } | { "kind": "once", at: string, } | { "kind": "daily", time: string, } | { "kind": "weekly", weekdays: Array<number>, time: string, };
 
@@ -658,21 +664,21 @@ export type AutomationExecutionPolicy = "autoSandbox" | "askFirst";
 
 export type AutomationExecutionInput = { policy: AutomationExecutionPolicy, };
 
-export type AutomationListParams = { cwd: string | null, };
+export type AutomationListParams = { cwd?: string | null, };
 
-export type AutomationDraftParams = { scope: GatewayRequestScope | null, request: string, currentThreadId: string | null, };
+export type AutomationDraftParams = { scope?: GatewayRequestScope | null, request: string, currentThreadId?: string | null, };
 
-export type AutomationDraftView = { target: AutomationTargetInput, title: string, prompt: string, schedule: AutomationScheduleInput, execution: AutomationExecutionInput, model: string | null, reasoningEffort: string | null, };
+export type AutomationDraftView = { target: AutomationTargetInput, title: string, prompt: string, schedule: AutomationScheduleInput, execution?: AutomationExecutionInput, model?: string | null, reasoningEffort?: string | null, };
 
-export type AutomationWriteParams = { automationId: string | null, scope: GatewayRequestScope | null, target: AutomationTargetInput, title: string, prompt: string, schedule: AutomationScheduleInput, execution: AutomationExecutionInput | null, model: string | null, reasoningEffort: string | null, };
+export type AutomationWriteParams = { automationId?: string | null, scope?: GatewayRequestScope | null, target: AutomationTargetInput, title: string, prompt: string, schedule: AutomationScheduleInput, execution?: AutomationExecutionInput | null, model?: string | null, reasoningEffort?: string | null, };
 
 export type AutomationIdParams = { automationId: string, };
 
-export type AutomationRunParams = { automationId: string, trigger: string | null, };
+export type AutomationRunParams = { automationId: string, trigger?: string | null, };
 
-export type AutomationTaskView = { id: string, cwd: string, kind: AutomationTaskKind, targetThreadId: string | null, title: string, prompt: string, schedule: AutomationScheduleInput, enabled: boolean, execution: AutomationExecutionInput, model: string | null, reasoningEffort: string | null, sourceKey: string | null, createdAtMs: number, updatedAtMs: number, lastRunAtMs: number | null, nextRunAtMs: number | null, lastStatus: string | null, lastError: string | null, runs: Array<AutomationRunView>, };
+export type AutomationTaskView = { id: string, cwd: string, kind: AutomationTaskKind, targetThreadId?: string | null, title: string, prompt: string, schedule: AutomationScheduleInput, enabled: boolean, execution: AutomationExecutionInput, model?: string | null, reasoningEffort?: string | null, sourceKey?: string | null, createdAtMs: number, updatedAtMs: number, lastRunAtMs?: number | null, nextRunAtMs?: number | null, lastStatus?: string | null, lastError?: string | null, runs?: Array<AutomationRunView>, };
 
-export type AutomationRunView = { id: string, automationId: string, trigger: string, status: string, startedAtMs: number, completedAtMs: number | null, threadId: string | null, sourceKey: string | null, error: string | null, metadata: Record<string, unknown> | null, };
+export type AutomationRunView = { id: string, automationId: string, trigger: string, status: string, startedAtMs: number, completedAtMs?: number | null, threadId?: string | null, sourceKey?: string | null, error?: string | null, metadata?: Record<string, unknown> | null, };
 
 export type AutomationListResult = { automations: Array<AutomationTaskView>, };
 
@@ -682,85 +688,85 @@ export type AutomationMutationResult = { automation: AutomationTaskView, };
 
 export type AutomationDeleteResult = { deleted: boolean, automationId: string, };
 
-export type AutomationRunResult = { accepted: boolean, automation: AutomationTaskView, run: AutomationRunView | null, };
+export type AutomationRunResult = { accepted: boolean, automation: AutomationTaskView, run?: AutomationRunView | null, };
 
 export type TurnStartResult = { accepted: boolean, threadId: string, turnId: string, thread: GatewayThread, };
 
-export type ShellResultPayload = { thread: GatewayThread, command: string, outcome: string, toolFailures: number, committedEntries: Array<TranscriptEntry>, };
+export type ShellResultPayload = { thread: GatewayThread, command: string, outcome: string, toolFailures: number, committedEntries?: Array<TranscriptEntry>, };
 
-export type ShellErrorPayload = { message: string, threadId: string | null, };
+export type ShellErrorPayload = { message: string, threadId?: string | null, };
 
 export type SourceResetParams = { scope: GatewayRequestScope, };
 
-export type SettingsReadParams = { cwd: string | null, threadId: string | null, };
+export type SettingsReadParams = { cwd?: string | null, threadId?: string | null, };
 
-export type SettingsUpdateParams = { scope: GatewayRequestScope, threadId: string, agent: string | null, };
+export type SettingsUpdateParams = { scope: GatewayRequestScope, threadId: string, agent?: string | null, };
 
-export type SettingsReadResult = { cwd: string, project: WorkbenchProjectView | null, channels: ChannelListResult, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls: WorkbenchControlsView | null, webSearch: WebSearchSettingsView | null, };
+export type SettingsReadResult = { cwd: string, project?: WorkbenchProjectView | null, channels?: ChannelListResult, memoryResources: Record<string, unknown>, secrets: Record<string, unknown>, controls?: WorkbenchControlsView | null, webSearch?: WebSearchSettingsView | null, };
 
-export type WebSearchSettingsView = { execution: string, backend: string, externalAccess: string, contextSize: string, returnTokenBudget: string, contentTypes: Array<string>, allowedDomains: Array<string>, blockedDomains: Array<string>, backgroundStorageAcknowledged: boolean, location: Record<string, unknown>, image: Record<string, unknown>, credentials: Record<string, string>, };
+export type WebSearchSettingsView = { execution: string, backend: string, externalAccess: string, contextSize: string, returnTokenBudget: string, contentTypes?: Array<string>, allowedDomains?: Array<string>, blockedDomains?: Array<string>, backgroundStorageAcknowledged: boolean, location: Record<string, unknown>, image: Record<string, unknown>, credentials: Record<string, string>, };
 
-export type WebSearchSettingsReadParams = { cwd: string | null, };
+export type WebSearchSettingsReadParams = { cwd?: string | null, };
 
-export type WebSearchSettingsUpdateParams = { scope: GatewayRequestScope, search: WebSearchSettingsView, credentialValues: Record<string, string>, };
+export type WebSearchSettingsUpdateParams = { scope: GatewayRequestScope, search: WebSearchSettingsView, credentialValues?: Record<string, string>, };
 
-export type WorkbenchProjectView = { path: string, displayPath: string, branch: string | null, };
+export type WorkbenchProjectView = { path: string, displayPath: string, branch?: string | null, };
 
 export type WorkbenchModelStatus = "resolved" | "unconfigured" | "error";
 
-export type WorkbenchControlsView = { permissionMode: string, mode: string, runtimeRef: string, agent: string | null, model: string | null, modelStatus: WorkbenchModelStatus, modelError: string | null, variant: string | null, permissionModeOptions: Array<string>, modeOptions: Array<string>, modelOptions: Array<string>, modelDetails: Array<ModelOptionView>, recentModels: Array<string>, variantOptions: Array<string>, };
+export type WorkbenchControlsView = { permissionMode: string, mode: string, runtimeRef?: string, agent?: string | null, model?: string | null, modelStatus?: WorkbenchModelStatus, modelError?: string | null, variant?: string | null, permissionModeOptions?: Array<string>, modeOptions?: Array<string>, modelOptions?: Array<string>, modelDetails?: Array<ModelOptionView>, recentModels?: Array<string>, variantOptions?: Array<string>, };
 
 export type ModelSettingsScope = "global";
 
-export type ModelSettingsReadParams = { scope: ModelSettingsScope, cwd: string | null, };
+export type ModelSettingsReadParams = { scope?: ModelSettingsScope, cwd?: string | null, };
 
-export type ModelProviderSaveParams = { scope: ModelSettingsScope, providerId: string, name: string | null, api: string, apiKey: string | null, noAuth: boolean, model: ModelProviderSaveModelParams | null, };
+export type ModelProviderSaveParams = { scope?: ModelSettingsScope, providerId: string, name?: string | null, api: string, apiKey?: string | null, noAuth?: boolean, model?: ModelProviderSaveModelParams | null, };
 
-export type ModelProviderSaveModelParams = { id: string, name: string | null, limit: ModelLimitView, advancedFormat: string | null, advanced: string | null, };
+export type ModelProviderSaveModelParams = { id: string, name?: string | null, limit?: ModelLimitView, advancedFormat?: string | null, advanced?: string | null, };
 
-export type ModelLimitView = { context: number | null, output: number | null, };
+export type ModelLimitView = { context?: number | null, output?: number | null, };
 
-export type ModelProviderCatalogParams = { scope: ModelSettingsScope, providerId: string, refresh: boolean, cwd: string | null, };
+export type ModelProviderCatalogParams = { scope?: ModelSettingsScope, providerId: string, refresh?: boolean, cwd?: string | null, };
 
-export type ModelStateReadParams = { cwd: string | null, threadId: string | null, };
+export type ModelStateReadParams = { cwd?: string | null, threadId?: string | null, };
 
-export type ModelStateSetParams = { cwd: string | null, threadId: string | null, model: string, reasoningEffort: string | null, };
+export type ModelStateSetParams = { cwd?: string | null, threadId?: string | null, model: string, reasoningEffort?: string | null, };
 
-export type ModelStateResult = { cwd: string, threadId: string | null, model: string | null, reasoningEffort: string | null, recentModels: Array<string>, };
+export type ModelStateResult = { cwd: string, threadId?: string | null, model?: string | null, reasoningEffort?: string | null, recentModels?: Array<string>, };
 
 export type ModelAssignmentTarget = "default" | "auxiliary";
 
-export type ModelAssignmentSetParams = { scope: ModelSettingsScope, target: ModelAssignmentTarget, task: string | null, provider: string, model: string, reasoningEffort: string | null, };
+export type ModelAssignmentSetParams = { scope?: ModelSettingsScope, target: ModelAssignmentTarget, task?: string | null, provider: string, model: string, reasoningEffort?: string | null, };
 
-export type ModelSettingsResult = { scope: ModelSettingsScope, cwd: string, defaultModel: string | null, defaultReasoningEffort: string | null, providers: Array<ModelProviderView>, auxiliary: Array<AuxiliaryModelAssignmentView>, modelOptions: Array<ModelOptionView>, voice: unknown | null, imageGeneration: unknown | null, };
+export type ModelSettingsResult = { scope: ModelSettingsScope, cwd: string, defaultModel?: string | null, defaultReasoningEffort?: string | null, providers: Array<ModelProviderView>, auxiliary: Array<AuxiliaryModelAssignmentView>, modelOptions: Array<ModelOptionView>, voice?: unknown | null, imageGeneration?: unknown | null, };
 
-export type ModelProviderView = { id: string, name: string, builtIn: boolean, configured: boolean, api: string | null, apiKeyEnv: string | null, credentialStatus: ModelCredentialStatus, noAuth: boolean, canFetchModels: boolean, unavailableReason: string | null, };
+export type ModelProviderView = { id: string, name: string, builtIn: boolean, configured: boolean, api?: string | null, apiKeyEnv?: string | null, credentialStatus: ModelCredentialStatus, noAuth: boolean, canFetchModels: boolean, unavailableReason?: string | null, };
 
 export type ModelCredentialStatus = "present" | "missing" | "notRequired";
 
-export type ModelOptionView = { provider: string, id: string, value: string, name: string | null, providerName: string | null, free: boolean, limit: ModelLimitView, reasoningSupported: boolean | null, reasoningEfforts: Array<string>, };
+export type ModelOptionView = { provider: string, id: string, value: string, name?: string | null, providerName?: string | null, free?: boolean, limit?: ModelLimitView, reasoningSupported?: boolean | null, reasoningEfforts?: Array<string>, };
 
-export type AuxiliaryModelAssignmentView = { task: string, label: string, provider: string, model: string, reasoningEffort: string | null, effectiveModel: string | null, };
+export type AuxiliaryModelAssignmentView = { task: string, label: string, provider: string, model: string, reasoningEffort?: string | null, effectiveModel?: string | null, };
 
 export type ModelProviderCatalogResult = { providerId: string, models: Array<ModelOptionView>, };
 
-export type ModelAssignmentSetResult = { ok: boolean, target: ModelAssignmentTarget, task: string | null, provider: string, model: string, reasoningEffort: string | null, };
+export type ModelAssignmentSetResult = { ok: boolean, target: ModelAssignmentTarget, task?: string | null, provider: string, model: string, reasoningEffort?: string | null, };
 
-export type WorkspaceCreateParams = { name: string, parent: string | null, };
+export type WorkspaceCreateParams = { name: string, parent?: string | null, };
 
 export type WorkspaceCreateResult = { cwd: string, scope: GatewayRequestScope, };
 
 export type WorkspaceFolderEntry = { name: string, path: string, };
 
-export type WorkspaceFolderListParams = { scope: GatewayRequestScope, path: string | null, };
+export type WorkspaceFolderListParams = { scope: GatewayRequestScope, path?: string | null, };
 
-export type WorkspaceFolderListResult = { root: string, roots: Array<WorkspaceFolderEntry>, current: string, parent: string | null, folders: Array<WorkspaceFolderEntry>, };
+export type WorkspaceFolderListResult = { root: string, roots: Array<WorkspaceFolderEntry>, current: string, parent?: string | null, folders: Array<WorkspaceFolderEntry>, };
 
 export type WorkspaceGitBranchesParams = { scope: GatewayRequestScope, };
 
-export type WorkspaceGitCheckoutParams = { scope: GatewayRequestScope, branch: string, create: boolean, };
+export type WorkspaceGitCheckoutParams = { scope: GatewayRequestScope, branch: string, create?: boolean, };
 
-export type WorkspaceGitBranchesResult = { current: string | null, branches: Array<string>, };
+export type WorkspaceGitBranchesResult = { current?: string | null, branches: Array<string>, };
 
 export type WorkspaceFileKind = "file" | "directory";
 
@@ -786,37 +792,37 @@ export type WorkspaceFileOpenExternalResult = { path: string, action: WorkspaceE
 
 export type WorkspaceFileReadParams = { scope: GatewayRequestScope, path: string, };
 
-export type WorkspaceFileReadResult = { path: string, content: string | null, truncated: boolean, binary: boolean, editable: boolean, editableReason: string | null, sizeBytes: number, revision: string, lineEnding: string | null, unreadable: string | null, };
+export type WorkspaceFileReadResult = { path: string, content?: string | null, truncated: boolean, binary: boolean, editable?: boolean, editableReason?: string | null, sizeBytes?: number, revision?: string, lineEnding?: string | null, unreadable?: string | null, };
 
 export type WorkspaceFilePreviewOpenParams = { scope: GatewayRequestScope, path: string, };
 
-export type WorkspaceFilePreviewOpenResult = { path: string, content: string | null, truncated: boolean, binary: boolean, editable: boolean, editableReason: string | null, sizeBytes: number, revision: string, lineEnding: string | null, unreadable: string | null, mediaType: string, resourceId: string, resourcePath: string, expiresAtMs: number, };
+export type WorkspaceFilePreviewOpenResult = { path: string, content?: string | null, truncated: boolean, binary: boolean, editable?: boolean, editableReason?: string | null, sizeBytes?: number, revision?: string, lineEnding?: string | null, unreadable?: string | null, mediaType: string, resourceId: string, resourcePath: string, expiresAtMs: number, };
 
 export type WorkspaceFilePreviewReleaseParams = { resourceId: string, };
 
 export type WorkspaceFilePreviewReleaseResult = { released: boolean, };
 
-export type WorkspaceFileWriteParams = { scope: GatewayRequestScope, path: string, content: string, expectedRevision: string | null, force: boolean, };
+export type WorkspaceFileWriteParams = { scope: GatewayRequestScope, path: string, content: string, expectedRevision?: string | null, force?: boolean, };
 
-export type WorkspaceFileWriteResult = { path: string, revision: string, sizeBytes: number, lineEnding: string | null, };
+export type WorkspaceFileWriteResult = { path: string, revision: string, sizeBytes: number, lineEnding?: string | null, };
 
 export type WorkspaceDiffFileStatusView = "modified" | "added" | "deleted" | "untracked" | "binary" | "unreadable";
 
-export type WorkspaceDiffFileView = { path: string, status: WorkspaceDiffFileStatusView, binary: boolean, unreadable: boolean, placeholder: string | null, };
+export type WorkspaceDiffFileView = { path: string, status: WorkspaceDiffFileStatusView, binary: boolean, unreadable: boolean, placeholder?: string | null, };
 
 export type WorkspaceDiffTruncationView = { truncated: boolean, maxBytes: number, maxLines: number, omittedBytes: number, omittedLines: number, };
 
-export type WorkspaceDiffParams = { scope: GatewayRequestScope, path: string | null, };
+export type WorkspaceDiffParams = { scope: GatewayRequestScope, path?: string | null, };
 
-export type WorkspaceDiffResult = { isGitRepo: boolean, files: Array<WorkspaceDiffFileView>, unifiedDiff: string, truncation: WorkspaceDiffTruncationView, selectedPath: string | null, };
+export type WorkspaceDiffResult = { isGitRepo: boolean, files: Array<WorkspaceDiffFileView>, unifiedDiff: string, truncation: WorkspaceDiffTruncationView, selectedPath?: string | null, };
 
 export type WorkspaceChangeReviewStatusView = "pending" | "accepted" | "rejected" | "conflict";
 
-export type WorkspaceChangeFileView = { path: string, status: WorkspaceDiffFileStatusView, binary: boolean, unreadable: boolean, reviewStatus: WorkspaceChangeReviewStatusView, canReject: boolean, message: string | null, };
+export type WorkspaceChangeFileView = { path: string, status: WorkspaceDiffFileStatusView, binary: boolean, unreadable: boolean, reviewStatus: WorkspaceChangeReviewStatusView, canReject: boolean, message?: string | null, };
 
 export type WorkspaceChangeInvalidationView = { source: string, message: string, };
 
-export type WorkspaceChangeGroupView = { turnId: string, threadId: string | null, createdAtMs: number, completedAtMs: number, files: Array<WorkspaceChangeFileView>, invalidations: Array<WorkspaceChangeInvalidationView>, };
+export type WorkspaceChangeGroupView = { turnId: string, threadId?: string | null, createdAtMs: number, completedAtMs: number, files: Array<WorkspaceChangeFileView>, invalidations?: Array<WorkspaceChangeInvalidationView>, };
 
 export type WorkspaceChangesParams = { scope: GatewayRequestScope, };
 
@@ -826,21 +832,21 @@ export type WorkspaceChangeFileParams = { scope: GatewayRequestScope, turnId: st
 
 export type WorkspaceChangeMutationResult = { accepted: boolean, changes: WorkspaceChangesResult, };
 
-export type ContextReadParams = { scope: GatewayRequestScope, threadId: string | null, };
+export type ContextReadParams = { scope: GatewayRequestScope, threadId?: string | null, };
 
-export type ContextUsageCategoryView = { id: string, label: string, tokens: number, estimated: boolean, status: string, percent: number | null, details: unknown | null, };
+export type ContextUsageCategoryView = { id: string, label: string, tokens: number, estimated: boolean, status: string, percent?: number | null, details?: unknown | null, };
 
-export type ContextReadResult = { available: boolean, label: string, status: string, basis: string, appliesToSessionSeq: number | null, usedTokens: number, contextLimit: number | null, percent: number | null, categories: Array<ContextUsageCategoryView>, advice: Array<string>, };
+export type ContextReadResult = { available: boolean, label: string, status: string, basis: string, appliesToSessionSeq?: number | null, usedTokens: number, contextLimit?: number | null, percent?: number | null, categories: Array<ContextUsageCategoryView>, advice?: Array<string>, };
 
-export type ObservabilityReadParams = { scope: GatewayRequestScope, threadId: string | null, };
+export type ObservabilityReadParams = { scope: GatewayRequestScope, threadId?: string | null, };
 
-export type SessionUsageSummaryView = { available: boolean, sessionId: string | null, provider: string | null, model: string | null, messageCount: number, assistantMessageCount: number, contextInputTokens: number, billableInputTokens: number, billableOutputTokens: number, reasoningTokens: number, cacheReadTokens: number, cacheWriteTokens: number, effectiveTotalTokens: number | null, reportedTotalTokens: number, totalStatus: string, accountedProviderCallCount: number, unaccountedProviderCallCount: number, estimatedCostNanodollars: number, costStatus: string, estimatedPricingCount: number, freePricingCount: number, includedPricingCount: number, unknownPricingCount: number, cacheReadPercent: number | null, };
+export type SessionUsageSummaryView = { available: boolean, sessionId?: string | null, provider?: string | null, model?: string | null, messageCount: number, assistantMessageCount: number, contextInputTokens: number, billableInputTokens: number, billableOutputTokens: number, reasoningTokens: number, cacheReadTokens: number, cacheWriteTokens: number, effectiveTotalTokens?: number | null, reportedTotalTokens: number, totalStatus: string, accountedProviderCallCount: number, unaccountedProviderCallCount: number, estimatedCostNanodollars: number, costStatus: string, estimatedPricingCount: number, freePricingCount: number, includedPricingCount: number, unknownPricingCount: number, cacheReadPercent?: number | null, };
 
 export type ObservabilityReadResult = { context: ContextReadResult, usage: SessionUsageSummaryView, };
 
-export type UsageReadParams = { activityDays: number | null, };
+export type UsageReadParams = { activityDays?: number | null, };
 
-export type UsageWindowSummaryView = { id: string, label: string, sinceMs: number | null, sessionCount: number, messageCount: number, assistantMessageCount: number, contextInputTokens: number, billableInputTokens: number, billableOutputTokens: number, reasoningTokens: number, cacheReadTokens: number, cacheWriteTokens: number, effectiveTotalTokens: number, reportedTotalTokens: number, totalStatus: string, accountedProviderCallCount: number, unaccountedProviderCallCount: number, estimatedCostNanodollars: number, costStatus: string, estimatedPricingCount: number, freePricingCount: number, includedPricingCount: number, unknownPricingCount: number, cacheReadPercent: number | null, };
+export type UsageWindowSummaryView = { id: string, label: string, sinceMs?: number | null, sessionCount: number, messageCount: number, assistantMessageCount: number, contextInputTokens: number, billableInputTokens: number, billableOutputTokens: number, reasoningTokens: number, cacheReadTokens: number, cacheWriteTokens: number, effectiveTotalTokens: number, reportedTotalTokens: number, totalStatus: string, accountedProviderCallCount: number, unaccountedProviderCallCount: number, estimatedCostNanodollars: number, costStatus: string, estimatedPricingCount: number, freePricingCount: number, includedPricingCount: number, unknownPricingCount: number, cacheReadPercent?: number | null, };
 
 export type UsageActivityDayView = { date: string, sessionCount: number, messageCount: number, effectiveTotalTokens: number, reportedTotalTokens: number, totalStatus: string, accountedProviderCallCount: number, unaccountedProviderCallCount: number, contextInputTokens: number, cacheReadTokens: number, cacheWriteTokens: number, estimatedCostNanodollars: number, costStatus: string, estimatedPricingCount: number, freePricingCount: number, includedPricingCount: number, unknownPricingCount: number, };
 
@@ -850,23 +856,23 @@ export type UsageReadResult = { generatedAtMs: number, windows: Array<UsageWindo
 
 export type ReadyzResult = { ok: boolean, server: string, version: string, };
 
-export type CreateLaunchParams = { cwd: string, source: GatewaySourceInput | null, };
+export type CreateLaunchParams = { cwd: string, source?: GatewaySourceInput | null, };
 
 export type CreateLaunchResult = { launchId: string, expiresAtMs: number, openUrl: string, };
 
-export type ManagedServerState = { instanceId?: string, pid: number, baseUrl: string, readyzUrl: string, startedAtMs: number, version: string, executablePath: string | null, executableModifiedMs: number | null, executableSize: number | null, executableInode: string | null, staticDir: string | null, };
+export type ManagedServerState = { instanceId?: string, pid: number, baseUrl: string, readyzUrl: string, startedAtMs: number, version: string, executablePath?: string | null, executableModifiedMs?: number | null, executableSize?: number | null, executableInode?: string | null, staticDir?: string | null, };
 
 export type JsonRpcId = string | JsonSafeI64 | null;
 
-export type JsonRpcRequest = { jsonrpc: string, id: JsonRpcId, method: string, params: unknown | null, };
+export type JsonRpcRequest = { jsonrpc: string, id: JsonRpcId, method: string, params?: unknown | null, };
 
-export type JsonRpcNotification = { jsonrpc: string, method: string, params: unknown | null, };
+export type JsonRpcNotification = { jsonrpc: string, method: string, params?: unknown | null, };
 
 export type JsonRpcSuccess = { jsonrpc: string, id: JsonRpcId, result: unknown, };
 
 export type JsonRpcErrorResponse = { jsonrpc: string, id: JsonRpcId, error: JsonRpcError, };
 
-export type JsonRpcError = { code: number, message: string, data: unknown | null, };
+export type JsonRpcError = { code: number, message: string, data?: unknown | null, };
 
 export type ClientRequest = { "method": "initialize", "params": InitializeParams } | { "method": "thread/draft/open", "params": ThreadDraftOpenParams } | { "method": "thread/resume", "params": ThreadResumeParams } | { "method": "thread/read", "params": ThreadReadParams } | { "method": "thread/trace", "params": ThreadTraceParams } | { "method": "thread/list", "params": ThreadListParams } | { "method": "thread/browser", "params": ThreadBrowserParams } | { "method": "thread/rename", "params": ThreadRenameParams } | { "method": "thread/archive", "params": ThreadIdParams } | { "method": "thread/restore", "params": ThreadIdParams } | { "method": "thread/delete", "params": ThreadIdParams } | { "method": "turn/start", "params": TurnStartParams } | { "method": "thread/context/read", "params": ThreadContextReadParams } | { "method": "thread/draft/prepare", "params": ThreadDraftPrepareParams } | { "method": "thread/control/set", "params": ThreadControlSetParams } | { "method": "thread/action/run", "params": ThreadActionRunParams } | { "method": "thread/interaction/respond", "params": ThreadInteractionRespondParams } | { "method": "thread/history/read", "params": ThreadHistoryReadParams } | { "method": "thread/history/draft/read", "params": ThreadHistoryDraftReadParams } | { "method": "thread/import/list", "params": ThreadImportListParams } | { "method": "thread/import", "params": ThreadImportParams } | { "method": "runtime/profile/list", "params": RuntimeProfileListParams } | { "method": "runtime/profile/read", "params": RuntimeProfileReadParams } | { "method": "runtime/profile/write", "params": RuntimeProfileWriteParams } | { "method": "runtime/profile/delete", "params": RuntimeProfileDeleteParams } | { "method": "runtime/profile/setEnabled", "params": RuntimeProfileSetEnabledParams } | { "method": "automation/list", "params": AutomationListParams } | { "method": "automation/draft", "params": AutomationDraftParams } | { "method": "automation/write", "params": AutomationWriteParams } | { "method": "automation/pause", "params": AutomationIdParams } | { "method": "automation/resume", "params": AutomationIdParams } | { "method": "automation/delete", "params": AutomationIdParams } | { "method": "automation/run", "params": AutomationRunParams } | { "method": "completion/list", "params": CompletionListParams } | { "method": "command/list", "params": CommandListParams } | { "method": "command/execute", "params": CommandExecuteParams } | { "method": "slash/settings/read", "params": SlashSettingsReadParams } | { "method": "slash/settings/update", "params": SlashSettingsUpdateParams } | { "method": "agent/list", "params": AgentListParams } | { "method": "agent/read", "params": AgentReadParams } | { "method": "agent/write", "params": AgentWriteParams } | { "method": "agent/setEnabled", "params": AgentSetEnabledParams } | { "method": "agent/delete", "params": AgentDeleteParams } | { "method": "agent/status", "params": AgentStatusParams } | { "method": "team/list", "params": TeamListParams } | { "method": "team/read", "params": TeamReadParams } | { "method": "team/write", "params": TeamWriteParams } | { "method": "team/setEnabled", "params": TeamSetEnabledParams } | { "method": "team/delete", "params": TeamDeleteParams } | { "method": "team/status", "params": TeamStatusParams } | { "method": "agent/control", "params": AgentControlParams } | { "method": "backend/list", "params": BackendListParams } | { "method": "backend/doctor", "params": BackendDoctorParams } | { "method": "backend/install", "params": BackendManageParams } | { "method": "backend/repair", "params": BackendManageParams } | { "method": "backend/upgrade", "params": BackendManageParams } | { "method": "backend/write", "params": BackendWriteParams } | { "method": "backend/delete", "params": BackendDeleteParams } | { "method": "plugin/list", "params": PluginListParams } | { "method": "plugin/read", "params": PluginReadParams } | { "method": "plugin/doctor", "params": PluginDoctorParams } | { "method": "plugin/import/inspect", "params": PluginInspectParams } | { "method": "plugin/install", "params": PluginInstallParams } | { "method": "plugin/uninstall", "params": PluginUninstallParams } | { "method": "plugin/setEnabled", "params": PluginSetEnabledParams } | { "method": "plugin/authority/write", "params": PluginAuthorityWriteParams } | { "method": "plugin/authority/refresh", "params": PluginAuthorityRefreshParams } | { "method": "plugin/authority/setTrust", "params": PluginAuthoritySetTrustParams } | { "method": "plugin/catalog/list", "params": PluginCatalogListParams } | { "method": "plugin/catalog/add", "params": PluginCatalogAddParams } | { "method": "plugin/catalog/remove", "params": PluginCatalogRemoveParams } | { "method": "plugin/catalog/upgrade", "params": PluginCatalogUpgradeParams } | { "method": "plugin/connect/start", "params": PluginConnectStartParams } | { "method": "plugin/connect/status", "params": PluginConnectStatusParams } | { "method": "skill/list", "params": SkillListParams } | { "method": "skill/read", "params": SkillReadParams } | { "method": "skill/install", "params": SkillInstallParams } | { "method": "skill/uninstall", "params": SkillUninstallParams } | { "method": "skill/setEnabled", "params": SkillSetEnabledParams } | { "method": "skill/write", "params": SkillWriteParams } | { "method": "tool/list", "params": ToolListParams } | { "method": "tool/read", "params": ToolReadParams } | { "method": "tool/setEnabled", "params": ToolSetEnabledParams } | { "method": "tool/create", "params": ToolCreateParams } | { "method": "tool/remove", "params": ToolRemoveParams } | { "method": "mcp/list", "params": McpListParams } | { "method": "mcp/read", "params": McpReadParams } | { "method": "mcp/upsert", "params": McpUpsertParams } | { "method": "mcp/remove", "params": McpNameParams } | { "method": "mcp/setEnabled", "params": McpSetEnabledParams } | { "method": "mcp/setToolPolicy", "params": McpSetToolPolicyParams } | { "method": "mcp/test", "params": McpNameParams } | { "method": "mcp/oauth/start", "params": McpOAuthStartParams } | { "method": "mcp/oauth/status", "params": McpOAuthStatusParams } | { "method": "mcp/oauth/logout", "params": McpNameParams } | { "method": "channel/list", "params": ChannelListParams } | { "method": "channel/show", "params": ChannelIdParams } | { "method": "channel/enable", "params": ChannelEnableParams } | { "method": "channel/update", "params": ChannelUpdateParams } | { "method": "channel/delete", "params": ChannelIdParams } | { "method": "channel/doctor", "params": ChannelDoctorParams } | { "method": "channel/source/list", "params": ChannelIdParams } | { "method": "channel/wechat-qr/start", "params": ChannelWechatQrStartParams } | { "method": "channel/wechat-qr/poll", "params": ChannelWechatQrPollParams } | { "method": "shell/start", "params": ShellStartParams } | { "method": "terminal/start", "params": TerminalStartParams } | { "method": "terminal/write", "params": TerminalWriteParams } | { "method": "terminal/resize", "params": TerminalResizeParams } | { "method": "terminal/terminate", "params": TerminalTerminateParams } | { "method": "source/reset", "params": SourceResetParams } | { "method": "settings/update", "params": SettingsUpdateParams } | { "method": "settings/read", "params": SettingsReadParams } | { "method": "web/search/settings/read", "params": WebSearchSettingsReadParams } | { "method": "web/search/settings/update", "params": WebSearchSettingsUpdateParams } | { "method": "model/settings/read", "params": ModelSettingsReadParams } | { "method": "model/provider/save", "params": ModelProviderSaveParams } | { "method": "model/provider/catalog", "params": ModelProviderCatalogParams } | { "method": "model/state/read", "params": ModelStateReadParams } | { "method": "model/state/set", "params": ModelStateSetParams } | { "method": "model/assignment/set", "params": ModelAssignmentSetParams } | { "method": "voice/asr/transcribe", "params": VoiceAsrTranscribeParams } | { "method": "voice/tts/synthesize", "params": VoiceTtsSynthesizeParams } | { "method": "voice/policy/read", "params": VoicePolicyReadParams } | { "method": "voice/policy/update", "params": VoicePolicyUpdateParams } | { "method": "thread/realtime/start", "params": ThreadRealtimeStartParams } | { "method": "thread/realtime/appendAudio", "params": ThreadRealtimeAppendAudioParams } | { "method": "thread/realtime/appendText", "params": ThreadRealtimeAppendTextParams } | { "method": "thread/realtime/appendSpeech", "params": ThreadRealtimeAppendSpeechParams } | { "method": "thread/realtime/stop", "params": ThreadRealtimeSessionParams } | { "method": "thread/realtime/listVoices", "params": ThreadRealtimeSessionParams } | { "method": "workspace/files", "params": WorkspaceFilesParams } | { "method": "workspace/folders", "params": WorkspaceFolderListParams } | { "method": "workspace/git/branches", "params": WorkspaceGitBranchesParams } | { "method": "workspace/git/checkout", "params": WorkspaceGitCheckoutParams } | { "method": "workspace/file/read", "params": WorkspaceFileReadParams } | { "method": "workspace/file/preview/open", "params": WorkspaceFilePreviewOpenParams } | { "method": "workspace/file/preview/release", "params": WorkspaceFilePreviewReleaseParams } | { "method": "workspace/file/write", "params": WorkspaceFileWriteParams } | { "method": "workspace/file/externalActions", "params": WorkspaceFileExternalActionsParams } | { "method": "workspace/file/openExternal", "params": WorkspaceFileOpenExternalParams } | { "method": "workspace/diff", "params": WorkspaceDiffParams } | { "method": "workspace/changes", "params": WorkspaceChangesParams } | { "method": "workspace/change/accept", "params": WorkspaceChangeFileParams } | { "method": "workspace/change/reject", "params": WorkspaceChangeFileParams } | { "method": "workspace/create", "params": WorkspaceCreateParams } | { "method": "context/read", "params": ContextReadParams } | { "method": "observability/read", "params": ObservabilityReadParams } | { "method": "usage/read", "params": UsageReadParams };
 

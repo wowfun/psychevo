@@ -257,7 +257,7 @@
         },
         {
           "properties": {
-            "backend_ref": {
+            "backendRef": {
               "default": null,
               "type": [
                 "string",
@@ -305,14 +305,14 @@
             "path": {
               "type": "string"
             },
-            "relative_path": {
+            "relativePath": {
               "type": "string"
             }
           },
           "required": [
             "kind",
             "path",
-            "relative_path"
+            "relativePath"
           ],
           "type": "object"
         },
@@ -330,7 +330,7 @@
             "label": {
               "type": "string"
             },
-            "target_kind": {
+            "targetKind": {
               "type": "string"
             },
             "uri": {
@@ -345,7 +345,7 @@
             "id",
             "kind",
             "label",
-            "target_kind"
+            "targetKind"
           ],
           "type": "object"
         }

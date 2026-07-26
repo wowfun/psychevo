@@ -259,7 +259,7 @@ export const clientRequestTurnStartSchema = {
         },
         {
           "properties": {
-            "backend_ref": {
+            "backendRef": {
               "default": null,
               "type": [
                 "string",
@@ -307,14 +307,14 @@ export const clientRequestTurnStartSchema = {
             "path": {
               "type": "string"
             },
-            "relative_path": {
+            "relativePath": {
               "type": "string"
             }
           },
           "required": [
             "kind",
             "path",
-            "relative_path"
+            "relativePath"
           ],
           "type": "object"
         },
@@ -332,7 +332,7 @@ export const clientRequestTurnStartSchema = {
             "label": {
               "type": "string"
             },
-            "target_kind": {
+            "targetKind": {
               "type": "string"
             },
             "uri": {
@@ -347,7 +347,7 @@ export const clientRequestTurnStartSchema = {
             "id",
             "kind",
             "label",
-            "target_kind"
+            "targetKind"
           ],
           "type": "object"
         }

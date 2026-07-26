@@ -108,7 +108,7 @@ export class ThreadController {
   }
 
   target(targetId: string): RunnableTargetView | null {
-    return this.currentContext?.compatibleTargets.find((target) => target.targetId === targetId) ?? null;
+    return this.currentContext?.compatibleTargets?.find((target) => target.targetId === targetId) ?? null;
   }
 
   contextReadTarget(targetId: string): RunnableTargetInput | null {
@@ -166,7 +166,11 @@ export class ThreadController {
   }
 
   sendability(): ThreadTurnAdmission {
-    return this.currentContext?.sendability ?? {
+    const sendability = this.currentContext?.sendability;
+    return sendability ? {
+      allowed: sendability.allowed,
+      reason: sendability.reason ?? null
+    } : {
       allowed: false,
       reason: "Thread Context is required before starting a turn."
     };
@@ -192,7 +196,7 @@ export class ThreadController {
     const targetAdmission = admitTurnTarget(context, input.controls);
     if (!targetAdmission.allowed) return targetAdmission;
 
-    for (const control of context.controls) {
+    for (const control of context.controls ?? []) {
       if (!control.required) continue;
       if (!control.enabled) {
         return {
@@ -277,7 +281,7 @@ export class ThreadController {
       clientTurnId
     );
     this.activeThreadId = requestedThreadId;
-    this.activeTurnId = prepared.snapshot.activity.activeTurnId;
+    this.activeTurnId = prepared.snapshot.activity.activeTurnId ?? null;
     this.acceptingFirstTurn = !requestedThreadId;
     this.awaitingTurnStartAcceptance = true;
     this.settledBeforeAcceptanceTurnId = null;
@@ -468,7 +472,8 @@ function admitTurnTarget(
       reason: "The selected Agent target does not match the current Thread Context."
     };
   }
-  const target = context.compatibleTargets.find((candidate) => candidate.targetId === targetId);
+  const target = (context.compatibleTargets ?? [])
+    .find((candidate) => candidate.targetId === targetId);
   if (!target) {
     return {
       allowed: false,
@@ -488,7 +493,8 @@ function admitInputCapability(
   context: ThreadContextReadResult,
   kind: string
 ): ThreadTurnAdmission {
-  const capability = context.inputCapabilities.find((candidate) => candidate.kind === kind) ?? null;
+  const capability = (context.inputCapabilities ?? [])
+    .find((candidate) => candidate.kind === kind) ?? null;
   if (capability?.enabled) return { allowed: true, reason: null };
   return {
     allowed: false,
@@ -558,7 +564,7 @@ export function threadTurnStartParams({
   clientTurnId?: string;
 }): TurnStartParams {
   const target = controls && !controls.omitTarget
-    ? context?.compatibleTargets.find((candidate) => candidate.targetId === controls.targetId) ?? null
+    ? context?.compatibleTargets?.find((candidate) => candidate.targetId === controls.targetId) ?? null
     : null;
   if (controls && !controls.omitTarget && !target) {
     throw new Error("The selected Agent target is not present in the current Thread Context.");
@@ -759,8 +765,8 @@ function sourceFromScope(scope: GatewayRequestScope): GatewaySource {
     kind: scope.source.kind,
     lifetime: scope.source.lifetime ?? "process",
     rawId: scope.source.rawId ?? "",
-    rawIdentity: scope.source.rawIdentity,
-    visibleName: scope.source.visibleName
+    rawIdentity: scope.source.rawIdentity ?? null,
+    visibleName: scope.source.visibleName ?? null
   };
 }
 

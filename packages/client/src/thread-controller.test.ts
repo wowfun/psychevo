@@ -194,7 +194,10 @@ describe("thread transcript controller helpers", () => {
   it("atomically replaces every control descriptor from a control receipt", () => {
     const controller = new ThreadController(emptyThreadSnapshot(floatingScope(), "thread-acp"));
     const context = threadContext("codex-fixture", "codex-fixture");
-    const control = (id: string, revision: string): ThreadContextReadResult["controls"][number] => ({
+    const control = (
+      id: string,
+      revision: string
+    ): NonNullable<ThreadContextReadResult["controls"]>[number] => ({
       id,
       label: id,
       surfaceRole: id === "model" ? "model" : "reasoning",
@@ -231,7 +234,7 @@ describe("thread transcript controller helpers", () => {
       controlRevision: "controls-new"
     });
 
-    const effort = controller.context()?.controls.find((candidate) => candidate.id === "effort");
+    const effort = controller.context()?.controls?.find((candidate) => candidate.id === "effort");
     expect(effort?.capabilityRevision).toBe("new-revision");
     expect(controller.controlSetParams(
       context.selectedTargetId!,
@@ -659,6 +662,7 @@ describe("thread transcript controller helpers", () => {
 
   it("forwards an opaque fourth catalog target without interpreting its id", () => {
     const context = threadContext("native", null);
+    context.compatibleTargets ??= [];
     context.compatibleTargets.push({
       targetId: "target:7f4a26e91d5c0bb4",
       agentRef: "arbitrary-reviewer",
@@ -695,7 +699,7 @@ describe("thread transcript controller helpers", () => {
 
   it("admits every input part and Agent mention through target-scoped descriptors", () => {
     const context = threadContext("opaque-profile", "canonical-agent");
-    context.inputCapabilities = context.inputCapabilities.map((capability) => (
+    context.inputCapabilities = (context.inputCapabilities ?? []).map((capability) => (
       capability.kind === "image"
         ? { ...capability, enabled: false, unavailableReason: "Images are unavailable for this target." }
         : capability

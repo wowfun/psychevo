@@ -3,6 +3,9 @@ import {
   ClientRequestSchema,
   GatewayEventSchema,
   ThreadSnapshotSchema,
+  gatewayMethodValidation,
+  gatewayRequestParamsSchema,
+  gatewayResponseResultSchema,
   gatewaySchemas
 } from "./index";
 
@@ -41,6 +44,35 @@ describe("ClientRequestSchema", () => {
       method: "turn/start",
       params
     }).success).toBe(false);
+  });
+});
+
+describe("generated method validator registry", () => {
+  it("distinguishes precise and explicit opaque results", () => {
+    expect(gatewayMethodValidation("thread/read")).toEqual({
+      params: "precise",
+      result: "precise"
+    });
+    expect(gatewayMethodValidation("plugin/list")).toEqual({
+      params: "precise",
+      result: "opaque"
+    });
+  });
+
+  it("follows Rust optionality for params and validates result semantics", () => {
+    expect(gatewayRequestParamsSchema("thread/list").safeParse({}).success).toBe(true);
+    expect(gatewayRequestParamsSchema("thread/read").safeParse({}).success).toBe(false);
+    expect(gatewayRequestParamsSchema("turn/start").safeParse({
+      scope: {
+        cwd: "/tmp/project",
+        source: { kind: "web", rawId: "thread-test" }
+      },
+      clientTurnId: "client-turn-1"
+    }).success).toBe(true);
+    expect(gatewayResponseResultSchema("thread/read").safeParse({}).success).toBe(false);
+    expect(gatewayResponseResultSchema("plugin/list").safeParse({ plugins: [] }).success)
+      .toBe(true);
+    expect(gatewayResponseResultSchema("plugin/list").safeParse([]).success).toBe(false);
   });
 });
 
@@ -179,12 +211,30 @@ describe("ThreadSnapshotSchema", () => {
           updatedAtMs: 2
         }
       ],
-      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      activity: {
+        activities: [{
+          owner: "framework_turn",
+          activityId: "turn-1",
+          turnId: "turn-1",
+          kind: "root",
+          queuedTurns: 0
+        }],
+        running: true,
+        activeTurnId: "turn-1",
+        queuedTurns: 0
+      },
       turnStartReceipts: [{ clientTurnId: "client-turn-1", turnId: "turn-1" }],
       pendingActions: []
     });
 
     expect(parsed.thread?.id).toBe("s1");
+    expect(parsed.activity.activities).toEqual([{
+      owner: "framework_turn",
+      activityId: "turn-1",
+      turnId: "turn-1",
+      kind: "root",
+      queuedTurns: 0
+    }]);
     expect(parsed.history).toEqual({ owner: "psychevo", fidelity: "full", cursor: null, hint: null });
     expect(parsed.entries).toHaveLength(2);
     expect(parsed.turnStartReceipts).toEqual([

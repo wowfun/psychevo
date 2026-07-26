@@ -628,6 +628,7 @@ pub enum ThreadEditableDraftFidelity {
 pub enum ThreadActionInput {
     Interrupt,
     Steer {
+        #[schemars(rename = "expectedTurnId")]
         expected_turn_id: String,
         text: String,
     },
@@ -637,9 +638,11 @@ pub enum ThreadActionInput {
     },
     Fork,
     ForkBefore {
+        #[schemars(rename = "messageId")]
         message_id: String,
     },
     RevertConversation {
+        #[schemars(rename = "messageId")]
         message_id: String,
         draft: ThreadEditableDraft,
     },

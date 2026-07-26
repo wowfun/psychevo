@@ -32,6 +32,20 @@ describe("generated request contracts", () => {
     expectTypeOf<GatewayRequestResults["workspace/create"]>()
       .toEqualTypeOf<WorkspaceCreateResult>();
   });
+
+  it("keeps required fields required while allowing default-only params to be omitted", () => {
+    const client = null as unknown as GatewayClient;
+    if (false) {
+      void client.request("thread/list");
+      // @ts-expect-error thread/read requires threadId.
+      void client.request("thread/read", {});
+      // @ts-expect-error turn/start requires scope and clientTurnId.
+      void client.request("turn/start", { input: [] });
+      // @ts-expect-error thread/action/run requires scope, threadId, and action.
+      void client.request("thread/action/run", {});
+    }
+    expect(true).toBe(true);
+  });
 });
 
 describe("scopeForCwd", () => {
@@ -344,6 +358,60 @@ describe("GatewayClient transport", () => {
     transport.emit("{not-json");
     expect(diagnostics).toContain("protocol");
     expect(client.connectionSnapshot().state).toBe("reconnecting");
+    client.close();
+  });
+
+  it.each([
+    "thread/read",
+    "turn/start",
+    "thread/action/run"
+  ] as const)("rejects a semantically invalid %s result", async (method) => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    await client.connect();
+
+    const pending = method === "thread/read"
+      ? client.request(method, { threadId: "thread-1" })
+      : method === "turn/start"
+        ? client.request(method, {
+            scope: scopeForCwd("/tmp/project"),
+            clientTurnId: "client-turn-1",
+            input: []
+          })
+        : client.request(method, {
+            scope: scopeForCwd("/tmp/project"),
+            threadId: "thread-1",
+            action: { kind: "interrupt" }
+          });
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      result: {}
+    }));
+
+    await expect(pending).rejects.toMatchObject({
+      code: "protocol_fault",
+      delivery: "unknown"
+    });
+    client.close();
+  });
+
+  it("enforces an object boundary for explicitly opaque results", async () => {
+    const transport = new FakeGatewayTransport();
+    const client = new GatewayClient(transport);
+    await client.connect();
+
+    const pending = client.request("plugin/list", {});
+    transport.emit(JSON.stringify({
+      jsonrpc: "2.0",
+      id: "1",
+      result: []
+    }));
+
+    await expect(pending).rejects.toMatchObject({
+      code: "protocol_fault",
+      delivery: "unknown"
+    });
     client.close();
   });
 

@@ -40,6 +40,24 @@ fn render_request_methods() -> Result<String> {
         ts.push_str(";\n");
     }
     ts.push_str("}\n\n");
-    ts.push_str("export type GatewayMethod = keyof GatewayRequestParams;\n");
+    ts.push_str("export type GatewayMethod = keyof GatewayRequestParams;\n\n");
+    ts.push_str("export type GatewayResultValidation = \"precise\" | \"opaque\";\n\n");
+    ts.push_str("export const gatewayMethodContracts = {\n");
+    for contract in &contracts {
+        ts.push_str("  \"");
+        ts.push_str(contract.method);
+        ts.push_str("\": { paramsSchema: \"");
+        ts.push_str(&contract.params_ts);
+        ts.push_str("\", resultSchema: ");
+        if contract.result_ts == "GatewayJsonResult" {
+            ts.push_str("null, resultValidation: \"opaque\"");
+        } else {
+            ts.push('"');
+            ts.push_str(&contract.result_ts);
+            ts.push_str("\", resultValidation: \"precise\"");
+        }
+        ts.push_str(" },\n");
+    }
+    ts.push_str("} as const;\n");
     Ok(ts)
 }

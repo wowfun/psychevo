@@ -4,6 +4,19 @@ export const threadSessionSchemas = {
   GatewayActivityView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "FrameworkTurnKind": {
+      "enum": [
+        "root",
+        "delegated_child"
+      ],
+      "type": "string"
+    },
+    "GatewayLocalOperationView": {
+      "enum": [
+        "shell"
+      ],
+      "type": "string"
+    },
     "JsonSafeI64": {
       "maximum": 9007199254740991.0,
       "minimum": -9007199254740991.0,
@@ -13,6 +26,90 @@ export const threadSessionSchemas = {
       "maximum": 9007199254740991.0,
       "minimum": 0.0,
       "type": "integer"
+    },
+    "ThreadActivityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/FrameworkTurnKind"
+            },
+            "owner": {
+              "enum": [
+                "framework_turn"
+              ],
+              "type": "string"
+            },
+            "queuedTurns": {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "kind",
+            "owner",
+            "queuedTurns",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/GatewayLocalOperationView"
+            },
+            "owner": {
+              "enum": [
+                "gateway_local"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "operation",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "owner": {
+              "enum": [
+                "foreign"
+              ],
+              "type": "string"
+            },
+            "ownerId": {
+              "type": "string"
+            },
+            "ownerSurface": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "activityId",
+            "owner",
+            "ownerId"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "properties": {
@@ -22,6 +119,13 @@ export const threadSessionSchemas = {
         "string",
         "null"
       ]
+    },
+    "activities": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/ThreadActivityView"
+      },
+      "type": "array"
     },
     "leaseExpiresAtMs": {
       "anyOf": [
@@ -85,6 +189,23 @@ export const threadSessionSchemas = {
   "title": "GatewayActivityView",
   "type": "object"
 },
+  FrameworkTurnKind: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "root",
+    "delegated_child"
+  ],
+  "title": "FrameworkTurnKind",
+  "type": "string"
+},
+  GatewayLocalOperationView: {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "shell"
+  ],
+  "title": "GatewayLocalOperationView",
+  "type": "string"
+},
   SessionProjectView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "properties": {
@@ -109,6 +230,13 @@ export const threadSessionSchemas = {
   SessionSummaryView: {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "FrameworkTurnKind": {
+      "enum": [
+        "root",
+        "delegated_child"
+      ],
+      "type": "string"
+    },
     "GatewayActivityView": {
       "properties": {
         "activeTurnId": {
@@ -117,6 +245,13 @@ export const threadSessionSchemas = {
             "string",
             "null"
           ]
+        },
+        "activities": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ThreadActivityView"
+          },
+          "type": "array"
         },
         "leaseExpiresAtMs": {
           "anyOf": [
@@ -178,6 +313,12 @@ export const threadSessionSchemas = {
         "running"
       ],
       "type": "object"
+    },
+    "GatewayLocalOperationView": {
+      "enum": [
+        "shell"
+      ],
+      "type": "string"
     },
     "JsonSafeI64": {
       "maximum": 9007199254740991.0,
@@ -255,6 +396,90 @@ export const threadSessionSchemas = {
         "label"
       ],
       "type": "object"
+    },
+    "ThreadActivityView": {
+      "oneOf": [
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/FrameworkTurnKind"
+            },
+            "owner": {
+              "enum": [
+                "framework_turn"
+              ],
+              "type": "string"
+            },
+            "queuedTurns": {
+              "$ref": "#/definitions/JsonSafeU64"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "kind",
+            "owner",
+            "queuedTurns",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/definitions/GatewayLocalOperationView"
+            },
+            "owner": {
+              "enum": [
+                "gateway_local"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "activityId",
+            "operation",
+            "owner"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "activityId": {
+              "type": "string"
+            },
+            "owner": {
+              "enum": [
+                "foreign"
+              ],
+              "type": "string"
+            },
+            "ownerId": {
+              "type": "string"
+            },
+            "ownerSurface": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "activityId",
+            "owner",
+            "ownerId"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "properties": {
@@ -266,6 +491,7 @@ export const threadSessionSchemas = {
       ],
       "default": {
         "activeTurnId": null,
+        "activities": [],
         "queuedTurns": 0,
         "running": false
       }

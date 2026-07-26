@@ -111,7 +111,7 @@ function blockWithAgentChildTarget(block: TranscriptBlock, target: AgentChildTar
   return {
     ...block,
     metadata,
-    result
+    result: result ?? null
   };
 }
 

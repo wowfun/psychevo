@@ -197,7 +197,12 @@ fn schema_group_module(name: &str) -> &'static str {
     if name.starts_with("Thread") || name == "RunnableTargetView" {
         return "thread/controls";
     }
-    if name.starts_with("Session") || name == "GatewayActivityView" {
+    if name.starts_with("Session")
+        || matches!(
+            name,
+            "FrameworkTurnKind" | "GatewayActivityView" | "GatewayLocalOperationView"
+        )
+    {
         return "thread/session";
     }
     if name.starts_with("Completion") {

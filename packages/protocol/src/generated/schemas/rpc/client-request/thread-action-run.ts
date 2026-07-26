@@ -124,7 +124,7 @@ export const clientRequestThreadActionRunSchema = {
         },
         {
           "properties": {
-            "expected_turn_id": {
+            "expectedTurnId": {
               "type": "string"
             },
             "kind": {
@@ -138,7 +138,7 @@ export const clientRequestThreadActionRunSchema = {
             }
           },
           "required": [
-            "expected_turn_id",
+            "expectedTurnId",
             "kind",
             "text"
           ],
@@ -187,13 +187,13 @@ export const clientRequestThreadActionRunSchema = {
               ],
               "type": "string"
             },
-            "message_id": {
+            "messageId": {
               "type": "string"
             }
           },
           "required": [
             "kind",
-            "message_id"
+            "messageId"
           ],
           "type": "object"
         },
@@ -208,14 +208,14 @@ export const clientRequestThreadActionRunSchema = {
               ],
               "type": "string"
             },
-            "message_id": {
+            "messageId": {
               "type": "string"
             }
           },
           "required": [
             "draft",
             "kind",
-            "message_id"
+            "messageId"
           ],
           "type": "object"
         },

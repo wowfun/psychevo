@@ -184,7 +184,7 @@ export function appendOptimisticPrompt(
   const entry: TranscriptEntry = {
     id,
     threadId: snapshot.thread?.id ?? "",
-    turnId: snapshot.activity.activeTurnId,
+    turnId: snapshot.activity.activeTurnId ?? null,
     messageSeq: null,
     role: "user",
     status: "completed",
@@ -548,7 +548,7 @@ function mergeEntry(current: TranscriptEntry, next: TranscriptEntry): Transcript
   return {
     ...current,
     ...next,
-    messageSeq: next.messageSeq ?? current.messageSeq,
+    messageSeq: next.messageSeq ?? current.messageSeq ?? null,
     createdAtMs: current.createdAtMs || next.createdAtMs,
     blocks: replaceBlocks ? sortBlocks(blocksForEntry(next)) : mergeBlocks(current.blocks, next.blocks),
     metadata: mergeMetadata(current.metadata, next.metadata)
@@ -580,7 +580,7 @@ function mergeBlock(current: TranscriptBlock, next: TranscriptBlock): Transcript
     createdAtMs: current.createdAtMs || next.createdAtMs,
     artifactIds: nextArtifactIds.length > 0 ? nextArtifactIds : currentArtifactIds,
     metadata: mergeBlockMetadata(current, next),
-    result: next.result ?? current.result
+    result: next.result ?? current.result ?? null
   };
 }
 

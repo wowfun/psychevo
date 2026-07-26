@@ -334,15 +334,18 @@ pub enum GatewayMentionTarget {
         #[serde(default)]
         entrypoints: Vec<String>,
         #[serde(default)]
+        #[schemars(rename = "backendRef")]
         backend_ref: Option<String>,
     },
     File {
         path: String,
+        #[schemars(rename = "relativePath")]
         relative_path: String,
     },
     Capability {
         id: String,
         label: String,
+        #[schemars(rename = "targetKind")]
         target_kind: String,
         #[serde(default)]
         uri: Option<String>,

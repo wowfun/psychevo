@@ -1569,7 +1569,7 @@ function runtimeLedger(snapshot: ThreadSnapshot): RuntimeLedgerRow[] {
     const metadata = record(candidateBlock.metadata);
     const result = metadata.result ?? candidateBlock.result ?? null;
     return {
-      turnId: candidate.turnId,
+      turnId: candidate.turnId ?? null,
       entryId: candidate.id,
       blockId: candidateBlock.id,
       source: candidateBlock.source || candidate.source,
@@ -1577,7 +1577,7 @@ function runtimeLedger(snapshot: ThreadSnapshot): RuntimeLedgerRow[] {
       toolCallId: stringValue(metadata.tool_call_id),
       status: candidateBlock.status,
       order: candidateBlock.order,
-      title: candidateBlock.title,
+      title: candidateBlock.title ?? null,
       hasResult: result !== null && result !== undefined,
       activeElapsedOwner: candidateBlock.status === "running" &&
         candidateBlock.kind !== "text" &&

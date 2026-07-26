@@ -26,6 +26,69 @@ mod thread_application_contract_tests {
     use super::*;
 
     #[test]
+    fn generated_schema_follows_tagged_enum_variant_field_renames() {
+        let activity = ThreadActivityView::FrameworkTurn {
+            activity_id: "turn-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            kind: FrameworkTurnKind::Root,
+            queued_turns: 2,
+        };
+        let serialized = serde_json::to_value(activity).expect("serialize activity");
+        let schema = serde_json::to_value(schemars::schema_for!(ThreadActivityView))
+            .expect("activity schema");
+        let branch = schema["oneOf"]
+            .as_array()
+            .expect("activity branches")
+            .iter()
+            .find(|branch| {
+                branch["properties"]["owner"]["enum"]
+                    .as_array()
+                    .is_some_and(|values| values.iter().any(|value| value == "framework_turn"))
+            })
+            .expect("framework activity branch");
+        let properties = branch["properties"]
+            .as_object()
+            .expect("framework activity properties");
+
+        for key in serialized.as_object().expect("serialized activity").keys() {
+            assert!(
+                properties.contains_key(key),
+                "serialized activity key {key:?} is absent from its schema branch"
+            );
+        }
+        assert!(properties.contains_key("activityId"));
+        assert!(properties.contains_key("turnId"));
+        assert!(properties.contains_key("queuedTurns"));
+        assert!(!properties.contains_key("activity_id"));
+    }
+
+    #[test]
+    fn generated_typescript_follows_wire_requiredness() {
+        let list = typescript_decl_with_schema_optionality(
+            &export_ts_decl(ThreadListParams::decl()),
+            &schema::<ThreadListParams>().expect("ThreadListParams schema"),
+        );
+        assert!(list.contains("cwd?:"));
+        assert!(list.contains("archived?:"));
+        assert!(list.contains("limit?:"));
+
+        let read = typescript_decl_with_schema_optionality(
+            &export_ts_decl(ThreadReadParams::decl()),
+            &schema::<ThreadReadParams>().expect("ThreadReadParams schema"),
+        );
+        assert!(read.contains("threadId:"));
+        assert!(!read.contains("threadId?:"));
+
+        let turn = typescript_decl_with_schema_optionality(
+            &export_ts_decl(TurnStartParams::decl()),
+            &schema::<TurnStartParams>().expect("TurnStartParams schema"),
+        );
+        assert!(turn.contains("scope:"));
+        assert!(turn.contains("clientTurnId:"));
+        assert!(turn.contains("threadId?:"));
+    }
+
+    #[test]
     fn draft_open_requires_an_explicit_default_or_exact_target_intent() {
         let default_request: ClientRequest = serde_json::from_value(serde_json::json!({
             "method": "thread/draft/open",

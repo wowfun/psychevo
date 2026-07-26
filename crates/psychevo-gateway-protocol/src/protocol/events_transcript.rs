@@ -281,6 +281,8 @@ pub struct TranscriptEntry {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct GatewayActivityView {
+    #[serde(default)]
+    pub activities: Vec<ThreadActivityView>,
     pub running: bool,
     #[serde(default)]
     pub active_turn_id: Option<String>,
@@ -315,6 +317,61 @@ pub struct GatewayActivityView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub takeover_state: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(
+    tag = "owner",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+#[ts(
+    tag = "owner",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ThreadActivityView {
+    FrameworkTurn {
+        #[schemars(rename = "activityId")]
+        activity_id: String,
+        #[schemars(rename = "turnId")]
+        turn_id: String,
+        kind: FrameworkTurnKind,
+        #[serde(serialize_with = "json_safe_usize::serialize", deserialize_with = "json_safe_usize::deserialize")]
+        #[schemars(with = "JsonSafeU64", rename = "queuedTurns")]
+        #[ts(type = "number")]
+        queued_turns: usize,
+    },
+    GatewayLocal {
+        operation: GatewayLocalOperationView,
+        #[schemars(rename = "activityId")]
+        activity_id: String,
+    },
+    Foreign {
+        #[schemars(rename = "ownerId")]
+        owner_id: String,
+        #[schemars(rename = "activityId")]
+        activity_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(rename = "ownerSurface")]
+        #[ts(optional)]
+        owner_surface: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum FrameworkTurnKind {
+    Root,
+    DelegatedChild,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum GatewayLocalOperationView {
+    Shell,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

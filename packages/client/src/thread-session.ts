@@ -22,8 +22,7 @@ import {
   GatewayClientError,
   parseThreadSnapshot,
   type GatewayConnectionSnapshot,
-  type GatewayRequestInit,
-  type GatewayRequestOptions
+  type GatewayRequestArguments
 } from "./index";
 import {
   ThreadController,
@@ -37,8 +36,7 @@ export interface ThreadSessionClient {
   connectionSnapshot(): GatewayConnectionSnapshot;
   request<M extends GatewayMethod>(
     method: M,
-    params?: GatewayRequestInit<M>,
-    options?: GatewayRequestOptions
+    ...arguments_: GatewayRequestArguments<M>
   ): Promise<GatewayRequestResults[M]>;
   subscribe(handler: (notification: RpcNotification) => void): () => void;
   subscribeConnectionState(
@@ -50,6 +48,11 @@ export interface ThreadSessionOptions {
   client?: ThreadSessionClient | null;
   context?: ThreadContextReadResult | null;
   snapshot?: ThreadSnapshot | null;
+}
+
+export interface ThreadSessionView {
+  context: ThreadContextReadResult | null;
+  threadSnapshot: ThreadSnapshot | null;
 }
 
 export interface ThreadSessionLoadInput {
@@ -111,6 +114,8 @@ export class ThreadSession {
   private client: ThreadSessionClient | null = null;
   private readonly controller: ThreadController;
   private readonly listeners = new Set<() => void>();
+  private view: ThreadSessionView;
+  private publishDepth = 0;
   private unsubscribeClient: (() => void) | null = null;
   private unsubscribeConnection: (() => void) | null = null;
   private viewEpoch = 0;
@@ -120,12 +125,18 @@ export class ThreadSession {
   private eventQueue: GatewayEvent[] = [];
   private eventFrame: ScheduledFrame | null = null;
   private readonly firstAssistantTurns = new Set<string>();
+  private controlMutationSequence = 0;
+  private historyMutationSequence = 0;
 
   constructor(options: ThreadSessionOptions = {}) {
     this.controller = new ThreadController(options.snapshot ?? null);
     this.controller.setContext(options.context ?? null);
+    this.view = {
+      context: this.controller.context(),
+      threadSnapshot: this.controller.snapshot()
+    };
     this.controller.subscribe(() => {
-      for (const listener of this.listeners) listener();
+      this.publishView();
     });
     this.attachClient(options.client ?? null);
   }
@@ -153,16 +164,20 @@ export class ThreadSession {
   }
 
   getSnapshot(): ThreadSnapshot | null {
-    return this.controller.snapshot();
+    return this.view.threadSnapshot;
   }
 
   getContext(): ThreadContextReadResult | null {
-    return this.controller.context();
+    return this.view.context;
+  }
+
+  getView(): ThreadSessionView {
+    return this.view;
   }
 
   setContext(context: ThreadContextReadResult | null): void {
     this.controller.setContext(context);
-    this.emitChange();
+    this.publishView();
   }
 
   contextReadTarget(targetId: string): RunnableTargetInput | null {
@@ -193,8 +208,10 @@ export class ThreadSession {
     const epoch = this.advanceView("view_changed");
     const result = await client.request("thread/draft/open", params);
     if (epoch !== this.viewEpoch || this.disposed) return result;
-    this.controller.reset(parseThreadSnapshot(result.snapshot));
-    this.controller.setContext(result.context);
+    this.batchViewUpdate(() => {
+      this.controller.reset(parseThreadSnapshot(result.snapshot));
+      this.controller.setContext(result.context);
+    });
     return result;
   }
 
@@ -214,9 +231,50 @@ export class ThreadSession {
     ]);
     const parsed = parseThreadSnapshot(snapshot);
     if (epoch !== this.viewEpoch || this.disposed) return parsed;
-    this.controller.reset(parsed);
-    this.controller.setContext(context);
+    this.batchViewUpdate(() => {
+      this.controller.reset(parsed);
+      this.controller.setContext(context);
+    });
     return parsed;
+  }
+
+  async loadOlder(): Promise<ThreadSnapshot | null> {
+    const client = this.requireClient();
+    const snapshot = this.controller.snapshot();
+    const threadId = snapshot?.thread?.id ?? null;
+    const cursor = snapshot?.history.cursor ?? null;
+    if (!snapshot || !threadId || !cursor) return snapshot;
+    const epoch = this.viewEpoch;
+    const sequence = ++this.historyMutationSequence;
+    const result = await client.request("thread/history/read", {
+      scope: snapshot.scope,
+      threadId,
+      cursor,
+      limit: 100
+    });
+    const current = this.controller.snapshot();
+    if (
+      this.disposed
+      || epoch !== this.viewEpoch
+      || sequence !== this.historyMutationSequence
+      || result.threadId !== threadId
+      || current?.thread?.id !== threadId
+      || current.history.cursor !== cursor
+    ) {
+      return current;
+    }
+    const retainedIds = new Set(current.entries.map((entry) => entry.id));
+    const olderEntries = result.entries.filter((entry) => !retainedIds.has(entry.id));
+    const next: ThreadSnapshot = {
+      ...current,
+      entries: [...olderEntries, ...current.entries],
+      history: {
+        ...result.history,
+        cursor: result.nextCursor ?? null
+      }
+    };
+    this.controller.reset(next);
+    return next;
   }
 
   async send(
@@ -293,6 +351,10 @@ export class ThreadSession {
 
   async setControl(input: ThreadSessionControlInput) {
     const client = this.requireClient();
+    const epoch = this.viewEpoch;
+    const sequence = ++this.controlMutationSequence;
+    const threadId = this.controller.snapshot()?.thread?.id ?? null;
+    const targetId = this.controller.context()?.selectedTargetId ?? null;
     const params = this.controller.controlSetParams(
       input.targetId,
       input.control,
@@ -301,7 +363,18 @@ export class ThreadSession {
       input.threadId
     );
     const receipt = await client.request("thread/control/set", params);
+    if (
+      this.disposed
+      || epoch !== this.viewEpoch
+      || sequence !== this.controlMutationSequence
+      || (this.controller.snapshot()?.thread?.id ?? null) !== threadId
+      || this.controller.context()?.selectedTargetId !== targetId
+      || targetId !== input.targetId
+    ) {
+      return receipt;
+    }
     this.controller.applyControlReceipt(receipt);
+    this.publishView();
     return receipt;
   }
 
@@ -329,8 +402,10 @@ export class ThreadSession {
 
   reset(snapshot: ThreadSnapshot | null, context: ThreadContextReadResult | null = null): void {
     this.advanceView("view_changed");
-    this.controller.reset(snapshot);
-    this.controller.setContext(context);
+    this.batchViewUpdate(() => {
+      this.controller.reset(snapshot);
+      this.controller.setContext(context);
+    });
   }
 
   dispose(): void {
@@ -350,8 +425,32 @@ export class ThreadSession {
     return this.client;
   }
 
-  private emitChange(): void {
+  private publishView(): void {
+    if (this.publishDepth > 0) {
+      return;
+    }
+    const context = this.controller.context();
+    const threadSnapshot = this.controller.snapshot();
+    if (
+      this.view.context === context
+      && this.view.threadSnapshot === threadSnapshot
+    ) {
+      return;
+    }
+    this.view = { context, threadSnapshot };
     for (const listener of this.listeners) listener();
+  }
+
+  private batchViewUpdate(update: () => void): void {
+    this.publishDepth += 1;
+    try {
+      update();
+    } finally {
+      this.publishDepth -= 1;
+      if (this.publishDepth === 0) {
+        this.publishView();
+      }
+    }
   }
 
   private advanceView(reason: "disposed" | "view_changed"): number {
