@@ -3,8 +3,9 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    config::create_local_toolset, config::remove_local_toolset, config::set_local_toolset_enabled,
-    config::toolsets_value, types::ConfigScope,
+    __product::configuration::create_local_toolset, __product::configuration::remove_local_toolset,
+    __product::configuration::set_local_toolset_enabled, __product::configuration::toolsets_value,
+    __product::runtime::ConfigScope,
 };
 use serde_json::{Value, json};
 

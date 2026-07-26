@@ -3,11 +3,11 @@ impl PsychevoAcpAgent {
         &self,
         session_id: &SessionId,
         session: &AcpSession,
-        effect: psychevo::command_registry::SlashCommandEffect,
-        action: Option<psychevo::command_registry::SlashCommandAction>,
+        effect: psychevo::__product::commands::SlashCommandEffect,
+        action: Option<psychevo::__product::commands::SlashCommandAction>,
         cx: &ConnectionTo<Client>,
     ) -> Result<SlashPromptAction, Error> {
-        use psychevo::command_registry::{SlashCommandAction, SlashCommandEffect};
+        use psychevo::__product::commands::{SlashCommandAction, SlashCommandEffect};
 
         match effect {
             SlashCommandEffect::LocalText => {
@@ -518,7 +518,7 @@ impl PsychevoAcpAgent {
     }
 
     pub(crate) async fn usage_command_text(&self, session: &AcpSession) -> Result<String, Error> {
-        let value = usage_stats(psychevo::types::StatsOptions {
+        let value = usage_stats(psychevo::__product::runtime::StatsOptions {
             state: self.state.clone(),
             cwd: session.cwd.clone(),
             all: false,

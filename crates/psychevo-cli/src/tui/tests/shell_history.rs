@@ -72,7 +72,7 @@ pub(crate) async fn running_status_line_shows_spinner_elapsed_and_esc_hint() {
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -110,7 +110,7 @@ pub(crate) async fn status_line_elapsed_survives_run_and_tool_phase_changes() {
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -199,7 +199,7 @@ pub(crate) async fn esc_interrupts_running_turn_without_transcript_row() {
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -240,7 +240,7 @@ pub(crate) async fn esc_dismisses_slash_menu_before_interrupting_running_turn() 
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -473,7 +473,7 @@ pub(crate) async fn fullscreen_user_shell_during_agent_turn_waits_for_run_start_
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -548,7 +548,7 @@ pub(crate) async fn auxiliary_user_shell_missing_config_does_not_execute_marker_
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {

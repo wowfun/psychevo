@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
-use psychevo::state::StateRuntime;
+use psychevo::__product::persistence::StateRuntime;
 
 use crate::args::InitArgs;
 use crate::commands::gateway::stop_managed_for_home;

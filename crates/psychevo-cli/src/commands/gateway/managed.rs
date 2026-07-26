@@ -9,7 +9,7 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
-use psychevo::host_process::{
+use psychevo::__product::platform::{
     ManagedProcess, ProcessIdentityError, atomic_replace_private, instance_lease_is_held,
 };
 use serde::Deserialize;

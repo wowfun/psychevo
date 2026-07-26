@@ -13,7 +13,7 @@ pub(crate) async fn model_catalog_sync_hydrates_persistent_provider_cache() {
         .expect("mock provider")
         .provider
         .clone();
-    psychevo::config::write_cached_model_catalog(
+    psychevo::__product::configuration::write_cached_model_catalog(
         &app.home,
         &provider,
         &[ModelCatalogEntry {

@@ -6,19 +6,19 @@ impl PsychevoAcpAgent {
         image_inputs: Vec<ImageInput>,
         approval_handler: Option<Arc<dyn ApprovalHandler>>,
     ) -> TurnRequest {
-        let mut request = TurnRequest::new(prompt);
-        request.image_inputs = image_inputs;
-        request.source = "acp".to_string();
-        request.config_path = self.options.config_path.clone();
-        request.model = session.model.clone();
-        request.reasoning_effort = session.reasoning_effort.clone();
-        request.include_reasoning = true;
-        request.mode = session.mode;
-        request.permission_mode = session.permission_mode;
-        request.approval_mode = Some(ApprovalMode::Manual);
-        request.approval_handler = approval_handler;
-        request.inherited_env = Some(self.options.inherited_env.clone());
-        request.mcp_servers = session.mcp_servers.clone();
+        let mut request = TurnRequest::new(prompt)
+            .with_prompt_images(image_inputs, true)
+            .with_identity("acp", None)
+            .with_model(session.model.clone(), session.reasoning_effort.clone())
+            .with_reasoning_output(true)
+            .with_execution_policy(
+                session.mode,
+                session.permission_mode,
+                self.options.config_path.clone(),
+            )
+            .with_approval(Some(ApprovalMode::Manual), approval_handler, false)
+            .with_environment(Some(self.options.inherited_env.clone()), None, None)
+            .with_mcp_servers(session.mcp_servers.clone());
         request.__set_adapter_options(AdapterTurnOptions {
             snapshot_root: Some(self.options.home.join("snapshots")),
             ..AdapterTurnOptions::default()
@@ -206,11 +206,11 @@ impl PsychevoAcpAgent {
         prompt: &str,
         cx: &ConnectionTo<Client>,
     ) -> Result<SlashPromptAction, Error> {
-        use psychevo::command_registry::{SlashCommandParse, SlashCommandSurface};
+        use psychevo::__product::commands::{SlashCommandParse, SlashCommandSurface};
 
         let dynamic = self.dynamic_slash_commands(session);
         let effect_and_action =
-            match psychevo::command_registry::parse_slash_command_line(prompt) {
+            match psychevo::__product::commands::parse_slash_command_line(prompt) {
                 SlashCommandParse::NotSlash => return Ok(SlashPromptAction::NotSlashOrPassThrough),
                 SlashCommandParse::Unknown {
                     command,
@@ -218,7 +218,7 @@ impl PsychevoAcpAgent {
                     original: _,
                 } => {
                     if let Some(effect) =
-                        psychevo::command_registry::dynamic_slash_command_effect(
+                        psychevo::__product::commands::dynamic_slash_command_effect(
                             &command, &args, &dynamic,
                         )
                     {
@@ -229,7 +229,7 @@ impl PsychevoAcpAgent {
                 }
                 SlashCommandParse::Known(invocation) => {
                     let active_turn = session.turn.is_some();
-                    let effect = psychevo::command_registry::slash_invocation_effect(
+                    let effect = psychevo::__product::commands::slash_invocation_effect(
                         &invocation,
                         acp_command_capabilities(),
                         SlashCommandSurface::Acp,

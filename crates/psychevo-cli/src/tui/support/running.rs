@@ -50,8 +50,8 @@ pub(crate) fn framework_result_to_runtime(
     result: TurnResult,
     db_path: PathBuf,
     cwd: PathBuf,
-) -> psychevo::types::RunResult {
-    psychevo::types::RunResult {
+) -> psychevo::__product::runtime::RunResult {
+    psychevo::__product::runtime::RunResult {
         session_id: result.thread_id,
         outcome: match result.outcome {
             TurnOutcome::Completed => Outcome::Normal,
@@ -136,7 +136,7 @@ pub(crate) struct AuxiliaryShellTask {
     pub(crate) session_id: Option<String>,
     pub(crate) control: RunControlHandle,
     pub(crate) rx: mpsc::UnboundedReceiver<RunStreamEvent>,
-    pub(crate) task: JoinHandle<psychevo::Result<psychevo::types::UserShellResult>>,
+    pub(crate) task: JoinHandle<psychevo::Result<psychevo::__product::runtime::UserShellResult>>,
 }
 
 pub(crate) struct AuxiliaryAgentTask {
@@ -146,26 +146,26 @@ pub(crate) struct AuxiliaryAgentTask {
     pub(crate) pending_unowned_live_events: Vec<RunStreamEvent>,
     pub(crate) control: RunControlHandle,
     pub(crate) events: RunningTurnEvents,
-    pub(crate) task: JoinHandle<psychevo::Result<psychevo::types::RunResult>>,
+    pub(crate) task: JoinHandle<psychevo::Result<psychevo::__product::runtime::RunResult>>,
 }
 
 pub(crate) enum RunningTask {
-    Agent(JoinHandle<psychevo::Result<psychevo::types::RunResult>>),
-    UserShell(JoinHandle<psychevo::Result<psychevo::types::UserShellResult>>),
+    Agent(JoinHandle<psychevo::Result<psychevo::__product::runtime::RunResult>>),
+    UserShell(JoinHandle<psychevo::Result<psychevo::__product::runtime::UserShellResult>>),
 }
 
 pub(crate) enum RunningCompletion {
     Agent(
         Box<
             std::result::Result<
-                psychevo::Result<psychevo::types::RunResult>,
+                psychevo::Result<psychevo::__product::runtime::RunResult>,
                 tokio::task::JoinError,
             >,
         >,
     ),
     UserShell(
         std::result::Result<
-            psychevo::Result<psychevo::types::UserShellResult>,
+            psychevo::Result<psychevo::__product::runtime::UserShellResult>,
             tokio::task::JoinError,
         >,
     ),
@@ -340,7 +340,7 @@ pub(crate) fn prompt_display_metadata(
 fn tui_editable_input_envelope(
     content_text: &str,
     attachments: &[PendingImageAttachment],
-) -> psychevo::types::StoredEditableInputEnvelope {
+) -> psychevo::__product::runtime::StoredEditableInputEnvelope {
     let mut parts = Vec::new();
     let mut cursor = 0usize;
     for (image_block_index, attachment) in attachments.iter().enumerate() {
@@ -349,21 +349,29 @@ fn tui_editable_input_envelope(
         };
         let placeholder_start = cursor + relative;
         if placeholder_start > cursor {
-            parts.push(psychevo::types::StoredEditableInputPart::Text {
-                text: content_text[cursor..placeholder_start].to_string(),
-            });
+            parts.push(
+                psychevo::__product::runtime::StoredEditableInputPart::Text {
+                    text: content_text[cursor..placeholder_start].to_string(),
+                },
+            );
         }
-        parts.push(psychevo::types::StoredEditableInputPart::Image { image_block_index });
+        parts.push(
+            psychevo::__product::runtime::StoredEditableInputPart::Image { image_block_index },
+        );
         cursor = placeholder_start + attachment.placeholder.len();
     }
     if cursor < content_text.len() {
-        parts.push(psychevo::types::StoredEditableInputPart::Text {
-            text: content_text[cursor..].to_string(),
-        });
+        parts.push(
+            psychevo::__product::runtime::StoredEditableInputPart::Text {
+                text: content_text[cursor..].to_string(),
+            },
+        );
     } else if parts.is_empty() {
-        parts.push(psychevo::types::StoredEditableInputPart::Text {
-            text: content_text.to_string(),
-        });
+        parts.push(
+            psychevo::__product::runtime::StoredEditableInputPart::Text {
+                text: content_text.to_string(),
+            },
+        );
     }
-    psychevo::types::StoredEditableInputEnvelope { version: 1, parts }
+    psychevo::__product::runtime::StoredEditableInputEnvelope { version: 1, parts }
 }

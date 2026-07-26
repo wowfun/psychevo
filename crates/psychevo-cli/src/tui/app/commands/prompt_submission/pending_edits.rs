@@ -1,17 +1,10 @@
 impl TuiApp {
     pub(crate) fn cancel_pending_fullscreen_inputs(&mut self, ui: &mut FullscreenUi<'_>) {
-        let active = self.active_gateway_turn_selector(ui);
-        let legacy_control = active
-            .is_none()
-            .then(|| ui.running.as_ref().map(|running| running.control.clone()))
-            .flatten();
+        let control = ui.running.as_ref().map(|running| running.control.clone());
         let mut cancelled_steers = 0usize;
         let mut retained = VecDeque::new();
         while let Some(input) = ui.pending_steers.pop_front() {
-            let cancelled = active.as_ref().is_some_and(|(selector, expected)| {
-                self.gateway
-                    .cancel_steer(selector.clone(), expected.as_deref(), input.id)
-            }) || legacy_control
+            let cancelled = control
                 .as_ref()
                 .is_some_and(|control| control.cancel_pending_user_message(input.id));
             if cancelled {
@@ -56,15 +49,10 @@ impl TuiApp {
     ) -> Result<()> {
         match target {
             PendingInputRef::Steer(id) => {
-                let cancelled =
-                    self.active_gateway_turn_selector(ui)
-                        .is_some_and(|(selector, expected)| {
-                            self.gateway.cancel_steer(selector, expected.as_deref(), id)
-                        })
-                        || ui
-                            .running
-                            .as_ref()
-                            .is_some_and(|running| running.control.cancel_pending_user_message(id));
+                let cancelled = ui
+                    .running
+                    .as_ref()
+                    .is_some_and(|running| running.control.cancel_pending_user_message(id));
                 if !cancelled {
                     ui.set_ephemeral_error("steer already sent");
                     return Ok(());
@@ -164,19 +152,10 @@ impl TuiApp {
             false,
         )?
         .message;
-        let updated =
-            self.active_gateway_turn_selector(ui)
-                .is_some_and(|(selector, expected_turn_id)| {
-                    self.gateway.update_steer(
-                        selector,
-                        expected_turn_id.as_deref(),
-                        id,
-                        message.clone(),
-                    )
-                })
-                || ui.running.as_ref().is_some_and(|running| {
-                    running.control.update_pending_user_message(id, message)
-                });
+        let updated = ui
+            .running
+            .as_ref()
+            .is_some_and(|running| running.control.update_pending_user_message(id, message));
         if !updated {
             return Ok(false);
         }

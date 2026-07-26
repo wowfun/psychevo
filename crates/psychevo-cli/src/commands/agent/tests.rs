@@ -145,7 +145,7 @@ pub(crate) fn print_wait_report(value: &Value) {
     }
 }
 
-pub(crate) fn print_agent_record(record: &psychevo::agents::AgentRunRecord) {
+pub(crate) fn print_agent_record(record: &psychevo::__product::capabilities::AgentRunRecord) {
     println!(
         "{}\t{}\t{:?}\t{}",
         record.id, record.agent_name, record.status, record.task

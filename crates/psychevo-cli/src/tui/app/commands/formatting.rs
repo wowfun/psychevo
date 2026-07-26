@@ -167,11 +167,16 @@ impl TuiApp {
         ui.approval_rx = Some(approval_rx);
         let (control_handle, control) = run_control();
         let mut request = self.framework_turn_request_with_images(prompt, image_inputs);
-        request.prompt_display = prompt_display_metadata(display_prompt, &images, &self.cwd);
-        request.approval_handler = Some(Arc::new(TuiApprovalHandler {
-            session_id: self.current_session.clone(),
-            sender: approval_tx,
-        }));
+        request = request
+            .with_prompt_display(prompt_display_metadata(display_prompt, &images, &self.cwd))
+            .with_approval(
+                None,
+                Some(Arc::new(TuiApprovalHandler {
+                    session_id: self.current_session.clone(),
+                    sender: approval_tx,
+                })),
+                true,
+            );
         request.__set_adapter_options(psychevo::AdapterTurnOptions {
             snapshot_root: Some(self.home.join("snapshots")),
             run_stream_observer: Some(Arc::new(move |event| {
@@ -514,7 +519,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push("--format json".to_string());
             }
             if options.include
-                != psychevo::session_export::SessionExportIncludeSet::default_for(
+                != psychevo::__product::sessions::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Export,
                 )
             {
@@ -528,7 +533,7 @@ pub(crate) fn slash_command_echo(command: &SlashCommand) -> String {
                 parts.push(path.clone());
             }
             if options.include
-                != psychevo::session_export::SessionExportIncludeSet::default_for(
+                != psychevo::__product::sessions::SessionExportIncludeSet::default_for(
                     SessionArtifactKind::Share,
                 )
             {

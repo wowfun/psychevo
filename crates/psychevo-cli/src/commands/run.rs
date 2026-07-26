@@ -8,9 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo::{
-    Application, StartThreadRequest, ThreadListQuery, TurnEvent, TurnOutcome, TurnRequest,
-    types::ApprovalHandler, types::PermissionApprovalDecision, types::PermissionApprovalRequest,
-    types::PermissionMode, types::ProjectContextInstructionMode, types::RunMode,
+    __product::runtime::ApprovalHandler, __product::runtime::PermissionApprovalDecision,
+    __product::runtime::PermissionApprovalRequest, __product::runtime::PermissionMode,
+    __product::runtime::ProjectContextInstructionMode, __product::runtime::RunMode, Application,
+    StartThreadRequest, ThreadListQuery, TurnEvent, TurnOutcome, TurnRequest,
 };
 use psychevo_gateway::{
     GatewayEvent, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus, TranscriptEntry,
@@ -135,23 +136,19 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
             }));
             client.start_thread(request).await?
         };
-        let mut request = TurnRequest::new(prompt);
-        request.source = "run".to_string();
-        request.config_path = config_path;
-        request.project_context = project_context_override;
-        request.model = args.model.clone();
-        request.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-        request.runtime_ref = runtime_ref;
-        request.runtime_options = runtime_options;
-        request.include_reasoning = args.include_reasoning;
-        request.mode = run_mode;
-        request.permission_mode = permission_mode;
-        request.approval_handler = approval_handler;
-        request.inherited_env = Some(env_map);
-        request.agent = args.agent.clone();
-        request.no_agents = args.no_agents;
-        request.no_skills = args.no_skills;
-        request.skill_inputs = args.skill.clone();
+        let request = TurnRequest::new(prompt)
+            .with_identity("run", None)
+            .with_model(
+                args.model.clone(),
+                args.variant.map(|variant| variant.as_str().to_string()),
+            )
+            .with_runtime(runtime_ref, runtime_options)
+            .with_reasoning_output(args.include_reasoning)
+            .with_execution_policy(run_mode, permission_mode, config_path)
+            .with_approval(None, approval_handler, false)
+            .with_environment(Some(env_map), project_context_override, None)
+            .with_agent(args.agent.clone(), args.no_agents, args.no_skills)
+            .with_skills(args.skill.clone());
         let handle = thread.start_turn(request).await?;
         let receipt = handle.receipt().clone();
         let mut stream = handle.events();
@@ -168,7 +165,7 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
     .await;
     let shutdown = application.shutdown().await;
     let (receipt, events, result) = execution?;
-    shutdown?;
+    shutdown?.require_clean()?;
 
     let success = result.outcome == TurnOutcome::Completed && result.tool_failures == 0;
     if args.format == RunFormatArg::Json {
@@ -287,7 +284,9 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             }
             let mut entry = projected_entry(
                 &receipt.turn_id,
-                psychevo::types::RunStreamEvent::value(serde_json::Value::Object(runtime)),
+                psychevo::__product::runtime::RunStreamEvent::value(serde_json::Value::Object(
+                    runtime,
+                )),
             )?;
             entry.metadata = metadata;
             entry.usage = usage;
@@ -297,21 +296,21 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
         TurnEvent::Tool { stage, data } => {
             let entry = projected_entry(
                 &receipt.turn_id,
-                psychevo::types::RunStreamEvent::value(data),
+                psychevo::__product::runtime::RunStreamEvent::value(data),
             )?;
             typed_item_event(receipt, stage, entry)
         }
         TurnEvent::ReasoningDelta { text } => {
             let entry = projected_entry(
                 &receipt.turn_id,
-                psychevo::types::RunStreamEvent::ReasoningDelta { text },
+                psychevo::__product::runtime::RunStreamEvent::ReasoningDelta { text },
             )?;
             typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
         }
         TurnEvent::ReasoningCompleted { text } => {
             let mut entry = projected_entry(
                 &receipt.turn_id,
-                psychevo::types::RunStreamEvent::ReasoningDelta {
+                psychevo::__product::runtime::RunStreamEvent::ReasoningDelta {
                     text: text.unwrap_or_default(),
                 },
             )?;
@@ -402,7 +401,7 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
 
 fn projected_entry(
     turn_id: &str,
-    event: psychevo::types::RunStreamEvent,
+    event: psychevo::__product::runtime::RunStreamEvent,
 ) -> Option<TranscriptEntry> {
     match gateway_event_from_run_stream(turn_id, &event)? {
         GatewayEvent::EntryStarted { entry, .. }

@@ -6,22 +6,19 @@ impl TuiApp {
         prompt: String,
         image_inputs: Vec<ImageInput>,
     ) -> TurnRequest {
-        let mut request = TurnRequest::new(prompt);
-        request.image_inputs = image_inputs;
-        request.extract_prompt_image_sources = false;
-        request.source = "tui".to_string();
-        request.config_path = self.config_path.clone();
-        request.model = self.current_model.clone();
-        request.reasoning_effort = self.current_variant.clone();
-        request.mode = self.current_mode;
-        request.permission_mode = Some(self.current_permission_mode);
-        request.inherited_env = Some(self.env_map.clone());
-        request.agent = self.current_agent.clone();
-        request.no_agents = self.no_agents;
-        request.no_skills = self.no_skills;
-        request.clarify_enabled = true;
-        request.skill_inputs = self.skill_inputs.clone();
-        request
+        TurnRequest::new(prompt)
+            .with_prompt_images(image_inputs, false)
+            .with_identity("tui", None)
+            .with_model(self.current_model.clone(), self.current_variant.clone())
+            .with_execution_policy(
+                self.current_mode,
+                Some(self.current_permission_mode),
+                self.config_path.clone(),
+            )
+            .with_approval(None, None, true)
+            .with_environment(Some(self.env_map.clone()), None, None)
+            .with_agent(self.current_agent.clone(), self.no_agents, self.no_skills)
+            .with_skills(self.skill_inputs.clone())
     }
 
     pub(crate) async fn framework_thread(&self) -> psychevo::Result<psychevo::Thread> {

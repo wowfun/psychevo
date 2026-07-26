@@ -3,13 +3,15 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo::state::StateRuntime;
+use psychevo::__product::persistence::StateRuntime;
 use psychevo::{
-    paths::canonicalize_cwd, run::reload_session_context, session_export::SessionArtifactKind,
-    session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
-    session_export::SessionExportOptions, session_export::SessionExportWriteResult,
-    session_export::default_session_export_filename, session_export::render_session_export,
-    session_export::write_session_export, types::ReloadContextOptions, types::SessionSummary,
+    __product::platform::canonicalize_cwd, __product::runtime::ReloadContextOptions,
+    __product::runtime::SessionSummary, __product::runtime::reload_session_context,
+    __product::sessions::SessionArtifactKind, __product::sessions::SessionExportFormat,
+    __product::sessions::SessionExportIncludeSet, __product::sessions::SessionExportOptions,
+    __product::sessions::SessionExportWriteResult,
+    __product::sessions::default_session_export_filename,
+    __product::sessions::render_session_export, __product::sessions::write_session_export,
 };
 use serde_json::{Value, json};
 

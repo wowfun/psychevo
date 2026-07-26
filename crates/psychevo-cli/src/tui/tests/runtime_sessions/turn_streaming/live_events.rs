@@ -78,8 +78,8 @@ pub(crate) async fn shift_tab_cycles_mode_without_status_row() {
     );
 }
 
-pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo::types::RunResult {
-    psychevo::types::RunResult {
+pub(crate) fn finished_run_result(app: &TuiApp) -> psychevo::__product::runtime::RunResult {
+    psychevo::__product::runtime::RunResult {
         session_id: "finished-session".to_string(),
         outcome: Outcome::Normal,
         terminal_reason: None,
@@ -229,7 +229,7 @@ pub(crate) async fn final_message_defers_turn_meta_while_foreground_task_is_runn
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let _ = done_rx.await;
-        Ok(psychevo::types::RunResult {
+        Ok(psychevo::__product::runtime::RunResult {
             session_id: "streamed-session".to_string(),
             outcome: Outcome::Normal,
             terminal_reason: None,

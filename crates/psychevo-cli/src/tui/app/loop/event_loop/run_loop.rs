@@ -98,9 +98,6 @@ impl TuiApp {
             }
         }
         if let Some(running) = ui.running.take() {
-            if let Some(selector) = running.selector.clone() {
-                self.gateway.interrupt_turn(selector).await;
-            }
             running.control.abort();
             ui.discard_permission_approvals_for_abort();
             match running.task {

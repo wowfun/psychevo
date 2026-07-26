@@ -3,8 +3,10 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    config::auth_status_value, config::create_scoped_custom_provider, config::set_default_model,
-    config::set_provider_api_key, types::ScopedCustomProviderInput,
+    __product::configuration::auth_status_value,
+    __product::configuration::create_scoped_custom_provider,
+    __product::configuration::set_default_model, __product::configuration::set_provider_api_key,
+    __product::runtime::ScopedCustomProviderInput,
 };
 use serde_json::Value;
 
@@ -40,7 +42,7 @@ pub(crate) async fn run_auth_command_inner(args: &AuthArgs) -> Result<ExitCode> 
 
 pub(crate) fn auth_status(
     args: &AuthStatusArgs,
-    options: &psychevo::types::RunOptions,
+    options: &psychevo::__product::runtime::RunOptions,
 ) -> Result<ExitCode> {
     let value = auth_status_value(options, args.provider.as_deref())?;
     if args.json {
@@ -122,7 +124,7 @@ pub(crate) fn auth_setup(
 
 pub(crate) fn auth_set(
     args: &AuthSetArgs,
-    options: &psychevo::types::RunOptions,
+    options: &psychevo::__product::runtime::RunOptions,
     home: &std::path::Path,
     cwd: &std::path::Path,
 ) -> Result<ExitCode> {

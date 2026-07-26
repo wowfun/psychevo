@@ -36,7 +36,7 @@ pub(crate) async fn fullscreen_refreshes_title_after_detached_agent_task_finishe
             .await?
             .set_session_title(&task_session_id, "X Daily")
             .await?;
-        Ok(psychevo::types::RunResult {
+        Ok(psychevo::__product::runtime::RunResult {
             session_id: task_session_id,
             outcome: Outcome::Normal,
             terminal_reason: None,
@@ -96,7 +96,7 @@ pub(crate) async fn interrupted_turn_restores_queued_inputs_to_composer_without_
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::types::RunResult {
+    let result = psychevo::__product::runtime::RunResult {
         session_id: "aborted-session".to_string(),
         outcome: Outcome::Aborted,
         terminal_reason: None,
@@ -263,7 +263,7 @@ pub(crate) async fn completed_normal_task_with_tool_failures_does_not_mark_tui_e
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::types::RunResult {
+    let result = psychevo::__product::runtime::RunResult {
         session_id: "normal-with-tool-failure".to_string(),
         outcome: Outcome::Normal,
         terminal_reason: None,
@@ -312,7 +312,7 @@ pub(crate) async fn completed_budget_exhaustion_renders_specific_error_row() {
     let mut app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::types::RunResult {
+    let result = psychevo::__product::runtime::RunResult {
         session_id: "budget-exhausted".to_string(),
         outcome: Outcome::Failed,
         terminal_reason: Some(psychevo::__agent_core::TerminalReason::MaxTurnsExceeded {

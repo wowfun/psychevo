@@ -227,13 +227,17 @@ pub async fn run_stdio(options: AcpOptions) -> std::io::Result<()> {
     let result = Arc::clone(&agent)
         .serve(ByteStreams::new(stdout, stdin))
         .await;
-    let shutdown = agent.application.shutdown().await;
+    let shutdown = agent
+        .application
+        .shutdown()
+        .await
+        .and_then(psychevo::ShutdownReport::require_clean);
     match (result, shutdown) {
         (Err(error), _) => Err(std::io::Error::other(format!("ACP error: {error}"))),
         (Ok(()), Err(error)) => Err(std::io::Error::other(format!(
             "ACP shutdown error: {error}"
         ))),
-        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Ok(_)) => Ok(()),
     }
 }
 

@@ -1,6 +1,6 @@
 pub(crate) fn acp_command_capabilities()
--> &'static [psychevo::command_registry::CommandCapability] {
-    use psychevo::command_registry::CommandCapability;
+-> &'static [psychevo::__product::commands::CommandCapability] {
+    use psychevo::__product::commands::CommandCapability;
     &[
         CommandCapability::ActiveTurnControl,
         CommandCapability::Queue,
@@ -196,7 +196,7 @@ pub(crate) fn reasoning_effort_value(value: &str) -> Option<String> {
 }
 
 pub(crate) fn available_commands_from(
-    available: psychevo::command_registry::AvailableSlashCommands,
+    available: psychevo::__product::commands::AvailableSlashCommands,
 ) -> Vec<AvailableCommand> {
     available
         .commands
@@ -212,7 +212,7 @@ pub(crate) fn available_commands_from(
                 )
             };
             let input = match command.argument_kind {
-                psychevo::command_registry::CommandArgumentKind::None => None,
+                psychevo::__product::commands::CommandArgumentKind::None => None,
                 _ => Some(AvailableCommandInput::Text(TextCommandInput::new(
                     command.usage,
                 ))),

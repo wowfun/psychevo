@@ -3,10 +3,10 @@ pub(crate) use std::time::Duration;
 
 pub(crate) use anyhow::{Result, anyhow};
 pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-pub(crate) use psychevo::command_registry::parse_session_export_command_args;
+pub(crate) use psychevo::__product::commands::parse_session_export_command_args;
 pub(crate) use psychevo::{
-    prompt_image::split_image_source_argument, session_export::SessionArtifactKind,
-    session_export::SessionExportFormat, session_export::SessionExportIncludeSet,
+    __product::presentation::split_image_source_argument, __product::sessions::SessionArtifactKind,
+    __product::sessions::SessionExportFormat, __product::sessions::SessionExportIncludeSet,
 };
 pub(crate) use serde_json::Value;
 

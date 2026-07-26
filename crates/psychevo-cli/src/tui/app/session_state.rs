@@ -235,7 +235,7 @@ impl TuiApp {
         let Some(edge) = store.find_agent_edge(&session_id).await? else {
             return Ok(false);
         };
-        if edge.status != psychevo::state::AgentEdgeStatus::Open {
+        if edge.status != psychevo::__product::persistence::AgentEdgeStatus::Open {
             return Ok(false);
         }
         let message_count = store.load_tui_message_summaries(&session_id).await?.len();

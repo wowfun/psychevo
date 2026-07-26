@@ -4,24 +4,27 @@ pub(crate) use super::*;
 async fn bind_native(app: &TuiApp, session_id: &str) {
     let cwd = app.cwd.display().to_string();
     app.state_runtime
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
-            thread_id: session_id,
-            agent_ref: None,
-            agent_fingerprint: "test-agent",
-            agent_definition_json: "null",
-            runtime_ref: "native",
-            backend_kind: "native",
-            native_kind: "native",
-            native_session_id: Some(session_id),
-            cwd: &cwd,
-            profile_fingerprint: "test-profile",
-            profile_revision: "1",
-            profile_config_json: "{}",
-            adapter_kind: "native",
-            adapter_revision: "test",
-            ownership: psychevo::state::GatewayRuntimeBindingOwnership::ReadWrite,
-            parent_thread_id: None,
-        })
+        .create_gateway_runtime_binding(
+            psychevo::__product::persistence::GatewayRuntimeBindingInput {
+                thread_id: session_id,
+                agent_ref: None,
+                agent_fingerprint: "test-agent",
+                agent_definition_json: "null",
+                runtime_ref: "native",
+                backend_kind: "native",
+                native_kind: "native",
+                native_session_id: Some(session_id),
+                cwd: &cwd,
+                profile_fingerprint: "test-profile",
+                profile_revision: "1",
+                profile_config_json: "{}",
+                adapter_kind: "native",
+                adapter_revision: "test",
+                ownership:
+                    psychevo::__product::persistence::GatewayRuntimeBindingOwnership::ReadWrite,
+                parent_thread_id: None,
+            },
+        )
         .await
         .expect("Native binding");
 }
@@ -40,7 +43,7 @@ async fn persisted_history_message(app: &TuiApp, session_id: &str) -> i64 {
                 timestamp_ms: 1,
             },
             Some(serde_json::json!({
-                psychevo::types::EDITABLE_INPUT_METADATA_KEY: {
+                psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY: {
                     "version": 1,
                     "parts": [
                         {"type": "text", "text": "before "},
@@ -78,19 +81,19 @@ pub(crate) async fn tui_prompt_metadata_keeps_text_image_order_in_exact_envelope
     assert_eq!(
         metadata.editable_input.expect("exact envelope").parts,
         vec![
-            psychevo::types::StoredEditableInputPart::Text {
+            psychevo::__product::runtime::StoredEditableInputPart::Text {
                 text: "before ".to_string(),
             },
-            psychevo::types::StoredEditableInputPart::Image {
+            psychevo::__product::runtime::StoredEditableInputPart::Image {
                 image_block_index: 0,
             },
-            psychevo::types::StoredEditableInputPart::Text {
+            psychevo::__product::runtime::StoredEditableInputPart::Text {
                 text: " middle ".to_string(),
             },
-            psychevo::types::StoredEditableInputPart::Image {
+            psychevo::__product::runtime::StoredEditableInputPart::Image {
                 image_block_index: 1,
             },
-            psychevo::types::StoredEditableInputPart::Text {
+            psychevo::__product::runtime::StoredEditableInputPart::Text {
                 text: " after".to_string(),
             },
         ]

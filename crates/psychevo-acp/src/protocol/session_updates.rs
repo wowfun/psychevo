@@ -163,7 +163,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn advertises_tools_slash_command() {
         let commands = available_command_lines_from(available_commands_from(
-            psychevo::command_registry::available_slash_commands_for_surface(
+            psychevo::__product::commands::available_slash_commands_for_surface(
                 acp_command_capabilities(),
                 false,
                 &[],
@@ -179,7 +179,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn parses_slash_prompt_command_and_args() {
-        use psychevo::command_registry::{
+        use psychevo::__product::commands::{
             SlashCommandAction, SlashCommandParse, parse_slash_command_line,
         };
 

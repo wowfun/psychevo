@@ -64,7 +64,7 @@ impl TuiApp {
 
     pub(crate) fn sandbox_status_text(&self) -> Result<String> {
         let options = self.run_options(String::new());
-        Ok(psychevo::sandbox::sandbox_status_text(
+        Ok(psychevo::__product::platform::sandbox_status_text(
             &options,
             self.current_mode,
         )?)
@@ -291,7 +291,7 @@ impl TuiApp {
     pub(crate) async fn reload_context_for_current_session(
         &self,
         ui: &FullscreenUi<'_>,
-    ) -> Result<psychevo::types::ReloadContextResult> {
+    ) -> Result<psychevo::__product::runtime::ReloadContextResult> {
         if ui.running.is_some() {
             return Err(anyhow!("finish the current turn before reloading context"));
         }

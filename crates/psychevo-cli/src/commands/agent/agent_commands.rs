@@ -5,15 +5,15 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use psychevo::state::{AgentEdgeRecord, StateRuntime};
+use psychevo::__product::persistence::{AgentEdgeRecord, StateRuntime};
 use psychevo::{
-    Application, StartThreadRequest, TurnOutcome, TurnRequest, accounting::effective_usage_total,
-    agents::AgentBackendConfig, agents::AgentCatalog, agents::AgentDiscoveryOptions,
-    agents::agent_status_value, agents::close_agent_id, agents::discover_agents,
-    agents::list_agents_value, agents::resolve_agent_definition, agents::resume_agent_id,
-    agents::send_agent_message, agents::valid_agent_name, agents::view_agent_value_with_catalog,
-    agents::wait_agent_mailbox, config::load_agent_backend_configs, config::set_config_value,
-    types::SessionSummary, types::TuiMessageSummary,
+    Application, StartThreadRequest, TurnOutcome, TurnRequest, __product::usage::effective_usage_total,
+    __product::capabilities::AgentBackendConfig, __product::capabilities::AgentCatalog, __product::capabilities::AgentDiscoveryOptions,
+    __product::capabilities::agent_status_value, __product::capabilities::close_agent_id, __product::capabilities::discover_agents,
+    __product::capabilities::list_agents_value, __product::capabilities::resolve_agent_definition, __product::capabilities::resume_agent_id,
+    __product::capabilities::send_agent_message, __product::capabilities::valid_agent_name, __product::capabilities::view_agent_value_with_catalog,
+    __product::capabilities::wait_agent_mailbox, __product::configuration::load_agent_backend_configs, __product::configuration::set_config_value,
+    __product::runtime::SessionSummary, __product::runtime::TuiMessageSummary,
 };
 use serde_json::{Value, json};
 
@@ -303,12 +303,14 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
             "pid": std::process::id(),
         }));
         let thread = application.client().start_thread(start).await?;
-        let mut request = TurnRequest::new(prompt);
-        request.source = "agent-run".to_string();
-        request.model = args.model;
-        request.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-        request.inherited_env = Some(env_map);
-        request.agent = Some(selected.name);
+        let request = TurnRequest::new(prompt)
+            .with_identity("agent-run", None)
+            .with_model(
+                args.model,
+                args.variant.map(|variant| variant.as_str().to_string()),
+            )
+            .with_environment(Some(env_map), None, None)
+            .with_agent(Some(selected.name), false, false);
         let handle = thread.start_turn(request).await?;
         let mut stream = handle.events();
         let events = tokio::spawn(async move {
@@ -327,7 +329,7 @@ pub(crate) async fn run_agent(args: AgentRunArgs) -> Result<ExitCode> {
     .await;
     let shutdown = application.shutdown().await;
     let (result, events) = execution?;
-    shutdown?;
+    shutdown?.require_clean()?;
 
     if args.format == RunFormatArg::Json {
         for event in &events {

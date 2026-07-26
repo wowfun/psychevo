@@ -3,7 +3,8 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    config::custom_provider_api_key_env, config::remove_config_value, config::set_config_value,
+    __product::configuration::custom_provider_api_key_env,
+    __product::configuration::remove_config_value, __product::configuration::set_config_value,
 };
 use serde_json::json;
 

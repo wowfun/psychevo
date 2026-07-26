@@ -4,10 +4,13 @@ use std::process::{Command, ExitCode};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    config::config_provider_list_value, config::config_show_value,
-    config::create_scoped_custom_provider, config::permission_rules_value,
-    config::remove_local_permission_rule, config::set_config_value, config::set_provider_api_key,
-    types::ConfigScope, types::ScopedCustomProviderInput,
+    __product::configuration::config_provider_list_value,
+    __product::configuration::config_show_value,
+    __product::configuration::create_scoped_custom_provider,
+    __product::configuration::permission_rules_value,
+    __product::configuration::remove_local_permission_rule,
+    __product::configuration::set_config_value, __product::configuration::set_provider_api_key,
+    __product::runtime::ConfigScope, __product::runtime::ScopedCustomProviderInput,
 };
 use serde_json::{Value, json};
 

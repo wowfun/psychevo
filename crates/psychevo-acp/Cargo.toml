@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 agent-client-protocol.workspace = true
 futures.workspace = true
-psychevo = { path = "../psychevo", features = ["internal"] }
+psychevo = { path = "../psychevo", features = ["product"] }
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

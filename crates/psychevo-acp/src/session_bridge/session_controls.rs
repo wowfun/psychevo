@@ -7,7 +7,7 @@ impl PsychevoAcpAgent {
             return Ok("no runtime session yet".to_string());
         };
         let result =
-            psychevo::run::reload_session_context(psychevo::types::ReloadContextOptions {
+            psychevo::__product::runtime::reload_session_context(psychevo::__product::runtime::ReloadContextOptions {
                 state: self.state.clone(),
                 session: runtime_session_id,
                 config_path: self.options.config_path.clone(),
@@ -347,7 +347,7 @@ impl PsychevoAcpAgent {
             .cloned();
         let Some(session) = session else {
             return available_commands_from(
-                psychevo::command_registry::AvailableSlashCommands {
+                psychevo::__product::commands::AvailableSlashCommands {
                     commands: Vec::new(),
                     hidden_dynamic: 0,
                 },
@@ -361,8 +361,8 @@ impl PsychevoAcpAgent {
         &self,
         session: &AcpSession,
         active_turn: bool,
-    ) -> psychevo::command_registry::AvailableSlashCommands {
-        psychevo::command_registry::available_slash_commands_for_surface(
+    ) -> psychevo::__product::commands::AvailableSlashCommands {
+        psychevo::__product::commands::available_slash_commands_for_surface(
             acp_command_capabilities(),
             active_turn,
             &self.dynamic_slash_commands(session),
@@ -373,14 +373,14 @@ impl PsychevoAcpAgent {
     pub(crate) fn dynamic_slash_commands(
         &self,
         session: &AcpSession,
-    ) -> Vec<psychevo::command_registry::DynamicSlashCommand> {
+    ) -> Vec<psychevo::__product::commands::DynamicSlashCommand> {
         let mut commands = Vec::new();
         if let Ok(bundles) = list_skill_bundles(&self.options.home, &session.cwd) {
             for bundle in bundles {
-                commands.push(psychevo::command_registry::DynamicSlashCommand {
+                commands.push(psychevo::__product::commands::DynamicSlashCommand {
                     name: bundle.slug.clone(),
                     summary: bundle.description,
-                    prompt: psychevo::command_registry::skill_prompt_marker(
+                    prompt: psychevo::__product::commands::skill_prompt_marker(
                         &bundle.slug,
                         "",
                     ),
@@ -397,10 +397,10 @@ impl PsychevoAcpAgent {
             no_skills: false,
         }) {
             for skill in catalog.skills {
-                commands.push(psychevo::command_registry::DynamicSlashCommand {
+                commands.push(psychevo::__product::commands::DynamicSlashCommand {
                     name: skill.name.clone(),
                     summary: skill.description,
-                    prompt: psychevo::command_registry::skill_prompt_marker(
+                    prompt: psychevo::__product::commands::skill_prompt_marker(
                         &skill.name,
                         "",
                     ),

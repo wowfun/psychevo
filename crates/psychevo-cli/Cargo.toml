@@ -22,7 +22,7 @@ futures.workspace = true
 ignore.workspace = true
 psychevo-acp = { path = "../psychevo-acp" }
 psychevo-gateway = { path = "../psychevo-gateway", default-features = false }
-psychevo = { path = "../psychevo", features = ["internal"] }
+psychevo = { path = "../psychevo", features = ["product"] }
 pulldown-cmark.workspace = true
 qrcode = { workspace = true, optional = true }
 ratatui.workspace = true

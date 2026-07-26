@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow, bail};
-use psychevo::state::StateRuntime;
+use psychevo::__product::persistence::StateRuntime;
 use serde_json::{Value, json};
 
 use crate::args::{

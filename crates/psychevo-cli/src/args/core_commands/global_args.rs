@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 #[derive(Debug, Parser)]
-#[command(name = "pevo")]
+#[command(name = "pevo", version)]
 #[command(
     about = "Local coding-agent CLI and terminal UI",
     long_about = "pevo runs Psychevo coding-agent tasks, opens the fullscreen terminal UI, and manages local sessions, skills, models, configuration, credentials, and usage data."

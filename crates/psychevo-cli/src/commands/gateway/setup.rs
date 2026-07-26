@@ -4,9 +4,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    config::ChannelSetupInput, config::channel_doctor_value, config::channel_list_value,
-    config::channel_summary_value, config::set_channel_enabled, config::setup_channel_connection,
-    config::upsert_channel_connection,
+    __product::configuration::ChannelSetupInput, __product::configuration::channel_doctor_value,
+    __product::configuration::channel_list_value, __product::configuration::channel_summary_value,
+    __product::configuration::set_channel_enabled,
+    __product::configuration::setup_channel_connection,
+    __product::configuration::upsert_channel_connection,
 };
 use psychevo_gateway::im::ImAdapter;
 use psychevo_gateway::im::adapters::{

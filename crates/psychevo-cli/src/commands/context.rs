@@ -2,10 +2,10 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
-use psychevo::state::StateRuntime;
+use psychevo::__product::persistence::StateRuntime;
 use psychevo::{
-    context_usage::ContextOptions, context_usage::context_snapshot,
-    context_usage::format_context_snapshot_text,
+    __product::usage::ContextOptions, __product::usage::context_snapshot,
+    __product::usage::format_context_snapshot_text,
 };
 
 use crate::args::ContextArgs;

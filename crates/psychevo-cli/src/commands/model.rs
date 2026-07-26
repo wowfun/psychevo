@@ -3,9 +3,12 @@ use std::process::ExitCode;
 
 use anyhow::{Result, anyhow};
 use psychevo::{
-    config::configured_models, config::fetch_and_cache_model_catalog,
-    config::model_catalog_providers, config::selected_configured_model, config::set_default_model,
-    types::ConfiguredModel, types::ModelCatalogEntry, types::ModelCatalogProvider,
+    __product::configuration::configured_models,
+    __product::configuration::fetch_and_cache_model_catalog,
+    __product::configuration::model_catalog_providers,
+    __product::configuration::selected_configured_model,
+    __product::configuration::set_default_model, __product::runtime::ConfiguredModel,
+    __product::runtime::ModelCatalogEntry, __product::runtime::ModelCatalogProvider,
 };
 use serde_json::{Value, json};
 
@@ -43,7 +46,7 @@ pub(crate) async fn run_model_command_inner(args: &ModelArgs) -> Result<ExitCode
 
 pub(crate) fn list_models(
     args: &ModelListArgs,
-    options: &psychevo::types::RunOptions,
+    options: &psychevo::__product::runtime::RunOptions,
 ) -> Result<()> {
     let mut models = configured_models(options)?;
     if let Some(provider) = &args.provider {
@@ -79,7 +82,7 @@ pub(crate) fn list_models(
 
 pub(crate) fn current_model(
     args: &ModelJsonArgs,
-    options: &psychevo::types::RunOptions,
+    options: &psychevo::__product::runtime::RunOptions,
 ) -> Result<()> {
     let selected = selected_configured_model(options)?;
     if args.json {
@@ -123,7 +126,7 @@ pub(crate) fn set_model(
 pub(crate) async fn fetch_models(
     args: &ModelFetchArgs,
     home: &std::path::Path,
-    options: &psychevo::types::RunOptions,
+    options: &psychevo::__product::runtime::RunOptions,
 ) -> Result<()> {
     let mut providers = model_catalog_providers(options)?;
     if let Some(provider) = &args.provider {

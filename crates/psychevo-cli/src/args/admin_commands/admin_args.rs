@@ -5,6 +5,18 @@ pub(crate) mod tests {
     pub(crate) use super::*;
 
     #[test]
+    fn exposes_compiled_version_without_runtime_initialization() {
+        for flag in ["--version", "-V"] {
+            let error = Cli::try_parse_from(["pevo", flag]).expect_err("display version");
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+            assert!(
+                error.to_string().contains(env!("CARGO_PKG_VERSION")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_singular_skill_and_rejects_plural_skills() {
         let cli = Cli::try_parse_from(["pevo", "skill", "list", "--json"]).expect("skill");
         assert!(matches!(

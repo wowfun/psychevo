@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use psychevo::command_registry::{
+    use psychevo::__product::commands::{
         SlashCommandEffect, SlashCommandParse, SlashCommandSurface,
         available_slash_commands_for_surface, parse_slash_command_line, slash_invocation_effect,
     };
-    use psychevo::{session_export::SessionExportInclude, workspace_diff::WorkspaceDiffFileStatus, workspace_diff::WorkspaceDiffTruncation};
+    use psychevo::{__product::sessions::SessionExportInclude, __product::sessions::WorkspaceDiffFileStatus, __product::sessions::WorkspaceDiffTruncation};
 
     #[test]
     fn acp_advertises_diff_and_allows_it_during_active_turns() {

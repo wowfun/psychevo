@@ -1,1 +1,1 @@
-pub(crate) use psychevo::command_registry::*;
+pub(crate) use psychevo::__product::commands::*;

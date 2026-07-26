@@ -266,28 +266,15 @@ impl TuiApp {
             false,
         )?
         .message;
-        let Some(id) = self
+        if !self
             .gateway
-            .steer_turn(selector, expected_turn_id.as_deref(), message)
+            .steer_foreign_turn(selector, expected_turn_id.as_deref(), message)
             .await
-        else {
+        {
             ui.set_ephemeral_error("unable to steer current turn");
             return Ok(());
-        };
-        let session_id = ui
-            .running
-            .as_ref()
-            .and_then(|running| running.session_id.clone())
-            .or_else(|| self.current_session.clone());
-        let sequence = ui.next_pending_input_sequence();
-        ui.pending_steers.push_back(PendingSteerInput {
-            id,
-            session_id,
-            prompt,
-            display_prompt: display_prompt.clone(),
-            images,
-            sequence,
-        });
+        }
+        ui.set_ephemeral_status("steer sent to active owner");
         Ok(())
     }
 

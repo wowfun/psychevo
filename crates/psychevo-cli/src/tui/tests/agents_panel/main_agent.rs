@@ -5,7 +5,7 @@ pub(crate) use super::*;
 
 #[tokio::test]
 pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowed_definitions() {
-    psychevo::agents::set_agent_spawn_paused(false);
+    psychevo::__product::capabilities::set_agent_spawn_paused(false);
     let temp = tempdir().expect("temp");
     let mut app = test_app(&temp).await;
     write_tui_agent(
@@ -61,7 +61,7 @@ pub(crate) async fn agents_command_opens_running_tab_and_available_shows_shadowe
     )
     .await
     .expect("resume spawning");
-    assert!(!psychevo::agents::agent_spawn_paused());
+    assert!(!psychevo::__product::capabilities::agent_spawn_paused());
 
     app.handle_fullscreen_key(&mut ui, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await
@@ -573,7 +573,7 @@ pub(crate) async fn child_status_line_keeps_compact_parent_hint() {
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo::state::AgentEdgeStatus::Open,
+            psychevo::__product::persistence::AgentEdgeStatus::Open,
             None,
         )
         .await
@@ -666,10 +666,10 @@ pub(crate) async fn history_agent_edge_reconcile_does_not_make_failed_rows_opena
     success_en.tool_name = Some("spawn_agent".to_string());
     ui.transcript = vec![failed_zh, failed_en, success_zh, success_en];
     let edges = vec![
-        psychevo::state::AgentEdgeRecord {
+        psychevo::__product::persistence::AgentEdgeRecord {
             parent_session_id: "parent".to_string(),
             child_session_id: "child-zh".to_string(),
-            status: psychevo::state::AgentEdgeStatus::Closed,
+            status: psychevo::__product::persistence::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(serde_json::json!({
@@ -680,10 +680,10 @@ pub(crate) async fn history_agent_edge_reconcile_does_not_make_failed_rows_opena
                 }
             })),
         },
-        psychevo::state::AgentEdgeRecord {
+        psychevo::__product::persistence::AgentEdgeRecord {
             parent_session_id: "parent".to_string(),
             child_session_id: "child-en".to_string(),
-            status: psychevo::state::AgentEdgeStatus::Closed,
+            status: psychevo::__product::persistence::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(serde_json::json!({

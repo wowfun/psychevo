@@ -148,7 +148,7 @@ impl TuiApp {
                 .session_revert_state(&edit.thread_id)
                 .await?
                 .map(|revert| revert.kind),
-            Some(psychevo::state::SessionRevertKind::ConversationEdit { .. })
+            Some(psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. })
         ) {
             let draft = psychevo_gateway::history_editing::restore_native_conversation_edit(
                 &self.state_runtime,
@@ -187,7 +187,7 @@ impl TuiApp {
                 .session_revert_state(&thread_id)
                 .await?
                 .map(|revert| revert.kind),
-            Some(psychevo::state::SessionRevertKind::ConversationEdit { .. })
+            Some(psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. })
         ) {
             return Ok(false);
         }
@@ -214,7 +214,7 @@ impl TuiApp {
         };
         if matches!(
             revert.kind,
-            psychevo::state::SessionRevertKind::ConversationEdit { .. }
+            psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. }
         ) {
             let hidden = self
                 .state_runtime

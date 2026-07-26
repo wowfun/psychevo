@@ -3,8 +3,8 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use psychevo::{
-    config::channel_list_value, config::channel_summary_value,
-    config::resolve_default_workspace_cwd, paths::canonicalize_cwd,
+    __product::configuration::channel_list_value, __product::configuration::channel_summary_value,
+    __product::configuration::resolve_default_workspace_cwd, __product::platform::canonicalize_cwd,
 };
 use serde_json::{Value, json};
 

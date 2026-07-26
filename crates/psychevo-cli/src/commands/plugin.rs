@@ -4,12 +4,16 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::CommandFactory;
 use psychevo::{
-    plugins::PluginInspectOptions, plugins::PluginInstallOptions, plugins::PluginMarketplaceEntry,
-    plugins::PluginScope, plugins::PluginSourceKind, plugins::plugin_doctor_value,
-    plugins::plugin_import_inspect_value, plugins::plugin_install_value,
-    plugins::plugin_list_value, plugins::plugin_marketplace_add_value,
-    plugins::plugin_marketplace_list_value, plugins::plugin_marketplace_remove_value,
-    plugins::plugin_set_enabled_value, plugins::plugin_uninstall_value, plugins::plugin_view_value,
+    __product::capabilities::PluginInspectOptions, __product::capabilities::PluginInstallOptions,
+    __product::capabilities::PluginMarketplaceEntry, __product::capabilities::PluginScope,
+    __product::capabilities::PluginSourceKind, __product::capabilities::plugin_doctor_value,
+    __product::capabilities::plugin_import_inspect_value,
+    __product::capabilities::plugin_install_value, __product::capabilities::plugin_list_value,
+    __product::capabilities::plugin_marketplace_add_value,
+    __product::capabilities::plugin_marketplace_list_value,
+    __product::capabilities::plugin_marketplace_remove_value,
+    __product::capabilities::plugin_set_enabled_value,
+    __product::capabilities::plugin_uninstall_value, __product::capabilities::plugin_view_value,
 };
 use serde_json::Value;
 

@@ -32,7 +32,7 @@ pub(crate) async fn running_session_switch_buffers_stream_until_return() {
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -128,7 +128,7 @@ pub(crate) async fn fullscreen_new_with_unresolved_running_session_hides_unowned
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -222,7 +222,7 @@ pub(crate) async fn background_session_completion_does_not_steal_current_session
 
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
-    let result = psychevo::types::RunResult {
+    let result = psychevo::__product::runtime::RunResult {
         session_id: first.clone(),
         ..finished_run_result(&app)
     };
@@ -390,7 +390,7 @@ pub(crate) async fn new_session_does_not_receive_previous_running_output() {
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -446,7 +446,8 @@ pub(crate) async fn running_shell_switch_buffers_stream_until_return() {
     let mut ui = FullscreenUi::new(&app);
     let (tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::UserShellResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::UserShellResult>>()
+            .await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {
@@ -867,7 +868,7 @@ pub(crate) async fn sessions_panel_action_mode_does_not_pollute_search_and_rejec
     let mut ui = FullscreenUi::new(&app);
     let (_tx, rx) = mpsc::unbounded_channel();
     let task = tokio::spawn(async {
-        std::future::pending::<psychevo::Result<psychevo::types::RunResult>>().await
+        std::future::pending::<psychevo::Result<psychevo::__product::runtime::RunResult>>().await
     });
     let (control, _) = run_control();
     ui.running = Some(RunningTurn {

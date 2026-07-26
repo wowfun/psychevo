@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
 use psychevo::{
-    Application, StartThreadRequest, TurnOutcome, TurnRequest, types::PermissionMode,
-    types::ProjectContextInstructionMode, types::RunMode,
+    __product::runtime::PermissionMode, __product::runtime::ProjectContextInstructionMode,
+    __product::runtime::RunMode, Application, StartThreadRequest, TurnOutcome, TurnRequest,
 };
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -27,7 +27,7 @@ pub(crate) async fn run_mcp_command(args: McpArgs) -> Result<ExitCode> {
             let serve = run_mcp_stdio(runner).await;
             let shutdown = application.shutdown().await;
             serve?;
-            shutdown?;
+            shutdown?.require_clean()?;
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -266,20 +266,17 @@ async fn run_cli_mcp_turn(
             runner.client.start_thread(start).await?
         }
     };
-    let mut turn = TurnRequest::new(prompt);
-    turn.source = "mcp".to_string();
-    turn.config_path = config_path;
-    turn.project_context = project_context_override;
-    turn.model = args.model;
-    turn.reasoning_effort = args.variant.map(|variant| variant.as_str().to_string());
-    turn.mode = run_mode;
-    turn.permission_mode = permission_mode;
-    turn.approval_handler = interactive_approval_handler();
-    turn.inherited_env = Some(env_map);
-    turn.agent = args.agent;
-    turn.no_agents = args.no_agents;
-    turn.no_skills = args.no_skills;
-    turn.skill_inputs = args.skill;
+    let turn = TurnRequest::new(prompt)
+        .with_identity("mcp", None)
+        .with_model(
+            args.model,
+            args.variant.map(|variant| variant.as_str().to_string()),
+        )
+        .with_execution_policy(run_mode, permission_mode, config_path)
+        .with_approval(None, interactive_approval_handler(), false)
+        .with_environment(Some(env_map), project_context_override, None)
+        .with_agent(args.agent, args.no_agents, args.no_skills)
+        .with_skills(args.skill);
     let result = thread.start_turn(turn).await?.wait().await?;
     Ok(PsychevoMcpTurnResult {
         session_id: result.thread_id,

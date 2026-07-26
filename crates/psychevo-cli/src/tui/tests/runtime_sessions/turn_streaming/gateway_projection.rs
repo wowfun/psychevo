@@ -432,7 +432,7 @@ pub(crate) async fn typed_gateway_final_answer_restores_turn_meta_after_task_com
     let result_db_path = temp.path().join("state.db");
     let result_cwd = temp.path().to_path_buf();
     let task = tokio::spawn(async move {
-        Ok(psychevo::types::RunResult {
+        Ok(psychevo::__product::runtime::RunResult {
             session_id: "typed-session".to_string(),
             outcome: Outcome::Normal,
             terminal_reason: None,
@@ -499,7 +499,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
         .upsert_agent_edge(
             &parent,
             &child,
-            psychevo::state::AgentEdgeStatus::Open,
+            psychevo::__product::persistence::AgentEdgeStatus::Open,
             Some(serde_json::json!({
                 "agent": {
                     "id": "agent-run-1",
@@ -553,7 +553,7 @@ pub(crate) async fn opening_child_replays_and_continues_its_gateway_stream_witho
     })
     .expect("send other answer");
 
-    let result = psychevo::types::RunResult {
+    let result = psychevo::__product::runtime::RunResult {
         session_id: parent.clone(),
         ..finished_run_result(&app)
     };
@@ -919,7 +919,7 @@ pub(crate) async fn fullscreen_agent_end_releases_turn_before_auxiliary_task_fin
     })))
     .expect("send agent end");
 
-    let result = psychevo::types::RunResult {
+    let result = psychevo::__product::runtime::RunResult {
         session_id: "streamed-session".to_string(),
         outcome: Outcome::Normal,
         terminal_reason: None,

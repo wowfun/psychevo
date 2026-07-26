@@ -65,7 +65,7 @@ impl TuiApp {
             return Ok(format!("agent not found: {name}"));
         };
         Ok(serde_json::to_string_pretty(
-            &psychevo::agents::view_agent_value(&agent),
+            &psychevo::__product::capabilities::view_agent_value(&agent),
         )?)
     }
 
@@ -91,9 +91,11 @@ impl TuiApp {
             .tool_policy
             .permission_mode
             .map(|mode| match mode {
-                psychevo::agents::AgentPermissionMode::Default => "default",
-                psychevo::agents::AgentPermissionMode::AcceptEdits => "acceptEdits",
-                psychevo::agents::AgentPermissionMode::Plan => "plan",
+                psychevo::__product::capabilities::AgentPermissionMode::Default => "default",
+                psychevo::__product::capabilities::AgentPermissionMode::AcceptEdits => {
+                    "acceptEdits"
+                }
+                psychevo::__product::capabilities::AgentPermissionMode::Plan => "plan",
             })
             .unwrap_or_default()
             .to_string();

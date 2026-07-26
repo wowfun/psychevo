@@ -2,8 +2,8 @@ use std::env;
 use std::process::ExitCode;
 
 use anyhow::Result;
-use psychevo::state::StateRuntime;
-use psychevo::{stats::usage_stats, types::StatsOptions};
+use psychevo::__product::persistence::StateRuntime;
+use psychevo::{__product::runtime::StatsOptions, __product::usage::usage_stats};
 use serde_json::Value;
 
 use crate::args::StatsArgs;
