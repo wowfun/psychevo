@@ -24,10 +24,11 @@ feishu-sdk = { workspace = true, optional = true }
 futures.workspace = true
 getrandom.workspace = true
 http.workspace = true
+jsonschema.workspace = true
 percent-encoding.workspace = true
 portable-pty.workspace = true
 psychevo-gateway-protocol = { path = "../psychevo-gateway-protocol" }
-psychevo = { path = "../psychevo", features = ["internal"] }
+psychevo = { path = "../psychevo", features = ["product"] }
 qrcode = { workspace = true, optional = true }
 reqwest.workspace = true
 regex-lite.workspace = true

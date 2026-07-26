@@ -858,7 +858,7 @@ async fn workspace_change_reject_restores_pre_turn_dirty_content() {
     state.inner.review.observe_mutation(
         "turn-1",
         &state.inner.cwd,
-        psychevo::types::WorkspaceMutation::ExactUtf8 {
+        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
             path: "notes.txt".to_string(),
             before: Some("user dirty\n".to_string()),
             after: Some("agent changed\n".to_string()),
@@ -935,35 +935,35 @@ async fn workspace_review_records_patch_paths_and_opaque_invalidations() {
         .review
         .begin_turn("turn-patch", Some("thread-patch".to_string()), cwd);
     for mutation in [
-        psychevo::types::WorkspaceMutation::ExactUtf8 {
+        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
             path: "add.txt".to_string(),
             before: None,
             after: Some("added\n".to_string()),
         },
-        psychevo::types::WorkspaceMutation::ExactUtf8 {
+        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
             path: "update.txt".to_string(),
             before: Some("before update\n".to_string()),
             after: Some("after update\n".to_string()),
         },
-        psychevo::types::WorkspaceMutation::ExactUtf8 {
+        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
             path: "delete.txt".to_string(),
             before: Some("before delete\n".to_string()),
             after: None,
         },
-        psychevo::types::WorkspaceMutation::ExactUtf8 {
+        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
             path: "move-from.txt".to_string(),
             before: Some("before move\n".to_string()),
             after: None,
         },
-        psychevo::types::WorkspaceMutation::ExactUtf8 {
+        psychevo::__product::runtime::WorkspaceMutation::ExactUtf8 {
             path: "move-to.txt".to_string(),
             before: None,
             after: Some("before move\n".to_string()),
         },
-        psychevo::types::WorkspaceMutation::Opaque {
+        psychevo::__product::runtime::WorkspaceMutation::Opaque {
             source: "exec_command".to_string(),
         },
-        psychevo::types::WorkspaceMutation::Opaque {
+        psychevo::__product::runtime::WorkspaceMutation::Opaque {
             source: "acp.edit".to_string(),
         },
     ] {
@@ -1219,7 +1219,7 @@ async fn thread_action_compact_returns_structured_noop_without_prompt_turn() {
         .inner
         .state
 
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id: &session_id,
             agent_ref: None,
             agent_fingerprint: &agent_fingerprint,
@@ -1305,7 +1305,7 @@ async fn thread_action_compact_ignores_legacy_source_runtime_evidence_without_bi
         .inner
         .state
 
-        .upsert_gateway_source_binding(psychevo::state::GatewaySourceBindingInput {
+        .upsert_gateway_source_binding(psychevo::__product::persistence::GatewaySourceBindingInput {
             source_key: "legacy:test-lane",
             source_kind: "legacy",
             raw_identity: json!({"lane": "test-lane"}),
@@ -1373,7 +1373,7 @@ async fn thread_transcript_projects_compaction_checkpoint_divider() {
         .append_message(&session_id, &runtime_assistant_message("done", 2))
         .await.expect("assistant message");
     let record = store
-        .append_session_compaction(psychevo::state::SessionCompactionInput {
+        .append_session_compaction(psychevo::__product::persistence::SessionCompactionInput {
             session_id: session_id.clone(),
             reason: "manual".to_string(),
             summary_text: "Keep the decision trail.".to_string(),
@@ -1912,7 +1912,7 @@ async fn bind_native_runtime_to_thread(
         .inner
         .state
 
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id,
             agent_ref: None,
             agent_fingerprint: &agent_fingerprint,
@@ -1984,7 +1984,7 @@ default_mode = "default"
         .inner
         .state
 
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id,
             agent_ref: Some("ephemeral"),
             agent_fingerprint: &agent_fingerprint,

@@ -1,5 +1,5 @@
 fn configured_model_option_view(
-    model: &psychevo::types::ConfiguredModel,
+    model: &psychevo::__product::runtime::ConfiguredModel,
 ) -> wire::ModelOptionView {
     let reasoning_supported = model.metadata.capabilities.reasoning;
     wire::ModelOptionView {
@@ -21,7 +21,7 @@ fn configured_model_option_view(
 fn model_options_with_cached_catalog(
     state: &WebState,
     options: &RunOptions,
-    configured: &[psychevo::types::ConfiguredModel],
+    configured: &[psychevo::__product::runtime::ConfiguredModel],
 ) -> Vec<wire::ModelOptionView> {
     let mut seen = std::collections::BTreeSet::new();
     let mut views = Vec::new();
@@ -617,7 +617,7 @@ fn advanced_model_metadata_object(
         .ok_or_else(|| Error::Config("advanced metadata must be an object".to_string()))
 }
 
-fn configured_model_is_free(model: &psychevo::types::ConfiguredModel) -> bool {
+fn configured_model_is_free(model: &psychevo::__product::runtime::ConfiguredModel) -> bool {
     let Some(cost) = &model.metadata.cost else {
         return false;
     };

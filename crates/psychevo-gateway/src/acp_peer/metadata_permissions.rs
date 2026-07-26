@@ -6,7 +6,7 @@ struct LocalPeerSession {
 
 async fn ensure_local_session(
     peer: &ResolvedPeerTurn,
-    options: &psychevo::types::RunOptions,
+    options: &psychevo::__product::runtime::RunOptions,
 ) -> psychevo::Result<LocalPeerSession> {
     let store = &options.state;
     if let Some(session_id) = &options.session {
@@ -21,9 +21,9 @@ async fn ensure_local_session(
                 .gateway_runtime_binding(session_id)
                 .await?
                 .filter(|binding| {
-                    binding.status == psychevo::state::GatewayRuntimeBindingStatus::Resolved
+                    binding.status == psychevo::__product::persistence::GatewayRuntimeBindingStatus::Resolved
                         && binding.native_kind.as_deref()
-                            == Some(psychevo::config::RuntimeProfileKind::Acp.as_str())
+                            == Some(psychevo::__product::configuration::RuntimeProfileKind::Acp.as_str())
                 })
                 .and_then(|binding| binding.native_session_id),
         };
@@ -126,7 +126,7 @@ fn peer_native_session_id(metadata: &Value, backend_id: &str) -> Option<String> 
         .map(ToString::to_string)
 }
 
-fn emit_runtime_event(stream: &Option<psychevo::types::RunStreamSink>, value: Value) {
+fn emit_runtime_event(stream: &Option<psychevo::__product::runtime::RunStreamSink>, value: Value) {
     if let Some(stream) = stream {
         stream(RunStreamEvent::value(value));
     }

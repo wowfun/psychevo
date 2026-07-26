@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayActivity {
+    pub activities: Vec<ThreadActivityView>,
     pub running: bool,
     pub active_turn_id: Option<String>,
     pub queued_turns: usize,
@@ -23,14 +24,11 @@ struct ActiveThreadState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveActivityKind {
-    Turn,
     Shell,
-    Compact,
 }
 
 enum ShellStartState {
     Standalone,
-    Auxiliary(RunControlHandle),
     Queued {
         receiver: oneshot::Receiver<psychevo::Result<GatewayShellResult>>,
         active_activity_id: Option<String>,
@@ -40,18 +38,7 @@ enum ShellStartState {
 
 #[derive(Debug)]
 enum PendingQueuedActivity {
-    #[cfg(test)]
-    Turn(Box<PendingQueuedTurn>),
     Shell(Box<PendingQueuedShell>),
-    Compact(Box<PendingQueuedCompact>),
-}
-
-#[cfg(test)]
-#[derive(Debug)]
-struct PendingQueuedTurn {
-    turn_id: String,
-    request: SendTurnRequest,
-    responder: oneshot::Sender<psychevo::Result<GatewayTurnResult>>,
 }
 
 #[derive(Debug)]
@@ -59,166 +46,6 @@ struct PendingQueuedShell {
     shell_id: String,
     request: SendShellRequest,
     responder: oneshot::Sender<psychevo::Result<GatewayShellResult>>,
-}
-
-#[derive(Debug)]
-struct PendingQueuedCompact {
-    _admission: supervisor::GatewayActivityPermit,
-    compact_id: String,
-    request: SendCompactRequest,
-    responder: oneshot::Sender<psychevo::Result<psychevo::compaction::CompactionResult>>,
-}
-
-type PendingPermissionMap = Arc<Mutex<HashMap<String, PendingPermission>>>;
-
-struct PendingPermission {
-    selector_key: Option<String>,
-    responder: oneshot::Sender<PermissionApprovalDecision>,
-}
-
-#[cfg(test)]
-#[derive(Clone, Default)]
-struct GatewayPendingActionContext {
-    thread_id: Option<String>,
-    turn_id: Option<String>,
-    activity_id: Option<String>,
-    source_key: Option<String>,
-    owner_id: Option<String>,
-}
-
-#[cfg(test)]
-#[derive(Clone)]
-struct GatewayApprovalHandler {
-    selector_key: Option<String>,
-    pending_permissions: PendingPermissionMap,
-    event_sink: GatewayEventEmitter,
-    action_context: GatewayPendingActionContext,
-    timeout_secs: u64,
-    session_authorization_lifetime: Option<&'static str>,
-}
-
-#[cfg(test)]
-impl GatewayApprovalHandler {
-    fn new(
-        selector_key: Option<String>,
-        pending_permissions: PendingPermissionMap,
-        event_sink: GatewayEventEmitter,
-        action_context: GatewayPendingActionContext,
-        session_authorization_lifetime: Option<&'static str>,
-    ) -> Self {
-        Self {
-            selector_key,
-            pending_permissions,
-            event_sink,
-            action_context,
-            timeout_secs: 300,
-            session_authorization_lifetime,
-        }
-    }
-}
-
-#[cfg(test)]
-impl fmt::Debug for GatewayApprovalHandler {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("GatewayApprovalHandler")
-            .field("selector_key", &self.selector_key)
-            .field("timeout_secs", &self.timeout_secs)
-            .finish_non_exhaustive()
-    }
-}
-
-#[cfg(test)]
-impl ApprovalHandler for GatewayApprovalHandler {
-    fn timeout_secs(&self) -> u64 {
-        self.timeout_secs
-    }
-
-    fn request_permission(
-        &self,
-        request: PermissionApprovalRequest,
-    ) -> BoxFuture<'static, PermissionApprovalDecision> {
-        let request_id = if request.tool_call_id.trim().is_empty() {
-            Uuid::now_v7().to_string()
-        } else {
-            request.tool_call_id.clone()
-        };
-        let selector_key = self.selector_key.clone();
-        let pending_permissions = self.pending_permissions.clone();
-        let event_sink = self.event_sink.clone();
-        let action_context = self.action_context.clone();
-        let timeout_secs = self.timeout_secs;
-        let session_authorization_lifetime = self.session_authorization_lifetime;
-        Box::pin(async move {
-            let (responder, receiver) = oneshot::channel();
-            {
-                let mut pending = pending_permissions
-                    .lock()
-                    .expect("gateway pending permission map poisoned");
-                pending.insert(
-                    request_id.clone(),
-                    PendingPermission {
-                        selector_key,
-                        responder,
-                    },
-                );
-            }
-            let allow_always = request.allow_always;
-            let filesystem = request.filesystem.clone();
-            let _ = event_sink.emit(GatewayEvent::ActionRequested {
-                action: PendingActionView {
-                    action_id: request_id.clone(),
-                    kind: GatewayActionKind::Permission,
-                    title: Some(request.tool_name.clone()),
-                    summary: Some(if request.summary.trim().is_empty() {
-                        request.reason.clone()
-                    } else {
-                        request.summary.clone()
-                    }),
-                    payload: json!({
-                        "toolName": request.tool_name,
-                        "summary": request.summary,
-                        "reason": request.reason,
-                        "matchedRule": request.matched_rule,
-                        "suggestedRule": request.suggested_rule,
-                        "allowSession": session_authorization_lifetime.is_some(),
-                        "allowAlways": allow_always,
-                        "filesystem": filesystem,
-                        "authorizationLifetime": session_authorization_lifetime,
-                        "alwaysAuthorizationLifetime": allow_always.then_some("permanent"),
-                        "timeoutSecs": request.timeout_secs,
-                    }),
-                    thread_id: action_context.thread_id,
-                    turn_id: action_context.turn_id,
-                    activity_id: action_context.activity_id,
-                    source_key: action_context.source_key,
-                    owner_id: action_context.owner_id,
-                    lease_expires_at_ms: None,
-                },
-            });
-            let decision = timeout(Duration::from_secs(timeout_secs), receiver)
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or_else(PermissionApprovalDecision::deny);
-            {
-                let mut pending = pending_permissions
-                    .lock()
-                    .expect("gateway pending permission map poisoned");
-                pending.remove(&request_id);
-            }
-            let _ = event_sink.emit(GatewayEvent::ActionResolved {
-                action_id: request_id,
-                kind: GatewayActionKind::Permission,
-                outcome: permission_action_outcome(&decision),
-                payload: json!({
-                    "decision": permission_decision_from_runtime(&decision),
-                    "filesystemScope": decision.filesystem_scope,
-                }),
-            });
-            decision
-        })
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -233,11 +60,11 @@ pub struct ThreadTurnPolicy {
     pub snapshot_root: Option<PathBuf>,
     pub continue_latest: bool,
     pub extract_prompt_image_sources: bool,
-    pub prompt_display: Option<psychevo::types::PromptDisplayMetadata>,
+    pub prompt_display: Option<psychevo::__product::runtime::PromptDisplayMetadata>,
     pub max_context_messages: Option<usize>,
     pub config_path: Option<PathBuf>,
-    pub project_context_override: Option<psychevo::types::ProjectContextInstructionMode>,
-    pub sandbox_override: Option<psychevo::types::RunSandboxOverride>,
+    pub project_context_override: Option<psychevo::__product::runtime::ProjectContextInstructionMode>,
+    pub sandbox_override: Option<psychevo::__product::runtime::RunSandboxOverride>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub runtime_profile_ref: Option<String>,
@@ -246,16 +73,16 @@ pub struct ThreadTurnPolicy {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<psychevo::types::ApprovalMode>,
+    pub approval_mode: Option<psychevo::__product::runtime::ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub agent_ref: Option<String>,
     pub no_agents: bool,
     pub no_skills: bool,
-    pub selected_capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
+    pub selected_capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
-    pub mcp_servers: Vec<psychevo::types::McpServerInput>,
+    pub mcp_servers: Vec<psychevo::__product::runtime::McpServerInput>,
 }
 
 impl fmt::Debug for ThreadTurnPolicy {
@@ -346,7 +173,7 @@ pub struct ThreadCallerContext {
     workspace_mutations: Option<WorkspaceMutationSink>,
     control_handle: Option<RunControlHandle>,
     control: Option<RunControl>,
-    runtime_tools: Vec<psychevo::types::RuntimeTool>,
+    runtime_tools: Vec<psychevo::__product::runtime::RuntimeTool>,
 }
 
 impl ThreadCallerContext {
@@ -394,14 +221,14 @@ impl ThreadCallerContext {
 
     pub(crate) fn set_runtime_tools(
         &mut self,
-        tools: Vec<psychevo::types::RuntimeTool>,
+        tools: Vec<psychevo::__product::runtime::RuntimeTool>,
     ) {
         self.runtime_tools = tools;
     }
 
     pub(crate) fn extend_runtime_tools(
         &mut self,
-        tools: impl IntoIterator<Item = psychevo::types::RuntimeTool>,
+        tools: impl IntoIterator<Item = psychevo::__product::runtime::RuntimeTool>,
     ) {
         self.runtime_tools.extend(tools);
     }
@@ -447,68 +274,6 @@ impl ThreadTurnIntent {
             lineage: None,
             client_turn_id: None,
             turn_id: None,
-        }
-    }
-
-    #[cfg(test)]
-    fn into_queue_request(
-        self,
-        caller: ThreadCallerContext,
-        state: StateRuntime,
-        explicit_thread: bool,
-    ) -> SendTurnRequest {
-        let policy = self.policy;
-        SendTurnRequest {
-            thread_id: self.thread_id.clone(),
-            explicit_thread,
-            source: self.source,
-            bind_source: self.bind_source,
-            reset_source_binding: self.reset_source_binding,
-            input: self.input,
-            initial_thread_preferences: policy.initial_thread_preferences,
-            options: RunOptions {
-                state,
-                cwd: caller.cwd,
-                snapshot_root: policy.snapshot_root,
-                session: self.thread_id,
-                continue_latest: policy.continue_latest,
-                prompt: String::new(),
-                image_inputs: Vec::new(),
-                extract_prompt_image_sources: policy.extract_prompt_image_sources,
-                prompt_display: policy.prompt_display,
-                max_context_messages: policy.max_context_messages,
-                config_path: policy.config_path,
-                project_context_override: policy.project_context_override,
-                sandbox_override: policy.sandbox_override,
-                model: policy.model,
-                reasoning_effort: policy.reasoning_effort,
-                runtime_ref: policy.runtime_profile_ref,
-                runtime_session_id: None,
-                runtime_options: policy.control_values,
-                include_reasoning: policy.include_reasoning,
-                mode: policy.mode,
-                permission_mode: policy.permission_mode,
-                approval_mode: policy.approval_mode,
-                approval_handler: policy.approval_handler,
-                clarify_enabled: policy.clarify_enabled,
-                inherited_env: policy.inherited_env,
-                agent: policy.agent_ref,
-                external_agent_delegate: None,
-                no_agents: policy.no_agents,
-                no_skills: policy.no_skills,
-                selected_capability_roots: policy.selected_capability_roots,
-                skill_inputs: policy.skill_inputs,
-                mcp_servers: policy.mcp_servers,
-                workspace_mutations: caller.workspace_mutations,
-                runtime_tools: caller.runtime_tools,
-            },
-            runtime_source: Some(caller.runtime_source),
-            continue_sources: caller.continue_sources,
-            stream: caller.stream_observer,
-            event_sink: caller.event_observer,
-            control_handle: caller.control_handle,
-            control: caller.control,
-            lineage: self.lineage,
         }
     }
 
@@ -562,32 +327,28 @@ impl ThreadTurnIntent {
             (observer, None) => observer,
         };
         let policy = self.policy;
-        let mut request = psychevo::TurnRequest::new(prompt);
-        request.image_inputs = image_inputs;
-        request.extract_prompt_image_sources = policy.extract_prompt_image_sources;
-        request.prompt_display = policy.prompt_display.or(Some(prompt_display));
-        request.client_turn_id = self.client_turn_id;
-        request.source = caller.runtime_source;
-        request.config_path = policy.config_path;
-        request.model = policy.model;
-        request.reasoning_effort = policy.reasoning_effort;
-        request.runtime_ref = policy.runtime_profile_ref;
-        request.runtime_options = policy.control_values;
-        request.include_reasoning = policy.include_reasoning;
-        request.mode = policy.mode;
-        request.permission_mode = policy.permission_mode;
-        request.approval_mode = policy.approval_mode;
-        request.approval_handler = policy.approval_handler;
-        request.clarify_enabled = policy.clarify_enabled;
-        request.inherited_env = policy.inherited_env;
-        request.project_context = policy.project_context_override;
-        request.sandbox = policy.sandbox_override;
-        request.agent = policy.agent_ref;
-        request.no_agents = policy.no_agents;
-        request.no_skills = policy.no_skills;
-        request.skill_inputs = policy.skill_inputs;
-        request.mcp_servers = policy.mcp_servers;
-        request.tools = std::mem::take(&mut caller.runtime_tools);
+        let mut request = psychevo::TurnRequest::new(prompt)
+            .with_prompt_images(image_inputs, policy.extract_prompt_image_sources)
+            .with_prompt_display(policy.prompt_display.or(Some(prompt_display)))
+            .with_identity(caller.runtime_source, self.client_turn_id)
+            .with_model(policy.model, policy.reasoning_effort)
+            .with_runtime(policy.runtime_profile_ref, policy.control_values)
+            .with_reasoning_output(policy.include_reasoning)
+            .with_execution_policy(policy.mode, policy.permission_mode, policy.config_path)
+            .with_approval(
+                policy.approval_mode,
+                policy.approval_handler,
+                policy.clarify_enabled,
+            )
+            .with_environment(
+                policy.inherited_env,
+                policy.project_context_override,
+                policy.sandbox_override,
+            )
+            .with_agent(policy.agent_ref, policy.no_agents, policy.no_skills)
+            .with_skills(policy.skill_inputs)
+            .with_mcp_servers(policy.mcp_servers);
+        request.__set_runtime_tools(std::mem::take(&mut caller.runtime_tools));
         request.__set_adapter_options(psychevo::AdapterTurnOptions {
             snapshot_root: policy.snapshot_root,
             max_context_messages: policy.max_context_messages,
@@ -598,6 +359,7 @@ impl ThreadTurnIntent {
             initial_thread_preferences: policy.initial_thread_preferences,
             prepared_source_key,
             turn_event_observer,
+            agent_entrypoint: None,
         });
         if let Some(turn_id) = self.turn_id {
             request.__set_turn_id(turn_id);
@@ -653,10 +415,10 @@ fn framework_lifecycle_owns_run_stream_interaction(event: &RunStreamEvent) -> bo
         RunStreamEvent::ClarifyRequest(_) | RunStreamEvent::ClarifyResolved(_) => true,
         RunStreamEvent::Event(event) => matches!(
             &event.payload,
-            psychevo::types::SessionEventPayload::BlockingActionRequested { .. }
-                | psychevo::types::SessionEventPayload::BlockingActionUpdated { .. }
-                | psychevo::types::SessionEventPayload::BlockingActionResolved { .. }
-                | psychevo::types::SessionEventPayload::BlockingActionCancelled { .. }
+            psychevo::__product::runtime::SessionEventPayload::BlockingActionRequested { .. }
+                | psychevo::__product::runtime::SessionEventPayload::BlockingActionUpdated { .. }
+                | psychevo::__product::runtime::SessionEventPayload::BlockingActionResolved { .. }
+                | psychevo::__product::runtime::SessionEventPayload::BlockingActionCancelled { .. }
         ),
         RunStreamEvent::Scoped { event, .. } => {
             framework_lifecycle_owns_run_stream_interaction(event)
@@ -928,60 +690,6 @@ impl fmt::Debug for ThreadTurnIntent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AcceptedTurnReceipt {
-    pub accepted: bool,
-    pub thread_id: String,
-    pub turn_id: String,
-    pub client_turn_id: Option<String>,
-}
-
-pub struct AcceptedTurn {
-    pub receipt: AcceptedTurnReceipt,
-    completion: AcceptedTurnCompletion,
-}
-
-impl AcceptedTurn {
-    pub fn into_completion(self) -> AcceptedTurnCompletion {
-        self.completion
-    }
-
-    pub async fn wait(self) -> psychevo::Result<GatewayTurnResult> {
-        self.completion.wait().await
-    }
-}
-
-impl fmt::Debug for AcceptedTurn {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("AcceptedTurn")
-            .field("receipt", &self.receipt)
-            .finish_non_exhaustive()
-    }
-}
-
-pub struct AcceptedTurnCompletion {
-    receiver: oneshot::Receiver<psychevo::Result<GatewayTurnResult>>,
-}
-
-impl AcceptedTurnCompletion {
-    pub async fn wait(self) -> psychevo::Result<GatewayTurnResult> {
-        self.receiver.await.map_err(|_| {
-            Error::Message(
-                "accepted turn ended without publishing a completion result".to_string(),
-            )
-        })?
-    }
-}
-
-impl fmt::Debug for AcceptedTurnCompletion {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("AcceptedTurnCompletion")
-            .finish_non_exhaustive()
-    }
-}
-
 #[cfg(test)]
 pub(crate) struct SendTurnRequest {
     pub thread_id: Option<String>,
@@ -1038,41 +746,6 @@ pub struct SendShellRequest {
     pub stream: Option<RunStreamSink>,
     pub event_sink: Option<GatewayEventEmitter>,
     pub lineage: Option<Value>,
-}
-
-pub struct SendCompactRequest {
-    pub thread_id: Option<String>,
-    pub source: Option<GatewaySource>,
-    pub runtime_ref: Option<String>,
-    pub cwd: PathBuf,
-    pub config_path: Option<PathBuf>,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub instructions: Option<String>,
-    pub force: bool,
-    pub reason: psychevo::compaction::CompactionReason,
-    pub inherited_env: Option<BTreeMap<String, String>>,
-    pub event_sink: Option<GatewayEventEmitter>,
-}
-
-impl fmt::Debug for SendCompactRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("SendCompactRequest")
-            .field("thread_id", &self.thread_id)
-            .field("source", &self.source)
-            .field("runtime_ref", &self.runtime_ref)
-            .field("cwd", &self.cwd)
-            .field("config_path", &self.config_path)
-            .field("model", &self.model)
-            .field("reasoning_effort", &self.reasoning_effort)
-            .field("has_instructions", &self.instructions.is_some())
-            .field("force", &self.force)
-            .field("reason", &self.reason)
-            .field("has_inherited_env", &self.inherited_env.is_some())
-            .field("has_event_sink", &self.event_sink.is_some())
-            .finish()
-    }
 }
 
 impl fmt::Debug for SendShellRequest {

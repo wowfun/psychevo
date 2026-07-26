@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ use axum::routing::get;
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt};
 use psychevo::__agent_core::{ToolBinding, ToolExecutionMode, ToolOutput};
-use psychevo::types::{
+use psychevo::__product::runtime::{
     ApprovalHandler, FilesystemApprovalLifetime, FilesystemApprovalScope,
     PermissionApprovalDecision, PermissionApprovalOutcome, PermissionApprovalRequest,
 };
@@ -33,6 +33,8 @@ use tokio::task::JoinSet;
 
 const PROTOCOL_VERSION: u32 = 1;
 const OUTPUT_CAPACITY: usize = 256;
+const RELAY_TOMBSTONE_CAPACITY: usize = 1_024;
+const CONNECTION_REQUEST_LIMIT: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConnectionPhase {
@@ -80,6 +82,14 @@ impl RpcError {
             code: -32601,
             message: format!("method not found: {method}"),
             data: None,
+        }
+    }
+
+    fn overloaded() -> Self {
+        Self {
+            code: -32001,
+            message: "App Server connection request limit exceeded".to_string(),
+            data: Some(json!({ "limit": CONNECTION_REQUEST_LIMIT })),
         }
     }
 
@@ -204,8 +214,23 @@ impl CallbackBroker {
 
 #[derive(Clone, Debug, Default)]
 struct ConnectionRegistrations {
-    tools: Vec<wire::AppToolDefinition>,
+    tools: Vec<RegisteredRemoteTool>,
     approval_handler: bool,
+}
+
+#[derive(Clone)]
+struct RegisteredRemoteTool {
+    definition: wire::AppToolDefinition,
+    validator: Arc<jsonschema::Validator>,
+}
+
+impl fmt::Debug for RegisteredRemoteTool {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegisteredRemoteTool")
+            .field("name", &self.definition.name)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone)]
@@ -229,6 +254,7 @@ impl CapturedTurnContext {
 #[derive(Clone)]
 struct RemoteTool {
     definition: wire::AppToolDefinition,
+    validator: Arc<jsonschema::Validator>,
     context: CapturedTurnContext,
     callbacks: CallbackBroker,
 }
@@ -270,6 +296,11 @@ impl ToolBinding for RemoteTool {
     ) -> BoxFuture<'static, ToolOutput> {
         let this = self.clone();
         Box::pin(async move {
+            if let Err(error) = this.validator.validate(&arguments) {
+                return ToolOutput::error(format!(
+                    "custom Tool arguments failed JSON Schema validation: {error}"
+                ));
+            }
             let (thread_id, turn_id) = match this.context.get().await {
                 Ok(context) => context,
                 Err(error) => return ToolOutput::error(error.message),
@@ -398,10 +429,55 @@ pub struct AppServerConnection {
     client: Client,
     phase: Arc<Mutex<ConnectionPhase>>,
     turns: Arc<RwLock<HashMap<String, TurnHandle>>>,
-    relays: Arc<RwLock<HashSet<String>>>,
+    relays: Arc<Mutex<RelayRegistry>>,
+    relay_tasks: Arc<Mutex<JoinSet<()>>>,
     registrations: Arc<RwLock<ConnectionRegistrations>>,
     callbacks: CallbackBroker,
     output: Output,
+}
+
+struct RelayRegistry {
+    active: HashSet<String>,
+    completed: HashSet<String>,
+    completed_order: VecDeque<String>,
+    completed_capacity: usize,
+}
+
+impl RelayRegistry {
+    fn with_capacity(completed_capacity: usize) -> Self {
+        Self {
+            active: HashSet::new(),
+            completed: HashSet::new(),
+            completed_order: VecDeque::new(),
+            completed_capacity,
+        }
+    }
+
+    fn start(&mut self, turn_id: String) -> bool {
+        if self.active.contains(&turn_id) || self.completed.contains(&turn_id) {
+            return false;
+        }
+        self.active.insert(turn_id)
+    }
+
+    fn complete(&mut self, turn_id: &str) {
+        if !self.active.remove(turn_id) || self.completed_capacity == 0 {
+            return;
+        }
+        let turn_id = turn_id.to_string();
+        self.completed.insert(turn_id.clone());
+        self.completed_order.push_back(turn_id);
+        while self.completed_order.len() > self.completed_capacity {
+            if let Some(evicted) = self.completed_order.pop_front() {
+                self.completed.remove(&evicted);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn contains(&self, turn_id: &str) -> bool {
+        self.active.contains(turn_id) || self.completed.contains(turn_id)
+    }
 }
 
 impl std::fmt::Debug for AppServerConnection {
@@ -424,7 +500,10 @@ impl AppServerConnection {
             application,
             phase: Arc::new(Mutex::new(ConnectionPhase::New)),
             turns: Arc::new(RwLock::new(HashMap::new())),
-            relays: Arc::new(RwLock::new(HashSet::new())),
+            relays: Arc::new(Mutex::new(RelayRegistry::with_capacity(
+                RELAY_TOMBSTONE_CAPACITY,
+            ))),
+            relay_tasks: Arc::new(Mutex::new(JoinSet::new())),
             registrations: Arc::new(RwLock::new(ConnectionRegistrations::default())),
             callbacks,
             output,
@@ -605,10 +684,10 @@ impl AppServerConnection {
             }
             "tool/register" => {
                 let params = params::<wire::AppToolRegisterParams>(&request)?;
-                validate_registrations(&params)?;
+                let tools = validate_registrations(&params)?;
                 let count = params.tools.len();
                 *self.registrations.write().await = ConnectionRegistrations {
-                    tools: params.tools,
+                    tools,
                     approval_handler: params.approval_handler,
                 };
                 Ok(json!({
@@ -626,28 +705,31 @@ impl AppServerConnection {
                 let context = CapturedTurnContext {
                     receiver: context_receiver,
                 };
-                let mut input = TurnRequest::new(params.prompt);
-                input.client_turn_id = params.client_turn_id;
-                input.source = params.source.unwrap_or_else(|| "sdk".to_string());
-                input.model = params.model;
-                input.reasoning_effort = params.reasoning_effort;
-                input.no_agents = params.no_agents;
-                input.no_skills = params.no_skills;
-                input.inherited_env = params.inherited_env;
-                for definition in registrations.tools {
+                let approval_handler = (params.use_registered_approval_handler
+                    && registrations.approval_handler)
+                    .then(|| {
+                        Arc::new(RemoteApprovalHandler {
+                            context: context.clone(),
+                            callbacks: self.callbacks.clone(),
+                        }) as Arc<dyn ApprovalHandler>
+                    });
+                let mut input = TurnRequest::new(params.prompt)
+                    .with_identity(
+                        params.source.unwrap_or_else(|| "sdk".to_string()),
+                        params.client_turn_id,
+                    )
+                    .with_model(params.model, params.reasoning_effort)
+                    .with_agent(None, params.no_agents, params.no_skills)
+                    .with_environment(params.inherited_env, None, None)
+                    .with_approval(None, approval_handler, true);
+                for registration in registrations.tools {
                     input = input.tool(Arc::new(RemoteTool {
-                        definition,
+                        definition: registration.definition,
+                        validator: registration.validator,
                         context: context.clone(),
                         callbacks: self.callbacks.clone(),
                     }));
                 }
-                if params.use_registered_approval_handler && registrations.approval_handler {
-                    input.approval_handler = Some(Arc::new(RemoteApprovalHandler {
-                        context: context.clone(),
-                        callbacks: self.callbacks.clone(),
-                    }));
-                }
-                input.clarify_enabled = true;
                 let handle = thread
                     .start_turn(input)
                     .await
@@ -709,7 +791,10 @@ impl AppServerConnection {
                 let accepted = self
                     .turn(&params.turn_id)
                     .await?
-                    .respond(&params.interaction_id, response);
+                    .respond(&params.interaction_id, response)
+                    .await
+                    .map_err(RpcError::application)?
+                    .accepted;
                 Ok(json!({
                     "accepted": accepted,
                     "turnId": params.turn_id,
@@ -717,11 +802,12 @@ impl AppServerConnection {
                 }))
             }
             "shutdown" => {
-                self.application
+                let report = self
+                    .application
                     .shutdown()
                     .await
                     .map_err(RpcError::application)?;
-                Ok(json!({ "shutdown": true }))
+                Ok(json!({ "shutdown": true, "report": report }))
             }
             method => Err(RpcError::method_not_found(method)),
         }
@@ -793,11 +879,16 @@ impl AppServerConnection {
 
     async fn ensure_event_relay(&self, handle: TurnHandle) {
         let turn_id = handle.receipt().turn_id.clone();
-        if !self.relays.write().await.insert(turn_id) {
+        if !self.relays.lock().await.start(turn_id) {
             return;
         }
         let output = self.output.clone();
-        tokio::spawn(async move {
+        let turns = self.turns.clone();
+        let relays = self.relays.clone();
+        let relay_turn_id = handle.receipt().turn_id.clone();
+        let mut relay_tasks = self.relay_tasks.lock().await;
+        while relay_tasks.try_join_next().is_some() {}
+        relay_tasks.spawn(async move {
             let mut events = handle.events();
             while let Some(event) = events.next().await {
                 if output
@@ -808,10 +899,19 @@ impl AppServerConnection {
                     .await
                     .is_err()
                 {
-                    return;
+                    break;
                 }
             }
+            turns.write().await.remove(&relay_turn_id);
+            relays.lock().await.complete(&relay_turn_id);
         });
+    }
+
+    async fn disconnect(&self) {
+        self.callbacks.disconnect().await;
+        let mut relays = self.relay_tasks.lock().await;
+        relays.abort_all();
+        while relays.join_next().await.is_some() {}
     }
 }
 
@@ -886,8 +986,34 @@ fn line_requires_receive_order(line: &str) -> bool {
         .is_some_and(requires_receive_order)
 }
 
-fn validate_registrations(params: &wire::AppToolRegisterParams) -> Result<(), RpcError> {
+fn is_durable_mutation(value: &Value) -> bool {
+    matches!(
+        value.get("method").and_then(Value::as_str),
+        Some(
+            "thread/start"
+                | "thread/fork"
+                | "thread/archive"
+                | "thread/compact"
+                | "turn/start"
+                | "interaction/respond"
+                | "shutdown"
+        )
+    )
+}
+
+async fn send_connection_overload(connection: &AppServerConnection, value: &Value) {
+    let id = value.get("id").cloned().unwrap_or(Value::Null);
+    let _ = connection
+        .output
+        .send(error_response(id, RpcError::overloaded()))
+        .await;
+}
+
+fn validate_registrations(
+    params: &wire::AppToolRegisterParams,
+) -> Result<Vec<RegisteredRemoteTool>, RpcError> {
     let mut names = std::collections::HashSet::new();
+    let mut tools = Vec::with_capacity(params.tools.len());
     for tool in &params.tools {
         let name = tool.name.trim();
         if name.is_empty() {
@@ -915,13 +1041,22 @@ fn validate_registrations(params: &wire::AppToolRegisterParams) -> Result<(), Rp
                 "custom Tool parameters must be a JSON Schema object: {name}"
             )));
         }
+        let validator = jsonschema::validator_for(&tool.parameters).map_err(|error| {
+            RpcError::invalid_params(format!(
+                "custom Tool parameters are not a valid JSON Schema for {name}: {error}"
+            ))
+        })?;
         if tool.timeout_ms == 0 {
             return Err(RpcError::invalid_params(format!(
                 "custom Tool timeout must be greater than zero: {name}"
             )));
         }
+        tools.push(RegisteredRemoteTool {
+            definition: tool.clone(),
+            validator: Arc::new(validator),
+        });
     }
-    Ok(())
+    Ok(tools)
 }
 
 pub async fn run_stdio(application: Application) -> psychevo::Result<()> {
@@ -951,21 +1086,37 @@ where
     });
     let mut lines = BufReader::new(input).lines();
     let mut requests = JoinSet::new();
-    while let Some(line) = lines.next_line().await? {
-        if line.trim().is_empty() {
-            continue;
+    loop {
+        tokio::select! {
+            completed = requests.join_next(), if !requests.is_empty() => {
+                let _ = completed;
+            }
+            line = lines.next_line() => {
+                let Some(line) = line? else {
+                    break;
+                };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if line_requires_receive_order(&line) {
+                    connection.handle_line(&line).await;
+                    continue;
+                }
+                if requests.len() >= CONNECTION_REQUEST_LIMIT {
+                    if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                        send_connection_overload(&connection, &value).await;
+                    }
+                    continue;
+                }
+                let connection = connection.clone();
+                requests.spawn(async move {
+                    connection.handle_line(&line).await;
+                });
+            }
         }
-        if line_requires_receive_order(&line) {
-            connection.handle_line(&line).await;
-            continue;
-        }
-        let connection = connection.clone();
-        requests.spawn(async move {
-            connection.handle_line(&line).await;
-        });
     }
     while requests.join_next().await.is_some() {}
-    application.shutdown().await?;
+    application.shutdown().await?.require_clean()?;
     drop(connection);
     writer
         .await
@@ -1041,7 +1192,7 @@ pub async fn bind_websocket(
             })
             .await
             .map_err(psychevo::Error::from)?;
-        application.shutdown().await
+        application.shutdown().await?.require_clean().map(|_| ())
     });
     Ok(BoundAppServerWebSocket {
         local_addr,
@@ -1083,8 +1234,23 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
             }
         }
     });
-    let mut requests = JoinSet::new();
-    while let Some(message) = receiver.next().await {
+    let mut wait_requests = JoinSet::new();
+    let mut durable_requests = JoinSet::new();
+    loop {
+        let message = tokio::select! {
+            completed = wait_requests.join_next(), if !wait_requests.is_empty() => {
+                let _ = completed;
+                continue;
+            }
+            completed = durable_requests.join_next(), if !durable_requests.is_empty() => {
+                let _ = completed;
+                continue;
+            }
+            message = receiver.next() => message,
+        };
+        let Some(message) = message else {
+            break;
+        };
         match message {
             Ok(WebSocketMessage::Text(text)) => {
                 let value = match serde_json::from_str::<Value>(&text) {
@@ -1108,10 +1274,20 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
                     connection.handle_value(value).await;
                     continue;
                 }
+                if wait_requests.len() + durable_requests.len() >= CONNECTION_REQUEST_LIMIT {
+                    send_connection_overload(&connection, &value).await;
+                    continue;
+                }
+                let durable = is_durable_mutation(&value);
                 let connection = connection.clone();
-                requests.spawn(async move {
+                let request = async move {
                     connection.handle_value(value).await;
-                });
+                };
+                if durable {
+                    durable_requests.spawn(request);
+                } else {
+                    wait_requests.spawn(request);
+                }
             }
             Ok(WebSocketMessage::Close(_)) | Err(_) => break,
             Ok(WebSocketMessage::Binary(_)) => {
@@ -1128,9 +1304,14 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
             Ok(WebSocketMessage::Ping(_)) | Ok(WebSocketMessage::Pong(_)) => {}
         }
     }
-    connection.callbacks.disconnect().await;
-    while requests.join_next().await.is_some() {}
+    connection.disconnect().await;
+    wait_requests.abort_all();
+    while wait_requests.join_next().await.is_some() {}
+    if !durable_requests.is_empty() {
+        tokio::spawn(async move { while durable_requests.join_next().await.is_some() {} });
+    }
     drop(connection);
+    writer.abort();
     let _ = writer.await;
 }
 
@@ -1140,6 +1321,10 @@ mod tests {
     use futures::future::BoxFuture;
     use psychevo::{AgentSessionAdapter, AgentTurnRequest, TurnOutcome, TurnResult};
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn object_validator() -> Arc<jsonschema::Validator> {
+        Arc::new(jsonschema::validator_for(&json!({"type": "object"})).expect("object JSON Schema"))
+    }
 
     #[derive(Debug)]
     struct ImmediateAdapter;
@@ -1218,7 +1403,7 @@ mod tests {
         ) -> BoxFuture<'static, psychevo::Result<TurnResult>> {
             let clarify_enabled = Arc::clone(&self.clarify_enabled);
             Box::pin(async move {
-                clarify_enabled.store(request.input.clarify_enabled, Ordering::SeqCst);
+                clarify_enabled.store(request.input.clarify_enabled(), Ordering::SeqCst);
                 Ok(TurnResult {
                     thread_id: request.receipt.thread_id,
                     outcome: TurnOutcome::Completed,
@@ -1492,6 +1677,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_relay_releases_the_live_turn_handle_but_keeps_its_tombstone() {
+        let (temp, connection, _events) = test_connection().await;
+        initialize(&connection).await;
+        let thread = connection
+            .dispatch(request(
+                2,
+                "thread/start",
+                json!({"cwd": temp.path(), "source": "python"}),
+            ))
+            .await
+            .expect("thread");
+        let turn = connection
+            .dispatch(request(
+                3,
+                "turn/start",
+                json!({"threadId": thread["id"], "prompt": "once"}),
+            ))
+            .await
+            .expect("turn");
+        let turn_id = turn["turnId"].as_str().expect("turn id").to_string();
+        connection
+            .dispatch(request(4, "turn/wait", json!({"turnId": turn_id.clone()})))
+            .await
+            .expect("wait");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !connection.turns.read().await.contains_key(&turn_id) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("terminal relay releases live handle");
+        assert!(
+            connection.relays.lock().await.contains(&turn_id),
+            "the connection-local tombstone prevents replaying a second relay"
+        );
+    }
+
+    #[test]
+    fn completed_relay_tombstones_evict_in_fifo_order() {
+        let mut relays = RelayRegistry::with_capacity(2);
+        for turn_id in ["turn-1", "turn-2", "turn-3"] {
+            assert!(relays.start(turn_id.to_string()));
+            relays.complete(turn_id);
+        }
+
+        assert!(!relays.contains("turn-1"));
+        assert!(relays.contains("turn-2"));
+        assert!(relays.contains("turn-3"));
+        assert_eq!(relays.completed.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_a_quiet_relay_without_cancelling_the_durable_turn() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let started = Arc::new(tokio::sync::Notify::new());
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(BlockingAdapter {
+                started: Arc::clone(&started),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let (output, _events) = mpsc::channel(32);
+        let connection = AppServerConnection::new(application, output);
+        initialize(&connection).await;
+        let thread = connection
+            .dispatch(request(
+                2,
+                "thread/start",
+                json!({"cwd": temp.path(), "source": "python"}),
+            ))
+            .await
+            .expect("thread");
+        let turn = connection
+            .dispatch(request(
+                3,
+                "turn/start",
+                json!({"threadId": thread["id"], "prompt": "wait"}),
+            ))
+            .await
+            .expect("turn");
+        let turn_id = turn["turnId"].as_str().expect("turn id").to_string();
+        started.notified().await;
+
+        tokio::time::timeout(Duration::from_millis(250), connection.disconnect())
+            .await
+            .expect("quiet relay disconnect is bounded");
+
+        let handle = client
+            .resume_turn(turn_id)
+            .await
+            .expect("durable active turn survives connection");
+        handle.interrupt();
+        assert_eq!(
+            handle.wait().await.expect("interrupted turn").outcome,
+            TurnOutcome::Interrupted
+        );
+    }
+
+    #[test]
+    fn overload_response_exposes_the_connection_limit() {
+        let error = RpcError::overloaded();
+        assert_eq!(error.code, -32001);
+        assert_eq!(
+            error.data,
+            Some(json!({ "limit": CONNECTION_REQUEST_LIMIT }))
+        );
+    }
+
+    #[tokio::test]
     async fn completed_turn_and_thread_reattach_on_a_new_connection() {
         let (temp, connection, _rx) = test_connection().await;
         initialize(&connection).await;
@@ -1629,6 +1931,7 @@ mod tests {
                 execution_mode: wire::AppToolExecutionMode::Parallel,
                 timeout_ms: 1_000,
             },
+            validator: object_validator(),
             context: CapturedTurnContext {
                 receiver: context_rx,
             },
@@ -1658,6 +1961,71 @@ mod tests {
         let output = execution.await.expect("execution");
         assert_eq!(output.json, json!({"text": "hello"}));
         assert!(!output.is_error);
+    }
+
+    #[test]
+    fn custom_tool_registration_rejects_an_invalid_json_schema() {
+        let error = validate_registrations(&wire::AppToolRegisterParams {
+            tools: vec![wire::AppToolDefinition {
+                name: "broken".to_string(),
+                description: "Broken schema".to_string(),
+                parameters: json!({"type": 7}),
+                execution_mode: wire::AppToolExecutionMode::Parallel,
+                timeout_ms: 1_000,
+            }],
+            approval_handler: false,
+            clarify_handler: false,
+        })
+        .expect_err("invalid JSON Schema");
+        assert!(error.message.contains("not a valid JSON Schema"));
+    }
+
+    #[tokio::test]
+    async fn custom_tool_invalid_arguments_fail_before_client_callback() {
+        let (_temp, connection, mut rx) = test_connection().await;
+        let (_context_tx, context_rx) =
+            watch::channel(Some(("thread-1".to_string(), "turn-1".to_string())));
+        let schema = json!({
+            "type": "object",
+            "required": ["text"],
+            "properties": {"text": {"type": "string"}},
+            "additionalProperties": false
+        });
+        let tool = RemoteTool {
+            definition: wire::AppToolDefinition {
+                name: "echo".to_string(),
+                description: "Echo input".to_string(),
+                parameters: schema.clone(),
+                execution_mode: wire::AppToolExecutionMode::Parallel,
+                timeout_ms: 1_000,
+            },
+            validator: Arc::new(jsonschema::validator_for(&schema).expect("valid schema")),
+            context: CapturedTurnContext {
+                receiver: context_rx,
+            },
+            callbacks: connection.callbacks.clone(),
+        };
+        let (_control, receivers) = psychevo::__agent_core::ControlHandle::new();
+        let output = tool
+            .execute(
+                "call-invalid".to_string(),
+                json!({"text": 42}),
+                receivers.abort_signal(),
+            )
+            .await;
+        assert!(output.is_error);
+        assert!(
+            output.json["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("JSON Schema validation"))
+        );
+        assert!(
+            matches!(
+                rx.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ),
+            "invalid arguments must not reach the client callback"
+        );
     }
 
     #[tokio::test]
@@ -1750,6 +2118,7 @@ mod tests {
         };
         let tool = RemoteTool {
             definition: definition.clone(),
+            validator: object_validator(),
             context: CapturedTurnContext {
                 receiver: context_rx.clone(),
             },
@@ -1774,6 +2143,7 @@ mod tests {
         definition.timeout_ms = 10_000;
         let tool = RemoteTool {
             definition,
+            validator: object_validator(),
             context: CapturedTurnContext {
                 receiver: context_rx,
             },
@@ -1923,6 +2293,153 @@ mod tests {
         drop(client_write);
         server
             .await
+            .expect("stdio server task")
+            .expect("stdio server");
+    }
+
+    #[tokio::test]
+    async fn stdio_transport_bounds_a_real_flood_of_blocked_requests() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let started = Arc::new(tokio::sync::Notify::new());
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .agent_session_adapter(Arc::new(BlockingAdapter {
+                started: Arc::clone(&started),
+            }))
+            .build()
+            .await
+            .expect("application");
+        let client = application.client();
+        let (client_stream, server_stream) = tokio::io::duplex(1024 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let server = tokio::spawn(run_stdio_streams(application, server_read, server_write));
+        let mut responses = BufReader::new(client_read).lines();
+
+        async fn send(writer: &mut (impl AsyncWrite + Unpin), value: Value) {
+            writer
+                .write_all(value.to_string().as_bytes())
+                .await
+                .expect("write request");
+            writer.write_all(b"\n").await.expect("write newline");
+            writer.flush().await.expect("flush request");
+        }
+
+        async fn response<R>(lines: &mut tokio::io::Lines<BufReader<R>>, id: i64) -> Value
+        where
+            R: AsyncRead + Unpin,
+        {
+            loop {
+                let line = lines
+                    .next_line()
+                    .await
+                    .expect("read response")
+                    .expect("response line");
+                let value: Value = serde_json::from_str(&line).expect("response json");
+                if value["id"] == id {
+                    return value;
+                }
+            }
+        }
+
+        send(
+            &mut client_write,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "client": {"name": "flood-test", "version": "0"},
+                    "protocolMin": 1,
+                    "protocolMax": 1,
+                    "capabilities": {},
+                },
+            }),
+        )
+        .await;
+        assert_eq!(
+            response(&mut responses, 1).await["result"]["protocolVersion"],
+            1
+        );
+        send(
+            &mut client_write,
+            json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
+        )
+        .await;
+        send(
+            &mut client_write,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "thread/start",
+                "params": {"cwd": temp.path(), "source": "flood-test"},
+            }),
+        )
+        .await;
+        let thread_id = response(&mut responses, 2).await["result"]["id"]
+            .as_str()
+            .expect("thread id")
+            .to_string();
+        send(
+            &mut client_write,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "turn/start",
+                "params": {"threadId": thread_id, "prompt": "block"},
+            }),
+        )
+        .await;
+        let turn_id = response(&mut responses, 3).await["result"]["turnId"]
+            .as_str()
+            .expect("turn id")
+            .to_string();
+        started.notified().await;
+
+        for offset in 0..=CONNECTION_REQUEST_LIMIT {
+            send(
+                &mut client_write,
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 100 + offset,
+                    "method": "turn/wait",
+                    "params": {"turnId": turn_id},
+                }),
+            )
+            .await;
+        }
+        let overloaded = tokio::time::timeout(
+            Duration::from_secs(2),
+            response(
+                &mut responses,
+                100 + i64::try_from(CONNECTION_REQUEST_LIMIT).expect("limit"),
+            ),
+        )
+        .await
+        .expect("flood receives bounded overload response");
+        assert_eq!(overloaded["error"]["code"], -32001);
+        assert_eq!(
+            overloaded["error"]["data"]["limit"],
+            CONNECTION_REQUEST_LIMIT
+        );
+
+        let handle = client
+            .resume_turn(turn_id)
+            .await
+            .expect("resume blocked turn");
+        handle.interrupt();
+        for id in 100..100 + i64::try_from(CONNECTION_REQUEST_LIMIT).expect("limit") {
+            assert_eq!(
+                response(&mut responses, id).await["result"]["outcome"],
+                "interrupted"
+            );
+        }
+        client_write.shutdown().await.expect("close stdio input");
+        drop(client_write);
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("stdio flood server shuts down")
             .expect("stdio server task")
             .expect("stdio server");
     }

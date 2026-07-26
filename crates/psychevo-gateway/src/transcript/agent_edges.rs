@@ -31,6 +31,47 @@ pub(crate) fn enrich_agent_blocks_from_edges(
     }
 }
 
+pub(crate) fn agent_edge_lookup_candidates(entries: &[TranscriptEntry]) -> Vec<String> {
+    let mut candidates = std::collections::BTreeSet::new();
+    for block in entries
+        .iter()
+        .flat_map(|entry| &entry.blocks)
+        .filter(|block| block.kind == TranscriptBlockKind::Agent)
+    {
+        let Some(metadata) = block.metadata.as_ref().and_then(Value::as_object) else {
+            continue;
+        };
+        push_candidate(&mut candidates, metadata.get("tool_call_id"));
+        for object in ["args", "result"]
+            .into_iter()
+            .filter_map(|key| metadata.get(key).and_then(Value::as_object))
+        {
+            for key in [
+                "agent_id",
+                "id",
+                "agent_name",
+                "agent_type",
+                "task_name",
+                "task",
+                "message",
+            ] {
+                push_candidate(&mut candidates, object.get(key));
+            }
+        }
+    }
+    candidates.into_iter().collect()
+}
+
+fn push_candidate(candidates: &mut std::collections::BTreeSet<String>, value: Option<&Value>) {
+    if let Some(value) = value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        candidates.insert(value.to_string());
+    }
+}
+
 fn enrich_committed_agent_metadata(metadata: &mut serde_json::Map<String, Value>) {
     let args = metadata.get("args").cloned().unwrap_or(Value::Null);
     let result = ensure_json_object_field(metadata, "result");

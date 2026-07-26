@@ -21,7 +21,7 @@ struct ResolvedScope {
 
 impl ResolvedScope {
     fn to_wire_scope(&self) -> wire::GatewayRequestScope {
-        let cwd = psychevo::host_paths::normalized_native_path(&self.cwd);
+        let cwd = psychevo::__product::platform::normalized_native_path(&self.cwd);
         wire::GatewayRequestScope {
             cwd: cwd.display().to_string(),
             source: wire::GatewaySourceInput {
@@ -39,7 +39,7 @@ fn detached_draft_scope(scope: &ResolvedScope, auth: &AuthContext) -> ResolvedSc
     if !matches!(auth, AuthContext::Browser { .. }) {
         return scope.clone();
     }
-    let cwd = psychevo::host_paths::normalized_native_path(&scope.cwd);
+    let cwd = psychevo::__product::platform::normalized_native_path(&scope.cwd);
     let mut source = scope.source.clone();
     let canonical_raw_id = source
         .raw_identity

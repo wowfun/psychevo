@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 
 use psychevo::__agent_core::{AssistantBlock, Message, UserContentBlock};
-use psychevo::state::{AgentEdgeRecord, GatewayTurnTerminalRecord, SessionCompactionRecord};
+use psychevo::__product::persistence::{
+    AgentEdgeRecord, GatewayTurnTerminalRecord, SessionCompactionRecord,
+};
 use psychevo::{
-    thread_lineage::side_inherited_metadata_hidden,
-    tool_argument_display::write_argument_preview_from_args,
-    tool_argument_display::write_argument_preview_from_json,
-    tool_result_display::decode_persisted_tool_result_for_display, types::TUI_DISPLAY_METADATA_KEY,
-    types::TuiMessageSummary, types::USER_SHELL_METADATA_KEY,
+    __product::presentation::decode_persisted_tool_result_for_display,
+    __product::presentation::write_argument_preview_from_args,
+    __product::presentation::write_argument_preview_from_json,
+    __product::runtime::TUI_DISPLAY_METADATA_KEY, __product::runtime::TuiMessageSummary,
+    __product::runtime::USER_SHELL_METADATA_KEY,
+    __product::sessions::side_inherited_metadata_hidden,
 };
 use serde_json::{Value, json};
 
@@ -87,6 +90,7 @@ fn metadata_with_live_order(metadata: Option<Value>, live_order: i64) -> Value {
     Value::Object(object)
 }
 
+#[cfg(test)]
 pub(crate) fn project_turn_terminal_entries(
     terminals: &[GatewayTurnTerminalRecord],
 ) -> Vec<TranscriptEntry> {
@@ -215,49 +219,6 @@ pub(crate) fn merge_entries_at_session_boundaries(
     }
     merged.extend(synthetic.map(|(_, entry)| entry));
     merged
-}
-
-#[cfg(test)]
-pub(crate) fn transient_compaction_entry(
-    thread_id: &str,
-    turn_id: &str,
-    status: TranscriptBlockStatus,
-    created_at_ms: i64,
-    updated_at_ms: i64,
-) -> TranscriptEntry {
-    let metadata = json!({
-        "projection": "compaction_activity",
-        "transient": true,
-        "hidden": status != TranscriptBlockStatus::Running,
-    });
-    let mut status_block = block(
-        format!("turn:{turn_id}:compaction-activity:block"),
-        TranscriptBlockKind::Status,
-        status,
-        0,
-        "runtime.compaction",
-        Some("Summarizing thread".to_string()),
-        None,
-        None,
-        Some(metadata.clone()),
-        created_at_ms,
-    );
-    status_block.updated_at_ms = updated_at_ms;
-    TranscriptEntry {
-        id: format!("turn:{turn_id}:compaction-activity"),
-        thread_id: thread_id.to_string(),
-        turn_id: Some(turn_id.to_string()),
-        message_seq: None,
-        role: TranscriptEntryRole::Diagnostic,
-        status,
-        source: "runtime.compaction".to_string(),
-        blocks: vec![status_block],
-        metadata: Some(metadata),
-        usage: None,
-        accounting: None,
-        created_at_ms,
-        updated_at_ms,
-    }
 }
 
 fn project_compaction_entry(thread_id: &str, record: &SessionCompactionRecord) -> TranscriptEntry {

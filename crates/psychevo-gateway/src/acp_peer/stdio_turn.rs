@@ -12,10 +12,10 @@ struct AcpPeerTurnContext {
     peer_model: Option<String>,
     peer_reasoning_effort: Option<String>,
     peer_runtime_options: BTreeMap<String, String>,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     stream: Option<RunStreamSink>,
     workspace_mutations: Option<WorkspaceMutationSink>,
-    approval_handler: Option<Arc<dyn psychevo::types::ApprovalHandler>>,
+    approval_handler: Option<Arc<dyn psychevo::__product::runtime::ApprovalHandler>>,
     clarify_control: Option<RunControlHandle>,
     abort: Option<AbortSignal>,
     before_prompt: AcpBeforePromptCallback,
@@ -32,8 +32,8 @@ type AcpBeforePromptCallback = Arc<
 
 pub(crate) fn resolve_peer_mcp_server_handoffs(
     peer: &ResolvedPeerTurn,
-    options: &psychevo::types::RunOptions,
-) -> psychevo::Result<Vec<psychevo::types::ResolvedMcpServerInput>> {
+    options: &psychevo::__product::runtime::RunOptions,
+) -> psychevo::Result<Vec<psychevo::__product::runtime::ResolvedMcpServerInput>> {
     let names = mcp_handoff::requested_peer_mcp_server_names(peer)?;
     resolve_mcp_server_handoffs(options, &names).map_err(|error| {
         crate::agent_session_error(
@@ -83,8 +83,8 @@ async fn ensure_resident_acp_session(
     local_session_id: &str,
     requested_native_session_id: Option<&str>,
     cwd: &Path,
-    resolved_mcp_servers: &[psychevo::types::ResolvedMcpServerInput],
-    approval_handler: Option<Arc<dyn psychevo::types::ApprovalHandler>>,
+    resolved_mcp_servers: &[psychevo::__product::runtime::ResolvedMcpServerInput],
+    approval_handler: Option<Arc<dyn psychevo::__product::runtime::ApprovalHandler>>,
     clarify_control: Option<RunControlHandle>,
     stream: Option<RunStreamSink>,
     abort: Option<AbortSignal>,
@@ -563,7 +563,7 @@ async fn inspect_resident_acp_session(
     local_session_id: String,
     native_session_id: String,
     cwd: PathBuf,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
 ) -> psychevo::Result<AcpSessionSnapshot> {
     let session = ensure_resident_acp_session(
         cx,
@@ -603,7 +603,7 @@ async fn load_resident_acp_session(
     local_session_id: String,
     native_session_id: String,
     cwd: PathBuf,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
 ) -> psychevo::Result<AcpSessionLoadOutput> {
     let mut state = AcpPeerStreamState::new(None, None, local_session_id.clone());
     let session = ensure_resident_acp_session(
@@ -647,7 +647,7 @@ async fn prepare_resident_acp_session(
     generation: u64,
     local_session_id: String,
     cwd: PathBuf,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
 ) -> psychevo::Result<AcpSessionSnapshot> {
     let session = ensure_resident_acp_session(
         cx,
@@ -687,7 +687,7 @@ async fn set_resident_acp_control(
     local_session_id: String,
     native_session_id: String,
     cwd: PathBuf,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     control_id: String,
     value: Value,
 ) -> psychevo::Result<AcpSessionSnapshot> {

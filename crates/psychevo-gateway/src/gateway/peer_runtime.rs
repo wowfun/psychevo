@@ -1,7 +1,7 @@
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedPeerTurn {
-    pub(crate) agent: psychevo::agents::AgentDefinition,
-    pub(crate) backend: psychevo::agents::AgentBackendConfig,
+    pub(crate) agent: psychevo::__product::capabilities::AgentDefinition,
+    pub(crate) backend: psychevo::__product::capabilities::AgentBackendConfig,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) process_scope_fingerprint: Option<String>,
 }

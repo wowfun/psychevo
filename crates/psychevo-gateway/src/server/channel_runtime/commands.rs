@@ -436,7 +436,7 @@ async fn channel_command_action_from_effect(
             let options = context
                 .state
                 .run_options(context.scope.cwd.clone(), thread_id);
-            ChannelCommandAction::Reply(psychevo::sandbox::sandbox_status_text(
+            ChannelCommandAction::Reply(psychevo::__product::platform::sandbox_status_text(
                 &options,
                 RunMode::Default,
             )?)

@@ -59,7 +59,7 @@ struct BrokerCommand {
 
 impl BrokerCommand {
     fn from_profile(
-        config: &psychevo::config::CodexPluginsConfig,
+        config: &psychevo::__product::configuration::CodexPluginsConfig,
         env: &BTreeMap<String, String>,
     ) -> Self {
         let program = config
@@ -126,8 +126,8 @@ pub(super) struct CodexPluginAuthority {
 pub(super) type CodexCapabilityBroker = CodexPluginAuthority;
 
 pub(super) struct CodexRuntimeContributions {
-    pub(super) capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
-    pub(super) runtime_tools: Vec<psychevo::types::RuntimeTool>,
+    pub(super) capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
+    pub(super) runtime_tools: Vec<psychevo::__product::runtime::RuntimeTool>,
     pub(super) lease_id: Option<String>,
 }
 
@@ -140,14 +140,14 @@ struct RuntimePluginDetail {
 
 #[derive(Clone)]
 struct CodexRuntimeProfile {
-    capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
+    capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
     delegated_tools: Vec<CodexDelegatedToolDescriptor>,
 }
 
 #[derive(Clone, PartialEq)]
 #[allow(dead_code)]
 struct CodexRuntimeInventory {
-    capability_roots: Vec<psychevo::extensions::SelectedCapabilityRoot>,
+    capability_roots: Vec<psychevo::__product::capabilities::SelectedCapabilityRoot>,
     delegated_servers: BTreeSet<String>,
     delegated_tools: Vec<CodexDelegatedToolDescriptor>,
     warnings: Vec<String>,
@@ -197,7 +197,8 @@ impl CodexPluginAuthority {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(".psychevo"));
         let config =
-            psychevo::config::load_codex_plugins_profile_config(&profile_home).unwrap_or_default();
+            psychevo::__product::configuration::load_codex_plugins_profile_config(&profile_home)
+                .unwrap_or_default();
         let private_home = profile_home.join("codex");
         if config.enabled {
             let _ = ensure_private_home(&private_home);
@@ -424,7 +425,7 @@ impl CodexPluginAuthority {
             },
             "resolvedBinary": self.command.read().expect("Codex command lock poisoned").program,
             "version": version,
-            "compatibilityProfile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibilityProfile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "privateHome": self.private_home,
             "platform": std::env::consts::OS,
             "generation": self.generation.load(Ordering::Acquire),
@@ -472,12 +473,15 @@ impl CodexPluginAuthority {
         let profile_home = self.private_home.parent().ok_or_else(|| {
             Error::Message("Codex private home has no profile parent".to_string())
         })?;
-        let write =
-            psychevo::config::write_codex_plugins_profile_config(profile_home, enabled, binary)?;
+        let write = psychevo::__product::configuration::write_codex_plugins_profile_config(
+            profile_home,
+            enabled,
+            binary,
+        )?;
         let _draining = self.begin_draining().await;
         self.enabled.store(false, Ordering::Release);
         self.stop().await;
-        let config = psychevo::config::CodexPluginsConfig {
+        let config = psychevo::__product::configuration::CodexPluginsConfig {
             enabled,
             binary: binary
                 .map(str::trim)
@@ -902,10 +906,10 @@ impl CodexPluginAuthority {
         let profile_home = self.private_home.parent().ok_or_else(|| {
             Error::Message("Codex private home has no profile parent".to_string())
         })?;
-        if let Err(err) = psychevo::plugins::codex_plugin_set_enabled_value(
+        if let Err(err) = psychevo::__product::capabilities::codex_plugin_set_enabled_value(
             profile_home,
             cwd,
-            psychevo::plugins::PluginScope::Global,
+            psychevo::__product::capabilities::PluginScope::Global,
             &identity.selector(),
             Some(true),
         ) {
@@ -945,7 +949,7 @@ impl CodexPluginAuthority {
             "materialization": result,
             "detail": detail,
             "fingerprint": fingerprint,
-            "policy": psychevo::plugins::codex_plugin_policy_value(
+            "policy": psychevo::__product::capabilities::codex_plugin_policy_value(
                 profile_home,
                 cwd,
                 &identity.selector(),
@@ -1117,7 +1121,7 @@ impl CodexPluginAuthority {
             .into_iter()
             .map(|descriptor| {
                 let source = format!("codex:mcp:{}", descriptor.server_name);
-                psychevo::types::RuntimeTool::with_source(
+                psychevo::__product::runtime::RuntimeTool::with_source(
                     Arc::new(CodexMcpTool {
                         state: state.clone(),
                         cwd: cwd.to_path_buf(),
@@ -1207,12 +1211,14 @@ impl CodexPluginAuthority {
         let mut delegated_servers = BTreeSet::new();
         for plugin in &plugins {
             if let Some(root) = &plugin.package_root {
-                capability_roots.push(psychevo::extensions::SelectedCapabilityRoot::codex_local(
-                    plugin.identity.selector(),
-                    plugin.identity.plugin.clone(),
-                    plugin.identity.marketplace.clone(),
-                    root,
-                ));
+                capability_roots.push(
+                    psychevo::__product::capabilities::SelectedCapabilityRoot::codex_local(
+                        plugin.identity.selector(),
+                        plugin.identity.plugin.clone(),
+                        plugin.identity.marketplace.clone(),
+                        root,
+                    ),
+                );
             } else {
                 delegated_servers.extend(
                     plugin
@@ -1317,7 +1323,7 @@ impl CodexPluginAuthority {
                 };
                 if self.enforce_policy {
                     let profile_home = self.private_home.parent().unwrap_or_else(|| Path::new("."));
-                    let policy = psychevo::plugins::codex_plugin_policy_value(
+                    let policy = psychevo::__product::capabilities::codex_plugin_policy_value(
                         profile_home,
                         cwd,
                         &identity.selector(),
@@ -1689,7 +1695,11 @@ fn codex_detail_fingerprint(identity: &CodexPluginIdentity, detail: &Value) -> R
         .or_else(|| plugin.pointer("/summary/version"))
         .or_else(|| plugin.get("version"))
         .and_then(Value::as_str);
-    psychevo::plugins::external_plugin_fingerprint(root.as_deref(), &identity.selector(), version)
+    psychevo::__product::capabilities::external_plugin_fingerprint(
+        root.as_deref(),
+        &identity.selector(),
+        version,
+    )
 }
 
 fn find_codex_package_root(path: &Path) -> Option<PathBuf> {
@@ -1827,7 +1837,7 @@ pub(super) fn merge_plugin_list(mut native: Value, codex: Result<Value>) -> Valu
                         "source_kind": "codex_marketplace",
                         "scope": "codex_home",
                         "manifest_kind": "codex",
-                        "compatibility_profile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+                        "compatibility_profile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
                         "component_statuses": [],
                         "enabled": enabled,
                         "installed": installed,
@@ -1886,7 +1896,8 @@ pub(super) fn apply_codex_policy_views(mut value: Value, home: &Path, cwd: &Path
         if !selector.starts_with("codex:") {
             continue;
         }
-        let policy = psychevo::plugins::codex_plugin_policy_value(home, cwd, selector)?;
+        let policy =
+            psychevo::__product::capabilities::codex_plugin_policy_value(home, cwd, selector)?;
         let enabled = policy
             .get("effectiveEnabled")
             .and_then(Value::as_bool)
@@ -1976,7 +1987,7 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
     let component = |component: &str, level: &str, owner: &str, readiness: &str, reason: &str| {
         json!({
             "component": component,
-            "compatibilityProfile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibilityProfile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "highestLevel": level,
             "executionOwner": owner,
             "readiness": readiness,
@@ -2190,7 +2201,7 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
             "source_id": format!("codex:{}", identity.marketplace),
             "scope_name": "codex_home",
             "manifest_kind": "codex",
-            "compatibility_profile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibility_profile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "component_statuses": statuses,
             "installed": installed,
             "enabled": enabled,
@@ -2201,7 +2212,7 @@ pub(super) fn codex_plugin_read_value(identity: &CodexPluginIdentity, detail: Va
         "manifest": plugin,
         "inspection": {
             "authority": "codex",
-            "compatibility_profile": psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            "compatibility_profile": psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             "component_statuses": statuses,
         }
     })
@@ -2691,19 +2702,19 @@ fn validate_reviewed_profile(
         .ok_or_else(|| {
             Error::Message(format!(
                 "Codex plugin compatibility profile `{}` requires initialize.userAgent",
-                psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
             ))
         })?;
     let version = extract_semantic_version(user_agent).ok_or_else(|| {
         Error::Message(format!(
             "Codex plugin compatibility profile `{}` could not extract a version from userAgent",
-            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
         ))
     })?;
     if version != REVIEWED_CODEX_VERSION {
         return Err(Error::Message(format!(
             "Codex plugin compatibility profile `{}` reviewed `{REVIEWED_CODEX_VERSION}` but resolved `{version}`",
-            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
         )));
     }
     let reported_home = initialize
@@ -2713,27 +2724,27 @@ fn validate_reviewed_profile(
         .ok_or_else(|| {
             Error::Message(format!(
                 "Codex plugin compatibility profile `{}` requires initialize.codexHome",
-                psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
             ))
         })?;
     let expected = std::fs::canonicalize(expected_home).map_err(|err| {
         Error::Message(format!(
             "Codex plugin compatibility profile `{}` could not canonicalize private home `{}`: {err}",
-            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             expected_home.display()
         ))
     })?;
     let reported = std::fs::canonicalize(&reported_home).map_err(|err| {
         Error::Message(format!(
             "Codex plugin compatibility profile `{}` could not canonicalize reported home `{}`: {err}",
-            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             reported_home.display()
         ))
     })?;
     if reported != expected {
         return Err(Error::Message(format!(
             "Codex plugin compatibility profile `{}` rejected codexHome `{}`; expected Psychevo private home `{}`",
-            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
+            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE,
             reported.display(),
             expected.display()
         )));
@@ -2859,7 +2870,7 @@ impl BrokerProcess {
                 Ok(_) => {
                     return Err(Error::Message(format!(
                         "Codex plugin compatibility profile `{}` rejected `{method}` because the invalid-parameter probe unexpectedly succeeded",
-                        psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                        psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
                     )));
                 }
                 Err(err) => {
@@ -2867,13 +2878,13 @@ impl BrokerProcess {
                     if required_method_probe_reports_missing(&message) {
                         return Err(Error::Message(format!(
                             "Codex plugin compatibility profile `{}` requires method `{method}`",
-                            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
                         )));
                     }
                     if !required_method_probe_recognized(&message) {
                         return Err(Error::Message(format!(
                             "Codex plugin compatibility profile `{}` expected `{method}` to recognize the request envelope and reject its null parameters: {err}",
-                            psychevo::plugins::CODEX_PLUGIN_COMPATIBILITY_PROFILE
+                            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
                         )));
                     }
                 }
@@ -3445,9 +3456,10 @@ mod tests {
             env,
             Duration::from_secs(3),
         ));
-        let runtime = psychevo::state::StateRuntime::open(temp.path().join("state.db"))
-            .await
-            .expect("state");
+        let runtime =
+            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
+                .await
+                .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let state = super::super::WebState::new(super::super::GatewayWebServerConfig::new(
             gateway,
@@ -3631,9 +3643,10 @@ mod tests {
                 std::env::var("PATH").unwrap_or_default(),
             ),
         ]);
-        let runtime = psychevo::state::StateRuntime::open(temp.path().join("state.db"))
-            .await
-            .expect("state");
+        let runtime =
+            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
+                .await
+                .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let config = super::super::GatewayWebServerConfig::new(
             gateway,
@@ -3811,9 +3824,10 @@ mod tests {
             env.clone(),
             Duration::from_secs(2),
         );
-        let runtime = psychevo::state::StateRuntime::open(temp.path().join("state.db"))
-            .await
-            .expect("state");
+        let runtime =
+            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
+                .await
+                .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let config = super::super::GatewayWebServerConfig::new(
             gateway,
@@ -4332,9 +4346,10 @@ mod tests {
                 std::env::var("PATH").unwrap_or_default(),
             ),
         ]);
-        let runtime = psychevo::state::StateRuntime::open(temp.path().join("state.db"))
-            .await
-            .expect("state");
+        let runtime =
+            psychevo::__product::persistence::StateRuntime::open(temp.path().join("state.db"))
+                .await
+                .expect("state");
         let gateway = crate::Gateway::new(runtime);
         let config = super::super::GatewayWebServerConfig::new(
             gateway,
@@ -4388,7 +4403,7 @@ mod tests {
         assert_eq!(contributions.capability_roots.len(), 1);
         assert!(matches!(
             contributions.capability_roots[0].authority,
-            psychevo::extensions::CapabilityRootAuthority::Codex { .. }
+            psychevo::__product::capabilities::CapabilityRootAuthority::Codex { .. }
         ));
         assert_eq!(contributions.runtime_tools.len(), 1);
         assert_eq!(

@@ -41,11 +41,15 @@ async fn thread_snapshot(
     } else {
         Vec::new()
     };
-    let entries = match thread_id {
+    let history_page = match thread_id {
         Some(thread_id) => authoritative_history_projection(state, scope, thread_id).await?,
-        None => Vec::new(),
+        None => crate::BoundedTranscriptPage {
+            entries: Vec::new(),
+            next_cursor: None,
+        },
     };
-    let history = authoritative_history_view(state, thread_id).await?;
+    let mut history = authoritative_history_view(state, thread_id).await?;
+    history.cursor = history_page.next_cursor;
     let history_editing = if let Some(thread_id) = thread_id {
         thread_history_editing_value(store, thread_id).await?
     } else {
@@ -56,7 +60,7 @@ async fn thread_snapshot(
         "scope": scope.to_wire_scope(),
         "thread": thread,
         "history": history,
-        "entries": entries,
+        "entries": history_page.entries,
         "activity": activity,
         "turnStartReceipts": turn_start_receipts,
         "pendingActions": pending_actions,
@@ -65,7 +69,7 @@ async fn thread_snapshot(
 }
 
 async fn thread_history_editing_value(
-    store: &psychevo::state::StateRuntime,
+    store: &psychevo::__product::persistence::StateRuntime,
     thread_id: &str,
 ) -> psychevo::Result<Option<Value>> {
     let Some(revert) = store.session_revert_state(thread_id).await? else {
@@ -144,7 +148,7 @@ async fn snapshot_activity(
     let Some(edge) = state.inner.state.find_agent_edge(thread_id).await? else {
         return Ok(activity);
     };
-    if edge.child_session_id != thread_id || edge.status != psychevo::state::AgentEdgeStatus::Open
+    if edge.child_session_id != thread_id || edge.status != psychevo::__product::persistence::AgentEdgeStatus::Open
     {
         return Ok(activity);
     }
@@ -226,7 +230,7 @@ async fn active_turn_projection_window(
 }
 
 fn first_committed_seq_from_activity_intent(
-    record: &psychevo::state::GatewayActivityRecord,
+    record: &psychevo::__product::persistence::GatewayActivityRecord,
 ) -> Option<i64> {
     record
         .intent

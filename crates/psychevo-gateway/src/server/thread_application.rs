@@ -641,7 +641,7 @@ pub(super) fn framework_gateway_turn_result(
         psychevo::TurnOutcome::Interrupted => psychevo::__ai::Outcome::Aborted,
     };
     let status = gateway_turn_status_for_outcome(outcome);
-    let runtime_result = psychevo::types::RunResult {
+    let runtime_result = psychevo::__product::runtime::RunResult {
         session_id: result.thread_id.clone(),
         outcome,
         terminal_reason: result.terminal_reason,
@@ -867,7 +867,13 @@ pub(super) async fn action_descriptors(
                 (!active).then(inactive_reason).flatten(),
             ),
             wire::ThreadActionKind::Steer => {
-                let enabled = activity.active_turn_id.is_some();
+                let enabled = activity.activities.iter().any(|activity| {
+                    matches!(
+                        activity,
+                        wire::ThreadActivityView::FrameworkTurn { .. }
+                            | wire::ThreadActivityView::Foreign { .. }
+                    )
+                });
                 descriptor(
                     *action,
                     "Steer",
@@ -1009,22 +1015,26 @@ pub(super) async fn authoritative_history_projection(
     state: &WebState,
     scope: &ResolvedScope,
     thread_id: &str,
-) -> psychevo::Result<Vec<TranscriptEntry>> {
+) -> psychevo::Result<crate::BoundedTranscriptPage> {
     let activity = snapshot_activity(state, &scope.source, Some(thread_id)).await?;
-    let mut entries = state.inner.gateway.thread_transcript(thread_id).await?;
+    let mut page = state
+        .inner
+        .gateway
+        .thread_transcript_page(thread_id, None, 100)
+        .await?;
     if let Some((turn_id, first_committed_seq)) =
         active_turn_projection_window(state, thread_id, &activity).await?
     {
         transcript::stamp_committed_entries_for_turn_window(
-            &mut entries,
+            &mut page.entries,
             transcript::TurnProjectionWindow {
                 turn_id: &turn_id,
                 first_committed_seq,
             },
         );
     }
-    replay_running_live_transcript_overlay(state, thread_id, &activity, &mut entries).await?;
-    Ok(entries)
+    replay_running_live_transcript_overlay(state, thread_id, &activity, &mut page.entries).await?;
+    Ok(page)
 }
 
 pub(super) async fn read_history(
@@ -1055,36 +1065,75 @@ pub(super) async fn read_history(
         },
     )
     .await?;
-    let entries = authoritative_history_projection(state, &scope, &params.thread_id).await?;
-    let start = match params.cursor.as_deref() {
-        None => 0,
-        Some(cursor) => entries
-            .iter()
-            .position(|entry| entry.id == cursor)
-            .map(|index| index + 1)
-            .ok_or_else(|| {
-                agent_session_error(
+    let limit = params.limit.unwrap_or(100).clamp(1, 200);
+    let before_session_seq = match params.cursor.as_deref() {
+        None => None,
+        Some(cursor) => {
+            let session_seq = cursor
+                .strip_prefix("message:")
+                .and_then(|value| value.parse::<i64>().ok())
+                .filter(|session_seq| *session_seq > 0)
+                .ok_or_else(|| {
+                    agent_session_error(
+                        "history_cursor_unknown",
+                        AgentErrorStage::History,
+                        "user_action",
+                        "not_delivered",
+                        "The history cursor is not a stable message entry id.",
+                        Some(format!("thread:{}", params.thread_id)),
+                    )
+                })?;
+            if !state
+                .inner
+                .state
+                .tui_message_exists(&params.thread_id, session_seq)
+                .await?
+            {
+                return Err(agent_session_error(
                     "history_cursor_unknown",
                     AgentErrorStage::History,
                     "user_action",
                     "not_delivered",
                     "The history cursor is not present in this Thread projection.",
                     Some(format!("thread:{}", params.thread_id)),
-                )
-            })?,
+                ));
+            }
+            Some(session_seq)
+        }
     };
-    let limit = params.limit.unwrap_or(100).clamp(1, 200);
-    let end = start.saturating_add(limit).min(entries.len());
-    let page = entries[start..end].to_vec();
-    let next_cursor = (end < entries.len())
-        .then(|| page.last().map(|entry| entry.id.clone()))
-        .flatten();
+    let mut page = state
+        .inner
+        .gateway
+        .thread_transcript_page(&params.thread_id, before_session_seq, limit)
+        .await?;
+    if before_session_seq.is_none() {
+        let activity = snapshot_activity(state, &scope.source, Some(&params.thread_id)).await?;
+        if let Some((turn_id, first_committed_seq)) =
+            active_turn_projection_window(state, &params.thread_id, &activity).await?
+        {
+            transcript::stamp_committed_entries_for_turn_window(
+                &mut page.entries,
+                transcript::TurnProjectionWindow {
+                    turn_id: &turn_id,
+                    first_committed_seq,
+                },
+            );
+        }
+        replay_running_live_transcript_overlay(
+            state,
+            &params.thread_id,
+            &activity,
+            &mut page.entries,
+        )
+        .await?;
+    }
+    let next_cursor = page.next_cursor;
     let mut history = context.history;
     history.cursor = next_cursor.clone();
     Ok(wire::ThreadHistoryReadResult {
         thread_id: params.thread_id,
         history,
-        entries: page,
+        entries: page.entries,
         next_cursor,
     })
 }
@@ -1194,21 +1243,47 @@ pub(super) async fn run_routed_action(
             Some(format!("thread:{}", params.thread_id)),
         ));
     }
+    let activity = snapshot_activity(state, &scope.source, Some(&params.thread_id)).await?;
+    let control_owner = activity.activities.first().cloned();
     match params.action {
         wire::ThreadActionInput::Interrupt => {
-            let thread = state
-                .inner
-                .framework
-                .resume_thread(&params.thread_id)
-                .await?;
-            let (framework_interrupted, framework_cleared) = thread.__interrupt_all();
             let selector = GatewayThreadSelector::thread_id(&params.thread_id);
-            let gateway_interrupted = state.inner.gateway.interrupt_turn(selector.clone()).await;
-            let gateway_cleared = state.inner.gateway.clear_queue(selector);
+            let (interrupted, cleared) = match control_owner {
+                Some(wire::ThreadActivityView::FrameworkTurn { .. }) => {
+                    let thread = state
+                        .inner
+                        .framework
+                        .resume_thread(&params.thread_id)
+                        .await?;
+                    thread.__interrupt_all()
+                }
+                Some(wire::ThreadActivityView::GatewayLocal { activity_id, .. }) => (
+                    state.inner.gateway.interrupt_local_activity(&activity_id),
+                    state.inner.gateway.clear_queue(selector),
+                ),
+                Some(wire::ThreadActivityView::Foreign {
+                    owner_id,
+                    activity_id,
+                    ..
+                }) => (
+                    state
+                        .inner
+                        .gateway
+                        .enqueue_exact_foreign_control_command(
+                            &activity_id,
+                            &owner_id,
+                            "interrupt",
+                            json!({}),
+                        )
+                        .await,
+                    0,
+                ),
+                None => (false, 0),
+            };
             Ok(wire::ThreadActionRunResult::Interrupt {
                 thread_id: params.thread_id,
-                interrupted: framework_interrupted || gateway_interrupted,
-                cleared: framework_cleared.saturating_add(gateway_cleared),
+                interrupted,
+                cleared,
             })
         }
         wire::ThreadActionInput::Steer {
@@ -1225,24 +1300,43 @@ pub(super) async fn run_routed_action(
                     Some(format!("thread:{}", params.thread_id)),
                 ));
             }
-            let thread = state
-                .inner
-                .framework
-                .resume_thread(&params.thread_id)
-                .await?;
-            let accepted = thread.__steer(&expected_turn_id, text.clone())
-                || state
-                    .inner
-                    .gateway
-                    .steer_foreign_turn(
-                        GatewayThreadSelector::thread_id(&params.thread_id),
-                        Some(&expected_turn_id),
-                        RuntimeMessage::User {
-                            content: vec![UserContentBlock::text(text)],
-                            timestamp_ms: gateway_now_ms(),
-                        },
-                    )
-                    .await;
+            let message = RuntimeMessage::User {
+                content: vec![UserContentBlock::text(text.clone())],
+                timestamp_ms: gateway_now_ms(),
+            };
+            let accepted = match control_owner {
+                Some(wire::ThreadActivityView::FrameworkTurn { turn_id, .. })
+                    if turn_id == expected_turn_id =>
+                {
+                    state
+                        .inner
+                        .framework
+                        .resume_thread(&params.thread_id)
+                        .await?
+                        .__steer(&expected_turn_id, text)
+                }
+                Some(wire::ThreadActivityView::Foreign {
+                    owner_id,
+                    activity_id,
+                    ..
+                }) => {
+                    let message = serde_json::to_value(message)?;
+                    state
+                        .inner
+                        .gateway
+                        .enqueue_exact_foreign_control_command(
+                            &activity_id,
+                            &owner_id,
+                            "steer",
+                            json!({
+                                "expectedTurnId": expected_turn_id,
+                                "message": message,
+                            }),
+                        )
+                        .await
+                }
+                _ => false,
+            };
             Ok(wire::ThreadActionRunResult::Steer {
                 thread_id: params.thread_id,
                 accepted,
@@ -1522,7 +1616,11 @@ pub(super) async fn respond_to_routed_interaction_for_selector(
             }
             wire::ThreadInteractionResponse::CancelClarify => psychevo::InteractionResponse::Cancel,
         };
-        if thread.respond(interaction_id, framework_response) {
+        if thread
+            .respond(interaction_id, framework_response)
+            .await?
+            .accepted
+        {
             state.remove_pending_permission(interaction_id);
             return Ok(wire::ThreadInteractionRespondResult {
                 accepted: true,

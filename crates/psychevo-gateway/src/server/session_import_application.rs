@@ -5,7 +5,7 @@ use crate::{
     runtime_profile_config_revision,
 };
 use futures::{StreamExt, stream};
-use psychevo::agents::AgentEntrypoint;
+use psychevo::__product::capabilities::AgentEntrypoint;
 
 const IMPORT_DISCOVERY_CONCURRENCY: usize = 4;
 const IMPORT_STATE_METADATA_KEY: &str = "agentSessionImportState";

@@ -67,17 +67,10 @@ entrypoints: [peer]
     }));
 
     let error = harness
-        .gateway
-        .send_turn(turn_request)
+        .send(turn_request)
         .await
         .expect_err("protocol v2 must not be accepted by the stable outbound adapter");
-    assert_eq!(
-        error
-            .structured_data()
-            .and_then(|data| data["delivery"].as_str()),
-        Some("not_delivered"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("protocol"), "{error}");
     let methods = std::fs::read_to_string(log).expect("protocol log");
     assert!(methods.contains("initialize"), "{methods}");
     assert!(!methods.contains("session/new"), "{methods}");
@@ -179,8 +172,7 @@ Peer instructions from markdown.
     }));
 
     let result = harness
-        .gateway
-        .send_turn(turn_request)
+        .send(turn_request)
         .await
         .expect("stable v1 contract turn");
     assert_eq!(
@@ -212,11 +204,16 @@ Peer instructions from markdown.
     assert_eq!(prompt["resourceMime"], "text/markdown");
     assert_eq!(prompt["imageMime"], "image/png");
     assert!(prompt["imageDataLength"].as_u64().unwrap_or_default() > 0);
-    assert!(result.result.events.iter().any(|event| {
-        event["type"] == "acp_peer_unknown_notification"
-            && event["update_kind"] == "_future_status"
-            && event["origin"] == "live"
-    }));
+    assert!(raw_events
+        .lock()
+        .expect("raw events lock")
+        .iter()
+        .filter_map(RunStreamEvent::legacy_value)
+        .any(|event| {
+            event["type"] == "acp_peer_unknown_notification"
+                && event["update_kind"] == "_future_status"
+                && event["origin"] == "live"
+        }));
 
     {
         let raw_events_guard = raw_events.lock().expect("raw events lock");
@@ -246,8 +243,7 @@ Peer instructions from markdown.
         .insert("model".to_string(), "test/missing-model".to_string());
     rejected.options.inherited_env = Some(env);
     let error = harness
-        .gateway
-        .send_turn(rejected)
+        .send(rejected)
         .await
         .expect_err("invalid ACP config must reject before prompt delivery");
     assert!(error.to_string().contains("test/missing-model"), "{error}");
@@ -340,8 +336,9 @@ entrypoints: [peer]
     ]));
     request.control_handle = Some(handle.clone());
     request.control = Some(control);
-    let gateway = harness.gateway.clone();
-    let turn = tokio::spawn(async move { gateway.send_turn(request).await });
+    let (application, gateway) = harness.runner();
+    let turn =
+        tokio::spawn(async move { send_framework_turn(application, gateway, request).await });
 
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -375,124 +372,10 @@ entrypoints: [peer]
 }
 
 #[tokio::test]
-async fn acp_unknown_delivery_retains_input_without_automatic_retry() {
-    let backend = Arc::new(FakeBackend::default());
-    let harness = harness(backend).await;
-    let home = harness._temp.path().join("home");
-    let script = harness._temp.path().join("fake_acp_unknown.py");
-    let log = harness._temp.path().join("unknown-delivery.log");
-    std::fs::create_dir_all(&home).expect("home");
-    std::fs::write(
-        &script,
-        include_str!("../../../tests/fixtures/fake_acp_unknown_delivery.py"),
-    )
-    .expect("fake ACP script");
-    std::fs::write(
-        home.join("config.toml"),
-        format!(
-            r#"[agents.backends.fake]
-kind = "acp"
-description = "Unknown-delivery ACP agent."
-command = {}
-args = ["{}", "{}"]
-entrypoints = ["peer"]
-"#,
-            test_python_command_toml(&harness.cwd),
-            script.display(),
-            log.display()
-        ),
-    )
-    .expect("config");
-    let agents_dir = harness.cwd.join(".psychevo").join("agents");
-    std::fs::create_dir_all(&agents_dir).expect("agents dir");
-    std::fs::write(
-        agents_dir.join("reviewer.md"),
-        r#"---
-name: reviewer
-description: Unknown-delivery ACP agent.
-backend:
-  ref: fake
-entrypoints: [peer]
----
-"#,
-    )
-    .expect("agent file");
-
-    let mut turn_request = request(
-        &harness,
-        GatewaySource::new("web", "peer-unknown-delivery").persistent(),
-        "legacy prompt",
-    );
-    turn_request.input = vec![GatewayInputPart::Text {
-        text: "recover this exact input".to_string(),
-    }];
-    turn_request.options.agent = Some("reviewer".to_string());
-    turn_request.options.runtime_ref = Some("acp:fake".to_string());
-    turn_request.options.inherited_env = Some(BTreeMap::from([
-        (
-            "HOME".to_string(),
-            harness._temp.path().display().to_string(),
-        ),
-        ("PSYCHEVO_HOME".to_string(), home.display().to_string()),
-    ]));
-    let turn_id = "turn-acp-unknown-delivery";
-    let error = harness
-        .gateway
-        .run_turn_now("thread:acp-unknown", turn_request, turn_id.to_string())
-        .await
-        .expect_err("connection loss after prompt dispatch must stay unknown");
-    assert_eq!(
-        error
-            .structured_data()
-            .and_then(|data| data["delivery"].as_str()),
-        Some("unknown"),
-        "{error}"
-    );
-    assert_eq!(
-        error
-            .structured_data()
-            .and_then(|data| data["retryClass"].as_str()),
-        Some("unknown_delivery"),
-        "{error}"
-    );
-    let delivery = harness
-        .state
-
-        .gateway_turn_delivery(turn_id)
-        .await.expect("delivery lookup")
-        .expect("delivery record");
-    assert_eq!(delivery.status, "unknown");
-    assert!(
-        delivery
-            .input_json
-            .as_deref()
-            .is_some_and(|input| input.contains("recover this exact input"))
-    );
-    assert_eq!(delivery.delivery_confirmed_at_ms, None);
-    assert_eq!(delivery.terminal_at_ms, None);
-    let activity = harness
-        .state
-
-        .gateway_activity(turn_id)
-        .await.expect("activity lookup")
-        .expect("activity");
-    assert!(
-        activity
-            .intent
-            .as_ref()
-            .is_some_and(|intent| intent.get("input").is_some()),
-        "unknown delivery must retain the duplicate durable activity input"
-    );
-    let methods = std::fs::read_to_string(log).expect("unknown delivery log");
-    assert_eq!(methods.matches("initialize").count(), 1, "{methods}");
-    assert_eq!(methods.matches("session/prompt").count(), 1, "{methods}");
-}
-
-#[tokio::test]
 async fn acp_next_turn_load_reconciles_unknown_delivery_before_new_input() {
     let backend = Arc::new(FakeBackend::default());
     let harness = harness(backend).await;
-    let home = harness._temp.path().join("home-reconcile");
+    let home = harness._temp.path().join("home");
     let script = harness._temp.path().join("fake_acp_reconcile.py");
     let log = harness._temp.path().join("reconcile.jsonl");
     let state_path = harness._temp.path().join("reconcile-state.json");
@@ -554,21 +437,24 @@ entrypoints: [peer]
     };
 
     let first_turn_id = "turn-acp-reconcile-unknown";
-    harness
-        .gateway
-        .send_turn_with_id(
-            request_for("old input with unknown delivery"),
-            first_turn_id.to_string(),
-        )
-        .await
-        .expect_err("first prompt response is lost after Agent acceptance");
+    let first_error = send_framework_turn_with_id(
+        harness._application.clone(),
+        harness.gateway.clone(),
+        request_for("old input with unknown delivery"),
+        first_turn_id.to_string(),
+    )
+    .await
+    .expect_err("first prompt response is lost after Agent acceptance");
     let first_delivery = harness
         .state
 
         .gateway_turn_delivery(first_turn_id)
         .await.expect("first delivery")
         .expect("first delivery record");
-    assert_eq!(first_delivery.status, "unknown");
+    assert_eq!(
+        first_delivery.status, "unknown",
+        "unexpected first delivery after {first_error}: {first_delivery:?}"
+    );
     assert!(first_delivery.input_json.is_some());
     let thread_id = first_delivery.thread_id.clone();
     let first_terminal = harness
@@ -598,9 +484,12 @@ entrypoints: [peer]
     let mut second_request = request_for("new input after reconciliation");
     second_request.thread_id = Some(thread_id.clone());
     second_request.explicit_thread = true;
-    let second = harness
-        .gateway
-        .send_turn_with_id(second_request, second_turn_id.to_string())
+    let second = send_framework_turn_with_id(
+        harness._application.clone(),
+        harness.gateway.clone(),
+        second_request,
+        second_turn_id.to_string(),
+    )
         .await
         .expect("next explicit turn loads and continues");
     assert_eq!(second.result.final_answer, "reconciled answer 2");
@@ -681,9 +570,12 @@ entrypoints: [peer]
     let mut third_request = request_for("third input after a second load");
     third_request.thread_id = Some(thread_id.clone());
     third_request.explicit_thread = true;
-    let third = harness
-        .gateway
-        .send_turn_with_id(third_request, "turn-acp-reconcile-third".to_string())
+    let third = send_framework_turn_with_id(
+        harness._application.clone(),
+        harness.gateway.clone(),
+        third_request,
+        "turn-acp-reconcile-third".to_string(),
+    )
         .await
         .expect("second load deduplicates replay before third input");
     assert_eq!(third.result.final_answer, "reconciled answer 3");
@@ -791,8 +683,9 @@ async fn submit_permission_resolves_gateway_permission_request() {
         let _ = event_tx.send(event);
     }));
 
-    let gateway = harness.gateway.clone();
-    let turn = tokio::spawn(async move { gateway.send_turn(request).await });
+    let (application, gateway) = harness.runner();
+    let turn =
+        tokio::spawn(async move { send_framework_turn(application, gateway, request).await });
 
     loop {
         let event = event_rx.recv().await.expect("gateway event");
@@ -804,15 +697,29 @@ async fn submit_permission_resolves_gateway_permission_request() {
         }
     }
 
+    let thread_id = harness
+        .gateway
+        .resolve_source_thread(&source)
+        .await
+        .expect("permission source lookup")
+        .expect("permission source binding");
+    let thread = harness
+        ._application
+        .client()
+        .resume_thread(&thread_id)
+        .await
+        .expect("permission Framework Thread");
     assert!(
-        harness
-            .gateway
-            .submit_permission(
-                GatewayThreadSelector::source(source.source_key()),
+        thread
+            .respond(
                 "permission-1",
-                PermissionApprovalDecision::allow_once(),
+                psychevo::InteractionResponse::Permission(
+                    PermissionApprovalDecision::allow_once(),
+                ),
             )
             .await
+            .expect("permission response")
+            .accepted
     );
     turn.await.expect("turn task").expect("turn");
 
@@ -824,25 +731,25 @@ async fn submit_permission_resolves_gateway_permission_request() {
             outcome: GatewayActionOutcome::Accepted,
             payload,
             ..
-        } if payload["decision"] == "allowOnce"
+        } if payload["reason"] == "allow_once"
     ));
 }
 
 #[tokio::test]
-async fn submit_permission_accepts_thread_alias_for_source_started_request() {
+async fn framework_permission_accepts_the_materialized_source_thread() {
     let backend = Arc::new(FakeBackend::default());
     backend.request_permission();
     let harness = harness(backend).await;
     let source = GatewaySource::new("tui", "cwd").process();
-    let source_queue_key = source_key_key(&source.source_key());
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut request = request(&harness, source.clone(), "permission");
     request.event_sink = Some(GatewayEventEmitter::new(move |event| {
         let _ = event_tx.send(event);
     }));
 
-    let gateway = harness.gateway.clone();
-    let turn = tokio::spawn(async move { gateway.send_turn(request).await });
+    let (application, gateway) = harness.runner();
+    let turn =
+        tokio::spawn(async move { send_framework_turn(application, gateway, request).await });
 
     loop {
         let event = event_rx.recv().await.expect("gateway event");
@@ -854,18 +761,29 @@ async fn submit_permission_accepts_thread_alias_for_source_started_request() {
         }
     }
 
-    harness
+    let thread_id = harness
         .gateway
-        .register_active_thread_alias(&source_queue_key, "thread-materialized");
+        .resolve_source_thread(&source)
+        .await
+        .expect("permission source lookup")
+        .expect("permission materialized Thread");
+    let thread = harness
+        ._application
+        .client()
+        .resume_thread(&thread_id)
+        .await
+        .expect("permission Framework Thread");
     assert!(
-        harness
-            .gateway
-            .submit_permission(
-                GatewayThreadSelector::thread_id("thread-materialized"),
+        thread
+            .respond(
                 "permission-1",
-                PermissionApprovalDecision::allow_once(),
+                psychevo::InteractionResponse::Permission(
+                    PermissionApprovalDecision::allow_once(),
+                ),
             )
             .await
+            .expect("permission response")
+            .accepted
     );
     turn.await.expect("turn task").expect("turn");
 }

@@ -3,8 +3,6 @@ const ACP_PEER_ABORT_MESSAGE: &str = "ACP peer turn aborted";
 #[derive(Debug)]
 pub(crate) struct AcpPeerTurnResult {
     pub(crate) run: RunResult,
-    #[cfg(test)]
-    pub(crate) native_session_id: String,
 }
 
 #[derive(Clone)]
@@ -12,7 +10,7 @@ struct AcpClientContext {
     cwd: PathBuf,
     fs_read: bool,
     fs_write: bool,
-    approval_handler: Option<Arc<dyn psychevo::types::ApprovalHandler>>,
+    approval_handler: Option<Arc<dyn psychevo::__product::runtime::ApprovalHandler>>,
     clarify_control: Option<RunControlHandle>,
     terminal: bool,
     terminal_env: BTreeMap<String, String>,
@@ -90,7 +88,7 @@ struct PreviousAcpPromptUsage {
 }
 
 async fn acp_prompt_usage_delta(
-    store: &psychevo::state::StateRuntime,
+    store: &psychevo::__product::persistence::StateRuntime,
     session_id: &str,
     native_session_id: &str,
     cumulative: &Value,
@@ -199,7 +197,7 @@ fn acp_history_message_metadata(
 }
 
 async fn commit_acp_replay_and_current_input(
-    state: &psychevo::state::StateRuntime,
+    state: &psychevo::__product::persistence::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     current_turn_id: &str,
@@ -225,7 +223,7 @@ async fn commit_acp_replay_and_current_input(
 }
 
 pub(crate) async fn commit_imported_acp_replay(
-    state: &psychevo::state::StateRuntime,
+    state: &psychevo::__product::persistence::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     replay: &AcpHistoryReplayProjection,
@@ -234,7 +232,7 @@ pub(crate) async fn commit_imported_acp_replay(
 }
 
 async fn commit_acp_replay(
-    state: &psychevo::state::StateRuntime,
+    state: &psychevo::__product::persistence::StateRuntime,
     peer: &ResolvedPeerTurn,
     session_id: &str,
     current_turn_id: Option<&str>,
@@ -387,7 +385,7 @@ async fn commit_acp_replay(
 pub(crate) async fn run_acp_peer_turn(
     pool: &AcpProcessPool,
     peer: ResolvedPeerTurn,
-    profile: &psychevo::config::RuntimeProfileConfig,
+    profile: &psychevo::__product::configuration::RuntimeProfileConfig,
     request: BackendTurnRequest,
     turn_id: String,
     session_ready: AcpSessionReadyCallback,
@@ -515,15 +513,7 @@ pub(crate) async fn run_acp_peer_turn(
                 events: Vec::new(),
                 warnings: Vec::new(),
             };
-            return Ok(AcpPeerTurnResult {
-                run,
-                #[cfg(test)]
-                native_session_id: native_session_slot
-                    .lock()
-                    .ok()
-                    .and_then(|slot| slot.clone())
-                    .unwrap_or_default(),
-            });
+            return Ok(AcpPeerTurnResult { run });
         }
         Err(err) => {
             emit_runtime_event(
@@ -647,16 +637,12 @@ pub(crate) async fn run_acp_peer_turn(
         events: acp.events,
         warnings: Vec::new(),
     };
-    Ok(AcpPeerTurnResult {
-        run,
-        #[cfg(test)]
-        native_session_id: acp.native_session_id,
-    })
+    Ok(AcpPeerTurnResult { run })
 }
 
 fn acp_peer_turn_controls(
-    options: &psychevo::types::RunOptions,
-    profile: &psychevo::config::RuntimeProfileConfig,
+    options: &psychevo::__product::runtime::RunOptions,
+    profile: &psychevo::__product::configuration::RuntimeProfileConfig,
     is_new_native_session: bool,
 ) -> (Option<String>, Option<String>, BTreeMap<String, String>) {
     let mut runtime_options = options.runtime_options.clone();
@@ -678,7 +664,7 @@ fn acp_peer_turn_controls(
 }
 
 async fn set_session_title_if_empty(
-    store: &psychevo::state::StateRuntime,
+    store: &psychevo::__product::persistence::StateRuntime,
     session_id: &str,
     title: &str,
 ) {

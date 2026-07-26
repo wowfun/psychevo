@@ -13,7 +13,7 @@ pub(crate) struct AcpSetControlInput {
     pub(crate) cwd: PathBuf,
     pub(crate) local_session_id: String,
     pub(crate) native_session_id: String,
-    pub(crate) mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    pub(crate) mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     pub(crate) control_id: String,
     pub(crate) value: Value,
 }
@@ -191,9 +191,7 @@ impl AcpProcessPool {
             Err(_) if delivery.was_sent() => Err(acp_unknown_delivery_error(
                 "ACP connection ended after the prompt request was dispatched; the turn was not retried",
             )),
-            Err(_) => Err(acp_process_unavailable_error(
-                "ACP process ended before the prompt request was dispatched",
-            )),
+            Err(_) => Err(acp_startup_or_exit_error(&handle.startup_rx)),
         };
         observe_acp_auth_result(&handle.auth_observation, &result, true);
         result
@@ -204,7 +202,7 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         local_session_id: String,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         self.inner
@@ -274,7 +272,7 @@ impl AcpProcessPool {
         cwd: PathBuf,
         local_session_id: String,
         native_session_id: String,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let (reply_tx, reply_rx) = tokio_oneshot::channel();
@@ -301,7 +299,7 @@ impl AcpProcessPool {
         cwd: PathBuf,
         local_session_id: String,
         native_session_id: String,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionLoadOutput> {
         let handle = self.actor(&peer, &cwd)?;
         let resident_local_session_id = local_session_id.clone();
@@ -423,7 +421,7 @@ impl AcpProcessPool {
         peer: ResolvedPeerTurn,
         cwd: PathBuf,
         session: AcpResidentSessionRef,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     ) -> psychevo::Result<AcpSessionSnapshot> {
         let handle = self.actor(&peer, &cwd)?;
         let local_session_id = session.local_session_id.clone();
@@ -769,13 +767,13 @@ fn acp_process_key(peer: &ResolvedPeerTurn, cwd: &Path) -> psychevo::Result<AcpP
     digest.update(serde_json::to_vec(&acp_backend_effective_env(peer))?);
     digest.update([0]);
     digest.update(
-        psychevo::host_paths::normalized_native_path(&launch.program)
+        psychevo::__product::platform::normalized_native_path(&launch.program)
             .to_string_lossy()
             .as_bytes(),
     );
     digest.update([0]);
     digest.update(
-        psychevo::host_paths::normalized_native_path(&launch.cwd)
+        psychevo::__product::platform::normalized_native_path(&launch.cwd)
             .to_string_lossy()
             .as_bytes(),
     );
@@ -807,13 +805,13 @@ fn acp_auth_observation_key(
     digest.update(serde_json::to_vec(&acp_backend_effective_env(peer))?);
     digest.update([0]);
     digest.update(
-        psychevo::host_paths::normalized_native_path(&launch.program)
+        psychevo::__product::platform::normalized_native_path(&launch.program)
             .to_string_lossy()
             .as_bytes(),
     );
     digest.update([0]);
     digest.update(
-        psychevo::host_paths::normalized_native_path(&launch.cwd)
+        psychevo::__product::platform::normalized_native_path(&launch.cwd)
             .to_string_lossy()
             .as_bytes(),
     );
@@ -877,7 +875,7 @@ enum AcpProcessCommand {
     Prepare {
         local_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     Promote {
@@ -891,14 +889,14 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     LoadSession {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionLoadOutput>>,
     },
     InspectCached {
@@ -910,7 +908,7 @@ enum AcpProcessCommand {
         local_session_id: String,
         native_session_id: String,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
         control_id: String,
         value: Value,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
@@ -923,7 +921,7 @@ enum AcpProcessCommand {
     ResumeSession {
         session: AcpResidentSessionRef,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
         reply: tokio_oneshot::Sender<psychevo::Result<AcpSessionSnapshot>>,
     },
     ForkSession {
@@ -1158,14 +1156,14 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
         startup_tx.send_replace(AcpProcessStartupStatus::Failed(
             "ACP process did not expose stdin".to_string(),
         ));
-        psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
+        psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
         return;
     };
     let Some(stdout) = child.stdout.take() else {
         startup_tx.send_replace(AcpProcessStartupStatus::Failed(
             "ACP process did not expose stdout".to_string(),
         ));
-        psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
+        psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
         return;
     };
     let transport = AcpProtocolObservingTransport::new(
@@ -2222,7 +2220,7 @@ async fn run_acp_process_actor(inputs: AcpProcessActorInputs) {
     }
     let _ = teardown_terminals.terminate_all();
 
-    psychevo::process_env::terminate_tokio_child_tree(&mut child).await;
+    psychevo::__product::platform::terminate_tokio_child_tree(&mut child).await;
     let _ = child.wait().await;
 }
 
@@ -2336,6 +2334,26 @@ fn acp_process_unavailable_error(message: impl Into<String>) -> Error {
         message,
         Some("acp-process".to_string()),
     )
+}
+
+fn acp_startup_or_exit_error(
+    startup_rx: &watch::Receiver<AcpProcessStartupStatus>,
+) -> Error {
+    match startup_rx.borrow().clone() {
+        AcpProcessStartupStatus::Protocol(AcpProtocolDoctorStatus::Incompatible {
+            expected_version,
+            actual_version,
+        }) => acp_process_unavailable_error(format!(
+            "ACP peer negotiated unsupported protocol version {actual_version}; stable v{expected_version} is required"
+        )),
+        AcpProcessStartupStatus::Failed(message) => acp_process_unavailable_error(message),
+        AcpProcessStartupStatus::Starting
+        | AcpProcessStartupStatus::Protocol(AcpProtocolDoctorStatus::Compatible { .. }) => {
+            acp_process_unavailable_error(
+                "ACP process ended before the prompt request was dispatched",
+            )
+        }
+    }
 }
 
 fn acp_unknown_delivery_error(message: impl Into<String>) -> Error {

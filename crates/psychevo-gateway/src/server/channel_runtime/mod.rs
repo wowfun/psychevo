@@ -14,7 +14,10 @@ use crate::im::{
     ChannelGateway, ImIdentity, ImInboundMessage, ImOutboundMessage, gateway_input_parts_for_im,
     gateway_source_for_im,
 };
-use psychevo::{config::ChannelRuntimeConnection, config::channel_runtime_connections};
+use psychevo::{
+    __product::configuration::ChannelRuntimeConnection,
+    __product::configuration::channel_runtime_connections,
+};
 use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 

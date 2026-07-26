@@ -97,19 +97,6 @@ async fn pending_action_state(
     thread_id: Option<&str>,
     action: &PendingActionView,
 ) -> psychevo::Result<PendingInteractionState> {
-    if action.kind == GatewayActionKind::Permission
-        && state
-            .inner
-            .gateway
-            .has_pending_permission_for_selector(selector, &action.action_id)
-    {
-        return Ok(PendingInteractionState::Visible);
-    }
-    if action.kind == GatewayActionKind::Permission
-        && action.owner_id.as_deref() == Some(state.inner.gateway.owner_id())
-    {
-        return Ok(PendingInteractionState::Stale);
-    }
     pending_interaction_context_state(
         state,
         selector,

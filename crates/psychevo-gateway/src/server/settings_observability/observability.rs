@@ -64,7 +64,7 @@ async fn context_read_result(
 }
 
 fn context_read_result_from_snapshot(
-    snapshot: &psychevo::context_usage::ContextSnapshot,
+    snapshot: &psychevo::__product::usage::ContextSnapshot,
 ) -> wire::ContextReadResult {
     let status = match snapshot.status.as_str() {
         "reported" | "derived" | "partial" | "unavailable" => snapshot.status.as_str(),

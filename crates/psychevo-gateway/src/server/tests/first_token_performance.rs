@@ -1,3 +1,29 @@
+async fn run_profiled_framework_turn(
+    state: &WebState,
+    caller: crate::ThreadCallerContext,
+    mut intent: crate::ThreadTurnIntent,
+) {
+    let mut start = psychevo::StartThreadRequest::new(&caller.cwd);
+    start.source = caller.runtime_source.clone();
+    start.metadata = intent.lineage.clone();
+    let thread = state
+        .inner
+        .framework
+        .start_thread(start)
+        .await
+        .expect("profile Thread");
+    intent.thread_id = Some(thread.id().to_string());
+    intent.turn_id = Some(Uuid::now_v7().to_string());
+    let submission = intent
+        .into_framework_request(caller)
+        .expect("profile Framework request");
+    let handle = thread
+        .start_turn(submission.request)
+        .await
+        .expect("accept profile Turn");
+    handle.wait().await.expect("profile Turn");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_dispatch() {
@@ -88,15 +114,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
         )
     };
     let (caller, intent) = direct_turn(&state);
-    state
-        .inner
-        .gateway
-        .start_turn(caller, intent)
-        .await
-        .expect("accept direct warmup")
-        .wait()
-        .await
-        .expect("direct warmup");
+    run_profiled_framework_turn(&state, caller, intent).await;
     let warm_thread = "gui-warmup";
     let warm_contributions = state
         .inner
@@ -117,15 +135,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
         .selected_capability_roots
         .extend(warm_contributions.capability_roots);
     warm_caller.extend_runtime_tools(warm_contributions.runtime_tools);
-    state
-        .inner
-        .gateway
-        .start_turn(warm_caller, warm_intent)
-        .await
-        .expect("accept GUI warmup")
-        .wait()
-        .await
-        .expect("GUI warmup");
+    run_profiled_framework_turn(&state, warm_caller, warm_intent).await;
     if let Some(lease_id) = warm_lease.as_deref() {
         state
             .inner
@@ -142,15 +152,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
     for sample in 0..9 {
         let started = Instant::now();
         let (caller, intent) = direct_turn(&state);
-        state
-            .inner
-            .gateway
-            .start_turn(caller, intent)
-            .await
-            .expect("accept direct fake-provider turn")
-            .wait()
-            .await
-            .expect("direct fake-provider turn");
+        run_profiled_framework_turn(&state, caller, intent).await;
         let completed = started.elapsed();
         let dispatched = backend
             .dispatch_times
@@ -185,15 +187,7 @@ async fn initialized_gui_first_token_overhead_stays_close_to_direct_gateway_disp
             .selected_capability_roots
             .extend(contributions.capability_roots);
         caller.extend_runtime_tools(contributions.runtime_tools);
-        state
-            .inner
-            .gateway
-            .start_turn(caller, intent)
-            .await
-            .expect("accept GUI fake-provider turn")
-            .wait()
-            .await
-            .expect("GUI fake-provider turn");
+        run_profiled_framework_turn(&state, caller, intent).await;
         if let Some(lease_id) = lease_id.as_deref() {
             state
                 .inner

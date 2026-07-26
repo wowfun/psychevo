@@ -649,7 +649,7 @@ where
                     .codex_capability_broker
                     .plugin_read(&scope.cwd, &identity)
                     .await?;
-                let policy = psychevo::plugins::codex_plugin_policy_value(
+                let policy = psychevo::__product::capabilities::codex_plugin_policy_value(
                     &state.inner.home,
                     &scope.cwd,
                     &identity.selector(),
@@ -1551,7 +1551,7 @@ fn tool_config_dir(state: &WebState, scope: &ResolvedScope, local: bool) -> Path
     }
 }
 
-fn toolset_mutation_value(result: psychevo::config::ToolsetMutationResult) -> Value {
+fn toolset_mutation_value(result: psychevo::__product::configuration::ToolsetMutationResult) -> Value {
     json!({
         "success": true,
         "changed": result.changed,
@@ -1969,6 +1969,7 @@ async fn enqueue_thread_compact_result_for_thread(
             event_state.pending_context_for_selector(&event_selector, Some(&event_thread_id));
         event_state.publish_gateway_event_for_connection(event, context, None, Some(&out_tx));
     });
+    let native_compaction = (!non_native_runtime).then(|| thread.__enqueue_compact(request));
     let state = state.clone();
     Ok(Box::pin(async move {
         let mut started_activity = state.activity(&source, Some(&thread_id)).await;
@@ -1980,11 +1981,13 @@ async fn enqueue_thread_compact_result_for_thread(
         let result = if non_native_runtime {
             Ok(unavailable_compaction_result(
                 &thread_id,
-                psychevo::compaction::CompactionReason::Manual,
+                psychevo::__product::sessions::CompactionReason::Manual,
                 &runtime_ref,
             ))
         } else {
-            thread.compact(request).await
+            native_compaction
+                .expect("native compaction future")
+                .await
         };
         let completed_activity = state.activity(&source, Some(&thread_id)).await;
         let _ = event_sink.emit(GatewayEvent::ActivityChanged {
@@ -2014,7 +2017,7 @@ async fn enqueue_thread_compact_result_for_thread(
 
 async fn thread_compact_result(
     state: &WebState,
-    result: psychevo::compaction::CompactionResult,
+    result: psychevo::__product::sessions::CompactionResult,
 ) -> psychevo::Result<wire::ThreadCompactionResult> {
     let checkpoint = match result.checkpoint_id {
         Some(checkpoint_id) => state

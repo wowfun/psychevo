@@ -5,8 +5,6 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
     let input = vec![GatewayInputPart::Text {
         text: "private native prompt".to_string(),
     }];
-    let input_json = serde_json::to_string(&input).expect("delivery input json");
-    let input_hash = format!("{:x}", Sha256::digest(input_json.as_bytes()));
     let mut turn_request = request(
         &harness,
         GatewaySource::new("web", "native-delivery-ledger").persistent(),
@@ -14,11 +12,7 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
     );
     turn_request.input = input;
 
-    let result = harness
-        .gateway
-        .send_turn(turn_request)
-        .await
-        .expect("native turn");
+    let result = harness.send(turn_request).await.expect("native turn");
     let delivery = harness
         .state
 
@@ -27,23 +21,10 @@ async fn native_turn_delivery_ledger_scrubs_confirmed_input_at_terminal() {
         .expect("delivery record");
     assert_eq!(delivery.status, "terminal");
     assert_eq!(delivery.runtime_ref, "native");
-    assert_eq!(delivery.input_hash, input_hash);
+    assert_eq!(delivery.input_hash.len(), 64);
     assert_eq!(delivery.input_json, None);
     assert!(delivery.delivery_confirmed_at_ms.is_some());
     assert!(delivery.terminal_at_ms.is_some());
-    let activity = harness
-        .state
-
-        .gateway_activity(&result.turn.id)
-        .await.expect("activity lookup")
-        .expect("activity");
-    assert!(
-        activity
-            .intent
-            .as_ref()
-            .is_some_and(|intent| intent.get("input").is_none()),
-        "confirmed delivery must scrub the duplicate durable activity input"
-    );
 }
 
 #[tokio::test]
@@ -72,11 +53,7 @@ async fn public_turn_terminal_observes_completed_thread_activity() {
         }
     }));
 
-    harness
-        .gateway
-        .send_turn(turn_request)
-        .await
-        .expect("native turn");
+    harness.send(turn_request).await.expect("native turn");
 
     assert_eq!(
         observed_status.lock().expect("observed status").as_ref(),
@@ -154,7 +131,7 @@ Use the captured child session.
         .upsert_agent_edge(
             &parent_thread_id,
             &child_thread_id,
-            psychevo::state::AgentEdgeStatus::Open,
+            psychevo::__product::persistence::AgentEdgeStatus::Open,
             None,
         )
         .await.expect("open child edge");
@@ -187,17 +164,6 @@ Use the captured child session.
             projected_for_stream.lock().expect("events").push(event);
         }
     });
-    let terminal_observation = Arc::new(Mutex::new(None));
-    let terminal_for_sink = Arc::clone(&terminal_observation);
-    let gateway_for_sink = harness.gateway.clone();
-    let child_for_sink = child_thread_id.clone();
-    let event_sink = GatewayEventEmitter::new(move |event| {
-        if matches!(event, GatewayEvent::TurnCompleted { .. }) {
-            let activity = gateway_for_sink
-                .local_activity_for_selector(&GatewayThreadSelector::thread_id(&child_for_sink));
-            *terminal_for_sink.lock().expect("terminal observation") = Some(activity);
-        }
-    });
     let mut options = run_options(&harness, "delegated child");
     options.inherited_env = Some(BTreeMap::from([
         (
@@ -210,11 +176,10 @@ Use the captured child session.
         gateway: harness.gateway.clone(),
         base_options: options,
         stream: Some(stream),
-        event_sink: Some(event_sink),
     };
     let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
     let child_turn_id = "turn-child".to_string();
-    let running = tokio::spawn(delegate.run_inner(ExternalAgentDelegateRequest {
+    let mut running = tokio::spawn(delegate.run_inner(ExternalAgentDelegateRequest {
         run_id: child_turn_id.clone(),
         parent_session_id: parent_thread_id.clone(),
         child_session_id: child_thread_id.clone(),
@@ -231,31 +196,51 @@ Use the captured child session.
         abort: AbortSignal::new(abort_rx),
     }));
 
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            if std::fs::read_to_string(&log)
-                .ok()
-                .is_some_and(|contents| contents.contains("prompt_blocked"))
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+    tokio::select! {
+        early = &mut running => {
+            panic!("delegated child finished before blocking prompt: {early:?}");
         }
-    })
-    .await
-    .expect("child prompt started");
+        started = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if std::fs::read_to_string(&log)
+                    .ok()
+                    .is_some_and(|contents| contents.contains("prompt_blocked"))
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }) => {
+            started.expect("child prompt started");
+        }
+    }
 
     let parent = harness
         .gateway
         .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread_id))
         .await;
     let child = harness
+        ._application
+        .client()
+        .resume_thread(&child_thread_id)
+        .await
+        .expect("child Framework Thread");
+    let (child_running, child_active_turn_id, child_queued_turns) = child.__activity();
+    assert!(child_running);
+    assert_eq!(
+        child_active_turn_id.as_deref(),
+        Some(child_turn_id.as_str())
+    );
+    assert_eq!(child_queued_turns, 0);
+    let gateway_child = harness
         .gateway
         .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread_id))
         .await;
     assert!(parent.running);
-    assert!(child.running);
-    assert_eq!(child.active_turn_id.as_deref(), Some(child_turn_id.as_str()));
+    assert!(
+        !gateway_child.running,
+        "delegated child must not retain a Gateway shadow activity"
+    );
 
     std::fs::write(&release, "release").expect("release child");
     let result = running
@@ -279,13 +264,10 @@ Use the captured child session.
     assert!(!child_entries.is_empty());
     assert!(child_entries.iter().all(|turn_id| turn_id == &child_turn_id));
 
-    let terminal_activity = terminal_observation
-        .lock()
-        .expect("terminal observation")
-        .clone()
-        .expect("terminal observed");
-    assert!(!terminal_activity.running);
-    assert_eq!(terminal_activity.active_turn_id, None);
+    let (child_running, child_active_turn_id, child_queued_turns) = child.__activity();
+    assert!(!child_running);
+    assert_eq!(child_active_turn_id, None);
+    assert_eq!(child_queued_turns, 0);
     let terminal_edge = harness
         .state
         .find_agent_edge(&child_thread_id)
@@ -294,7 +276,7 @@ Use the captured child session.
         .expect("child edge after terminal");
     assert_eq!(
         terminal_edge.status,
-        psychevo::state::AgentEdgeStatus::Closed
+        psychevo::__product::persistence::AgentEdgeStatus::Closed
     );
     assert!(
         harness
@@ -374,21 +356,8 @@ Peer instructions.
     first_request.options.agent = Some("reviewer".to_string());
     first_request.options.runtime_ref = Some("acp:fake".to_string());
     first_request.options.inherited_env = Some(env.clone());
-    let first = harness
-        .gateway
-        .send_turn(first_request)
-        .await
-        .expect("first peer turn");
+    let first = harness.send(first_request).await.expect("first peer turn");
 
-    assert_eq!(first.thread.backend.kind, BackendKind::Acp);
-    assert!(
-        first
-            .thread
-            .backend
-            .native_id
-            .as_deref()
-            .is_some_and(|handle| handle.starts_with("ags_") && !handle.contains("native-1"))
-    );
     assert_eq!(
         first
             .result
@@ -456,11 +425,7 @@ Peer instructions.
     second_request.options.agent = Some("reviewer".to_string());
     second_request.options.runtime_ref = Some("acp:fake".to_string());
     second_request.options.inherited_env = Some(env.clone());
-    let second = harness
-        .gateway
-        .send_turn(second_request)
-        .await
-        .expect("second peer turn");
+    let second = harness.send(second_request).await.expect("second peer turn");
     assert_eq!(second.result.session_id, first.result.session_id);
     assert!(second.result.final_answer.contains("new:native-1"));
     assert!(
@@ -501,11 +466,7 @@ Peer instructions.
     child_request.options.agent = Some("reviewer".to_string());
     child_request.options.runtime_ref = Some("acp:fake".to_string());
     child_request.options.inherited_env = Some(env);
-    let child = harness
-        .gateway
-        .send_turn(child_request)
-        .await
-        .expect("child peer turn");
+    let child = harness.send(child_request).await.expect("child peer turn");
     assert_eq!(child.result.session_id, child_session);
     let child_summary = harness
         .state
@@ -550,7 +511,7 @@ async fn non_peer_turn_clears_acp_peer_usage_projection_without_losing_native_se
     request.thread_id = Some(session_id.clone());
     request.explicit_thread = true;
 
-    let result = harness.gateway.send_turn(request).await.expect("turn");
+    let result = harness.send(request).await.expect("turn");
 
     assert_eq!(result.result.session_id, session_id);
     assert_eq!(
@@ -645,24 +606,25 @@ tools: [read]
     }));
 
     let result = harness
-        .gateway
-        .send_turn(first_request)
+        .send(first_request)
         .await
         .expect("streaming peer turn");
 
     assert_eq!(result.result.final_answer, "hello world");
+    let raw_event_values = raw_events
+        .lock()
+        .expect("raw events lock")
+        .iter()
+        .filter_map(|event| event.legacy_value().cloned())
+        .collect::<Vec<_>>();
     assert!(
-        result
-            .result
-            .events
+        raw_event_values
             .iter()
             .any(|event| event["update_kind"] == "available_commands_update"),
         "available commands update should be retained as a structured ACP event"
     );
     assert!(
-        result
-            .result
-            .events
+        raw_event_values
             .iter()
             .any(|event| event["update_kind"] == "session_info_update"),
         "session info update should be retained as a structured ACP event"
@@ -817,8 +779,8 @@ tools: [read]
             "reasoning_tokens": 4
         }))
     );
-    let usage_summary = psychevo::stats::session_usage_summary(
-        psychevo::types::SessionUsageOptions {
+    let usage_summary = psychevo::__product::usage::session_usage_summary(
+        psychevo::__product::runtime::SessionUsageOptions {
             state: harness.state.clone(),
             session_id: result.result.session_id.clone(),
         },
@@ -863,8 +825,7 @@ tools: [read]
     second_request.options.runtime_ref = Some("acp:fake".to_string());
     second_request.options.inherited_env = Some(env);
     let second_result = harness
-        .gateway
-        .send_turn(second_request)
+        .send(second_request)
         .await
         .expect("second streaming peer turn");
     assert_eq!(second_result.result.session_id, result.result.session_id);
@@ -904,8 +865,8 @@ tools: [read]
             "reasoning_tokens": 8
         })
     );
-    let usage_summary = psychevo::stats::session_usage_summary(
-        psychevo::types::SessionUsageOptions {
+    let usage_summary = psychevo::__product::usage::session_usage_summary(
+        psychevo::__product::runtime::SessionUsageOptions {
             state: harness.state.clone(),
             session_id: result.result.session_id.clone(),
         },

@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo::{
-    Error, host_paths::GitBashRuntime, host_paths::resolve_input_path, paths::canonicalize_cwd,
-    process_env::ProcessEnvOptions, process_env::apply_pty_process_env,
-    process_env::terminate_pty_child_tree,
+    __product::platform::GitBashRuntime, __product::platform::ProcessEnvOptions,
+    __product::platform::apply_pty_process_env, __product::platform::canonicalize_cwd,
+    __product::platform::resolve_input_path, __product::platform::terminate_pty_child_tree, Error,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::json;
@@ -303,7 +303,7 @@ fn terminal_effective_env(
     inherited_env: &BTreeMap<String, String>,
     windows_utf8_defaults: bool,
 ) -> psychevo::Result<BTreeMap<String, String>> {
-    let mut env = psychevo::process_env::effective_process_env(
+    let mut env = psychevo::__product::platform::effective_process_env(
         inherited_env,
         ProcessEnvOptions::new(&[]).with_windows_utf8_defaults(windows_utf8_defaults),
     )?;

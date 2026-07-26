@@ -72,7 +72,7 @@ async fn automation_manual_run_uses_auto_sandbox_and_updates_status() {
     assert!(sandbox.enabled);
     assert_eq!(
         sandbox.mode,
-        psychevo::types::RunSandboxMode::WorkspaceWrite
+        psychevo::__product::runtime::RunSandboxMode::WorkspaceWrite
     );
 
     let mut saw_terminal = false;

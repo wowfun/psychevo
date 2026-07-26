@@ -17,7 +17,7 @@ pub(super) struct ThreadDraftPrepareWork {
     pub(super) target_catalog: Arc<RunnableTargetCatalog>,
     pub(super) target: wire::RunnableTargetView,
     pub(super) context: wire::ThreadContextReadResult,
-    pub(super) configured: Vec<psychevo::types::ConfiguredModel>,
+    pub(super) configured: Vec<psychevo::__product::runtime::ConfiguredModel>,
     pub(super) source_lane_prepared: bool,
 }
 
@@ -486,7 +486,7 @@ async fn thread_context_read_result_with_configured_models(
     params: wire::ThreadContextReadParams,
 ) -> psychevo::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo::types::ConfiguredModel>,
+    Vec<psychevo::__product::runtime::ConfiguredModel>,
 )> {
     let target_catalog = RunnableTargetCatalog::load(state, scope)?;
     thread_context_read_result_with_catalog(state, scope, params, target_catalog).await
@@ -499,7 +499,7 @@ async fn thread_context_read_result_with_catalog(
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo::types::ConfiguredModel>,
+    Vec<psychevo::__product::runtime::ConfiguredModel>,
 )> {
     let requested_target = params.target.clone();
     let thread_id = match params.thread_id {
@@ -930,7 +930,7 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
     target_catalog: Arc<RunnableTargetCatalog>,
 ) -> psychevo::Result<(
     wire::ThreadContextReadResult,
-    Vec<psychevo::types::ConfiguredModel>,
+    Vec<psychevo::__product::runtime::ConfiguredModel>,
 )> {
     let thread_id = match params.thread_id.clone() {
         Some(thread_id) => Some(thread_id),
@@ -1046,7 +1046,7 @@ pub(super) async fn thread_context_read_result_live_with_catalog_and_configured(
 async fn apply_prepared_acp_snapshot(
     state: &WebState,
     scope: &ResolvedScope,
-    configured: &[psychevo::types::ConfiguredModel],
+    configured: &[psychevo::__product::runtime::ConfiguredModel],
     context: &mut wire::ThreadContextReadResult,
     snapshot: &crate::acp_peer::AcpSessionSnapshot,
 ) -> psychevo::Result<()> {
@@ -1439,7 +1439,7 @@ fn apply_draft_preparation_problem(
 const DRAFT_PREPARATION_PROBLEM_KEY: &str = "draftPreparationProblem";
 
 fn source_lane_preparation_problem(
-    lane: &psychevo::state::GatewaySourceLaneRecord,
+    lane: &psychevo::__product::persistence::GatewaySourceLaneRecord,
     target: &wire::RunnableTargetView,
 ) -> Option<wire::RuntimeErrorView> {
     if lane.draft_agent_ref != target.agent_ref
@@ -3879,7 +3879,7 @@ fn acp_session_agent_surface_descriptor(
 fn apply_control_state_precedence(
     controls: &mut [wire::ThreadControlDescriptorView],
     binding: Option<&GatewayRuntimeBindingRecord>,
-    source_lane: Option<&psychevo::state::GatewaySourceLaneRecord>,
+    source_lane: Option<&psychevo::__product::persistence::GatewaySourceLaneRecord>,
 ) {
     for control in controls {
         if let Some(value) = binding
@@ -3915,7 +3915,7 @@ fn apply_control_state_precedence(
 
 fn populate_native_control_catalog(
     options: &RunOptions,
-    configured: &[psychevo::types::ConfiguredModel],
+    configured: &[psychevo::__product::runtime::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
     if let Some(model_control) = controls.iter_mut().find(|control| control.id == "model") {
@@ -3955,7 +3955,7 @@ fn populate_native_control_catalog(
 }
 
 fn decorate_configured_model_control_labels(
-    configured: &[psychevo::types::ConfiguredModel],
+    configured: &[psychevo::__product::runtime::ConfiguredModel],
     controls: &mut [wire::ThreadControlDescriptorView],
 ) {
     let Some(model_control) = controls
@@ -3979,7 +3979,7 @@ fn decorate_configured_model_control_labels(
 }
 
 fn source_draft_control_revision(
-    source_lane: Option<&psychevo::state::GatewaySourceLaneRecord>,
+    source_lane: Option<&psychevo::__product::persistence::GatewaySourceLaneRecord>,
     capability_revision: &str,
 ) -> String {
     let Some(source_lane) = source_lane else {
@@ -4051,7 +4051,11 @@ fn runtime_profile_config_json(
         "acp" => RuntimeProfileKind::Acp,
         _ => unreachable!("runtime kind was validated"),
     };
-    psychevo::config::validate_runtime_profile_backend_ref(&params.id, runtime_kind, backend_ref)?;
+    psychevo::__product::configuration::validate_runtime_profile_backend_ref(
+        &params.id,
+        runtime_kind,
+        backend_ref,
+    )?;
     let mut object = serde_json::Map::new();
     object.insert("runtime".to_string(), json!(params.runtime.trim()));
     object.insert("enabled".to_string(), json!(params.enabled.unwrap_or(true)));
@@ -4352,10 +4356,10 @@ default_model = "test/default"
         )
         .expect("ACP fixture");
         let host_env = std::env::vars().collect::<BTreeMap<_, _>>();
-        let python = psychevo::host_paths::resolve_executable_path(
+        let python = psychevo::__product::platform::resolve_executable_path(
             "python3",
             &state.inner.cwd,
-            &psychevo::host_paths::ExecutableResolveOptions {
+            &psychevo::__product::platform::ExecutableResolveOptions {
                 platform: HostPlatform::current(),
                 env: &host_env,
             },
@@ -4413,24 +4417,26 @@ backend_ref = "ephemeral"
         state
             .inner
             .state
-            .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
-                thread_id: &thread_id,
-                agent_ref: Some("ephemeral"),
-                agent_fingerprint: &agent_fingerprint,
-                agent_definition_json: agent_json,
-                runtime_ref: "ephemeral",
-                backend_kind: "acp",
-                native_kind: "acp",
-                native_session_id: Some("ephemeral-native-1"),
-                cwd: &cwd,
-                profile_fingerprint: &profile_fingerprint,
-                profile_revision: &profile_revision,
-                profile_config_json: &profile_json,
-                adapter_kind: "acp",
-                adapter_revision: "test",
-                ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-                parent_thread_id: None,
-            })
+            .create_gateway_runtime_binding(
+                psychevo::__product::persistence::GatewayRuntimeBindingInput {
+                    thread_id: &thread_id,
+                    agent_ref: Some("ephemeral"),
+                    agent_fingerprint: &agent_fingerprint,
+                    agent_definition_json: agent_json,
+                    runtime_ref: "ephemeral",
+                    backend_kind: "acp",
+                    native_kind: "acp",
+                    native_session_id: Some("ephemeral-native-1"),
+                    cwd: &cwd,
+                    profile_fingerprint: &profile_fingerprint,
+                    profile_revision: &profile_revision,
+                    profile_config_json: &profile_json,
+                    adapter_kind: "acp",
+                    adapter_revision: "test",
+                    ownership: GatewayRuntimeBindingOwnership::ReadWrite,
+                    parent_thread_id: None,
+                },
+            )
             .await
             .expect("binding");
         let persisted_projection = crate::acp_peer::AcpSessionSnapshot {

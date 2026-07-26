@@ -98,7 +98,7 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
     .await
     .expect("first history page");
     assert_eq!(first["entries"].as_array().expect("entries").len(), 1);
-    assert_eq!(first["entries"][0]["blocks"][0]["body"], "first");
+    assert_eq!(first["entries"][0]["blocks"][0]["body"], "second");
     let cursor = first["nextCursor"]
         .as_str()
         .expect("opaque stable entry cursor")
@@ -123,7 +123,7 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
     )
     .await
     .expect("second history page");
-    assert_eq!(second["entries"][0]["blocks"][0]["body"], "second");
+    assert_eq!(second["entries"][0]["blocks"][0]["body"], "first");
     assert_eq!(second["nextCursor"], Value::Null);
 
     let unknown = handle_rpc(
@@ -144,6 +144,90 @@ async fn thread_history_read_pages_the_authoritative_projection_by_entry_id() {
     .await
     .expect_err("unknown cursor fails closed");
     assert!(unknown.to_string().contains("cursor"), "{unknown}");
+}
+
+#[tokio::test]
+async fn thread_snapshot_and_history_read_cover_three_bounded_pages_without_overlap() {
+    let (_temp, state) = web_state().await;
+    let scope = default_resolved_scope(&state, &AuthContext::Bearer).expect("scope");
+    let session_id = state
+        .inner
+        .state
+        .create_session_with_metadata(&state.inner.cwd, "web", "fake-model", "fake-provider", None)
+        .await
+        .expect("session");
+    for session_seq in 1..=205 {
+        state
+            .inner
+            .state
+            .append_message(
+                &session_id,
+                &RuntimeMessage::User {
+                    content: vec![UserContentBlock::text(format!("message {session_seq}"))],
+                    timestamp_ms: session_seq,
+                },
+            )
+            .await
+            .expect("append history message");
+    }
+
+    let snapshot = thread_snapshot(&state, &scope, Some(&session_id))
+        .await
+        .expect("snapshot");
+    let snapshot_entries = snapshot["entries"].as_array().expect("snapshot entries");
+    assert_eq!(snapshot_entries.len(), 100);
+    assert_eq!(snapshot_entries[0]["messageSeq"], 106);
+    assert_eq!(snapshot_entries[99]["messageSeq"], 205);
+    assert_eq!(snapshot["history"]["cursor"], "message:106");
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let second = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("history-second")),
+            method: "thread/history/read".to_string(),
+            params: Some(json!({
+                "scope": scope.to_wire_scope(),
+                "threadId": session_id,
+                "cursor": snapshot["history"]["cursor"],
+                "limit": 100
+            })),
+        },
+    )
+    .await
+    .expect("second history page");
+    let second_entries = second["entries"].as_array().expect("second entries");
+    assert_eq!(second_entries.len(), 100);
+    assert_eq!(second_entries[0]["messageSeq"], 6);
+    assert_eq!(second_entries[99]["messageSeq"], 105);
+    assert_eq!(second["nextCursor"], "message:6");
+
+    let third = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!("history-third")),
+            method: "thread/history/read".to_string(),
+            params: Some(json!({
+                "scope": scope.to_wire_scope(),
+                "threadId": session_id,
+                "cursor": second["nextCursor"],
+                "limit": 100
+            })),
+        },
+    )
+    .await
+    .expect("third history page");
+    let third_entries = third["entries"].as_array().expect("third entries");
+    assert_eq!(third_entries.len(), 5);
+    assert_eq!(third_entries[0]["messageSeq"], 1);
+    assert_eq!(third_entries[4]["messageSeq"], 5);
+    assert_eq!(third["nextCursor"], Value::Null);
 }
 
 #[tokio::test]
@@ -193,7 +277,7 @@ async fn thread_snapshot_replays_running_exec_live_overlay() {
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
@@ -293,7 +377,7 @@ async fn thread_snapshot_does_not_downgrade_completed_tool_with_stale_live_overl
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
@@ -360,7 +444,7 @@ async fn thread_snapshot_does_not_replay_live_text_for_committed_active_owner() 
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&session_id),
             source_key: None,
@@ -427,7 +511,7 @@ async fn thread_snapshot_stamps_committed_prefix_after_scoped_child_turn_started
 
     let turn_id = "turn-running";
     let activity = store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -490,14 +574,14 @@ async fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity
         .upsert_agent_edge(
             &parent_session_id,
             &child_session_id,
-            psychevo::state::AgentEdgeStatus::Open,
+            psychevo::__product::persistence::AgentEdgeStatus::Open,
             None,
         )
         .await.expect("open child edge");
 
     let turn_id = "turn-parent-running";
     let activity = store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -548,7 +632,7 @@ async fn thread_snapshot_replays_open_child_overlay_from_running_parent_activity
     );
 
     store
-        .set_agent_edge_status(&child_session_id, psychevo::state::AgentEdgeStatus::Closed)
+        .set_agent_edge_status(&child_session_id, psychevo::__product::persistence::AgentEdgeStatus::Closed)
         .await.expect("close child edge");
     let closed_child_snapshot =
         thread_snapshot(&state, &scope, Some(&child_session_id)).await.expect("closed child snapshot");
@@ -584,14 +668,14 @@ async fn thread_snapshot_does_not_revive_child_overlay_from_stale_or_terminal_pa
         .upsert_agent_edge(
             &parent_session_id,
             &child_session_id,
-            psychevo::state::AgentEdgeStatus::Open,
+            psychevo::__product::persistence::AgentEdgeStatus::Open,
             None,
         )
         .await.expect("open child edge");
 
     let turn_id = "turn-parent-stale";
     let activity = store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: turn_id,
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -668,7 +752,7 @@ async fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child
         .upsert_agent_edge(
             &parent_session_id,
             &child_session_id,
-            psychevo::state::AgentEdgeStatus::Open,
+            psychevo::__product::persistence::AgentEdgeStatus::Open,
             None,
         )
         .await.expect("open child edge");
@@ -693,7 +777,7 @@ async fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child
     let agent_fingerprint = crate::gateway_agent_definition_fingerprint(agent_json);
     let cwd = state.inner.cwd.display().to_string();
     store
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id: &child_session_id,
             agent_ref: Some("opencode"),
             agent_fingerprint: &agent_fingerprint,
@@ -713,7 +797,7 @@ async fn acp_bound_child_snapshot_does_not_inherit_parent_activity_without_child
         })
         .await.expect("ACP child binding");
     store
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: "turn-parent-running",
             thread_id: Some(&parent_session_id),
             source_key: None,
@@ -804,7 +888,7 @@ async fn append_exec_live_update(
         .inner
         .state
 
-        .upsert_gateway_live_snapshot(psychevo::state::GatewayLiveSnapshotInput {
+        .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
             snapshot_key: &format!("{activity_id}:{turn_id}:live-tool"),
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
@@ -866,7 +950,7 @@ async fn append_stale_exec_live_snapshot(
         .inner
         .state
 
-        .upsert_gateway_live_snapshot(psychevo::state::GatewayLiveSnapshotInput {
+        .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
             snapshot_key: &format!("{activity_id}:{turn_id}:stale-live-tool"),
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),
@@ -924,7 +1008,7 @@ async fn append_assistant_live_text_update(
         .inner
         .state
 
-        .upsert_gateway_live_snapshot(psychevo::state::GatewayLiveSnapshotInput {
+        .upsert_gateway_live_snapshot(psychevo::__product::persistence::GatewayLiveSnapshotInput {
             snapshot_key: &format!("{activity_id}:{turn_id}:live-text"),
             activity_id: Some(activity_id),
             owner_id: Some(state.inner.gateway.owner_id()),

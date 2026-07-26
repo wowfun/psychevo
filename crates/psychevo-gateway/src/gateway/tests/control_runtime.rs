@@ -4,58 +4,33 @@
         let wait = backend.wait_on_first_run();
         let harness = harness(backend).await;
         let source = GatewaySource::new("tui", "cwd").process();
-        let selector = GatewayThreadSelector::source(source.source_key());
 
         let (handle, control) = run_control();
         let mut first_request = request(&harness, source.clone(), "first");
         first_request.control_handle = Some(handle);
         first_request.control = Some(control);
+        let application = harness._application.clone();
         let gateway = harness.gateway.clone();
-        let first = tokio::spawn(async move { gateway.send_turn(first_request).await });
+        let first = tokio::spawn(async move {
+            send_framework_turn(application, gateway, first_request).await
+        });
         wait.started.notified().await;
 
-        let active_turn_id = harness
+        let thread_id = harness
             .gateway
-            .local_activity_for_selector(&selector)
-            .active_turn_id
-            .expect("active turn id");
-        let message = Message::User {
-            content: vec![UserContentBlock::text("steer")],
-            timestamp_ms: 0,
-        };
-
-        assert!(
-            harness
-                .gateway
-                .steer_turn(selector.clone(), Some("stale-turn"), message.clone())
-                .await.is_none()
-        );
-        let input_id = harness
-            .gateway
-            .steer_turn(selector.clone(), Some(&active_turn_id), message.clone())
-            .await.expect("current turn steer");
-        assert!(!harness.gateway.update_steer(
-            selector.clone(),
-            Some("stale-turn"),
-            input_id,
-            message.clone()
-        ));
-        assert!(harness.gateway.update_steer(
-            selector.clone(),
-            Some(&active_turn_id),
-            input_id,
-            message.clone()
-        ));
-        assert!(
-            !harness
-                .gateway
-                .cancel_steer(selector.clone(), Some("stale-turn"), input_id)
-        );
-        assert!(
-            harness
-                .gateway
-                .cancel_steer(selector, Some(&active_turn_id), input_id)
-        );
+            .resolve_source_thread(&source)
+            .await
+            .expect("source lookup")
+            .expect("source binding");
+        let thread = harness
+            ._application
+            .client()
+            .resume_thread(&thread_id)
+            .await
+            .expect("Framework Thread");
+        let active_turn_id = thread.__activity().1.expect("active turn id");
+        assert!(!thread.__steer("stale-turn", "steer"));
+        assert!(thread.__steer(&active_turn_id, "steer"));
 
         wait.release.notify_one();
         first.await.expect("first task").expect("first turn");
@@ -78,8 +53,7 @@
         ]);
 
             let result = harness
-                .gateway
-                .send_turn(request)
+                .send(request)
                 .await
                 .expect("Native turn");
 
@@ -131,7 +105,7 @@
             let mut first = request(&harness, source.clone(), "first");
             first.options.agent = Some("reviewer".to_string());
             first.options.inherited_env = Some(env.clone());
-            let first = harness.gateway.send_turn(first).await.expect("first turn");
+            let first = harness.send(first).await.expect("first turn");
             let binding = harness
                 .state
 
@@ -153,8 +127,7 @@
             second.explicit_thread = true;
             second.options.inherited_env = Some(env);
             let second = harness
-                .gateway
-                .send_turn(second)
+                .send(second)
                 .await
                 .expect("captured Agent Definition remains authoritative");
             let binding = harness
@@ -169,110 +142,6 @@
             }));
         }
 
-        #[tokio::test]
-    async fn acp_binding_rejects_public_steer_before_queueing() {
-        let harness = harness(Arc::new(FakeBackend::default())).await;
-        let thread_id = harness
-            .state
-
-            .create_session_with_metadata(&harness.cwd, "test", "model", "provider", None)
-            .await.expect("session");
-        let cwd = harness.cwd.to_string_lossy().to_string();
-        harness
-            .state
-
-            .create_gateway_runtime_binding(GatewayRuntimeBindingInput {
-                thread_id: &thread_id,
-                agent_ref: Some("opencode"),
-                agent_fingerprint: "agent-fingerprint",
-                agent_definition_json: r#"{"name":"opencode"}"#,
-                runtime_ref: "opencode",
-                backend_kind: "acp",
-                native_kind: "acp",
-                native_session_id: Some("native-session"),
-                cwd: &cwd,
-                profile_fingerprint: "fingerprint",
-                profile_revision: "1",
-                profile_config_json: "{}",
-                adapter_kind: "acp",
-                adapter_revision: "1",
-                ownership: GatewayRuntimeBindingOwnership::ReadWrite,
-                parent_thread_id: None,
-            })
-            .await.expect("runtime binding");
-        let (handle, _control) = run_control();
-        harness.gateway.register_active(
-            &thread_key(&thread_id),
-            "turn-1".to_string(),
-            Some(handle),
-            ActiveActivityKind::Turn,
-        );
-
-        let selector = GatewayThreadSelector::thread_id(thread_id);
-        assert!(
-            harness
-                .gateway
-                .steer_turn(
-                    selector.clone(),
-                    Some("turn-1"),
-                    psychevo::__agent_core::user_text_message("unsupported steer"),
-                )
-                .await.is_none()
-        );
-        assert!(
-            !harness
-                .gateway
-                .steer_foreign_turn(
-                    selector,
-                    Some("turn-1"),
-                    psychevo::__agent_core::user_text_message("unsupported foreign steer"),
-                )
-                .await
-        );
-    }
-    #[tokio::test]
-    async fn interrupt_aborts_active_and_clear_queue_drops_pending_turns() {
-        let backend = Arc::new(FakeBackend::default());
-        let wait = backend.wait_on_first_run();
-        let harness = harness(backend.clone()).await;
-        let source = GatewaySource::new("tui", "cwd").process();
-
-        let (handle, control) = run_control();
-        let mut first_request = request(&harness, source.clone(), "first");
-        first_request.control_handle = Some(handle);
-        first_request.control = Some(control);
-        let first_gateway = harness.gateway.clone();
-        let first = tokio::spawn(async move { first_gateway.send_turn(first_request).await });
-        wait.started.notified().await;
-
-        let second_gateway = harness.gateway.clone();
-        let second_request = request(&harness, source.clone(), "second");
-        let second = tokio::spawn(async move { second_gateway.send_turn(second_request).await });
-        tokio::task::yield_now().await;
-
-        let selector = GatewayThreadSelector::source(source.source_key());
-        assert!(harness.gateway.interrupt_turn(selector.clone()).await);
-        let mut cleared = harness.gateway.clear_queue(selector);
-        for _ in 0..10 {
-            if cleared > 0 {
-                break;
-            }
-            tokio::task::yield_now().await;
-            cleared = harness
-                .gateway
-                .clear_queue(GatewayThreadSelector::source(source.source_key()));
-        }
-        assert_eq!(cleared, 1);
-
-        let second_err = second
-            .await
-            .expect("second task")
-            .expect_err("queued turn should be cleared");
-        assert!(second_err.to_string().contains("queue cleared"));
-
-        wait.release.notify_one();
-        first.await.expect("first task").expect("first turn");
-    }
     #[tokio::test]
     async fn runtime_ref_resolves_generated_peer_backend_without_agent_selection() {
         let backend = Arc::new(FakeBackend::default());

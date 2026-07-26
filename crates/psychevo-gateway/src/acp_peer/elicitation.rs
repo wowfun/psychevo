@@ -390,7 +390,7 @@ fn bounded_elicitation_text(value: &str, field: &str) -> std::result::Result<(),
 
 fn encode_acp_elicitation_response(
     fields: &[AcpElicitationField],
-    response: psychevo::types::ClarifyResponse,
+    response: psychevo::__product::runtime::ClarifyResponse,
 ) -> std::result::Result<CreateElicitationResponse, String> {
     if fields.is_empty() {
         let answer = response

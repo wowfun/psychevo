@@ -35,7 +35,6 @@ struct GatewayExternalAgentDelegate {
     gateway: Gateway,
     base_options: RunOptions,
     stream: Option<RunStreamSink>,
-    event_sink: Option<GatewayEventEmitter>,
 }
 
 impl fmt::Debug for GatewayExternalAgentDelegate {
@@ -44,7 +43,6 @@ impl fmt::Debug for GatewayExternalAgentDelegate {
             .debug_struct("GatewayExternalAgentDelegate")
             .field("cwd", &self.base_options.cwd)
             .field("has_stream", &self.stream.is_some())
-            .field("has_event_sink", &self.event_sink.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -65,10 +63,7 @@ impl GatewayExternalAgentDelegate {
         request: ExternalAgentDelegateRequest,
     ) -> psychevo::Result<ExternalAgentDelegateResult> {
         let child_session_id = request.child_session_id.clone();
-        let terminal_child_session_id = child_session_id.clone();
         let child_turn_id = request.run_id.clone();
-        let terminal_gateway = self.gateway.clone();
-        let terminal_event_sink = self.event_sink.clone();
         let mut options = self.base_options.clone();
         options.session = Some(child_session_id.clone());
         options.continue_latest = false;
@@ -93,35 +88,6 @@ impl GatewayExternalAgentDelegate {
                 request.parent_session_id
             )));
         }
-        let (control_handle, control) = run_control();
-        let child_activity = self.gateway.claim_durable_gateway_activity(
-            DurableGatewayActivityClaim {
-                activity_id: &child_turn_id,
-                thread_id: Some(&child_session_id),
-                source_key: None,
-                turn_id: Some(&child_turn_id),
-                kind: "turn",
-                owner_surface: Some("agent"),
-                queued_turns: 0,
-                intent: Some(json!({
-                    "kind": "delegated_agent_turn",
-                    "threadId": child_session_id,
-                    "parentThreadId": request.parent_session_id,
-                })),
-            },
-        )
-        .await?;
-        let child_heartbeat = self
-            .gateway
-            .spawn_durable_activity_heartbeat(child_activity.clone());
-        self.gateway.register_active(
-            &thread_key(&child_session_id),
-            child_turn_id.clone(),
-            Some(control_handle.clone()),
-            ActiveActivityKind::Turn,
-        );
-        let abort_bridge =
-            spawn_external_delegate_abort_bridge(request.abort.clone(), control_handle);
         let stream = self.stream.map(|stream| {
             let child_session_id = child_session_id.clone();
             let child_turn_id = child_turn_id.clone();
@@ -133,7 +99,8 @@ impl GatewayExternalAgentDelegate {
                 ));
             }) as RunStreamSink
         });
-        let result = async move {
+        let gateway = self.gateway.clone();
+        let result = async {
             let (profile_config, profile_revision, profile_fingerprint) =
                 resolve_gateway_runtime_profile(&options).await?;
             if request
@@ -155,173 +122,73 @@ impl GatewayExternalAgentDelegate {
                     Some(format!("agent-binding:{child_session_id}")),
                 ));
             }
-            match profile_config.runtime {
-                RuntimeProfileKind::Acp => {
-                    let expected_backend = profile_config.backend_ref.as_deref().ok_or_else(|| {
-                        agent_session_configuration_error(format!(
-                            "ACP Runtime Profile `{}` is missing backendRef.",
-                            profile_config.id
-                        ))
-                    })?;
-                    if request.backend_ref.as_deref() != Some(expected_backend) {
-                        return Err(agent_session_configuration_error(format!(
-                            "Agent Definition `{}` uses ACP backend `{}`, but Runtime Profile `{}` resolves to backend `{expected_backend}`.",
-                            request.agent_name,
-                            request.backend_ref.as_deref().unwrap_or("none"),
-                            profile_config.id,
-                        )));
-                    }
-                    options.agent = Some(request.agent_name.clone());
-                    let existing_binding = options
-                        .state
-
-                        .gateway_runtime_binding(&child_session_id)
-                        .await?;
-                    let agent_binding = resolve_gateway_agent_binding_snapshot(
-                        &options,
-                        &profile_config,
-                        existing_binding.as_ref(),
-                        AgentEntrypoint::Subagent,
-                    )?;
-                    let binding = ensure_gateway_runtime_binding(
-                        &options.state,
-                        &child_session_id,
-                        &agent_binding,
-                        &profile_config,
-                        profile_revision,
-                        &profile_fingerprint,
-                    )
-                    .await?;
-                    options.runtime_ref = Some(expected_backend.to_string());
-                    let peer = resolve_peer_delegate(&options, &request, &profile_fingerprint)?;
-                    let captured_binding = binding.clone();
-                    let session_ready =
-                        acp_session_ready_for_binding(options.state.clone(), binding);
-                    self.gateway
-                        .run_internal_agent_turn(
-                            Some(captured_binding),
-                            profile_config,
-                            Some(peer),
-                        BackendTurnRequest {
-                            options,
-                            input: Vec::new(),
-                            runtime_source: "agent".to_string(),
-                            continue_sources: vec!["agent".to_string()],
-                            stream,
-                            control: Some(control),
-                        },
-                        request.run_id,
-                        Some(session_ready),
-                    )
-                    .await
-                    .map(|run| ExternalAgentDelegateResult {
-                        child_session_id,
-                        final_answer: run.final_answer,
-                        outcome: run.outcome,
-                    })
-                }
-                RuntimeProfileKind::Native => Err(agent_session_configuration_error(format!(
+            if profile_config.runtime == RuntimeProfileKind::Native {
+                return Err(agent_session_configuration_error(format!(
                     "Runtime Profile `{}` is native and cannot be executed by the external Team delegate.",
                     profile_config.id
-                ))),
+                )));
             }
+            let expected_backend = profile_config.backend_ref.as_deref().ok_or_else(|| {
+                agent_session_configuration_error(format!(
+                    "ACP Runtime Profile `{}` is missing backendRef.",
+                    profile_config.id
+                ))
+            })?;
+            if request.backend_ref.as_deref() != Some(expected_backend) {
+                return Err(agent_session_configuration_error(format!(
+                    "Agent Definition `{}` uses ACP backend `{}`, but Runtime Profile `{}` resolves to backend `{expected_backend}`.",
+                    request.agent_name,
+                    request.backend_ref.as_deref().unwrap_or("none"),
+                    profile_config.id,
+                )));
+            }
+            let _ = profile_fingerprint;
+            options.agent = Some(request.agent_name.clone());
+            options.runtime_ref = Some(profile_config.id);
+            let mut turn_request =
+                psychevo::TurnRequest::__from_run_options(options, "agent", stream);
+            turn_request.__set_turn_id(child_turn_id.clone());
+            turn_request.__set_agent_entrypoint(AgentEntrypoint::Subagent);
+            let thread = gateway
+                .framework_client()?
+                .resume_thread(&child_session_id)
+                .await?;
+            let handle = thread.start_turn(turn_request).await?;
+            let abort_bridge =
+                spawn_framework_delegate_abort_bridge(request.abort.clone(), handle.clone());
+            let completed = handle.wait().await;
+            abort_bridge.abort();
+            completed.map(|turn| ExternalAgentDelegateResult {
+                child_session_id: child_session_id.clone(),
+                final_answer: turn.final_answer,
+                outcome: match turn.outcome {
+                    psychevo::TurnOutcome::Completed => Outcome::Normal,
+                    psychevo::TurnOutcome::Stopped => Outcome::Stopped,
+                    psychevo::TurnOutcome::Failed => Outcome::Failed,
+                    psychevo::TurnOutcome::Interrupted => Outcome::Aborted,
+                },
+            })
         }
         .await;
-        abort_bridge.abort();
-        let _ = child_heartbeat.send(());
-        terminal_gateway
+        gateway
             .state
-
-            .set_agent_edge_status(
-                &terminal_child_session_id,
-                psychevo::state::AgentEdgeStatus::Closed,
-            )
+            .set_agent_edge_status(&child_session_id, psychevo::__product::persistence::AgentEdgeStatus::Closed)
             .await?;
-        match &result {
-            Ok(result) => terminal_gateway.record_external_delegate_terminal(
-                &terminal_child_session_id,
-                &child_turn_id,
-                result,
-                Some(&child_activity),
-                terminal_event_sink.as_ref(),
-            )
-            .await?,
-            Err(error) => terminal_gateway.ensure_failed_terminal_after_turn_error(
-                &child_turn_id,
-                Some(&terminal_child_session_id),
-                terminal_event_sink.as_ref(),
-                error,
-            )
-            .await?,
-        }
         result
     }
 }
 
-impl Gateway {
-    async fn record_external_delegate_terminal(
-        &self,
-        child_session_id: &str,
-        turn_id: &str,
-        result: &ExternalAgentDelegateResult,
-        durable_activity: Option<&DurableGatewayActivity>,
-        event_sink: Option<&GatewayEventEmitter>,
-    ) -> psychevo::Result<()> {
-        if let Some(terminal) = self.state.gateway_turn_terminal(turn_id).await? {
-            self.mark_active_turn_terminal(turn_id);
-            self.finish_durable_gateway_activity(durable_activity, &terminal.status)
-                .await;
-            return Ok(());
-        }
-        let status = gateway_turn_status_for_outcome(result.outcome);
-        let error_message = match result.outcome {
-            Outcome::Normal => None,
-            Outcome::Failed => Some("The delegated runtime turn failed."),
-            Outcome::Stopped | Outcome::Aborted => {
-                Some("The delegated runtime turn was interrupted.")
-            }
-        };
-        let turn = self.record_and_project_terminal_turn(TerminalTurnInput {
-            thread_id: Some(child_session_id),
-            turn_id,
-            status,
-            outcome: Some(result.outcome.as_str()),
-            error_message,
-            error_data: None,
-            classified_error: None,
-            first_committed_seq: None,
-            last_committed_seq: None,
-            durable_activity,
-        })
-        .await?;
-        let committed_entries = self.project_terminal_entry_for_turn(turn_id).await;
-        self.finish_durable_gateway_activity(
-            durable_activity,
-            durable_activity_status_for_turn(status),
-        )
-        .await;
-        if let Some(event_sink) = event_sink {
-            let _ = event_sink.emit(GatewayEvent::TurnCompleted {
-                thread_id: Some(child_session_id.to_string()),
-                turn_id: turn_id.to_string(),
-                turn,
-                committed_entries,
-            });
-        }
-        Ok(())
-    }
-}
-
-fn spawn_external_delegate_abort_bridge(
+fn spawn_framework_delegate_abort_bridge(
     mut abort: AbortSignal,
-    control: RunControlHandle,
+    turn: psychevo::TurnHandle,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         abort.wait_for_abort().await;
-        control.abort();
+        turn.interrupt();
     })
 }
 
+#[cfg(test)]
 fn resolve_peer_delegate(
     options: &RunOptions,
     request: &ExternalAgentDelegateRequest,

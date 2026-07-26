@@ -5,13 +5,11 @@
         let source = GatewaySource::new("cli", "run-1").invocation();
 
         let first = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "first"))
+            .send(request(&harness, source.clone(), "first"))
             .await
             .expect("first turn");
         let second = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "second"))
+            .send(request(&harness, source.clone(), "second"))
             .await
             .expect("second turn");
 
@@ -43,8 +41,7 @@
         );
         initial.options.cwd = harness.cwd.join("..").join("work");
         let first = harness
-            .gateway
-            .send_turn(initial)
+            .send(initial)
             .await
             .expect("first turn");
         let mut continued = request(
@@ -54,8 +51,7 @@
         );
         continued.options.continue_latest = true;
         let second = harness
-            .gateway
-            .send_turn(continued)
+            .send(continued)
             .await
             .expect("continued turn");
 
@@ -82,18 +78,20 @@
         let source = GatewaySource::new("tui", "cwd").process();
 
         let first = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "first"))
+            .send(request(&harness, source.clone(), "first"))
             .await
             .expect("first turn");
         let second = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "second"))
+            .send(request(&harness, source.clone(), "second"))
             .await
             .expect("second turn");
         let rebuilt_gateway = Gateway::with_backend(harness.state.clone(), backend.clone());
-        let third = rebuilt_gateway
-            .send_turn(request(&harness, source.clone(), "third"))
+        let rebuilt_application = attach_test_application(&harness, &rebuilt_gateway);
+        let third = send_framework_turn(
+            rebuilt_application,
+            rebuilt_gateway,
+            request(&harness, source.clone(), "third"),
+        )
             .await
             .expect("third turn");
 
@@ -129,13 +127,16 @@
         );
 
         let first = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "first"))
+            .send(request(&harness, source.clone(), "first"))
             .await
             .expect("first turn");
         let rebuilt_gateway = Gateway::with_backend(harness.state.clone(), backend.clone());
-        let second = rebuilt_gateway
-            .send_turn(request(&harness, source.clone(), "second"))
+        let rebuilt_application = attach_test_application(&harness, &rebuilt_gateway);
+        let second = send_framework_turn(
+            rebuilt_application,
+            rebuilt_gateway,
+            request(&harness, source.clone(), "second"),
+        )
             .await
             .expect("second turn");
 
@@ -188,15 +189,13 @@
         std::fs::create_dir_all(&changed_default).expect("changed default cwd");
 
         let first = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "first"))
+            .send(request(&harness, source.clone(), "first"))
             .await
             .expect("first turn");
         let mut second_request = request(&harness, source, "second");
         second_request.options.cwd = changed_default.clone();
         let second = harness
-            .gateway
-            .send_turn(second_request)
+            .send(second_request)
             .await
             .expect("second turn");
 
@@ -232,13 +231,11 @@
         std::fs::create_dir_all(&changed_default).expect("changed default cwd");
 
         let first = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "first"))
+            .send(request(&harness, source.clone(), "first"))
             .await
             .expect("first turn");
         let other = harness
-            .gateway
-            .send_turn(request(&harness, other_source.clone(), "other"))
+            .send(request(&harness, other_source.clone(), "other"))
             .await
             .expect("other turn");
 
@@ -282,8 +279,7 @@
         let mut second_request = request(&harness, source.clone(), "second");
         second_request.options.cwd = changed_default.clone();
         let second = harness
-            .gateway
-            .send_turn(second_request)
+            .send(second_request)
             .await
             .expect("second turn");
 
@@ -319,15 +315,16 @@
         std::fs::create_dir_all(&changed_default).expect("changed default cwd");
 
         let first = harness
-            .gateway
-            .send_turn(request(&harness, source.clone(), "first"))
+            .send(request(&harness, source.clone(), "first"))
             .await
             .expect("first turn");
 
         let wait = backend.wait_on_next_run();
-        let second_gateway = harness.gateway.clone();
+        let (second_application, second_gateway) = harness.runner();
         let second_request = request(&harness, source.clone(), "second-running");
-        let second = tokio::spawn(async move { second_gateway.send_turn(second_request).await });
+        let second = tokio::spawn(async move {
+            send_framework_turn(second_application, second_gateway, second_request).await
+        });
         wait.started.notified().await;
 
         assert_eq!(
@@ -338,10 +335,12 @@
             1
         );
 
-        let third_gateway = harness.gateway.clone();
+        let (third_application, third_gateway) = harness.runner();
         let mut third_request = request(&harness, source.clone(), "third-new-cwd");
         third_request.options.cwd = changed_default.clone();
-        let third = tokio::spawn(async move { third_gateway.send_turn(third_request).await });
+        let third = tokio::spawn(async move {
+            send_framework_turn(third_application, third_gateway, third_request).await
+        });
 
         tokio::task::yield_now().await;
         assert_eq!(
@@ -456,14 +455,18 @@ model = "lmstudio/test-model"
         let harness = harness(backend.clone()).await;
         let source = GatewaySource::new("tui", "cwd").process();
 
-        let first_gateway = harness.gateway.clone();
+        let (first_application, first_gateway) = harness.runner();
         let first_request = request(&harness, source.clone(), "first");
-        let first = tokio::spawn(async move { first_gateway.send_turn(first_request).await });
+        let first = tokio::spawn(async move {
+            send_framework_turn(first_application, first_gateway, first_request).await
+        });
         wait.started.notified().await;
 
-        let second_gateway = harness.gateway.clone();
+        let (second_application, second_gateway) = harness.runner();
         let second_request = request(&harness, source.clone(), "second");
-        let second = tokio::spawn(async move { second_gateway.send_turn(second_request).await });
+        let second = tokio::spawn(async move {
+            send_framework_turn(second_application, second_gateway, second_request).await
+        });
 
         tokio::task::yield_now().await;
         assert_eq!(
@@ -497,9 +500,11 @@ model = "lmstudio/test-model"
         let canonical = GatewaySource::new("web", "cwd").persistent();
         let draft = GatewaySource::new("web", "cwd:draft:test").persistent();
 
-        let first_gateway = harness.gateway.clone();
+        let (first_application, first_gateway) = harness.runner();
         let first_request = request(&harness, canonical.clone(), "first");
-        let first = tokio::spawn(async move { first_gateway.send_turn(first_request).await });
+        let first = tokio::spawn(async move {
+            send_framework_turn(first_application, first_gateway, first_request).await
+        });
         wait.started.notified().await;
 
         harness
@@ -510,8 +515,7 @@ model = "lmstudio/test-model"
         let mut second_request = request(&harness, draft, "second");
         second_request.bind_source = Some(canonical.clone());
         let second = harness
-            .gateway
-            .send_turn(second_request)
+            .send(second_request)
             .await
             .expect("second draft turn");
 
@@ -583,8 +587,10 @@ model = "lmstudio/test-model"
         let mut first_request = request(&harness, source.clone(), "first");
         first_request.thread_id = Some(first.clone());
         first_request.explicit_thread = true;
-        let gateway = harness.gateway.clone();
-        let running = tokio::spawn(async move { gateway.send_turn(first_request).await });
+        let (application, gateway) = harness.runner();
+        let running = tokio::spawn(async move {
+            send_framework_turn(application, gateway, first_request).await
+        });
         wait.started.notified().await;
 
         harness
@@ -603,9 +609,13 @@ model = "lmstudio/test-model"
 
         assert!(
             harness
-                .gateway
-                .local_activity_for_selector(&GatewayThreadSelector::thread_id(&first))
-                .running
+                ._application
+                .client()
+                .resume_thread(&first)
+                .await
+                .expect("running Framework Thread")
+                .__activity()
+                .0
         );
         assert!(
             !harness
@@ -687,85 +697,6 @@ model = "lmstudio/test-model"
             .await.expect("activity lookup")
             .expect("activity");
         assert_eq!(record.thread_id.as_deref(), Some(parent_thread.as_str()));
-    }
-
-    #[tokio::test]
-    async fn gateway_event_sink_does_not_alias_scoped_child_thread_to_parent_activity() {
-        let backend = Arc::new(FakeBackend::default());
-        let harness = harness(backend).await;
-        let turn_id = "turn-parent";
-        let queue_key = "source:web:test";
-        let parent_thread = harness
-            .state
-
-            .create_session_with_metadata(&harness.cwd, "web", "model", "provider", None)
-            .await.expect("parent session");
-        let child_thread = harness
-            .state
-
-            .create_session_with_metadata(&harness.cwd, "agent", "model", "provider", None)
-            .await.expect("child session");
-
-        harness.gateway.register_active(
-            queue_key,
-            turn_id.to_string(),
-            None,
-            ActiveActivityKind::Turn,
-        );
-        let activity = harness
-            .gateway
-            .claim_durable_gateway_activity(DurableGatewayActivityClaim {
-                activity_id: turn_id,
-                thread_id: None,
-                source_key: Some("web:test"),
-                turn_id: Some(turn_id),
-                kind: "turn",
-                owner_surface: Some("web"),
-                queued_turns: 0,
-                intent: Some(json!({
-                    "kind": "turn",
-                    "threadId": parent_thread.clone(),
-                })),
-            })
-            .await.expect("claim activity");
-        let sink = harness
-            .gateway
-            .wrap_gateway_event_sink(
-                None,
-                Some(activity),
-                Some(queue_key.to_string()),
-                Some(turn_id.to_string()),
-            )
-            .expect("event sink");
-
-        sink.emit(GatewayEvent::TurnStarted {
-            thread_id: Some(parent_thread.clone()),
-            turn_id: turn_id.to_string(),
-            selected_skills: Vec::new(),
-        })
-        .expect("parent turn event");
-        sink.emit(GatewayEvent::TurnStarted {
-            thread_id: Some(child_thread.clone()),
-            turn_id: turn_id.to_string(),
-            selected_skills: Vec::new(),
-        })
-        .expect("child turn event");
-        harness.gateway.wait_for_gateway_events().await;
-
-        assert!(
-            harness
-                .gateway
-                .activity_for_selector(GatewayThreadSelector::thread_id(&parent_thread))
-                .await
-                .running
-        );
-        assert!(
-            !harness
-                .gateway
-                .activity_for_selector(GatewayThreadSelector::thread_id(&child_thread))
-                .await
-                .running
-        );
     }
 
     #[tokio::test]

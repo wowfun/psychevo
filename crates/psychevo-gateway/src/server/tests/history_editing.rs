@@ -20,7 +20,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
         .inner
         .state
 
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id: &session_id,
             agent_ref: None,
             agent_fingerprint: &agent_fingerprint,
@@ -47,7 +47,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
         timestamp_ms: 1,
     };
     let metadata = json!({
-        psychevo::types::EDITABLE_INPUT_METADATA_KEY: {
+        psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY: {
             "version": 1,
             "parts": [
                 {"type": "text", "text": "visible"},
@@ -173,7 +173,7 @@ async fn native_history_draft_edit_restore_and_point_fork_share_one_typed_contra
                 timestamp_ms: 3,
             },
             Some(json!({
-                psychevo::types::EDITABLE_INPUT_METADATA_KEY: {
+                psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY: {
                     "version": 1,
                     "parts": []
                 }

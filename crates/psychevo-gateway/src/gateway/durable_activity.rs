@@ -654,6 +654,33 @@ impl Gateway {
         false
     }
 
+    pub(crate) async fn enqueue_exact_foreign_control_command(
+        &self,
+        activity_id: &str,
+        owner_id: &str,
+        command_kind: &str,
+        payload: Value,
+    ) -> bool {
+        self.state
+            .enqueue_gateway_control_command(GatewayControlCommandInput {
+                activity_id,
+                owner_id,
+                command_kind,
+                payload,
+            })
+            .await
+            .is_ok()
+    }
+
+    pub(crate) fn interrupt_local_activity(&self, activity_id: &str) -> bool {
+        self.control_for_activity_id(activity_id)
+            .map(|control| {
+                control.abort();
+                true
+            })
+            .unwrap_or(false)
+    }
+
     async fn apply_pending_gateway_control_commands(&self) {
         let Ok(commands) = self
             .state
@@ -676,7 +703,6 @@ impl Gateway {
                     .apply_takeover_control_command(&command.activity_id)
                     .await,
                 "steer" => self.apply_steer_control_command(&command.activity_id, &command.payload),
-                "permission" => self.apply_permission_control_command(&command.payload),
                 "clarify" => self.apply_clarify_control_command(&command.payload),
                 _ => false,
             };
@@ -729,28 +755,6 @@ impl Gateway {
         self.control_for_activity_id(activity_id)
             .and_then(|control| control.steer_user_message(message))
             .is_some()
-    }
-
-    fn apply_permission_control_command(&self, payload: &Value) -> bool {
-        let Some(request_id) = payload.get("requestId").and_then(Value::as_str) else {
-            return false;
-        };
-        let Some(decision) = payload
-            .get("decision")
-            .and_then(Value::as_str)
-            .and_then(|label| {
-                permission_decision_from_label(
-                    label,
-                    payload
-                        .get("filesystemScope")
-                        .cloned()
-                        .and_then(|value| serde_json::from_value(value).ok()),
-                )
-            })
-        else {
-            return false;
-        };
-        self.submit_permission_by_request_id(request_id, decision)
     }
 
     fn apply_clarify_control_command(&self, payload: &Value) -> bool {
@@ -822,22 +826,11 @@ impl Gateway {
             .collect()
     }
 
-    fn submit_permission_by_request_id(
-        &self,
-        request_id: &str,
-        decision: PermissionApprovalDecision,
-    ) -> bool {
-        self.pending_permissions
-            .lock()
-            .expect("gateway pending permission map poisoned")
-            .remove(request_id)
-            .and_then(|pending| pending.responder.send(decision).ok())
-            .is_some()
-    }
 }
 
 fn gateway_activity_view(activity: &GatewayActivity) -> GatewayActivityView {
     GatewayActivityView {
+        activities: activity.activities.clone(),
         running: activity.running,
         active_turn_id: activity.active_turn_id.clone(),
         queued_turns: activity.queued_turns,
@@ -936,36 +929,12 @@ fn permission_decision_label(decision: &PermissionApprovalDecision) -> &'static 
     }
 }
 
-fn permission_decision_from_label(
-    label: &str,
-    filesystem_scope: Option<psychevo::types::FilesystemApprovalScope>,
-) -> Option<PermissionApprovalDecision> {
-    match label {
-        "allow_once" => Some(PermissionApprovalDecision::allow_once()),
-        "allow_turn" => filesystem_scope
-            .map(|scope| PermissionApprovalDecision {
-                outcome: PermissionApprovalOutcome::AllowTurn,
-                filesystem_scope: Some(scope),
-            }),
-        "allow_session" => Some(match filesystem_scope {
-            Some(scope) => PermissionApprovalDecision {
-                outcome: PermissionApprovalOutcome::AllowSession,
-                filesystem_scope: Some(scope),
-            },
-            None => PermissionApprovalDecision::allow_session(),
-        }),
-        "allow_always" => Some(PermissionApprovalDecision::allow_always()),
-        "deny" => Some(PermissionApprovalDecision::deny()),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod event_ingress_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use psychevo::state::StateRuntime;
+    use psychevo::__product::persistence::StateRuntime;
 
     use super::*;
 

@@ -507,11 +507,12 @@ fn structured_agent_markdown(
     }
     let mut optional_contributions = BTreeSet::new();
     for name in &params.optional_contributions {
-        let contribution = psychevo::agents::AgentContribution::parse(name).ok_or_else(|| {
-            Error::Message(format!(
-                "optional contribution `{name}` must be instructions, tools, mcp, or skills"
-            ))
-        })?;
+        let contribution = psychevo::__product::capabilities::AgentContribution::parse(name)
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "optional contribution `{name}` must be instructions, tools, mcp, or skills"
+                ))
+            })?;
         optional_contributions.insert(contribution.as_str());
     }
     if optional_contributions.is_empty() {
@@ -815,7 +816,10 @@ fn agent_definition_view(agent: &AgentDefinition) -> wire::AgentDefinitionView {
         enabled: agent.enabled,
         source: agent.source.as_str().to_string(),
         source_label: agent.source.display_label().to_string(),
-        generated: matches!(agent.source, psychevo::agents::AgentSource::Generated),
+        generated: matches!(
+            agent.source,
+            psychevo::__product::capabilities::AgentSource::Generated
+        ),
         target,
         mutable: target.is_some(),
         path: agent
@@ -912,7 +916,7 @@ fn agent_diagnostic_view(diagnostic: &AgentDiagnostic) -> wire::AgentDiagnosticV
 }
 
 pub(super) async fn agent_status_result(
-    store: Option<&psychevo::state::StateRuntime>,
+    store: Option<&psychevo::__product::persistence::StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> wire::AgentStatusResult {
@@ -927,7 +931,7 @@ pub(super) async fn agent_status_result(
 }
 
 pub(super) async fn team_status_result(
-    store: &psychevo::state::StateRuntime,
+    store: &psychevo::__product::persistence::StateRuntime,
     parent_session_id: Option<&str>,
 ) -> psychevo::Result<wire::TeamStatusResult> {
     let team = if let Some(thread) = parent_session_id {
@@ -967,7 +971,7 @@ pub(super) async fn team_status_result(
 }
 
 pub(super) async fn agent_control_result(
-    store: &psychevo::state::StateRuntime,
+    store: &psychevo::__product::persistence::StateRuntime,
     params: wire::AgentControlParams,
 ) -> psychevo::Result<wire::AgentControlResult> {
     let action = params.action.trim();
@@ -1055,7 +1059,9 @@ fn agent_run_view(record: &AgentRunRecord) -> wire::AgentRunView {
     }
 }
 
-fn team_run_view(record: &psychevo::state::AgentTeamRunRecord) -> wire::TeamRunView {
+fn team_run_view(
+    record: &psychevo::__product::persistence::AgentTeamRunRecord,
+) -> wire::TeamRunView {
     wire::TeamRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),
@@ -1077,7 +1083,9 @@ fn team_run_view(record: &psychevo::state::AgentTeamRunRecord) -> wire::TeamRunV
     }
 }
 
-fn mission_run_view(record: &psychevo::state::AgentMissionRunRecord) -> wire::MissionRunView {
+fn mission_run_view(
+    record: &psychevo::__product::persistence::AgentMissionRunRecord,
+) -> wire::MissionRunView {
     wire::MissionRunView {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),

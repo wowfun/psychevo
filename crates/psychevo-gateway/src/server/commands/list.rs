@@ -101,7 +101,7 @@ fn custom_alias_command_value(
     };
     let spec = invocation.spec;
     if !web_desktop_action_visible(spec.action)
-        || !psychevo::command_registry::supported_by_capabilities(spec, capabilities)
+        || !psychevo::__product::commands::supported_by_capabilities(spec, capabilities)
         || (active_turn && !spec.available_during_active_turn())
     {
         return None;

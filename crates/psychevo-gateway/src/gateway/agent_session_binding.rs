@@ -1,14 +1,17 @@
 use std::path::Path;
 
-use psychevo::state::{
+use psychevo::__product::persistence::{
     GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayRuntimeBindingRecord,
     GatewayRuntimeBindingStatus, StateRuntime,
 };
 use psychevo::{
-    Error, agents::AgentDefinition, agents::AgentDiscoveryOptions, agents::AgentEntrypoint,
-    agents::discover_agents, agents::resolve_agent_definition, config::RuntimeProfileConfig,
-    config::RuntimeProfileKind, config::load_agent_backend_configs,
-    config::load_runtime_profile_configs, skills::resolve_skills_home, types::RunOptions,
+    __product::capabilities::AgentDefinition, __product::capabilities::AgentDiscoveryOptions,
+    __product::capabilities::AgentEntrypoint, __product::capabilities::discover_agents,
+    __product::capabilities::resolve_agent_definition,
+    __product::capabilities::resolve_skills_home, __product::configuration::RuntimeProfileConfig,
+    __product::configuration::RuntimeProfileKind,
+    __product::configuration::load_agent_backend_configs,
+    __product::configuration::load_runtime_profile_configs, __product::runtime::RunOptions, Error,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -189,7 +192,7 @@ pub(crate) async fn resolve_bound_gateway_agent_target(
     }))
 }
 
-fn resolve_captured_bound_peer(
+pub(crate) fn resolve_captured_bound_peer(
     options: &RunOptions,
     binding: &GatewayRuntimeBindingRecord,
     profile: &RuntimeProfileConfig,
@@ -607,7 +610,7 @@ pub(crate) fn runtime_session_handle(
     let digest = Sha256::digest(
         format!(
             "agent-session-v1\0{runtime_ref}\0{}\0{native_session_id}",
-            psychevo::host_paths::normalized_native_path(&canonical).display()
+            psychevo::__product::platform::normalized_native_path(&canonical).display()
         )
         .as_bytes(),
     );

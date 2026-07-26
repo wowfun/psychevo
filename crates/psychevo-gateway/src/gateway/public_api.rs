@@ -1,3 +1,8 @@
+pub(crate) struct BoundedTranscriptPage {
+    pub(crate) entries: Vec<TranscriptEntry>,
+    pub(crate) next_cursor: Option<String>,
+}
+
 impl Gateway {
     pub(crate) async fn discover_agent_sessions(
         &self,
@@ -206,13 +211,31 @@ impl Gateway {
             source_generations: Arc::new(Mutex::new(HashMap::new())),
             source_mutations: Arc::new(Mutex::new(HashMap::new())),
             live_snapshots: Arc::new(Mutex::new(HashMap::new())),
-            pending_permissions: Arc::new(Mutex::new(HashMap::new())),
             owner_id: Arc::new(format!("gateway:{}:{}", std::process::id(), Uuid::now_v7())),
+            framework_application: Arc::new(OnceLock::new()),
         }
     }
 
     pub fn state(&self) -> &StateRuntime {
         &self.state
+    }
+
+    pub(crate) fn attach_framework_application(
+        &self,
+        application: Application,
+    ) -> psychevo::Result<()> {
+        self.framework_application.set(application).map_err(|_| {
+            Error::Message("Gateway Framework Application is already attached".to_string())
+        })
+    }
+
+    pub(crate) fn framework_client(&self) -> psychevo::Result<psychevo::Client> {
+        self.framework_application
+            .get()
+            .map(Application::client)
+            .ok_or_else(|| {
+                Error::Message("Gateway Framework Application is not attached".to_string())
+            })
     }
 
     pub async fn shutdown_runtimes(&self, force: bool) -> psychevo::Result<()> {
@@ -461,6 +484,92 @@ impl Gateway {
         ))
     }
 
+    pub(crate) async fn thread_transcript_page(
+        &self,
+        thread_id: &str,
+        before_session_seq: Option<i64>,
+        limit: usize,
+    ) -> psychevo::Result<BoundedTranscriptPage> {
+        let fetch_limit = limit.saturating_mul(4).saturating_add(8);
+        let summaries = self
+            .state
+            .load_tui_message_summaries_before(
+                thread_id,
+                before_session_seq,
+                fetch_limit,
+            )
+            .await?;
+        let has_older_messages = summaries.len() == fetch_limit;
+        let lower_boundary = summaries
+            .first()
+            .map(|summary| summary.session_seq)
+            .unwrap_or(i64::MIN);
+        let mut entries = transcript::project_transcript_entries(thread_id, &summaries);
+        let agent_edges = self
+            .state
+            .list_agent_edges_for_parent_candidates(
+                thread_id,
+                &transcript::agent_edge_lookup_candidates(&entries),
+            )
+            .await?;
+        transcript::enrich_agent_blocks_from_edges(&mut entries, &agent_edges);
+
+        let compactions = self
+            .state
+            .list_valid_session_compactions_between(
+                thread_id,
+                lower_boundary,
+                before_session_seq,
+                fetch_limit,
+            )
+            .await?;
+        let mut synthetic_entries = compactions
+            .iter()
+            .zip(transcript::project_compaction_entries(
+                thread_id,
+                &compactions,
+            ))
+            .map(|(record, entry)| (record.created_after_session_seq, entry))
+            .collect::<Vec<_>>();
+        let terminals = self
+            .state
+            .list_gateway_turn_terminals_for_thread_window(
+                thread_id,
+                lower_boundary,
+                before_session_seq,
+                fetch_limit,
+            )
+            .await?;
+        transcript::reconcile_terminal_bounded_running_blocks(&mut entries, &terminals);
+        synthetic_entries.extend(terminals.iter().filter_map(|terminal| {
+            let boundary = transcript::terminal_structural_boundary(terminal);
+            (boundary >= lower_boundary
+                && before_session_seq.is_none_or(|upper_boundary| boundary < upper_boundary))
+                .then(|| transcript::project_turn_terminal_entry(terminal).map(|entry| (boundary, entry)))
+                .flatten()
+        }));
+        let mut entries =
+            transcript::merge_entries_at_session_boundaries(entries, synthetic_entries);
+        let projected_overflow = entries.len() > limit;
+        if projected_overflow {
+            let drain = entries.len() - limit;
+            entries.drain(..drain);
+        }
+        let next_cursor = (has_older_messages || projected_overflow)
+            .then(|| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.message_seq)
+                    .min()
+                    .map(|session_seq| format!("message:{session_seq}"))
+            })
+            .flatten();
+        Ok(BoundedTranscriptPage {
+            entries,
+            next_cursor,
+        })
+    }
+
     pub fn local_activity_for_selector(
         &self,
         selector: &GatewayThreadSelector,
@@ -480,10 +589,21 @@ impl Gateway {
             }
             if let Some(state) = active.get(&key) {
                 activity.running |= state.running && state.active_turn_id.is_some();
-                if activity.active_turn_id.is_none() {
-                    activity.active_turn_id = state.active_turn_id.clone();
+                if state.running
+                    && let (Some(activity_id), Some(kind)) =
+                        (state.active_turn_id.as_ref(), state.active_kind)
+                {
+                    let provenance = match kind {
+                        ActiveActivityKind::Shell => ThreadActivityView::GatewayLocal {
+                            operation: GatewayLocalOperationView::Shell,
+                            activity_id: activity_id.clone(),
+                        },
+                    };
+                    if !activity.activities.contains(&provenance)
+                    {
+                        activity.activities.push(provenance);
+                    }
                 }
-                activity.queued_turns += state.queued.len();
             }
         }
         activity
@@ -581,17 +701,35 @@ impl Gateway {
         let stale = record.status == "running" && record.lease_expires_at_ms < gateway_now_ms();
         if matches!(record.status.as_str(), "running" | "queued") && !stale {
             activity.running = true;
+            if record.kind == "turn"
+                && activity.active_turn_id.is_none()
+                && let Some(turn_id) = record.turn_id.clone()
+            {
+                activity.active_turn_id = Some(turn_id);
+            }
+            let provenance = if record.owner_id != self.owner_id() {
+                Some(ThreadActivityView::Foreign {
+                    owner_id: record.owner_id.clone(),
+                    activity_id: record.activity_id.clone(),
+                    owner_surface: record.owner_surface.clone(),
+                })
+            } else {
+                match record.kind.as_str() {
+                    "shell" => Some(ThreadActivityView::GatewayLocal {
+                        operation: GatewayLocalOperationView::Shell,
+                        activity_id: record.activity_id.clone(),
+                    }),
+                    _ => None,
+                }
+            };
+            if let Some(provenance) = provenance
+                && !activity.activities.contains(&provenance)
+            {
+                activity.activities.push(provenance);
+            }
         }
         if stale && activity.takeover_state.is_none() {
             activity.takeover_state = Some("stale".to_string());
-        }
-        if activity.active_turn_id.is_none() {
-            activity.active_turn_id = record.turn_id.clone();
-        }
-        if record.owner_id == self.owner_id() {
-            activity.queued_turns = activity.queued_turns.max(record.queued_turns);
-        } else {
-            activity.queued_turns += record.queued_turns;
         }
         activity.started_at_ms = match (activity.started_at_ms, Some(record.started_at_ms)) {
             (Some(left), Some(right)) => Some(left.min(right)),
@@ -610,231 +748,6 @@ impl Gateway {
         }
     }
 
-    /// Legacy queue conformance seam. Product callers enter through
-    /// `psychevo::Application`; only the historical Gateway queue tests keep
-    /// this path compiled while their lower-level shell and compaction
-    /// coverage remains in this crate.
-    #[cfg(test)]
-    pub async fn start_turn(
-        &self,
-        mut caller: ThreadCallerContext,
-        mut intent: ThreadTurnIntent,
-    ) -> psychevo::Result<AcceptedTurn> {
-        let admission = self
-            .supervisor
-            .acquire_activity_admission()
-            .map_err(|error| Error::Message(error.to_string()))?;
-        let turn_id = intent
-            .turn_id
-            .take()
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
-        let client_turn_id = intent
-            .client_turn_id
-            .take()
-            .filter(|value| !value.trim().is_empty());
-        let explicit_thread = intent
-            .thread_id
-            .as_deref()
-            .is_some_and(|thread_id| !thread_id.trim().is_empty());
-        let thread_id = self
-            .materialize_accepted_thread(&caller, &intent)
-            .await?;
-        intent.thread_id = Some(thread_id.clone());
-        intent.policy.continue_latest = false;
-        gateway_profile_mark(
-            "gateway_start_turn_entered",
-            Some(&turn_id),
-            Some(&thread_id),
-            GatewayProfileFields {
-                runtime_source: Some(&caller.runtime_source),
-                ..GatewayProfileFields::default()
-            },
-        );
-        if let Some(client_turn_id) = client_turn_id.as_deref() {
-            self.state
-                .record_gateway_turn_start_receipt(&thread_id, client_turn_id, &turn_id)
-                .await?;
-        }
-        if caller.continue_sources.is_empty() {
-            caller.continue_sources.push(caller.runtime_source.clone());
-        }
-        let request = intent.into_queue_request(caller, self.state.clone(), explicit_thread);
-        let (completion_tx, completion_rx) = oneshot::channel();
-        let gateway = self.clone();
-        let supervised_turn_id = turn_id.clone();
-        self.supervisor.spawn_permitted_activity(
-            format!("turn:{turn_id}"),
-            admission,
-            async move {
-                let result = gateway
-                    .send_turn_with_id(request, supervised_turn_id)
-                    .await;
-                let _ = completion_tx.send(result);
-            },
-        );
-        Ok(AcceptedTurn {
-            receipt: AcceptedTurnReceipt {
-                accepted: true,
-                thread_id,
-                turn_id,
-                client_turn_id,
-            },
-            completion: AcceptedTurnCompletion {
-                receiver: completion_rx,
-            },
-        })
-    }
-
-    #[cfg(test)]
-    async fn materialize_accepted_thread(
-        &self,
-        caller: &ThreadCallerContext,
-        intent: &ThreadTurnIntent,
-    ) -> psychevo::Result<String> {
-        if let Some(thread_id) = intent
-            .thread_id
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            self.thread_cwd(thread_id).await?;
-            return Ok(thread_id.to_string());
-        }
-        if !intent.reset_source_binding && let Some(source) = intent.source.as_ref() {
-            if let Some(thread_id) = self.active_thread_for_source(source) {
-                return Ok(thread_id);
-            }
-            if let Some(thread_id) = self.lookup_source_thread(source).await? {
-                return Ok(thread_id);
-            }
-        }
-        let cwd = psychevo::paths::canonicalize_cwd(&caller.cwd)?;
-        if intent.policy.continue_latest {
-            let continue_sources = if caller.continue_sources.is_empty() {
-                vec![caller.runtime_source.as_str()]
-            } else {
-                caller
-                    .continue_sources
-                    .iter()
-                    .map(String::as_str)
-                    .collect()
-            };
-            if let Some(thread_id) = self
-                .state
-                .latest_session_for_cwd_with_sources(&cwd, &continue_sources)
-                .await?
-            {
-                return Ok(thread_id);
-            }
-        }
-        self.state
-            .create_session_with_metadata(
-                &cwd,
-                &caller.runtime_source,
-                "pending",
-                "pending",
-                intent.lineage.clone(),
-            )
-            .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn send_turn(
-        &self,
-        mut request: SendTurnRequest,
-    ) -> psychevo::Result<GatewayTurnResult> {
-        request.explicit_thread = request.thread_id.is_some();
-        let turn_id = Uuid::now_v7().to_string();
-        self.send_turn_with_id(request, turn_id).await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn send_turn_with_id(
-        &self,
-        request: SendTurnRequest,
-        turn_id: String,
-    ) -> psychevo::Result<GatewayTurnResult> {
-        let queue_key = self.queue_key_for_request(&request).await?;
-        let mut request = Some(request);
-        let queued = {
-            let mut active = self.active.lock().expect("gateway active map poisoned");
-            let state = active.entry(queue_key.clone()).or_default();
-            if state.running {
-                let (responder, receiver) = oneshot::channel();
-                let queue_position = state.queued.len() + 1;
-                let queued_request = request.take().expect("gateway request missing");
-                let event_sink = queued_request.event_sink.clone();
-                let thread_id = queued_request.thread_id.clone();
-                let active_activity_id = state.active_turn_id.clone();
-                state
-                    .queued
-                    .push_back(PendingQueuedActivity::Turn(Box::new(PendingQueuedTurn {
-                        turn_id: turn_id.clone(),
-                        request: queued_request,
-                        responder,
-                    })));
-                Some((
-                    receiver,
-                    event_sink,
-                    thread_id,
-                    queue_position,
-                    active_activity_id,
-                ))
-            } else {
-                state.running = true;
-                None
-            }
-        };
-
-        gateway_profile_mark(
-            if queued.is_some() {
-                "gateway_turn_queued"
-            } else {
-                "gateway_turn_admitted"
-            },
-            Some(&turn_id),
-            request
-                .as_ref()
-                .and_then(|request| request.thread_id.as_deref()),
-            GatewayProfileFields {
-                queue_depth: queued
-                    .as_ref()
-                    .map(|(_, _, _, queue_position, _)| *queue_position),
-                ..GatewayProfileFields::default()
-            },
-        );
-
-        if let Some((receiver, event_sink, thread_id, queue_position, active_activity_id)) = queued
-        {
-            if let Some(active_activity_id) = active_activity_id {
-                let _ = self
-                    .state
-
-                    .set_gateway_activity_queued_turns(&active_activity_id, queue_position)
-                    .await;
-            }
-            if let Some(event_sink) = event_sink {
-                let _ = event_sink.emit(GatewayEvent::TurnQueued {
-                    thread_id,
-                    turn_id,
-                    queue_position,
-                });
-            }
-            return receiver
-                .await
-                .map_err(|_| Error::Message("gateway turn queue closed".to_string()))?;
-        }
-
-        let result = self
-            .run_turn_now(
-                &queue_key,
-                request.take().expect("gateway request missing"),
-                turn_id,
-            )
-            .await;
-        self.finish_activity_and_spawn_next(queue_key);
-        result
-    }
-
     pub async fn send_shell(
         &self,
         request: SendShellRequest,
@@ -850,26 +763,20 @@ impl Gateway {
             let mut active = self.active.lock().expect("gateway active map poisoned");
             let state = active.entry(queue_key.clone()).or_default();
             if state.running {
-                if state.active_kind == Some(ActiveActivityKind::Turn)
-                    && let Some(control) = state.control.clone()
-                {
-                    ShellStartState::Auxiliary(control)
-                } else {
-                    let (responder, receiver) = oneshot::channel();
-                    let queue_position = state.queued.len() + 1;
-                    let active_activity_id = state.active_turn_id.clone();
-                    state
-                        .queued
-                        .push_back(PendingQueuedActivity::Shell(Box::new(PendingQueuedShell {
-                            shell_id: shell_id.clone(),
-                            request: request.take().expect("gateway shell request missing"),
-                            responder,
-                        })));
-                    ShellStartState::Queued {
-                        receiver,
-                        active_activity_id,
-                        queue_position,
-                    }
+                let (responder, receiver) = oneshot::channel();
+                let queue_position = state.queued.len() + 1;
+                let active_activity_id = state.active_turn_id.clone();
+                state
+                    .queued
+                    .push_back(PendingQueuedActivity::Shell(Box::new(PendingQueuedShell {
+                        shell_id: shell_id.clone(),
+                        request: request.take().expect("gateway shell request missing"),
+                        responder,
+                    })));
+                ShellStartState::Queued {
+                    receiver,
+                    active_activity_id,
+                    queue_position,
                 }
             } else {
                 state.running = true;
@@ -893,23 +800,6 @@ impl Gateway {
                     .await
                     .map_err(|_| Error::Message("gateway shell queue closed".to_string()))?
             }
-            ShellStartState::Auxiliary(inject_into) => {
-                let (responder, receiver) = oneshot::channel();
-                let gateway = self.clone();
-                self.spawn_accepted_turn(format!("auxiliary-shell:{shell_id}"), async move {
-                    let result = gateway
-                        .run_shell_auxiliary(
-                            request.take().expect("gateway shell request missing"),
-                            shell_id,
-                            inject_into,
-                        )
-                        .await;
-                    let _ = responder.send(result);
-                });
-                receiver
-                    .await
-                    .map_err(|_| Error::Message("gateway auxiliary shell cancelled".to_string()))?
-            }
             ShellStartState::Standalone => {
                 let (responder, receiver) = oneshot::channel();
                 let gateway = self.clone();
@@ -931,79 +821,69 @@ impl Gateway {
         }
     }
 
-    pub async fn enqueue_compact_session(
+    pub async fn submit_clarify(
         &self,
-        request: SendCompactRequest,
-    ) -> psychevo::Result<
-        BoxFuture<'static, psychevo::Result<psychevo::compaction::CompactionResult>>,
-    > {
-        let admission = self
-            .supervisor
-            .acquire_activity_admission()
-            .map_err(|error| Error::Message(error.to_string()))?;
-        let queue_key = self.queue_key_for_compact_request(&request).await?;
-        let compact_id = Uuid::now_v7().to_string();
-        let event_sink = request.event_sink.clone();
-        let event_thread_id = self.compact_event_thread_id(&request).await;
-        let (responder, receiver) = oneshot::channel();
-        let mut pending = Some(Box::new(PendingQueuedCompact {
-            _admission: admission,
-            compact_id,
-            request,
-            responder,
-        }));
-        let queued = {
-            let mut active = self.active.lock().expect("gateway active map poisoned");
-            let state = active.entry(queue_key.clone()).or_default();
-            if state.running {
-                state.queued.push_back(PendingQueuedActivity::Compact(
-                    pending.take().expect("gateway compact request missing"),
-                ));
-                true
-            } else {
-                state.running = true;
-                false
-            }
+        selector: GatewayThreadSelector,
+        call_id: &str,
+        result: ClarifyResult,
+    ) -> bool {
+        let payload = match result {
+            ClarifyResult::Answered(response) => json!({
+                "requestId": call_id,
+                "answers": response
+                    .answers
+                    .into_iter()
+                    .map(|answer| answer.answers)
+                    .collect::<Vec<_>>(),
+            }),
+            ClarifyResult::Cancelled => json!({
+                "requestId": call_id,
+                "cancel": true,
+            }),
         };
-
-        if queued {
-            self.emit_activity_changed_for_thread(event_sink, event_thread_id)
-                .await;
-        } else {
-            self.spawn_compact_activity(
-                queue_key,
-                pending.take().expect("gateway compact request missing"),
-            );
-        }
-
-        Ok(Box::pin(async move {
-            receiver
-                .await
-                .map_err(|_| Error::Message("gateway compact queue closed".to_string()))?
-        }))
+        self.enqueue_foreign_control_command(&selector, "clarify", payload)
+            .await
     }
 
-    pub async fn compact_session(
-        &self,
-        request: SendCompactRequest,
-    ) -> psychevo::Result<psychevo::compaction::CompactionResult> {
-        self.enqueue_compact_session(request).await?.await
-    }
-
-    pub async fn steer_turn(
+    pub async fn steer_foreign_turn(
         &self,
         selector: GatewayThreadSelector,
         expected_turn_id: Option<&str>,
         message: psychevo::__agent_core::Message,
-    ) -> Option<psychevo::__agent_core::PendingInputId> {
-        if self.expected_turn_is_terminal(expected_turn_id).await {
-            return None;
+    ) -> bool {
+        if self.expected_turn_is_terminal(expected_turn_id).await
+            || !self.agent_supports_steer_for_selector(&selector).await
+        {
+            return false;
         }
-        if !self.agent_supports_steer_for_selector(&selector).await {
-            return None;
-        }
-        self.control_for_selector(&selector, expected_turn_id)
-            .and_then(|control| control.steer_user_message(message))
+        let Ok(message) = serde_json::to_value(message) else {
+            return false;
+        };
+        self.enqueue_foreign_control_command(
+            &selector,
+            "steer",
+            json!({
+                "expectedTurnId": expected_turn_id,
+                "message": message,
+            }),
+        )
+        .await
+    }
+
+    pub async fn interrupt_turn(&self, selector: GatewayThreadSelector) -> bool {
+        self.enqueue_foreign_control_command(&selector, "interrupt", json!({}))
+            .await
+    }
+
+    async fn expected_turn_is_terminal(&self, expected_turn_id: Option<&str>) -> bool {
+        let Some(turn_id) = expected_turn_id else {
+            return false;
+        };
+        self.state
+            .gateway_turn_terminal(turn_id)
+            .await
+            .map(|terminal| terminal.is_some())
+            .unwrap_or(true)
     }
 
     async fn agent_supports_steer_for_selector(
@@ -1029,134 +909,12 @@ impl Gateway {
         }
     }
 
-    pub async fn steer_foreign_turn(
-        &self,
-        selector: GatewayThreadSelector,
-        expected_turn_id: Option<&str>,
-        message: psychevo::__agent_core::Message,
-    ) -> bool {
-        if self.expected_turn_is_terminal(expected_turn_id).await {
-            return false;
-        }
-        if !self.agent_supports_steer_for_selector(&selector).await {
-            return false;
-        }
-        let Ok(message) = serde_json::to_value(message) else {
-            return false;
-        };
-        self.enqueue_foreign_control_command(
-            &selector,
-            "steer",
-            json!({
-                "expectedTurnId": expected_turn_id,
-                "message": message,
-            }),
-        )
-        .await
-    }
-
-    async fn expected_turn_is_terminal(&self, expected_turn_id: Option<&str>) -> bool {
-        let Some(turn_id) = expected_turn_id else {
-            return false;
-        };
-        self.state
-            .gateway_turn_terminal(turn_id)
-            .await
-            .map(|terminal| terminal.is_some())
-            .unwrap_or(true)
-    }
-
-    pub fn cancel_steer(
-        &self,
-        selector: GatewayThreadSelector,
-        expected_turn_id: Option<&str>,
-        input_id: psychevo::__agent_core::PendingInputId,
-    ) -> bool {
-        self.control_for_selector(&selector, expected_turn_id)
-            .is_some_and(|control| control.cancel_pending_user_message(input_id))
-    }
-
-    pub fn update_steer(
-        &self,
-        selector: GatewayThreadSelector,
-        expected_turn_id: Option<&str>,
-        input_id: psychevo::__agent_core::PendingInputId,
-        message: psychevo::__agent_core::Message,
-    ) -> bool {
-        self.control_for_selector(&selector, expected_turn_id)
-            .is_some_and(|control| control.update_pending_user_message(input_id, message))
-    }
-
-    pub async fn interrupt_turn(&self, selector: GatewayThreadSelector) -> bool {
-        if let Some(control) = self.control_for_selector(&selector, None) {
-            control.abort();
-            true
-        } else {
-            self.enqueue_foreign_control_command(&selector, "interrupt", json!({}))
-                .await
-        }
-    }
-
-    pub async fn submit_clarify(
-        &self,
-        selector: GatewayThreadSelector,
-        call_id: &str,
-        result: ClarifyResult,
-    ) -> bool {
-        if self
-            .control_for_selector(&selector, None)
-            .is_some_and(|control| control.submit_clarify_result(call_id, result.clone()))
-        {
-            return true;
-        }
-        let payload = match result {
-            ClarifyResult::Answered(response) => json!({
-                "requestId": call_id,
-                "answers": response
-                    .answers
-                    .into_iter()
-                    .map(|answer| answer.answers)
-                    .collect::<Vec<_>>(),
-            }),
-            ClarifyResult::Cancelled => json!({
-                "requestId": call_id,
-                "cancel": true,
-            }),
-        };
-        self.enqueue_foreign_control_command(&selector, "clarify", payload)
-            .await
-    }
-
     pub async fn submit_permission(
         &self,
         selector: GatewayThreadSelector,
         request_id: &str,
         decision: PermissionApprovalDecision,
     ) -> bool {
-        let selector_keys = self.selector_keys_with_active_aliases(&selector);
-        let pending = {
-            let mut permissions = self
-                .pending_permissions
-                .lock()
-                .expect("gateway pending permission map poisoned");
-            match permissions.get(request_id) {
-                Some(pending)
-                    if pending.selector_key.as_deref().is_some_and(|pending_key| {
-                        !selector_keys.iter().any(|key| key == pending_key)
-                    }) =>
-                {
-                    return false;
-                }
-                Some(_) => permissions.remove(request_id),
-                None => None,
-            }
-        };
-        if pending
-            .and_then(|pending| pending.responder.send(decision.clone()).ok())
-            .is_some()
-        {
-            return true;
-        }
         self.enqueue_foreign_control_command(
             &selector,
             "permission",
@@ -1167,24 +925,6 @@ impl Gateway {
             }),
         )
         .await
-    }
-
-    pub(crate) fn has_pending_permission_for_selector(
-        &self,
-        selector: &GatewayThreadSelector,
-        request_id: &str,
-    ) -> bool {
-        let selector_keys = self.selector_keys_with_active_aliases(selector);
-        self.pending_permissions
-            .lock()
-            .expect("gateway pending permission map poisoned")
-            .get(request_id)
-            .is_some_and(|pending| {
-                pending
-                    .selector_key
-                    .as_deref()
-                    .is_none_or(|pending_key| selector_keys.iter().any(|key| key == pending_key))
-            })
     }
 
     pub fn clear_queue(&self, selector: GatewayThreadSelector) -> usize {
@@ -1208,25 +948,10 @@ impl Gateway {
             }
         }
         let count = dropped.len();
-        for pending in dropped {
-            match pending {
-                #[cfg(test)]
-                PendingQueuedActivity::Turn(pending) => {
-                    let _ = pending.responder.send(Err(Error::Message(
-                        "gateway turn queue cleared".to_string(),
-                    )));
-                }
-                PendingQueuedActivity::Shell(pending) => {
-                    let _ = pending.responder.send(Err(Error::Message(
-                        "gateway shell queue cleared".to_string(),
-                    )));
-                }
-                PendingQueuedActivity::Compact(pending) => {
-                    let _ = pending.responder.send(Err(Error::Message(
-                        "gateway compact queue cleared".to_string(),
-                    )));
-                }
-            }
+        for PendingQueuedActivity::Shell(pending) in dropped {
+            let _ = pending.responder.send(Err(Error::Message(
+                "gateway shell queue cleared".to_string(),
+            )));
         }
         count
     }

@@ -155,7 +155,7 @@ async fn deliver_channel_outbox_record(
     state: &WebState,
     runtime: &ChannelRuntimeState,
     channel_gateway: &ChannelGateway,
-    record: psychevo::state::GatewayChannelOutboxRecord,
+    record: psychevo::__product::persistence::GatewayChannelOutboxRecord,
 ) -> psychevo::Result<()> {
     let payload = record.payload_text.ok_or_else(|| {
         psychevo::Error::Message(format!(
@@ -478,15 +478,17 @@ async fn run_channel_inbound_turn(
     let record = state
         .inner
         .state
-        .upsert_gateway_channel_outbox(psychevo::state::GatewayChannelOutboxInput {
-            delivery_id: &delivery_id,
-            thread_id: &result.thread.id,
-            turn_id: &result.turn.id,
-            connection_id: &connection.id,
-            source_key: &source.source_key().0,
-            payload_text: &answer,
-            payload_hash: &payload_hash,
-        })
+        .upsert_gateway_channel_outbox(
+            psychevo::__product::persistence::GatewayChannelOutboxInput {
+                delivery_id: &delivery_id,
+                thread_id: &result.thread.id,
+                turn_id: &result.turn.id,
+                connection_id: &connection.id,
+                source_key: &source.source_key().0,
+                payload_text: &answer,
+                payload_hash: &payload_hash,
+            },
+        )
         .await?;
     if record.status == "acknowledged" {
         return Ok(());

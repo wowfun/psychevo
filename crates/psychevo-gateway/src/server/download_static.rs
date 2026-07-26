@@ -46,10 +46,10 @@ fn render_media_artifact(
     state: &WebState,
     artifact_id: &str,
 ) -> psychevo::Result<Response<Body>> {
-    psychevo::media::validate_media_artifact_id(artifact_id)?;
-    let path = psychevo::media::media_artifact_path(&state.inner.home, artifact_id)?;
+    psychevo::__product::platform::validate_media_artifact_id(artifact_id)?;
+    let path = psychevo::__product::platform::media_artifact_path(&state.inner.home, artifact_id)?;
     let bytes = std::fs::read(&path)?;
-    let media = psychevo::media::read_media_artifact(&state.inner.home, artifact_id)?;
+    let media = psychevo::__product::platform::read_media_artifact(&state.inner.home, artifact_id)?;
     let mut response = Response::new(Body::from(bytes));
     response.headers_mut().insert(
         CONTENT_TYPE,

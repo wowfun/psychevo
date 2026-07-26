@@ -31,154 +31,20 @@ impl Gateway {
                 None
             }
         };
-        if let Some(next) = next {
+        if let Some(PendingQueuedActivity::Shell(next)) = next {
             let gateway = self.clone();
-            let run_key = queue_key.clone();
-            match next {
-                #[cfg(test)]
-                PendingQueuedActivity::Turn(next) => {
-                    gateway.clone().spawn_accepted_turn(
-                        format!("queued-turn:{}", next.turn_id),
-                        async move {
-                        let result = gateway
-                            .run_turn_now(&run_key, next.request, next.turn_id)
-                            .await;
-                        gateway.finish_activity_and_spawn_next(run_key);
-                        let _ = next.responder.send(result);
-                    });
-                }
-                PendingQueuedActivity::Shell(next) => {
-                    gateway.clone().spawn_accepted_turn(
-                        format!("queued-shell:{}", next.shell_id),
-                        async move {
-                        let result = gateway
-                            .run_shell_now(&run_key, next.request, next.shell_id)
-                            .await;
-                        gateway.finish_activity_and_spawn_next(run_key);
-                        let _ = next.responder.send(result);
-                    });
-                }
-                PendingQueuedActivity::Compact(next) => {
-                    gateway.spawn_compact_activity(run_key, next);
-                }
-            }
+            let run_key = queue_key;
+            gateway.clone().spawn_accepted_turn(
+                format!("queued-shell:{}", next.shell_id),
+                async move {
+                    let result = gateway
+                        .run_shell_now(&run_key, next.request, next.shell_id)
+                        .await;
+                    gateway.finish_activity_and_spawn_next(run_key);
+                    let _ = next.responder.send(result);
+                },
+            );
         }
-    }
-
-    fn spawn_compact_activity(&self, run_key: String, next: Box<PendingQueuedCompact>) {
-        let gateway = self.clone();
-        self.spawn_accepted_turn(format!("compact:{}", next.compact_id), async move {
-            let event_sink = next.request.event_sink.clone();
-            let event_thread_id = gateway.compact_event_thread_id(&next.request).await;
-            let result = gateway
-                .run_compact_now(&run_key, next.request, next.compact_id)
-                .await;
-            gateway.finish_activity_and_spawn_next(run_key);
-            gateway
-                .emit_activity_changed_for_thread(event_sink, event_thread_id)
-                .await;
-            let _ = next.responder.send(result);
-        });
-    }
-
-    async fn compact_event_thread_id(&self, request: &SendCompactRequest) -> Option<String> {
-        if request.thread_id.is_some() {
-            return request.thread_id.clone();
-        }
-        if let Some(source) = request.source.as_ref() {
-            return self.lookup_source_thread(source).await.ok().flatten();
-        }
-        None
-    }
-
-    async fn non_native_compaction_runtime(
-        &self,
-        request: &SendCompactRequest,
-        thread_id: &str,
-    ) -> psychevo::Result<Option<String>> {
-        if let Some(binding) = self.state.gateway_runtime_binding(thread_id).await? {
-            if binding.status == GatewayRuntimeBindingStatus::Resolved {
-                return Ok(binding
-                    .runtime_ref
-                    .filter(|runtime_ref| runtime_ref != "native"));
-            }
-            return Ok(Some(
-                binding
-                    .runtime_ref
-                    .unwrap_or_else(|| "unresolved".to_string()),
-            ));
-        }
-
-        let summary = self
-            .state
-
-            .session_summary(thread_id)
-            .await?
-            .ok_or_else(|| Error::Message(format!("session not found: {thread_id}")))?;
-        if summary.source == "peer_agent" {
-            let runtime_ref = self
-                .state
-
-                .session_metadata(thread_id)
-                .await?
-                .as_ref()
-                .and_then(|metadata| {
-                    metadata
-                        .get("runtimeRef")
-                        .or_else(|| metadata.get("runtime_ref"))
-                })
-                .and_then(Value::as_str)
-                .unwrap_or("peer_agent")
-                .to_string();
-            return Ok(Some(runtime_ref));
-        }
-
-        Ok(request
-            .runtime_ref
-            .as_deref()
-            .map(str::trim)
-            .filter(|runtime_ref| !runtime_ref.is_empty() && *runtime_ref != "native")
-            .map(ToString::to_string))
-    }
-
-    async fn emit_activity_changed_for_thread(
-        &self,
-        event_sink: Option<GatewayEventEmitter>,
-        thread_id: Option<String>,
-    ) {
-        let (Some(event_sink), Some(thread_id)) = (event_sink, thread_id) else {
-            return;
-        };
-        let _ = event_sink.emit(GatewayEvent::ActivityChanged {
-            thread_id: Some(thread_id.clone()),
-            activity: gateway_activity_view(
-                &self
-                    .activity_for_selector(GatewayThreadSelector::thread_id(&thread_id))
-                    .await,
-            ),
-        });
-    }
-
-    #[cfg(test)]
-    async fn queue_key_for_request(
-        &self,
-        request: &SendTurnRequest,
-    ) -> psychevo::Result<String> {
-        if let Some(thread_id) = &request.thread_id {
-            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
-        }
-        if let Some(source) = &request.source {
-            if !request.reset_source_binding
-                && let Some(thread_id) = self.lookup_source_thread(source).await?
-            {
-                return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
-            }
-            return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
-        }
-        if let Some(thread_id) = &request.options.session {
-            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
-        }
-        Ok(format!("invocation:{}", Uuid::now_v7()))
     }
 
     async fn queue_key_for_shell_request(
@@ -200,22 +66,6 @@ impl Gateway {
         Ok(format!("shell:{}", Uuid::now_v7()))
     }
 
-    async fn queue_key_for_compact_request(
-        &self,
-        request: &SendCompactRequest,
-    ) -> psychevo::Result<String> {
-        if let Some(thread_id) = &request.thread_id {
-            return Ok(self.primary_queue_key_for_alias(thread_key(thread_id)));
-        }
-        if let Some(source) = &request.source {
-            if let Some(thread_id) = self.lookup_source_thread(source).await? {
-                return Ok(self.primary_queue_key_for_alias(thread_key(&thread_id)));
-            }
-            return Ok(self.primary_queue_key_for_alias(source_key_key(&source.source_key())));
-        }
-        Ok(format!("compact:{}", Uuid::now_v7()))
-    }
-
     async fn lookup_source_thread(
         &self,
         source: &GatewaySource,
@@ -230,22 +80,10 @@ impl Gateway {
                 .cloned()),
             GatewaySourceLifetime::Persistent => Ok(self
                 .state
-
                 .gateway_source_lane(&source.source_key().0)
                 .await?
                 .and_then(|lane| lane.thread_id)),
         }
-    }
-
-    #[cfg(test)]
-    fn active_thread_for_source(&self, source: &GatewaySource) -> Option<String> {
-        let source_key = source_key_key(&source.source_key());
-        self.active_aliases
-            .lock()
-            .expect("gateway active alias map poisoned")
-            .get(&source_key)
-            .and_then(|primary| primary.strip_prefix("thread:"))
-            .map(str::to_string)
     }
 
     fn source_generation(&self, source: &GatewaySource) -> u64 {
@@ -267,90 +105,31 @@ impl Gateway {
         *generation = generation.saturating_add(1);
     }
 
-    #[cfg(test)]
-    async fn bind_source_to_result(
-        &self,
-        source: &GatewaySource,
-        result: &RunResult,
-        backend: &GatewayBackendInfo,
-        lineage: Option<Value>,
-        expected_generation: Option<u64>,
-    ) -> psychevo::Result<()> {
-        let source_key = source.source_key();
-        if let Some(expected_generation) = expected_generation
-            && self.source_generation(source) != expected_generation
-        {
-            return Ok(());
-        }
-        match source.lifetime {
-            GatewaySourceLifetime::Invocation => {}
-            GatewaySourceLifetime::Process => {
-                self.process_bindings
-                    .lock()
-                    .expect("gateway process binding map poisoned")
-                    .insert(source_key.0.clone(), result.session_id.clone());
-            }
-            GatewaySourceLifetime::Persistent => {
-                self.state
-
-                    .upsert_gateway_source_lane(GatewaySourceLaneInput {
-                        source_key: &source_key.0,
-                        source_kind: &source.kind,
-                        raw_identity: source.raw_identity.clone().unwrap_or(Value::Null),
-                        visible_name: source.visible_name.as_deref(),
-                        thread_id: Some(&result.session_id),
-                        draft_agent_ref: None,
-                        draft_profile_ref: None,
-                        draft_control_values: &Default::default(),
-                        lineage: lineage_with_runtime_ref(lineage, backend.runtime_ref.as_deref()),
-                    })
-                    .await?;
-            }
-        }
-        if source.lifetime != GatewaySourceLifetime::Invocation {
-            self.bump_source_generation_key(&source_key);
-        }
-        Ok(())
-    }
-
     fn register_active(
         &self,
         key: &str,
-        turn_id: String,
+        activity_id: String,
         control: Option<RunControlHandle>,
         kind: ActiveActivityKind,
     ) {
         let mut active = self.active.lock().expect("gateway active map poisoned");
         let state = active.entry(key.to_string()).or_default();
-        state.active_turn_id = Some(turn_id);
+        state.active_turn_id = Some(activity_id);
         state.control = control;
         state.active_kind = Some(kind);
     }
 
-    fn mark_active_turn_terminal(&self, turn_id: &str) {
-        let mut active = self.active.lock().expect("gateway active map poisoned");
-        for state in active.values_mut() {
-            if state.active_turn_id.as_deref() == Some(turn_id) {
-                state.control = None;
-                state.active_turn_id = None;
-                state.active_kind = None;
-            }
-        }
-    }
-
     fn register_active_thread_alias(&self, key: &str, thread_id: &str) {
-        let alias = thread_key(thread_id);
-        self.register_active_queue_alias(&alias, key);
+        self.register_active_queue_alias(&thread_key(thread_id), key);
     }
 
     fn register_active_queue_alias(&self, alias: &str, primary: &str) {
-        if alias == primary {
-            return;
+        if alias != primary {
+            self.active_aliases
+                .lock()
+                .expect("gateway active alias map poisoned")
+                .insert(alias.to_string(), primary.to_string());
         }
-        self.active_aliases
-            .lock()
-            .expect("gateway active alias map poisoned")
-            .insert(alias.to_string(), primary.to_string());
     }
 
     fn primary_queue_key_for_alias(&self, key: String) -> String {
@@ -360,53 +139,6 @@ impl Gateway {
             .get(&key)
             .cloned()
             .unwrap_or(key)
-    }
-
-    fn control_for_selector(
-        &self,
-        selector: &GatewayThreadSelector,
-        expected_turn_id: Option<&str>,
-    ) -> Option<RunControlHandle> {
-        let selector_keys = self.selector_keys_with_active_aliases(selector);
-        let active = self.active.lock().expect("gateway active map poisoned");
-        let mut seen = HashSet::new();
-        for key in selector_keys {
-            if !seen.insert(key.clone()) {
-                continue;
-            }
-            if let Some(state) = active.get(&key) {
-                if expected_turn_id
-                    .is_some_and(|expected| state.active_turn_id.as_deref() != Some(expected))
-                {
-                    continue;
-                }
-                if let Some(control) = &state.control {
-                    return Some(control.clone());
-                }
-            }
-        }
-        None
-    }
-
-    fn selector_keys_with_active_aliases(&self, selector: &GatewayThreadSelector) -> Vec<String> {
-        let selector_keys = self.selector_keys(selector);
-        let aliases = self
-            .active_aliases
-            .lock()
-            .expect("gateway active alias map poisoned");
-        let mut keys = Vec::new();
-        let mut seen = HashSet::new();
-        for key in selector_keys {
-            if seen.insert(key.clone()) {
-                keys.push(key.clone());
-            }
-            if let Some(primary) = aliases.get(&key)
-                && seen.insert(primary.clone())
-            {
-                keys.push(primary.clone());
-            }
-        }
-        keys
     }
 
     fn selector_keys(&self, selector: &GatewayThreadSelector) -> Vec<String> {
@@ -426,27 +158,5 @@ impl Gateway {
                 keys
             }
         }
-    }
-}
-
-fn unavailable_compaction_result(
-    thread_id: &str,
-    reason: psychevo::compaction::CompactionReason,
-    runtime_ref: &str,
-) -> psychevo::compaction::CompactionResult {
-    psychevo::compaction::CompactionResult {
-        session_id: thread_id.to_string(),
-        compacted: false,
-        reason: reason.as_str().to_string(),
-        message: format!(
-            "Context compaction is unavailable for runtime profile `{runtime_ref}` until its adapter owns native compaction."
-        ),
-        checkpoint_id: None,
-        first_kept_session_seq: None,
-        tokens_before: None,
-        tokens_after: None,
-        summary: None,
-        summary_provider: None,
-        summary_model: None,
     }
 }

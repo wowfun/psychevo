@@ -1,5 +1,4 @@
 const RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(6);
-const RUNTIME_FORCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(4);
 const SERVER_CONNECTION_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone)]
 pub struct GatewayWebServerConfig {
@@ -143,7 +142,6 @@ impl BoundGatewayWebServer {
                 let shutdown = shutdown_application_with_deadlines(
                     &application,
                     RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
-                    RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
                 ).await;
                 result?;
                 shutdown
@@ -153,7 +151,6 @@ impl BoundGatewayWebServer {
                 let shutdown = shutdown_application_with_deadlines(
                     &application,
                     RUNTIME_GRACEFUL_SHUTDOWN_TIMEOUT,
-                    RUNTIME_FORCE_SHUTDOWN_TIMEOUT,
                 ).await;
                 let drain = tokio::time::timeout(SERVER_CONNECTION_DRAIN_TIMEOUT, &mut server).await;
                 if let Ok(result) = drain {
@@ -168,26 +165,28 @@ impl BoundGatewayWebServer {
 async fn shutdown_application_with_deadlines(
     application: &Application,
     graceful_timeout: Duration,
-    force_timeout: Duration,
 ) -> psychevo::Result<()> {
     let graceful =
         tokio::time::timeout(graceful_timeout, application.shutdown()).await;
     let graceful_failure = match graceful {
-        Ok(Ok(())) => return Ok(()),
+        Ok(Ok(report)) => match report.require_clean() {
+            Ok(_) => return Ok(()),
+            Err(error) => format!("graceful runtime shutdown failed: {error}"),
+        },
         Ok(Err(error)) => format!("graceful runtime shutdown failed: {error}"),
         Err(_) => format!(
             "graceful runtime shutdown exceeded {} ms",
             graceful_timeout.as_millis()
         ),
     };
-    match tokio::time::timeout(force_timeout, application.shutdown_force()).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => Err(Error::Message(format!(
+    match application.shutdown_force().await {
+        Ok(report) => report.require_clean().map(|_| ()).map_err(|error| {
+            Error::Message(format!(
+                "{graceful_failure}; forced runtime shutdown failed: {error}"
+            ))
+        }),
+        Err(error) => Err(Error::Message(format!(
             "{graceful_failure}; forced runtime shutdown failed: {error}"
-        ))),
-        Err(_) => Err(Error::Message(format!(
-            "{graceful_failure}; forced runtime shutdown exceeded {} ms",
-            force_timeout.as_millis()
         ))),
     }
 }
@@ -299,7 +298,7 @@ fn write_managed_state(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    psychevo::host_process::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
+    psychevo::__product::platform::atomic_replace(path, &serde_json::to_vec_pretty(&state)?)?;
     Ok(())
 }
 
@@ -532,6 +531,10 @@ impl WebState {
             state.clone(),
             Arc::new(GatewayAgentSessionAdapter::new(config.gateway.clone())),
         );
+        config
+            .gateway
+            .attach_framework_application(application.clone())
+            .expect("Gateway Framework Application must be attached once");
         let framework = application.client();
         let source = cwd_source(&config.cwd);
         let channel_runtime = channel_runtime::ChannelRuntimeState::new(&config.home);
@@ -631,16 +634,39 @@ impl WebState {
                 .flatten(),
         };
         if let Some(thread_id) = framework_thread_id
-            && let Ok(thread) = self.inner.framework.resume_thread(thread_id).await
+            && let Ok(thread) = self.inner.framework.resume_thread(&thread_id).await
         {
             let (running, active_turn_id, queued_turns) = thread.__activity();
             if running {
                 activity.running = true;
             }
             if active_turn_id.is_some() {
-                activity.active_turn_id = active_turn_id;
+                activity.active_turn_id = active_turn_id.clone();
             }
-            activity.queued_turns = activity.queued_turns.saturating_add(queued_turns);
+            if let Some(turn_id) = active_turn_id {
+                let kind = self
+                    .inner
+                    .state
+                    .session_summary(&thread_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|summary| summary.parent_session_id.is_some())
+                    .map_or(
+                        wire::FrameworkTurnKind::Root,
+                        |_| wire::FrameworkTurnKind::DelegatedChild,
+                    );
+                activity.activities.insert(
+                    0,
+                    wire::ThreadActivityView::FrameworkTurn {
+                        activity_id: turn_id.clone(),
+                        turn_id,
+                        kind,
+                        queued_turns,
+                    },
+                );
+            }
+            activity.queued_turns = queued_turns;
         }
         activity
     }
@@ -782,7 +808,7 @@ impl WebState {
 
     async fn pending_context_for_live_event(
         &self,
-        record: &psychevo::state::GatewayLiveEventRecord,
+        record: &psychevo::__product::persistence::GatewayLiveEventRecord,
     ) -> PendingInteractionContext {
         let mut context = PendingInteractionContext {
             thread_id: record.thread_id.clone(),

@@ -350,7 +350,7 @@ async fn resume_resident_acp_session(
     generation: u64,
     session_ref: AcpResidentSessionRef,
     cwd: PathBuf,
-    resolved_mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    resolved_mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
 ) -> psychevo::Result<AcpSessionSnapshot> {
     require_acp_lifecycle_capability(initialized, AcpLifecycleCapability::Resume)?;
     if !cwd.is_absolute() {

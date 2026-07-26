@@ -24,13 +24,13 @@ async fn plugin_read_rpcs_return_manifest_metadata_without_mutation() {
         }"#,
     )
     .expect("manifest");
-    psychevo::plugins::install_plugin(
+    psychevo::__product::capabilities::install_plugin(
         &state.inner.home,
         &state.inner.cwd,
-        psychevo::plugins::PluginInstallOptions {
+        psychevo::__product::capabilities::PluginInstallOptions {
             source: source.display().to_string(),
             source_kind: None,
-            scope: psychevo::plugins::PluginScope::Global,
+            scope: psychevo::__product::capabilities::PluginScope::Global,
             git_ref: None,
             npm_version: None,
             npm_registry: None,

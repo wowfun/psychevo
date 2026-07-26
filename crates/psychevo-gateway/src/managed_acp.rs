@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 
-use psychevo::host_paths::HostPlatform;
+use psychevo::__product::platform::HostPlatform;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -227,7 +227,7 @@ async fn install_managed_codex_acp_with_lock(
                 ))
             })?;
         if !output.status.success() {
-            let stderr = psychevo::process_env::decode_process_output_for_platform(
+            let stderr = psychevo::__product::platform::decode_process_output_for_platform(
                 &output.stderr,
                 platform == HostPlatform::Windows,
             );
@@ -277,13 +277,17 @@ fn managed_npm_command(
         .iter()
         .map(OsString::from)
         .collect::<Vec<_>>();
-    let mut command =
-        psychevo::process_env::tokio_host_process_command(npm_program, &args, platform, env)?;
+    let mut command = psychevo::__product::platform::tokio_host_process_command(
+        npm_program,
+        &args,
+        platform,
+        env,
+    )?;
     command.env_clear();
-    psychevo::process_env::apply_tokio_process_env(
+    psychevo::__product::platform::apply_tokio_process_env(
         &mut command,
         env,
-        psychevo::process_env::ProcessEnvOptions::new(&[])
+        psychevo::__product::platform::ProcessEnvOptions::new(&[])
             .with_windows_utf8_defaults(platform == HostPlatform::Windows),
     )?;
     Ok(command)
@@ -784,8 +788,9 @@ pub(crate) fn verified_managed_codex_acp_command(
         ManagedTreeVerificationPurpose::Launch,
     ) {
         ManagedCodexAcpStatus::Ready(paths) => {
-            let configured = psychevo::host_paths::normalized_native_path(configured_command);
-            let expected = psychevo::host_paths::normalized_native_path(&paths.executable);
+            let configured =
+                psychevo::__product::platform::normalized_native_path(configured_command);
+            let expected = psychevo::__product::platform::normalized_native_path(&paths.executable);
             if !paths.executable.is_absolute() || configured != expected {
                 return Err(psychevo::Error::Message(format!(
                     "managed Codex ACP backend command must be the verified executable `{}`; run backend/repair",

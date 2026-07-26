@@ -1110,7 +1110,7 @@ async fn media_artifact_endpoint_requires_auth_and_serves_image_bytes() {
         .decode(psychevo::__ai::DEFAULT_FAKE_IMAGE_BASE64)
         .expect("png fixture");
     let artifact =
-        psychevo::media::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
+        psychevo::__product::platform::write_generated_image_artifact(&state.inner.home, &bytes, "image/png")
             .expect("artifact");
 
     let unauthorized = read_media_artifact(

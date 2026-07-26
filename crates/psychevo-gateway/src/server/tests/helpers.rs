@@ -34,7 +34,7 @@
     }
 
     fn track_snapshot(root: &Path, cwd: &Path) -> String {
-        let workspace_id = psychevo::paths::workspace_snapshot_id(cwd).expect("workspace id");
+        let workspace_id = psychevo::__product::platform::workspace_snapshot_id(cwd).expect("workspace id");
         let git_dir = root.join("workspaces").join(workspace_id);
         std::fs::create_dir_all(&git_dir).expect("snapshot git dir");
         if !git_dir.join("HEAD").exists() {

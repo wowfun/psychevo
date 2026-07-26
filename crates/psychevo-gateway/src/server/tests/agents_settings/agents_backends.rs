@@ -458,7 +458,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
             .all(|profile| profile.id != "acp:opencode")
     );
 
-    let catalog = psychevo::agents::discover_agents(&psychevo::agents::AgentDiscoveryOptions {
+    let catalog = psychevo::__product::capabilities::discover_agents(&psychevo::__product::capabilities::AgentDiscoveryOptions {
         home: state.inner.home.clone(),
         cwd: state.inner.cwd.clone(),
         env: state.inner.inherited_env.clone(),
@@ -512,7 +512,7 @@ async fn bound_hidden_acp_profile_starts_follow_up_from_captured_target() {
     .expect("child Thread");
     let cwd = state.inner.cwd.display().to_string();
     Box::pin(state.inner.state.create_gateway_runtime_binding(
-        psychevo::state::GatewayRuntimeBindingInput {
+        psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("opencode"),
             agent_fingerprint: &agent_fingerprint,
@@ -1308,7 +1308,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         .inner
         .state
 
-        .create_gateway_runtime_binding(psychevo::state::GatewayRuntimeBindingInput {
+        .create_gateway_runtime_binding(psychevo::__product::persistence::GatewayRuntimeBindingInput {
             thread_id: &thread_id,
             agent_ref: Some("native-peer"),
             agent_fingerprint: &agent_fingerprint,
@@ -1425,7 +1425,7 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
         .inner
         .state
 
-        .claim_gateway_activity(psychevo::state::GatewayActivityClaimInput {
+        .claim_gateway_activity(psychevo::__product::persistence::GatewayActivityClaimInput {
             activity_id: "foreign-native-turn",
             thread_id: Some(&thread_id),
             source_key: Some(&state.inner.source.source_key().0),
@@ -1477,6 +1477,15 @@ async fn thread_context_projects_immutable_agent_binding_and_turn_rejects_agent_
     .expect("public interrupt action");
     assert_eq!(interrupted["kind"], "interrupt");
     assert_eq!(interrupted["interrupted"], true);
+    let commands = state
+        .inner
+        .state
+        .pending_gateway_control_commands("gateway:foreign", 50)
+        .await
+        .expect("foreign control commands");
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].activity_id, "foreign-native-turn");
+    assert_eq!(commands[0].command_kind, "interrupt");
 
     let error = handle_rpc(
         state,
@@ -2280,7 +2289,7 @@ fn backend_doctor_resolves_windows_pathext_command_shim() {
     std::fs::write(&shim, "@echo off\n").expect("shim");
     let backend = AgentBackendConfig {
         id: "opencode".to_string(),
-        kind: psychevo::agents::AgentBackendKind::Acp,
+        kind: psychevo::__product::capabilities::AgentBackendKind::Acp,
         enabled: true,
         label: "OpenCode".to_string(),
         description: None,

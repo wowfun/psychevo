@@ -1172,7 +1172,7 @@
         );
         let mut metadata = serde_json::Map::new();
         metadata.insert(
-            psychevo::thread_lineage::SIDE_INHERITED_METADATA_KEY.to_string(),
+            psychevo::__product::sessions::SIDE_INHERITED_METADATA_KEY.to_string(),
             json!({
                 "hidden": true,
                 "parent_session_id": "parent-thread",
@@ -1223,7 +1223,7 @@
         AgentEdgeRecord {
             parent_session_id: parent.to_string(),
             child_session_id: child.to_string(),
-            status: psychevo::state::AgentEdgeStatus::Closed,
+            status: psychevo::__product::persistence::AgentEdgeStatus::Closed,
             created_at_ms: 1,
             updated_at_ms: 2,
             metadata: Some(metadata),

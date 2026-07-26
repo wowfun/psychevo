@@ -55,26 +55,6 @@ fn wrap_stream(
     }
 }
 
-#[cfg(test)]
-fn apply_input_parts(
-    options: &mut RunOptions,
-    input: &[GatewayInputPart],
-) -> psychevo::Result<()> {
-    if input.is_empty() {
-        return Ok(());
-    }
-    let (prompt, image_inputs, prompt_display, has_structured_input) =
-        framework_input_parts(input)?;
-    options.prompt = prompt;
-    options.image_inputs = image_inputs;
-    options.prompt_display = Some(prompt_display);
-    if options.prompt.trim().is_empty() && options.image_inputs.is_empty() && !has_structured_input
-    {
-        return Err(Error::Message("gateway turn input is empty".to_string()));
-    }
-    Ok(())
-}
-
 fn framework_input_parts(
     input: &[GatewayInputPart],
 ) -> psychevo::Result<(String, Vec<ImageInput>, PromptDisplayMetadata, bool)> {
@@ -145,27 +125,5 @@ fn gateway_image_input_into_runtime(input: GatewayImageInput) -> ImageInput {
     match input {
         GatewayImageInput::LocalPath { path } => ImageInput::LocalPath(path.into()),
         GatewayImageInput::Url { url } => ImageInput::ImageUrl(url),
-    }
-}
-
-#[cfg(test)]
-fn permission_decision_from_runtime(decision: &PermissionApprovalDecision) -> PermissionDecision {
-    match decision.outcome {
-        PermissionApprovalOutcome::AllowOnce => PermissionDecision::AllowOnce,
-        PermissionApprovalOutcome::AllowTurn => PermissionDecision::AllowTurn,
-        PermissionApprovalOutcome::AllowSession => PermissionDecision::AllowSession,
-        PermissionApprovalOutcome::AllowAlways => PermissionDecision::AllowAlways,
-        PermissionApprovalOutcome::Deny => PermissionDecision::Deny,
-    }
-}
-
-#[cfg(test)]
-fn permission_action_outcome(decision: &PermissionApprovalDecision) -> GatewayActionOutcome {
-    match decision.outcome {
-        PermissionApprovalOutcome::AllowOnce
-        | PermissionApprovalOutcome::AllowTurn
-        | PermissionApprovalOutcome::AllowSession
-        | PermissionApprovalOutcome::AllowAlways => GatewayActionOutcome::Accepted,
-        PermissionApprovalOutcome::Deny => GatewayActionOutcome::Rejected,
     }
 }

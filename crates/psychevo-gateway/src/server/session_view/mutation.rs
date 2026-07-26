@@ -35,9 +35,27 @@ async fn session_summary_by_id(
             activity.running = true;
         }
         if active_turn_id.is_some() {
-            activity.active_turn_id = active_turn_id;
+            activity.active_turn_id = active_turn_id.clone();
         }
-        activity.queued_turns = activity.queued_turns.saturating_add(queued_turns);
+        if let Some(turn_id) = active_turn_id {
+            let kind = projection
+                .summary
+                .parent_session_id
+                .as_ref()
+                .map_or(wire::FrameworkTurnKind::Root, |_| {
+                    wire::FrameworkTurnKind::DelegatedChild
+                });
+            activity.activities.insert(
+                0,
+                wire::ThreadActivityView::FrameworkTurn {
+                    activity_id: turn_id.clone(),
+                    turn_id,
+                    kind,
+                    queued_turns,
+                },
+            );
+        }
+        activity.queued_turns = queued_turns;
     }
     Ok(session_summary_value(projection, activity))
 }

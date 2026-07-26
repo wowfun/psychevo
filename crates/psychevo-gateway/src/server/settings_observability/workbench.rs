@@ -3,7 +3,7 @@ async fn settings_read_value(
     cwd: &Path,
     thread_id: Option<&str>,
 ) -> psychevo::Result<Value> {
-    let normalized_cwd = psychevo::host_paths::normalized_native_path(cwd);
+    let normalized_cwd = psychevo::__product::platform::normalized_native_path(cwd);
     let cwd = normalized_cwd.as_path();
     let controls = workbench_controls_value(state, cwd, thread_id).await?;
     let project = workbench_project_value(cwd);
@@ -22,7 +22,7 @@ async fn settings_read_value(
 
 fn web_search_settings_value(state: &WebState, cwd: &Path) -> psychevo::Result<Value> {
     let options = state.run_options(cwd.to_path_buf(), None);
-    let value = psychevo::config::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
+    let value = psychevo::__product::configuration::web_search_settings_value(&options, cwd).unwrap_or_else(|_| {
         json!({
             "execution": "local", "backend": "exa", "external_access": "live",
             "context_size": "medium", "return_token_budget": "default",
@@ -68,7 +68,7 @@ fn web_search_settings_update_value(
         "location": search.location,
         "image": search.image,
     });
-    psychevo::config::update_global_web_search_settings(
+    psychevo::__product::configuration::update_global_web_search_settings(
         &state.inner.home,
         value,
         params.credential_values,
@@ -298,7 +298,7 @@ async fn update_session_agent_setting(
 }
 
 fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
-    let cwd = psychevo::host_paths::normalized_native_path(cwd);
+    let cwd = psychevo::__product::platform::normalized_native_path(cwd);
     wire::WorkbenchProjectView {
         path: cwd.display().to_string(),
         display_path: display_cwd(&cwd),
@@ -307,11 +307,11 @@ fn workbench_project_value(cwd: &Path) -> wire::WorkbenchProjectView {
 }
 
 fn display_cwd(cwd: &Path) -> String {
-    let cwd_display = psychevo::host_paths::display_path_for_native_path(cwd);
+    let cwd_display = psychevo::__product::platform::display_path_for_native_path(cwd);
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from)
         && let Some(display) = display_relative_to_home(
             &cwd_display,
-            &psychevo::host_paths::display_path_for_native_path(&home),
+            &psychevo::__product::platform::display_path_for_native_path(&home),
         )
     {
         return display;

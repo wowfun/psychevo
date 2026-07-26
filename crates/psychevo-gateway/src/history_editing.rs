@@ -1,6 +1,8 @@
 use psychevo::__agent_core::{Message, UserContentBlock, now_ms};
-use psychevo::state::{ConversationDraftPart, StateRuntime};
-use psychevo::{types::StoredEditableInputEnvelope, types::StoredEditableInputPart};
+use psychevo::__product::persistence::{ConversationDraftPart, StateRuntime};
+use psychevo::{
+    __product::runtime::StoredEditableInputEnvelope, __product::runtime::StoredEditableInputPart,
+};
 use psychevo_gateway_protocol as wire;
 
 use crate::Gateway;
@@ -33,7 +35,8 @@ pub async fn native_history_action_unavailable_reason(
         .gateway_runtime_binding(thread_id)
         .await?
         .is_some_and(|binding| {
-            binding.status == psychevo::state::GatewayRuntimeBindingStatus::Resolved
+            binding.status
+                == psychevo::__product::persistence::GatewayRuntimeBindingStatus::Resolved
                 && binding.backend_kind.as_deref() == Some("native")
         });
     if !native_binding {
@@ -45,7 +48,9 @@ pub async fn native_history_action_unavailable_reason(
         .session_metadata(thread_id)
         .await?
         .as_ref()
-        .and_then(|metadata| metadata.get(psychevo::thread_lineage::SIDE_CONVERSATION_METADATA_KEY))
+        .and_then(|metadata| {
+            metadata.get(psychevo::__product::sessions::SIDE_CONVERSATION_METADATA_KEY)
+        })
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     if side {
@@ -120,7 +125,9 @@ pub async fn read_native_editable_draft(
     let envelope = summary
         .metadata
         .as_ref()
-        .and_then(|metadata| metadata.get(psychevo::types::EDITABLE_INPUT_METADATA_KEY))
+        .and_then(|metadata| {
+            metadata.get(psychevo::__product::runtime::EDITABLE_INPUT_METADATA_KEY)
+        })
         .cloned()
         .map(serde_json::from_value::<StoredEditableInputEnvelope>)
         .transpose()?;
@@ -185,16 +192,16 @@ pub async fn stage_native_conversation_edit(
     let requested_parts = draft_parts_from_wire(&draft.parts);
     if let Some(existing) = state.session_revert_state(thread_id).await? {
         return match existing.kind {
-            psychevo::state::SessionRevertKind::ConversationEdit {
+            psychevo::__product::persistence::SessionRevertKind::ConversationEdit {
                 boundary_message_id,
                 draft: existing_parts,
             } if boundary_message_id == message_id && existing_parts == requested_parts => Ok(true),
-            psychevo::state::SessionRevertKind::WorkspaceUndo { .. } => {
+            psychevo::__product::persistence::SessionRevertKind::WorkspaceUndo { .. } => {
                 Err(psychevo::Error::Message(
                     "Redo workspace files before editing conversation history.".to_string(),
                 ))
             }
-            psychevo::state::SessionRevertKind::ConversationEdit { .. } => {
+            psychevo::__product::persistence::SessionRevertKind::ConversationEdit { .. } => {
                 Err(psychevo::Error::Message(
                     "Restore or run the staged conversation edit before starting another edit."
                         .to_string(),
@@ -218,7 +225,7 @@ pub async fn stage_native_conversation_edit(
     state
         .set_session_revert_state(
             thread_id,
-            psychevo::state::SessionRevertState::conversation_edit(
+            psychevo::__product::persistence::SessionRevertState::conversation_edit(
                 message_seq,
                 message_id.to_string(),
                 requested_parts,
@@ -236,7 +243,9 @@ pub async fn restore_native_conversation_edit(
         .session_revert_state(thread_id)
         .await?
         .ok_or_else(|| psychevo::Error::Message("No conversation edit is staged.".to_string()))?;
-    let psychevo::state::SessionRevertKind::ConversationEdit { draft, .. } = revert.kind else {
+    let psychevo::__product::persistence::SessionRevertKind::ConversationEdit { draft, .. } =
+        revert.kind
+    else {
         return Err(psychevo::Error::Message(
             "The staged state belongs to workspace undo; use /redo instead.".to_string(),
         ));
@@ -264,7 +273,7 @@ pub async fn fork_native_history(
         ));
     }
     state
-        .fork_native_session_history(psychevo::state::NativeSessionForkInput {
+        .fork_native_session_history(psychevo::__product::persistence::NativeSessionForkInput {
             source_session_id: thread_id,
             before_session_seq,
         })

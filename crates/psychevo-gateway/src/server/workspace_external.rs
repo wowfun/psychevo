@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use psychevo::{
-    Error, host_paths::ExecutableResolveOptions, host_paths::HostPlatform,
-    host_paths::resolve_executable_path, process_env::ProcessEnvOptions,
-    process_env::apply_tokio_process_env, process_env::effective_process_env,
-    process_env::tokio_host_process_command,
+    __product::platform::ExecutableResolveOptions, __product::platform::HostPlatform,
+    __product::platform::ProcessEnvOptions, __product::platform::apply_tokio_process_env,
+    __product::platform::effective_process_env, __product::platform::resolve_executable_path,
+    __product::platform::tokio_host_process_command, Error,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;

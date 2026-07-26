@@ -237,7 +237,7 @@ async fn settings_read_exposes_session_agent() {
                 "main_agent": main_agent_metadata(
                     "translate",
                     "translate",
-                    psychevo::agents::AgentSource::Project,
+                    psychevo::__product::capabilities::AgentSource::Project,
                     None,
                 )
             })),

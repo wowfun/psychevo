@@ -28,14 +28,18 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
             let receipt = request.receipt.clone();
             let thread = request.thread.clone();
             let events = request.events.clone();
-            let prompt = request.input.prompt.clone();
-            let image_inputs = request.input.image_inputs.clone();
-            let runtime_source = request.input.source.clone();
+            let prompt = request.input.prompt().to_string();
+            let image_inputs = request.input.image_inputs().to_vec();
+            let runtime_source = request.input.source().to_string();
             let adapter_input = request.input.__take_adapter_input_parts();
             let run_stream_observer = request.input.__take_run_stream_observer();
             let initial_thread_preferences =
                 request.input.__take_initial_thread_preferences();
             let prepared_source_key = request.input.__take_prepared_source_key();
+            let agent_entrypoint = request
+                .input
+                .__take_agent_entrypoint()
+                .unwrap_or(AgentEntrypoint::Peer);
             let mut options = request.input.__into_run_options(
                 gateway.state.clone(),
                 PathBuf::from(&thread.cwd),
@@ -80,7 +84,7 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
                 &options,
                 &profile,
                 existing_binding.as_ref(),
-                AgentEntrypoint::Peer,
+                agent_entrypoint,
             )?;
             options.agent = agent_binding.agent_ref.clone();
             let mut binding = ensure_gateway_runtime_binding(
@@ -148,9 +152,18 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
             let peer = if let Some(target) = bound_target {
                 target.peer
             } else if profile.runtime == RuntimeProfileKind::Acp {
-                let mut peer_options = options.clone();
-                peer_options.runtime_ref = profile.backend_ref.clone();
-                resolve_peer_turn(&peer_options)?
+                Some(resolve_captured_bound_peer(
+                    &options,
+                    &binding,
+                    &profile,
+                    &profile_fingerprint,
+                )?
+                .ok_or_else(|| {
+                    Error::Message(format!(
+                        "ACP Runtime Profile `{}` did not resolve an Agent Session peer",
+                        profile.id
+                    ))
+                })?)
             } else {
                 None
             };
@@ -160,7 +173,6 @@ impl psychevo::AgentSessionAdapter for GatewayAgentSessionAdapter {
                     gateway: gateway.clone(),
                     base_options: options.clone(),
                     stream: Some(stream.clone()),
-                    event_sink: None,
                 }));
             }
             let attached = gateway

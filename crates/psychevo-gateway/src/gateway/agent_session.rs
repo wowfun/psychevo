@@ -189,8 +189,6 @@ enum AgentSessionTarget {
 #[derive(Debug)]
 struct AgentTurnOutput {
     run: RunResult,
-    #[cfg(test)]
-    backend: GatewayBackendInfo,
 }
 
 #[derive(Clone)]
@@ -198,7 +196,7 @@ struct AgentSessionRef {
     cwd: PathBuf,
     local_session_id: String,
     native_session_id: String,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
 }
 
 struct AgentSessionDiscoveryQuery {
@@ -280,7 +278,7 @@ struct PreparedAgentSession {
     cwd: PathBuf,
     local_session_id: String,
     native_session_id: String,
-    mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+    mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     peer: ResolvedPeerTurn,
 }
 
@@ -309,7 +307,7 @@ impl AgentSessionHost {
         target_id: String,
         agent_ref: Option<String>,
         cwd: PathBuf,
-        mcp_servers: Vec<psychevo::types::ResolvedMcpServerInput>,
+        mcp_servers: Vec<psychevo::__product::runtime::ResolvedMcpServerInput>,
     ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
         let attached = self.attach(captured)?;
         let (peer, profile) = match &attached.target {
@@ -904,9 +902,7 @@ impl AttachedAgent {
     ) -> psychevo::Result<AgentTurnOutput> {
         let delivery = AgentDeliveryObserver::new(request.options.state.clone(), turn_id.clone());
         match &self.target {
-            AgentSessionTarget::Native { profile } => {
-                #[cfg(not(test))]
-                let _ = profile;
+            AgentSessionTarget::Native { .. } => {
                 lower_native_runtime_options(&mut request.options)?;
                 if request.input.iter().any(|part| {
                     matches!(
@@ -923,8 +919,6 @@ impl AttachedAgent {
                         Some("agent-input:native".to_string()),
                     ));
                 }
-                #[cfg(test)]
-                let runtime_ref = request.options.runtime_ref.clone();
                 delivery.confirm().await?;
                 gateway_profile_mark(
                     "native_adapter_submitted",
@@ -945,15 +939,7 @@ impl AttachedAgent {
                         ..GatewayProfileFields::default()
                     },
                 );
-                Ok(AgentTurnOutput {
-                    run,
-                    #[cfg(test)]
-                    backend: GatewayBackendInfo {
-                        kind: self.host.native.kind(),
-                        runtime_ref: runtime_ref.or_else(|| Some(profile.id.clone())),
-                        native_id: None,
-                    },
-                })
+                Ok(AgentTurnOutput { run })
             }
             AgentSessionTarget::Acp { peer, profile } => {
                 let session_ready = session_ready.ok_or_else(|| {
@@ -966,8 +952,6 @@ impl AttachedAgent {
                         None,
                     )
                 })?;
-                #[cfg(test)]
-                let cwd = request.options.cwd.clone();
                 let result = acp_peer::run_acp_peer_turn(
                     &self.host.acp,
                     peer.as_ref().clone(),
@@ -978,21 +962,7 @@ impl AttachedAgent {
                     delivery,
                 )
                 .await?;
-                #[cfg(test)]
-                let native_session_id = result.native_session_id.clone();
-                Ok(AgentTurnOutput {
-                    #[cfg(test)]
-                    backend: GatewayBackendInfo {
-                        kind: BackendKind::Acp,
-                        runtime_ref: Some(profile.id.clone()),
-                        native_id: Some(runtime_session_handle(
-                            &profile.id,
-                            &cwd,
-                            &native_session_id,
-                        )),
-                    },
-                    run: result.run,
-                })
+                Ok(AgentTurnOutput { run: result.run })
             }
         }
     }

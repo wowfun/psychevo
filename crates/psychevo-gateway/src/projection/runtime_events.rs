@@ -552,13 +552,13 @@ fn clarify_summary(raw: &Value) -> Option<String> {
 }
 
 fn clarify_resolution_outcome(
-    reason: &psychevo::types::ClarifyResolvedReason,
+    reason: &psychevo::__product::runtime::ClarifyResolvedReason,
 ) -> GatewayActionOutcome {
     match reason {
-        psychevo::types::ClarifyResolvedReason::Answered => GatewayActionOutcome::Accepted,
-        psychevo::types::ClarifyResolvedReason::Cancelled => GatewayActionOutcome::Cancelled,
-        psychevo::types::ClarifyResolvedReason::TimedOut => GatewayActionOutcome::TimedOut,
-        psychevo::types::ClarifyResolvedReason::TurnFinished => GatewayActionOutcome::Completed,
+        psychevo::__product::runtime::ClarifyResolvedReason::Answered => GatewayActionOutcome::Accepted,
+        psychevo::__product::runtime::ClarifyResolvedReason::Cancelled => GatewayActionOutcome::Cancelled,
+        psychevo::__product::runtime::ClarifyResolvedReason::TimedOut => GatewayActionOutcome::TimedOut,
+        psychevo::__product::runtime::ClarifyResolvedReason::TurnFinished => GatewayActionOutcome::Completed,
     }
 }
 

@@ -202,6 +202,6 @@ fn slash_keybinds_config_value(keybinds: &[GatewaySlashKeybind]) -> Value {
 
 fn slash_target_summary(target: &str) -> Option<String> {
     let (command, _) = split_slash_command_token(target);
-    psychevo::command_registry::slash_command_spec(command)
+    psychevo::__product::commands::slash_command_spec(command)
         .map(|spec| spec.summary.to_string())
 }

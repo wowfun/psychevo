@@ -13,56 +13,57 @@ mod transcript;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::future::BoxFuture;
 use psychevo::__ai::{AbortSignal, Outcome};
-use psychevo::state::{
+use psychevo::__product::persistence::{
     GatewayActivityClaimInput, GatewayActivityRecord, GatewayControlCommandInput,
     GatewayLiveSnapshotInput, GatewayRuntimeBindingRecord, GatewayRuntimeBindingStatus,
-    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, GatewayTurnTerminalInput,
-    StateRuntime,
+    GatewayRuntimeControlStatePatch, GatewaySourceLaneInput, StateRuntime,
 };
 #[cfg(test)]
-use psychevo::state::{
-    GatewayRuntimeBindingInput, GatewayRuntimeBindingOwnership, GatewayTurnDeliveryInput,
-};
-#[cfg(test)]
-use psychevo::types::PermissionApprovalRequest;
+use psychevo::__product::runtime::PermissionApprovalRequest;
 use psychevo::{
-    Error, agents::AgentDiscoveryOptions, agents::AgentEntrypoint, agents::discover_agents,
-    agents::resolve_agent_definition, config::RuntimeProfileConfig, config::RuntimeProfileKind,
-    config::load_agent_backend_configs, run::run_live, run::run_live_streaming,
-    run::run_live_streaming_controlled, skills::resolve_skills_home, types::ApprovalHandler,
-    types::ClarifyAnswer, types::ClarifyResponse, types::ClarifyResult,
-    types::ExternalAgentDelegate, types::ExternalAgentDelegateRequest,
-    types::ExternalAgentDelegateResult, types::ImageInput, types::PermissionApprovalDecision,
-    types::PermissionApprovalOutcome, types::PermissionMode, types::PromptDisplayMetadata,
-    types::RunControl, types::RunControlHandle, types::RunMode, types::RunOptions,
-    types::RunResult, types::RunStreamEvent, types::RunStreamSink,
-    types::StoredEditableInputEnvelope, types::StoredEditableInputPart,
-    types::UserShellContextOptions, types::UserShellOptions, types::UserShellResult,
-    types::WorkspaceMutationSink, types::run_control,
-    user_shell::run_user_shell_command_streaming_controlled,
+    __product::capabilities::AgentDiscoveryOptions, __product::capabilities::AgentEntrypoint,
+    __product::capabilities::discover_agents, __product::capabilities::resolve_agent_definition,
+    __product::capabilities::resolve_skills_home, __product::configuration::RuntimeProfileConfig,
+    __product::configuration::RuntimeProfileKind,
+    __product::configuration::load_agent_backend_configs,
+    __product::presentation::run_user_shell_command_streaming_controlled,
+    __product::runtime::ApprovalHandler, __product::runtime::ClarifyAnswer,
+    __product::runtime::ClarifyResponse, __product::runtime::ClarifyResult,
+    __product::runtime::ExternalAgentDelegate, __product::runtime::ExternalAgentDelegateRequest,
+    __product::runtime::ExternalAgentDelegateResult, __product::runtime::ImageInput,
+    __product::runtime::PermissionApprovalDecision, __product::runtime::PermissionApprovalOutcome,
+    __product::runtime::PermissionMode, __product::runtime::PromptDisplayMetadata,
+    __product::runtime::RunControl, __product::runtime::RunControlHandle,
+    __product::runtime::RunMode, __product::runtime::RunOptions, __product::runtime::RunResult,
+    __product::runtime::RunStreamEvent, __product::runtime::RunStreamSink,
+    __product::runtime::StoredEditableInputEnvelope, __product::runtime::StoredEditableInputPart,
+    __product::runtime::UserShellContextOptions, __product::runtime::UserShellOptions,
+    __product::runtime::UserShellResult, __product::runtime::WorkspaceMutationSink,
+    __product::runtime::run_control, __product::runtime::run_live,
+    __product::runtime::run_live_streaming, __product::runtime::run_live_streaming_controlled,
+    Application, Error,
 };
 use serde_json::{Value, json};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
-#[cfg(test)]
-use tokio::time::timeout;
 use uuid::Uuid;
 
 use journey_profile::{GatewayProfileFields, gateway_profile_mark};
 use projection::GatewayLiveProjector;
 pub use projection::gateway_event_from_run_stream;
 pub use protocol::{
-    AgentDeliveryStatusView, AgentErrorView, BackendKind, GatewayActionKind, GatewayActionOutcome,
-    GatewayActivityView, GatewayBackendInfo, GatewayEvent, GatewayImageInput, GatewayInputPart,
-    GatewaySelectedSkill, GatewaySource, GatewaySourceLifetime, GatewayThread,
-    GatewayThreadSelector, GatewayTurn, GatewayTurnError, GatewayTurnStatus, PendingActionView,
-    PermissionDecision, SourceKey, ThreadEditableDraft, ThreadEditableDraftFidelity,
-    ThreadEditableInputPart, ThreadHistoryDraftReadResult, TranscriptBlock, TranscriptBlockKind,
-    TranscriptBlockStatus, TranscriptEntry, TranscriptEntryRole, TranscriptToolResult,
+    AgentDeliveryStatusView, AgentErrorView, BackendKind, FrameworkTurnKind, GatewayActionKind,
+    GatewayActionOutcome, GatewayActivityView, GatewayBackendInfo, GatewayEvent, GatewayImageInput,
+    GatewayInputPart, GatewayLocalOperationView, GatewaySelectedSkill, GatewaySource,
+    GatewaySourceLifetime, GatewayThread, GatewayThreadSelector, GatewayTurn, GatewayTurnError,
+    GatewayTurnStatus, PendingActionView, PermissionDecision, SourceKey, ThreadActivityView,
+    ThreadEditableDraft, ThreadEditableDraftFidelity, ThreadEditableInputPart,
+    ThreadHistoryDraftReadResult, TranscriptBlock, TranscriptBlockKind, TranscriptBlockStatus,
+    TranscriptEntry, TranscriptEntryRole, TranscriptToolResult,
 };
 pub use server::{BoundGatewayWebServer, GatewayWebServerConfig, bind_gateway_web_server};
 
@@ -167,7 +168,7 @@ pub(crate) use agent_session_binding::{
     runtime_profile_config_revision, runtime_session_handle,
 };
 use agent_session_binding::{
-    ensure_gateway_runtime_binding, resolve_bound_gateway_runtime_profile,
+    ensure_gateway_runtime_binding, resolve_captured_bound_peer,
     resolve_gateway_agent_binding_snapshot, resolve_gateway_runtime_profile,
 };
 use event_ingress::{GatewayEventEnvelope, GatewayEventIngress};
@@ -177,8 +178,6 @@ include!("gateway/state.rs");
 include!("gateway/agent_session.rs");
 include!("gateway/public_api.rs");
 include!("gateway/source_bindings.rs");
-#[cfg(test)]
-include!("gateway/turn_lifecycle.rs");
 include!("gateway/turn_shell.rs");
 include!("gateway/active_queue.rs");
 include!("gateway/durable_activity.rs");

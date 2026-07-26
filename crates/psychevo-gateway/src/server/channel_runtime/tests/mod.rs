@@ -2,8 +2,8 @@ use super::*;
 use crate::im::FakeImAdapter;
 use futures::future::BoxFuture;
 use psychevo::__ai::Outcome;
-use psychevo::state::StateRuntime;
-use psychevo::{types::PermissionApprovalOutcome, types::RunResult};
+use psychevo::__product::persistence::StateRuntime;
+use psychevo::{__product::runtime::PermissionApprovalOutcome, __product::runtime::RunResult};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -99,7 +99,7 @@ impl crate::GatewayBackend for TestBackend {
                     return Err(Error::Message("approval handler missing".to_string()));
                 };
                 let decision = handler
-                    .request_permission(psychevo::types::PermissionApprovalRequest {
+                    .request_permission(psychevo::__product::runtime::PermissionApprovalRequest {
                         tool_call_id: "permission-1".to_string(),
                         tool_name: "fake_tool".to_string(),
                         summary: "fake permission".to_string(),
@@ -317,15 +317,17 @@ async fn channel_outbox_retry_sends_saved_final_without_rerunning_the_turn() {
     state
         .inner
         .state
-        .upsert_gateway_channel_outbox(psychevo::state::GatewayChannelOutboxInput {
-            delivery_id: "out-retry",
-            thread_id: &thread_id,
-            turn_id: "turn-already-completed",
-            connection_id: "wechat",
-            source_key: &source.source_key().0,
-            payload_text: payload,
-            payload_hash: &payload_hash,
-        })
+        .upsert_gateway_channel_outbox(
+            psychevo::__product::persistence::GatewayChannelOutboxInput {
+                delivery_id: "out-retry",
+                thread_id: &thread_id,
+                turn_id: "turn-already-completed",
+                connection_id: "wechat",
+                source_key: &source.source_key().0,
+                payload_text: payload,
+                payload_hash: &payload_hash,
+            },
+        )
         .await
         .expect("outbox");
     runner::retry_unacknowledged_channel_outbox(&state, &runtime, &connection, &channel_gateway)

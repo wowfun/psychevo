@@ -5,9 +5,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use psychevo::{
-    Error, config::resolve_workspace_root, host_paths::normalized_native_path,
-    paths::canonicalize_cwd, types::WorkspaceMutation, workspace_diff::WorkspaceDiffFileStatus,
-    workspace_diff::collect_workspace_diff,
+    __product::configuration::resolve_workspace_root, __product::platform::canonicalize_cwd,
+    __product::platform::normalized_native_path, __product::runtime::WorkspaceMutation,
+    __product::sessions::WorkspaceDiffFileStatus, __product::sessions::collect_workspace_diff,
+    Error,
 };
 use psychevo_gateway_protocol as wire;
 use serde_json::Value;

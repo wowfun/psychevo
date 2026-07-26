@@ -225,7 +225,7 @@ async fn command_result_from_effect(
         }
         SlashCommandEffect::SandboxShow => {
             let options = state.run_options(scope.cwd.clone(), thread_id.clone());
-            let status = psychevo::sandbox::sandbox_status_text(&options, RunMode::Default)?;
+            let status = psychevo::__product::platform::sandbox_status_text(&options, RunMode::Default)?;
             Ok(command_accepted_message(raw, action, Some(status)))
         }
         SlashCommandEffect::Voice(mode) => Ok(command_voice_result(
@@ -422,12 +422,12 @@ fn command_download_action(
 ) -> wire::CommandExecuteResult {
     let usage = match action {
         SlashCommandAction::Export => {
-            psychevo::command_registry::slash_command_spec("/export")
+            psychevo::__product::commands::slash_command_spec("/export")
                 .map(|spec| spec.usage)
                 .unwrap_or("/export [path] [-f|--format markdown|json] [-i|--include list]")
         }
         SlashCommandAction::Share => {
-            psychevo::command_registry::slash_command_spec("/share")
+            psychevo::__product::commands::slash_command_spec("/share")
                 .map(|spec| spec.usage)
                 .unwrap_or("/share [path] [-i|--include list]")
         }
