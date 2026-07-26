@@ -96,11 +96,57 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 
 ## Documentation
 
+- [Rust and Python SDK Guide](docs/sdk.md)
 - [Installation Guide](docs/install.md)
 - [ACP Configuration Guide](docs/acp-configuration.md)
 - [Channels Guide](docs/channels/README.md)
 - [TUI Troubleshooting](docs/troubleshooting/tui.md)
 - [Contributing Guide](CONTRIBUTING.md)
+
+## Rust and Python SDKs
+
+The `psychevo` Rust crate runs the Framework in process. One `Application`
+owns Thread and Turn state, accepted work, controls, interactions, and ordered
+shutdown:
+
+```rust
+use psychevo::{Application, StartThreadRequest, TurnRequest};
+
+let application = Application::builder()
+    .home("/tmp/psychevo-sdk")
+    .build()
+    .await?;
+let client = application.client();
+let thread = client
+    .start_thread(StartThreadRequest::new("."))
+    .await?;
+let turn = thread
+    .start_turn(TurnRequest::new("Inspect this repository"))
+    .await?;
+let result = turn.wait().await?;
+application.shutdown().await?;
+```
+
+The async Python SDK starts its exact-version bundled App Server over stdio by
+default:
+
+```python
+from pathlib import Path
+
+import psychevo
+
+
+async with psychevo.Client() as client:
+    thread = await client.start_thread(cwd=Path.cwd())
+    turn = await thread.start_turn("Inspect this repository")
+    result = await turn.wait()
+    print(result.final_answer)
+```
+
+The Python client also accepts an explicit App Server executable or an
+authenticated WebSocket URL. It does not search `PATH`, download binaries, or
+discover a daemon. See the [SDK Guide](docs/sdk.md) for lifecycle, events,
+controls, callbacks, transport configuration, and package layout.
 
 ## More ways to work
 
@@ -183,7 +229,8 @@ pnpm --filter @psychevo/workbench dev
 |------------------|----------------|
 | `psychevo-ai` | Provider protocol normalization and AI transport adapters. |
 | `psychevo-agent-core` | Model-agnostic agent loop, tool traits, tool execution hooks, outcomes, and abort handling. |
-| `psychevo-runtime` | Coding-agent runtime assembly, provider/model resolution, context, tools, persistence, skills, agents, permissions, and usage accounting. |
+| `psychevo` | Coding-agent runtime assembly, provider/model resolution, context, tools, persistence, skills, agents, permissions, and usage accounting. |
+| `psychevo-gateway-protocol` | Private generated schema shared by the App Server dispatcher and protocol tooling. |
 | `psychevo-gateway` | Local Gateway API and WebSocket server used by Web and CLI surfaces. |
 | `psychevo-acp` | ACP server packaging and runtime bridge used by `pevo acp`. |
 | `psychevo-cli` | The `pevo` command-line entrypoint, TUI, managed Web/Gateway commands, setup, and diagnostics. |

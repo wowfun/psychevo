@@ -23,7 +23,7 @@ Out of scope:
 
 ## Runtime Contract
 
-`psychevo-runtime::hooks` owns hook normalization, trust filtering, matching,
+`psychevo::hooks` owns hook normalization, trust filtering, matching,
 handler execution, and run-summary construction. Agent code, plugin code,
 profile config, project config, selected capability roots, and managed policy
 may produce hook source descriptors, but they must not execute hook handlers

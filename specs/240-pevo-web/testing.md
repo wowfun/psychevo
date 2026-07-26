@@ -131,6 +131,11 @@ required. They must not print tokens or secrets.
   row order, tool result JSON in collapsed headers, evidence header overflow,
   empty assistant updates after tool rows, and stale completion popovers after
   prompt submission.
+- `ThreadSession` unit coverage proves that a same-Turn terminal synchronously
+  flushes the latest already-received paced assistant entry before applying
+  completion, even when `committedEntries` is empty. Transcript reducer coverage
+  proves that this empty-slice successful terminal preserves live content while
+  finalizing pending/running reasoning, assistant, and evidence blocks.
 - Inline transcript diff fixtures cover desktop and narrow viewports, including
   direct rendered-diff detail without Input/Change metadata, single-gutter
   rows, clipped long lines, and malformed-diff fallback.
@@ -240,6 +245,12 @@ required. They must not print tokens or secrets.
   preserve transcript and edited draft during reconnect, disable rather than
   queue Send while disconnected, generation-guard rehydration, and reconcile an
   unknown `turn/start` from the authoritative resumed snapshot.
+- Every ACP or Agent-owned `turnCompleted` notification triggers an
+  epoch-guarded authoritative Thread snapshot refresh. A non-empty
+  `committedEntries` slice proves only which Framework entries accompanied the
+  terminal; it does not prove that Agent-owned tool results and reconciled
+  history are already complete. Native terminals use their Application-owned
+  committed slice and do not add this hidden read.
 - Opt-in Windows Git Bash performance evidence records cached Native/default
   draft-open p95 at or below 40 ms and click-to-controls/send-ready p95 at or
   below 100 ms. Cold catalog bootstrap is tracked separately at or below 500 ms;
@@ -273,19 +284,24 @@ required. They must not print tokens or secrets.
   synthetic Git workspace outside the source checkout. The manifest records a
   configurable deterministic tracked-dirty-file count so workspace-review
   scaling is reproducible without inheriting the developer's worktree state.
-- Comparison manifest v2 reports send-to-feedback-commit, send-to-provider,
+- Comparison manifest v3 reports send-to-feedback-commit, send-to-provider,
   provider-to-first-surface-commit, first-commit-to-settled-commit, and
   send-to-settled-commit. Diagnostic spans distinguish Workbench `turn/start`
   admission, first non-empty assistant receipt, controller batch application,
   DOM commit, and optional post-frame observation from TUI event drain and
   terminal draw commit. It emits raw samples, p50/p95, GUI-minus-TUI deltas,
   ratios, Long Task and cross-sample RPC-overlap diagnostics, a content-free TUI
-  JSONL trace, and a Playwright trace. Comparison v1 inputs are rejected.
-- Every sample associates the ordered main provider request with exactly one
-  Gateway Turn. The manifest and Markdown report recompute p50/p95 sub-
-  waterfalls for the shared Gateway/runtime stages and for surface
-  receipt/application/paint stages; a missing, negative, cross-clock, or
-  ambiguous stage fails validation.
+  JSONL trace, a content-free TUI-process Gateway JSONL trace containing Native
+  Adapter dispatch/return boundaries, and a Playwright trace. Comparison v1 and
+  v2 inputs are rejected.
+- Every sample associates exactly one ordered main provider request. Every
+  Workbench sample additionally associates exactly one managed `turn/start`
+  transaction and accepted Framework Turn.
+  The manifest and Markdown report recompute p50/p95 sub-waterfalls for both
+  surfaces' receipt/application/paint stages and for Workbench's Gateway/runtime
+  stages. They do not synthesize a Gateway lifecycle for the Framework-bound
+  TUI or compare non-equivalent internal spans. A missing, negative,
+  cross-clock, or ambiguous required stage fails validation.
 - The deterministic Native fixture leaves a fixed recorded interval between
   first output and completion. A completion event must not discard queued
   assistant output and force the UI to wait for the delayed snapshot refresh.

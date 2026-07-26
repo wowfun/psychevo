@@ -66,8 +66,11 @@ cargo xtask ci run --profile rust-broad
   the independent Desktop
   manifest, enable `native-runtime`, and cover all targets without enabling
   `wdio-test`.
-- `ci plan --profile rust-broad --json` includes generated Gateway protocol
-  verification and `cargo check -p psychevo-cli --no-default-features`.
+- `ci plan --profile rust-broad --json` includes the runner-owned SDK
+  architecture check, generated Gateway protocol verification, and
+  `cargo check -p psychevo-cli --no-default-features`; every Cargo command in
+  the plan suppresses normal output, while runner-owned checks are not Cargo
+  commands.
 - `ci plan --profile web --json` includes client tests/typecheck, Workbench
   build/tests/typecheck, and Desktop renderer tests/typecheck.
 - `ci plan --profile changed --json` emits a parseable plan without executing
@@ -112,10 +115,16 @@ cargo xtask ci run --profile rust-broad
 When VHS dependencies are installed, run `cargo xtask ci run --profile visual`
 and review artifacts under `.local/.psychevo-dev/ci/<run-id>/visual/`.
 Workbench visual screenshots should be under
-`.local/.psychevo-dev/ci/<run-id>/visual/workbench/screenshots/`. When host
-prerequisites are missing, report the blocked dependency set instead of
-  treating the profile as product failure, and print the relevant manual
-  dependency install hints from `cargo xtask doctor deps check --only ...`.
+`.local/.psychevo-dev/ci/<run-id>/visual/workbench/screenshots/`. A failed
+runtime-backed Workbench visual check must copy the isolated managed Gateway
+root, including its log and state database, into that check's artifact
+directory before the harness removes its temporary profile. Journey transport
+marks must remain content-free while recording enough entry size, status, and
+ordering facts to distinguish an incomplete Gateway projection from a frontend
+reconciliation failure.
+When host prerequisites are missing, report the blocked dependency set instead
+of treating the profile as product failure, and print the relevant manual
+dependency install hints from `cargo xtask doctor deps check --only ...`.
 
 ## Broad Validation
 

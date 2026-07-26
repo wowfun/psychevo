@@ -132,7 +132,7 @@ When a runtime-supplied binding reports a tool failure as a tool result, agent e
 
 This spec owns agent-core execution semantics and event families.
 
-`psychevo-runtime` owns session coordination, model context assembly, resource surface wiring, agent-invocation scoped tool surface assembly, durable execution records, persistence, and replay wiring.
+`psychevo` owns session coordination, model context assembly, resource surface wiring, agent-invocation scoped tool surface assembly, durable execution records, persistence, and replay wiring.
 
 `psychevo-ai` owns provider protocol normalization. Provider stream events may be converted into core message and tool execution events, but provider event shapes are not part of this spec.
 

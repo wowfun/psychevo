@@ -109,10 +109,12 @@ Initial profiles:
   date or implementation-batch identifier.
 - `surface-profile`: deterministic artifact-producing TUI-versus-Workbench
   profiling against one local Native provider fixture. It runs the real
-  fullscreen TUI through a pseudo-terminal and Workbench through desktop
-  Chromium, excludes warmup and traced diagnostic samples from percentiles,
-  and writes a validated comparison waterfall without screenshots or live
-  credentials.
+  fullscreen Framework-bound TUI through a pseudo-terminal and the
+  Gateway-bound Workbench through desktop Chromium, excludes warmup and traced
+  diagnostic samples from percentiles, and writes a validated comparison
+  waterfall without screenshots or live credentials. Gateway lifecycle spans
+  are required only for Workbench; the shared provider and surface-commit
+  boundaries remain the cross-surface control.
 - `live`: opt-in live validation using explicit provider credentials.
 - `package`: artifact-only CD profile that builds local reviewable artifacts
   and checksums without publishing or creating hosted release objects.
@@ -158,10 +160,20 @@ Registered live checks:
 
 - `provider-smoke`: native `xtask` provider smoke with two `pevo run --format
   json --include-reasoning` turns, `read` tool verification, `--continue`
-  thread reuse verification, and token final-answer verification.
+  thread reuse verification, and token final-answer verification. Its verifier
+  consumes the current public item lifecycle: non-empty
+  `item.updated(reasoning)` proves streamed reasoning and a completed
+  `tool_execution_end` with `tool_name=read` and `outcome=normal` proves tool
+  execution. It must not silently keep accepting a retired
+  `entry.completed.blocks` output shape.
 - `pevo-doctor-live`: `pevo doctor --live --json`.
 - `runtime-provider-read`: runtime ignored live provider read-tool check.
 - `runtime-model-fetch`: runtime ignored Xiaomi `/models` fetch/cache check.
+- Runtime live checks owned by the `psychevo` package compile with its private
+  `internal` feature because their integration-test harness deliberately
+  exercises non-public runtime seams. The live plan must show that feature
+  explicitly; validation must not make those seams public merely to compile a
+  repository-owned test.
 - `gateway-automation-live`: gateway automation ignored live check.
 - `codex-plugin-broker-live`: read installed Codex plugins through the
   capability broker. A missing Codex executable is a `blocked` result for this

@@ -3,7 +3,7 @@ name: 100. Coding Agent
 psychevo_self_edit: deny
 ---
 
-Define the built-in coding-agent capability assembled by `psychevo-runtime`.
+Define the built-in coding-agent capability assembled by `psychevo`.
 
 ## Scope
 
@@ -25,7 +25,7 @@ Out of scope:
 
 ## Capability Contract
 
-`coding-agent` is a built-in capability target resolved by runtime. It is not a separate Rust crate boundary. Its future implementation belongs inside `psychevo-runtime` as a built-in capability module that assembles lower-level runtime, tool, context, resource, and evidence contracts.
+`coding-agent` is a built-in capability target resolved by runtime. It is not a separate Rust crate boundary. Its future implementation belongs inside `psychevo` as a built-in capability module that assembles lower-level runtime, tool, context, resource, and evidence contracts.
 
 A coding-agent invocation accepts a coding intent from the caller and operates inside a runtime-resolved session and working context. The coding intent is the caller's requested software work. The working context is the runtime-bound resource and context boundary that the coding tools operate through.
 

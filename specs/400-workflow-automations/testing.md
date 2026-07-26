@@ -28,7 +28,7 @@ checks must not mutate the user's normal automation database.
 Schedule/runtime changes:
 
 ```sh
-cargo test -p psychevo-runtime automations::tests
+cargo test -p psychevo automations::tests
 ```
 
 Gateway automation RPC, scheduler bridge, and model-tool changes:

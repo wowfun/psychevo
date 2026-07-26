@@ -8,8 +8,8 @@ Define the first interactive terminal surface for `pevo`.
 This topic implements the terminal-specific surface defined by
 [075 Design System](../075-design-system/spec.md). It also builds on
 [200 pevo CLI](../200-pevo-cli/spec.md) and [026 Commands](../026-commands/spec.md),
-and routes live coding-agent turns through `psychevo-gateway`. Runtime remains
-the execution and persistence kernel behind Gateway. For interactive
+and routes live coding-agent turns through the in-process Framework Client.
+The Framework remains the execution and persistence authority. For interactive
 terminals, `pevo tui` is a fullscreen terminal UI. For non-terminal
 stdin/stdout, it keeps the deterministic line-by-line scripted behavior.
 TUI visual roles map to `075` `DESIGN.md` roles such as accent, identity,
@@ -43,7 +43,7 @@ constants should express those semantic roles rather than a separate TUI theme.
   when long tool/action/grant details wrap across many terminal rows
 - shared ownership boundaries for the rendered TUI surface, interaction model,
   sessions, state, and validation
-- long-lived process-scoped Gateway ownership for thread/source binding,
+- long-lived process-scoped Framework ownership for Thread identity,
   active-turn queueing, steering, interrupt, permission, clarify, and typed
   timeline projection
 
@@ -134,23 +134,40 @@ merged configuration at startup, so project-local overrides can affect TUI and
 Gateway command discovery even though the GUI v1 Settings page edits only the
 active profile config.
 
-## Gateway Ownership
+## Framework Client Ownership
 
-Fullscreen TUI owns one long-lived `Gateway` instance for the process. Its
+Fullscreen TUI owns one long-lived in-process `psychevo::Client` for the
+process. Its
 source lifetime is `Process`, so the process can remember the current thread
 without creating durable source bindings. Normal prompts, queued prompts,
 steer, interrupt, permission responses, clarify responses, source reset, and
-thread switching go through Gateway APIs.
+thread switching go through Client APIs.
+
+The TUI may install the Framework's private read-only Native event observer for
+terminal rendering that needs usage, allowlisted provider metadata, tool
+progress, or other execution details not carried by the stable public Turn
+event projection. It also supplies its profile-local workspace snapshot root so
+the existing `/undo` and `/redo` contract remains available. Neither private
+input grants queue or lifecycle authority: accepted, started, and terminal Turn
+state still comes only from Application.
+
+Clarify answers and cancellation for the TUI's own foreground Turn are submitted
+through that Application-issued running Turn control. Gateway clarify
+submission is only a fallback for a foreign Gateway activity projected into the
+current TUI session; the TUI must not try to rediscover its local Framework
+Turn through a Gateway source selector.
 
 The TUI slash parser remains local UI behavior, but slash command effects must
-map to typed Gateway/runtime APIs. TUI must not add a generic `slash/exec`
-Gateway method and must not shell out to `pevo run` for normal prompting or
-control.
+map to typed Client or interface-neutral Framework helpers. TUI must not add a
+generic `slash/exec` transport method, construct private execution options,
+call the Native run loop directly, or shell out to `pevo run` for normal
+prompting or control. The TUI remains an internal module of `psychevo-cli`; it
+is not a separate crate or package.
 
 ## Cross-Surface Journey Profiling
 
 Fullscreen TUI participates in the deterministic TUI-versus-Workbench journey
-profile through its real terminal event loop and its process-local `Gateway`.
+profile through its real terminal event loop and its process-local Client.
 The comparable warm send path is `input_ready -> send_committed ->
 runtime_request_dispatched -> first_output_visible -> turn_settled`. TUI has no
 equivalent of Workbench `draft_context_ready`: an unbound TUI draft is local
@@ -166,12 +183,16 @@ resulting draw to complete. These surface-commit boundaries align with
 Workbench DOM commit; neither claims to observe physical pixels.
 
 An internal, opt-in TUI probe may write content-free JSONL observations for
-startup, input, Gateway-event application, queue depth, frame paint, and
-settlement. It must be inert unless an explicit test artifact path is supplied,
-must use a monotonic process clock, and must never write prompt text, response
-text, tokens, tool arguments, credentials, or provider request bodies. This
-probe is diagnostics only and does not extend the public Gateway protocol or
-the persisted transcript.
+startup, input, foreground Framework execution-event receipt/application,
+authoritative Turn task completion, queue depth, frame paint, and settlement.
+The probe must observe the same `RunStreamEvent` path and completed
+`TurnHandle::wait` task that the TUI actually consumes; it must not require or
+fabricate a public Gateway Turn lifecycle for a Client-owned prompt. It must be
+inert unless an explicit test artifact path is supplied, must use a monotonic
+process clock, and must never write prompt text, response text, tokens, tool
+arguments, credentials, or provider request bodies. This probe is diagnostics
+only and does not extend the public Framework or Gateway protocol or the
+persisted transcript.
 
 ## Session Observability
 
@@ -214,6 +235,8 @@ argument, or provider request text.
 - [Interaction](interaction.md) defines key handling, slash commands, file
   completion, user shell escapes, panels, and local text selection.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the product CLI surface.
+- [080 Framework and SDK](../080-sdk/spec.md) defines the in-process Client
+  used by the TUI.
 - [026 Commands](../026-commands/spec.md) defines shared command contract
   conventions.
 - [200 pevo run](../200-pevo-cli/pevo-run.md) defines non-interactive live run.

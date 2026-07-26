@@ -45,10 +45,14 @@ Relevant narrow validation:
 
 - `cargo test -p psychevo-ai`
 - `cargo test -p psychevo-agent-core`
-- `cargo test -p psychevo-runtime`
+- `cargo test -p psychevo`
 - `cargo test -p psychevo-cli`
 
 Rust broad validation remains `cargo xtask ci run --profile rust-broad`.
+
+Fullscreen clarify coverage includes answering and cancelling a foreground
+Framework Turn through its Application-issued control when no Gateway selector
+exists, plus the existing foreign-Gateway fallback behavior.
 Documentation-only changes to this topic do not require code tests unless
 executable examples, generated artifacts, or validation instructions change.
 

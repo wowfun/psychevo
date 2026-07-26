@@ -10,7 +10,7 @@ Define the concrete ACP server packaging for the `pevo` product.
 `psychevo-acp` hosts the ACP protocol mapping defined by
 [027 ACP](../027-acp/spec.md). This topic owns the crate, binary, `pevo acp`
 command integration, process setup, stdio server packaging, and runtime call
-construction for that product entrypoint.
+construction through the Framework Client for that product entrypoint.
 
 ## Scope
 
@@ -19,7 +19,7 @@ construction for that product entrypoint.
 - `pevo acp` command behavior and process help positioning
 - ACP JSON-RPC server over stdio for the first product slice
 - product environment and path setup before runtime calls
-- construction of Gateway calls from ACP inputs
+- construction of Framework Client calls from ACP inputs
 
 Out of scope:
 
@@ -63,12 +63,19 @@ The ACP server uses the same product path conventions as the `pevo` CLI:
 Relative paths resolve from the server process cwd. The server may create the
 home directory before accepting ACP requests.
 
-## Gateway Wiring
+## Framework Client Wiring
 
-`psychevo-acp` depends on `psychevo-gateway` and constructs Gateway calls from
-ACP session state and prompt inputs. It passes cwd, session id, mode, model,
-image inputs, inherited environment, config path, database path, approval
-handler, and ACP-provided MCP servers through normal Gateway/runtime inputs.
+`psychevo-acp` depends on `psychevo`, not `psychevo-gateway`,
+`psychevo-agent-core`, or `psychevo-ai`. It constructs typed Client calls from
+ACP session state and prompt inputs. It passes cwd, Thread id, mode, model,
+image inputs, inherited environment, config path, approval handler, and
+ACP-provided MCP servers through normal Framework inputs. It does not construct
+private execution options or access the Framework state Module.
+
+Every model-backed ACP Turn supplies `$PSYCHEVO_HOME/snapshots` as its private
+Framework workspace snapshot root. This preserves the pre-Turn filesystem
+snapshot required by local `/undo` and `/redo`; conversation rollback must not
+claim success while leaving Tool-created file changes behind.
 
 Runtime remains the owner of session coordination, model resolution, tool
 surface assembly, capability-extension source normalization, permission policy,
@@ -78,7 +85,7 @@ The server exposes runtime model controls through standard ACP session config
 options. On `session/new` and `session/load`, clients receive `mode`, `model`,
 and `effort` options when values are available from local configuration.
 `session/set_config_option` updates the in-memory ACP session and returns the
-refreshed option set; the next prompt passes those values to Gateway/runtime.
+refreshed option set; the next prompt passes those values to Framework.
 `pevo acp` also continues to send ACP `usage_update` notifications from runtime
 context snapshots so connected clients can show context-window usage. When a
 turn has provider/runtime token accounting but no context snapshot, `pevo acp`
@@ -93,9 +100,9 @@ for ACP prompts. Runtime environment context still exposes the ACP session cwd
 to the model.
 
 `psychevo-acp` may keep transport-local state for active ACP actors, but active
-turn queueing, steering, interrupt, permission, clarify, and source-to-thread
-binding use Gateway semantics. Transport-local state is not durable session
-evidence.
+turn queueing, steering, interrupt, permission, clarify, and source-to-Thread
+binding use Framework Client semantics. Transport-local state is not durable
+Thread evidence.
 
 ACP request handling uses the SDK ACP v2 agent builder and v2 typed handlers.
 Initialize responses return protocol version `V2` to v2 clients, while v1
@@ -114,10 +121,22 @@ deprecated v1 `modes` field.
 
 `PSYCHEVO_ACP_TERMINAL_OUTPUT` affects only ACP presentation. It does not make
 the editor execute Psychevo commands, and `pevo acp` must continue to route
-`exec_command`, yielded command sessions, and `write_stdin` through runtime and
-Gateway semantics. Under ACP v2 schema 0.13.6, terminal-output presentation is
+`exec_command`, yielded command sessions, and `write_stdin` through Framework
+semantics. Under ACP v2 schema 0.13.6, terminal-output presentation is
 encoded as text content plus `_meta` terminal output fields because the v2 tool
 content model no longer has the v1 terminal content variant.
+
+Framework `Tool` events preserve pending, start, update, and terminal stages.
+ACP keeps per-Turn projection state so `tool_execution_update` produces an
+in-progress `ToolCallUpdate`, command-output deltas retain the negotiated
+`_meta.terminal_info`, `_meta.terminal_output`, and `_meta.terminal_exit`
+presentation, and terminal updates finish the same Tool call id. Unsupported or
+disabled terminal presentation still receives ordinary bounded Tool content.
+
+Framework completed-message events preserve top-level provider `usage`,
+`metadata`, and `accounting`. ACP accounting accumulation reads those
+top-level fields at `message_end`; it must not look for accounting inside the
+message body or discard it while converting Framework events.
 
 `psychevo-acp` sends ACP command availability after the client receives or can
 apply the ACP session id. It also handles supported slash-command prompts
@@ -167,5 +186,7 @@ conditions such as unconfirmed models or non-loopback no-auth URLs.
   dependency direction.
 - [027 ACP](../027-acp/spec.md) defines ACP protocol mapping and runtime
   boundaries.
+- [080 Framework and SDK](../080-sdk/spec.md) defines the in-process Client
+  consumed by inbound ACP.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the concrete `pevo` command
   surface.

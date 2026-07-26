@@ -7,8 +7,8 @@ Define the concrete `pevo` command-line product surface.
 
 This product surface builds on [025 CLI](../025-cli/spec.md) and
 [026 Commands](../026-commands/spec.md), and routes agent work through
-`psychevo-runtime`. It owns command spelling, user-facing process behavior, and
-product-level environment variables.
+the in-process `psychevo::Client`. It owns command spelling, user-facing
+process behavior, and product-level environment variables.
 
 ## Scope
 
@@ -505,6 +505,8 @@ and installs Workbench assets, and initializes the global Psychevo home.
 - [025 CLI](../025-cli/spec.md) defines command-line foundation semantics.
 - [026 Commands](../026-commands/spec.md) defines shared command contract
   conventions.
+- [080 Framework and SDK](../080-sdk/spec.md) defines the Client used by
+  interactive CLI commands and the Python CLI distribution boundary.
 - [210 pevo TUI](../210-pevo-tui/spec.md) defines the fullscreen interactive
   terminal command.
 - [055 Skills](../055-skills/spec.md) defines the skill package and lifecycle

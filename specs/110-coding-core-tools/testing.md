@@ -30,7 +30,7 @@ CI/CD vocabulary and generic validation boundaries follow
 Default validation should use deterministic local harnesses and fake or test
 providers. The Rust workspace broad validation entrypoint is
 `cargo xtask ci run --profile rust-broad`; narrower implementation validation
-should cover `psychevo-runtime` tool assembly and exec-session behavior.
+should cover `psychevo` tool assembly and exec-session behavior.
 
 Real provider and live service validation remain opt-in. Managed ripgrep tests
 must not perform real GitHub downloads; download behavior should be covered with

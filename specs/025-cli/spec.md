@@ -30,7 +30,7 @@ Out of scope:
 A CLI invocation starts with process argv, process cwd, inherited process
 environment, and standard streams. A CLI product entrypoint may translate these
 process inputs into runtime invocation inputs, but it must route accepted agent
-work through `psychevo-runtime`.
+work through `psychevo`.
 
 CLI argument parsing failures happen before runtime invocation. Runtime
 configuration failures, session-start rejection, and before-agent-start

@@ -204,7 +204,7 @@ Provider and model failures must surface as observable failed generation outcome
 
 `psychevo-agent-core` owns agent execution, turn progression, core execution events, tool execution flow, and projection of normalized AI output categories into the agent loop.
 
-`psychevo-runtime` owns the agent-invocation scoped tool surface, resource surface wiring, model context assembly, durable records, persistence, and replay wiring.
+`psychevo` owns the agent-invocation scoped tool surface, resource surface wiring, model context assembly, durable records, persistence, and replay wiring.
 
 `psychevo-cli` owns process and terminal behavior. CLI rendering must not define AI protocol semantics.
 

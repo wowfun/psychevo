@@ -5,25 +5,25 @@ psychevo_self_edit: deny
 
 # 021. Gateway
 
-Define Psychevo's transport-neutral gateway layer for current and future
-interactive surfaces.
+Define Psychevo's transport Adapter layer for current and future interactive
+surfaces.
 
-Gateway is the caller-facing orchestration layer above
-`psychevo-runtime`. It normalizes source identity, thread and turn requests,
-active-turn control, interaction requests, and observation events for CLI, TUI,
-ACP, Web, Desktop, native Floating, IM adapters, and peer-agent backends.
+Gateway normalizes wire identity and projects typed `psychevo::Client`
+requests, controls, interactions, snapshots, and events for Web, Desktop,
+native Floating, IM adapters, Automations, the App Server, and outbound
+peer-agent backends. It does not own Thread or Turn orchestration.
 
 ## Scope
 
 - transport-neutral thread and turn model
 - source identity and source-to-thread mapping
 - active-turn queue, steer, interrupt, and reset semantics
-- gateway-owned permission and clarify request routing
+- transport projection of Framework-owned permission and clarify interactions
 - canonical caller-facing item and event projection
 - typed live observation projection without generic raw debug persistence
 - local loopback HTTP/WebSocket facade for product and API clients
 - generic IM source adapter boundary for first-party Gateway integration
-- Gateway application Module and Native/ACP Agent Session seam
+- Gateway transport Modules and outbound ACP Agent Session Adapter
 - Runtime Profile selection and native runtime identity projection, as defined
   by [052 Agent Runtimes](../052-agent-runtimes/spec.md)
 
@@ -40,32 +40,28 @@ Out of scope:
 
 ## Architecture Boundary
 
-`psychevo-gateway` is the application kernel. Product entrypoints such as CLI,
-TUI, inbound ACP, Web/Desktop, and Channels call one `ThreadApplication`
-Interface instead of assembling turns, controls, interactions, or history
-themselves.
+`psychevo-gateway` is an Adapter host over one injected `psychevo::Client`.
+Product entrypoints such as CLI, TUI, inbound ACP, Web/Desktop, and Channels
+all call the same Client use cases instead of assembling turns, controls,
+interactions, or history themselves.
 
-The concrete turn Interface accepts a `ThreadCallerContext` plus a
-`ThreadTurnIntent` and lowers them inside `ThreadApplication` to
-runtime-internal `RunOptions` and a private queue envelope. The context contains
-surface identity and immutable host facts required for policy resolution. The
-intent contains only caller-visible Thread, input, target, control, preference,
-mention, and continuation choices. CLI, TUI, inbound ACP, Web/Desktop,
-Channels, and automation ingress must not construct internal state handles,
-runtime delegates, event sinks, or a lower send primitive.
+Gateway transport Modules parse and authorize wire requests, construct typed
+Framework requests, call `psychevo::Client`, and project typed results. CLI,
+TUI, inbound ACP, Web/Desktop, Channels, and automation ingress must not
+construct internal state handles, Native execution options, event persistence
+sinks, or a lower send primitive.
 
-Gateway owns the `AgentSessionHost` seam with two production Adapters: Native
-Psychevo runtime and outbound ACP Agents. `psychevo-runtime` remains the Native
-execution kernel and owns Native agent-loop, provider, tool, context, and
-durable-evidence semantics. Gateway owns public thread identity, immutable
-binding, queueing, delivery classification, interactions, and product
-projection. ACP is external at the Adapter seam and is not Gateway's internal
-application Interface.
+Framework owns the `AgentSessionAdapter` seam. Its built-in Native Adapter and
+Gateway's injected outbound ACP Adapter are equal implementations. Framework
+owns public Thread identity, immutable binding, queueing, delivery
+classification, interactions, and durable projection. Gateway owns only
+transport connection and wire projection concerns. ACP is external at the
+Adapter seam and is not Gateway's internal application Interface.
 
-`ThreadApplication.start_turn` returns `AcceptedTurn`: the public Thread and
-Turn identity, the accepted client receipt, and an opaque completion handle.
-The accepted Turn is owned by Gateway supervision. Dropping the completion
-handle cannot cancel it; Web returns the acceptance immediately, while CLI,
+`Thread::start_turn` returns a `TurnHandle` with the public Thread and Turn
+identity and accepted client receipt. The accepted Turn is owned by Application
+supervision. Dropping the handle or a transport connection cannot cancel it;
+Web returns the acceptance immediately, while CLI,
 TUI, Channels, and Automations may await completion when their transport
 contract requires it.
 
@@ -79,27 +75,28 @@ before the final durable source binding is committed.
 
 ## Application Lifecycle
 
-One process-level `GatewaySupervisor` owns admission and every long-lived
-application task whose lifetime extends beyond a single transport handler.
-Live-event tailing, Automation scheduling, Channel reconciliation, prewarming,
-accepted Turns, and comparable background work register with that supervisor.
+One process-level Application supervisor owns Thread/Turn admission and every
+Framework task whose lifetime extends beyond a caller handle. Gateway owns a
+separate transport supervisor for listeners, connections, live-event tailing,
+Automation scheduling, Channel reconciliation, prewarming, and comparable
+transport producers. Accepted Turns never move into the transport supervisor.
 Connection-local request tasks remain in the connection's local task set; they
 are not moved into a global registry merely for uniformity.
-Admission acquires a supervised activity permit before its first asynchronous
+Application admission acquires a supervised activity permit before its first asynchronous
 operation. Closing admission and acquiring that permit share one atomic
 boundary, so shutdown cannot observe an empty closed tracker while an admitted
 request is still materializing its Thread or receipt. Queue workers for Turn,
-Shell, and Compact activities are supervisor-owned; queue advancement never
-creates a detached runtime task.
+Shell, and Compact activities are Application-owned; queue advancement never
+creates a detached execution task.
 
 Shutdown is idempotent and ordered:
 
-1. close listener, connection, and Turn admission;
-2. cancel schedulers, Channel ingress, tailers, and other new-work producers;
-3. drain already accepted Turns;
-4. flush and close `GatewayEventIngress`;
-5. close `AgentSessionHost` and its Native/ACP Adapters;
-6. close `StateRuntime` after all state consumers have stopped;
+1. close Gateway listeners and connection admission;
+2. cancel schedulers, Channel ingress, tailers, and other transport producers;
+3. close Application admission and drain already accepted Turns;
+4. flush and close Framework event projection;
+5. close Agent Session Adapters;
+6. close Framework state after all state consumers have stopped;
 7. abort and report tasks that exceed the explicit graceful and force
    deadlines.
 
@@ -111,8 +108,11 @@ cancel and await it.
 
 Deterministic local profiling may enable a content-free internal Gateway probe
 to distinguish surface admission, the shared `Gateway::run_turn` boundary,
-Native Adapter dispatch, live assistant projection, and authoritative turn
-completion. The probe writes only to an explicit artifact path, uses a
+Native Adapter dispatch and return, live assistant projection, and authoritative
+turn completion. The Native return mark is emitted only after the underlying
+runtime future has resolved, so a stalled surface comparison can distinguish
+runtime finalization from Framework terminal persistence. The probe writes only
+to an explicit artifact path, uses a
 process-local monotonic clock and clock-domain id, and is inert otherwise.
 For Web-owned Turns it also records observed workspace-mutation delivery and
 asserts that no workspace-review scan runs in the admission, event-relay, or
@@ -120,7 +120,8 @@ completion path. Runtime undo snapshots remain a shared Native stage and are
 reported separately from Web projection work.
 
 Profiling observations may include bounded request, Thread, Turn, source,
-Adapter, event-kind, sequence, and queue-depth correlations. They must not
+Adapter, event-kind, sequence, queue-depth, and aggregate state-pool
+size/idle/in-flight counters at an Adapter boundary. They must not
 include prompt or response text, tokens, tool arguments/results, credentials,
 provider request bodies, or arbitrary event payloads. The probe is not a public
 Gateway event, does not alter transport schemas, and cannot become persisted
@@ -144,6 +145,20 @@ after terminal persistence and committed-entry projection. Runtime-native
 internal Adapter/profiling stages and cannot create additional public starts.
 `TurnStarted` carries the Gateway admission time; selected Skill evidence stays
 in committed Transcript metadata rather than delaying or repeating lifecycle.
+Application lifecycle projection is also the sole public source of permission
+and clarify action lifecycle. When the same interaction is visible in an
+Adapter raw stream, the raw observation may update private projection state but
+must not publish a second `ActionRequested`, `ActionResolved`, or
+`ActionCancelled`. This keeps every interaction id and Channel reply token
+single-use without invalidating a still-visible token.
+
+The durable Thread snapshot, not a raw Adapter terminal payload, is
+authoritative for the final committed transcript. A first-party Gateway client
+refreshes every ACP or Agent-owned snapshot after `TurnCompleted`, so history
+imported during Agent reconciliation and committed tool evidence cannot
+disappear from the rendered Thread. A non-empty terminal `committedEntries`
+slice does not prove the external Agent history is complete. Native terminal
+payloads do not trigger an extra hidden read.
 
 `turn/start` success returns the accepted Thread and Turn identity. Validation,
 authorization, or binding failures before acceptance are JSON-RPC errors. Once
@@ -305,7 +320,14 @@ no source thread is bound must first create or select a concrete thread id, then
 start the turn against that id. `entryStarted`, `entryUpdated`, and
 `entryCompleted` events must carry transcript entries whose `threadId` is the
 owning thread id; clients must not assign live entries to the currently visible
-thread as a fallback.
+thread as a fallback. The Framework Adapter keeps exactly one stateful
+`GatewayLiveProjector` for the lifetime of each accepted Turn. It must project
+the ordered stream through that instance rather than applying the stateless
+single-event fallback independently, so reasoning completion, replacement
+plans, tool identity, assistant segments, and stream sequence remain coherent.
+In particular, ACP `acp_peer_plan` observations must reach the public live
+Transcript before the Application-owned terminal even when that terminal does
+not embed committed entries.
 When runtime wraps a stream event in an explicit child-thread scope, Gateway
 must project that event with the scoped child thread id, not with the visible
 parent thread id. The parent Agent entry may still be updated by parent-owned
@@ -397,9 +419,18 @@ RPCs.
 
 ## Interaction Requests
 
-Gateway owns the caller-facing interaction request semantics for permissions
-and clarify/user-input requests. Runtime permission decisions remain
-authoritative; Gateway only provides a request/response rendezvous.
+Framework owns caller-facing interaction semantics and the durable
+request/response rendezvous for permissions and clarify/user-input requests.
+Runtime permission decisions remain authoritative; Gateway only projects those
+typed interactions to and from a transport.
+
+For a Framework Turn, Gateway neither installs its legacy
+`GatewayApprovalHandler` nor registers an Adapter-local permission responder.
+It projects `TurnEvent::InteractionRequested` and
+`TurnEvent::InteractionResolved`, reconstructs pending requests from the
+Framework's durable Thread state after reconnect, and submits typed responses
+to `Thread::respond`. The legacy local/foreign Gateway command path is only a
+fallback for work not owned by the current Application.
 
 Gateway interaction projections must carry enough context for clients to render
 and answer the request without guessing from the currently visible source. A
@@ -447,10 +478,10 @@ notifications.
 The facade dispatches requests with bounded concurrency instead of awaiting one
 handler in the socket receive loop. Each connection permits at most 32 active
 requests and writes responses through one writer; responses may complete out of
-order and are correlated by JSON-RPC id. Ordering belongs to the owning
-Application Module: draft mutations serialize by canonical source generation,
-bound Thread mutations serialize through `ThreadApplication`, and unrelated
-reads or sources remain concurrent. The transport does not maintain a second
+order and are correlated by JSON-RPC id. Ordering belongs to Framework: draft
+mutations serialize by canonical source generation, bound Thread mutations
+serialize through the Thread authority, and unrelated reads or sources remain
+concurrent. The transport does not maintain a second
 global method-classification scheduler. Completed per-request tasks are reaped
 while the connection remains open; the task registry is bounded by active work,
 not by the lifetime request count of a long-lived socket. When all permits are
@@ -459,8 +490,8 @@ Close/error and completed request tasks; a saturated connection therefore
 disconnects promptly without waiting for one of its requests to finish.
 
 The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
-conversion of transport values into caller context and intent, calling the
-owning Application Module, and serializing its typed result. It does not
+conversion of transport values into typed Framework requests, calling the
+injected Client, and serializing its typed result. It does not
 authorize, resolve request scope, acquire application locks, access the store,
 mutate source bindings, publish events, or assemble responses for Thread and
 Turn requests. Those responsibilities belong to these static Application
@@ -827,28 +858,28 @@ kind/body replacement in place by id, not keep both the provisional assistant
 row and the completed preamble row. Non-tool assistant completions remain
 assistant text entries and must never be projected into a Thinking row.
 
-## Agent Session Host And Immutable Bindings
+## Agent Session Adapter And Immutable Bindings
 
-Gateway owns public thread identity and crosses one `AgentSessionHost` seam
-through Native and outbound ACP Adapters as defined by [052 Agent
-Runtimes](../052-agent-runtimes/spec.md). It does not expose an Adapter command
-bus or runtime-name-specific methods.
+Framework owns public Thread identity and crosses one `AgentSessionAdapter`
+seam through its Native Adapter or Gateway's injected outbound ACP Adapter as
+defined by [052 Agent Runtimes](../052-agent-runtimes/spec.md). It does not
+expose an Adapter command bus or runtime-name-specific methods.
 
-The Host exposes typed Gateway-native operations and typed Gateway-native
-snapshots. A generic command/response union, runtime downcast, or ACP protocol
+The seam exposes typed Framework operations and snapshots. A generic
+command/response union, runtime downcast, or ACP protocol
 type is not part of its Interface. ACP request and result types remain private
 to the outbound ACP Adapter; Native runtime types remain private to the Native
 Adapter.
 
-`AgentSessionHost.attach` captures the public thread id, binding revision, and
+Attaching an Agent Session Adapter captures the public Thread id, binding revision, and
 immutable binding fingerprints. Reattaching the same capture is idempotent;
 reusing the same thread/revision for a different target is rejected before an
-Adapter command. Ordering has exactly one owner: the Thread Application active
+Adapter command. Ordering has exactly one owner: the Framework active
 queue for Native execution and the outbound ACP process pool's resident
-per-session actor for ACP execution. The Host is the identity-and-routing seam,
+per-session actor for ACP execution. The seam routes identity and is
 not a second mailbox layered over either authority.
 
-Before Gateway delivers a first prompt, it persists the thread binding,
+Before Framework delivers a first prompt, it persists the Thread binding,
 including Agent Definition and Runtime Profile snapshots, implementation kind,
 backend reference, cwd, profile fingerprint, safety policy, Adapter revision,
 ownership, and binding revision. The binding is immutable. A newly created or
@@ -907,6 +938,13 @@ Profile id alone is not sufficient control identity. When that source owns a
 prepared ACP draft, the mutation is also sent to the resident Agent and the
 receipt reflects its config-option acknowledgement.
 
+Before a Channel admits a non-command message, it resolves the source binding
+to its existing public Thread and reads controls from that Thread. The
+connection default and source draft apply only while no Thread has been bound.
+A successful Channel control receipt for a bound Thread must therefore affect
+the next message on that same lane rather than being acknowledged against one
+Thread and executed against a fresh source draft.
+
 Every accepted turn receives exactly one terminal. Process exit closes
 waiters; uncertain delivery is not retried; one Adapter never falls back to the
 other. Errors carry typed stage, retry, delivery, diagnostic, thread, and
@@ -949,6 +987,8 @@ deterministic source/session routing while preserving Psychevo's Gateway core:
 
 - [001 Architecture](../001-architecture/spec.md) defines crate boundaries and dependency direction.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing interface semantics.
+- [080 Framework and SDK](../080-sdk/spec.md) defines the Application, Client,
+  App Server, and SDK boundary consumed by Gateway.
 - [027 ACP](../027-acp/spec.md) defines the ACP projection boundary.
 - [249 Vision and Image Artifacts](../249-vision-and-image-artifacts/spec.md)
   defines authenticated media reads for generated image artifacts.

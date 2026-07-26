@@ -31,12 +31,13 @@ metadata; it does not include tokens.
 
 The foreground CLI installs explicit SIGINT/SIGTERM handling. On either signal
 it stops accepting new HTTP/WebSocket work, asks the Gateway-owned
-`AgentSessionHost` to shut down its resident Agent adapters gracefully within a
-fixed deadline, and falls back to a separately bounded forced shutdown when
-graceful shutdown times out or fails. The server process does not exit until
-this cleanup path and its bounded connection drain have settled. This applies
-equally to direct `pevo serve` and the managed `serve` child started by
-`pevo gateway`.
+transport supervisor to drain connections, then asks
+`psychevo::Application` to drain accepted Turns and shut down its Agent Session
+Adapters gracefully within a fixed deadline. It falls back to a separately
+bounded forced Application shutdown when graceful shutdown times out or fails.
+The server process does not exit until this cleanup path and its bounded
+connection drain have settled. This applies equally to direct `pevo serve` and
+the managed `serve` child started by `pevo gateway`.
 
 `BoundGatewayWebServer` keeps signal ownership explicit for library callers.
 Its ordinary `run` method does not install process-global signal handlers; an
@@ -86,6 +87,8 @@ filter.
 ## Related Topics
 
 - [021 Gateway](../021-gateway/spec.md) defines the transport-neutral Gateway.
+- [080 Framework and SDK](../080-sdk/spec.md) defines Application ownership
+  and ordered shutdown.
 - [200 pevo CLI](../200-pevo-cli/spec.md) defines the CLI surface.
 - [220 pevo Gateway](../220-pevo-gateway/spec.md) defines managed Web launch
   lifecycle.

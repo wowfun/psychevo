@@ -3,7 +3,7 @@ name: 004. Runtime Contract
 psychevo_self_edit: deny
 ---
 
-Define the runtime contract owned by `psychevo-runtime`.
+Define the runtime contract owned by `psychevo`.
 
 ## Scope
 
@@ -34,7 +34,7 @@ Out of scope:
 
 ## Runtime Boundary
 
-`psychevo-runtime` is the transport-neutral library boundary for session coordination and agent-invocation assembly. CLI and future non-CLI entry points should use runtime libraries directly instead of routing through command-line transport.
+`psychevo` is the transport-neutral library boundary for session coordination and agent-invocation assembly. CLI and future non-CLI entry points should use runtime libraries directly instead of routing through command-line transport.
 
 Runtime owns session boundary resolution and execution wiring. `psychevo-agent-core` keeps agent execution semantics, and `psychevo-ai` keeps provider-neutral AI protocol semantics.
 

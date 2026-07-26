@@ -3,7 +3,7 @@ name: 006. Context Assembly
 psychevo_self_edit: deny
 ---
 
-Define the model context assembly contract owned by `psychevo-runtime`.
+Define the model context assembly contract owned by `psychevo`.
 
 ## Scope
 

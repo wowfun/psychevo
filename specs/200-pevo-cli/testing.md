@@ -72,7 +72,7 @@ come from the focused command and smoke tests below.
   when none exists.
 - `--continue` plus `--session` rejects.
 - `PSYCHEVO_CONFIG` plus `PSYCHEVO_DB` allows isolated runs without global home.
-- Repo-local live validation checks typed `entry.completed` reasoning and tool
+- Repo-local live validation checks typed `item.*` reasoning and tool
   blocks, `turn.completed.finalAnswer`, and `thread.started` reuse for
   `--continue`.
 

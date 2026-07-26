@@ -558,7 +558,7 @@ evidence contract does not add test timestamps to the public Gateway protocol.
 
 The deterministic cross-surface profile compares the real fullscreen TUI and
 desktop-Chromium Workbench against one shared Native provider fixture. TUI uses
-the in-process Gateway API while Workbench uses managed Gateway,
+the in-process Framework Client while Workbench uses managed Gateway,
 WebSocket/JSON-RPC, client reconciliation, React commit, and DOM commit. The
 report therefore treats the shared provider boundary as the control and
 attributes additional Workbench time to the Web admission, transport, and
@@ -570,10 +570,12 @@ The common warm-path checkpoints are `send_committed`,
 first optimistic running surface separately. Workbench-only diagnostics include
 `turn/start` frame and acceptance, Gateway event receipt, controller batch
 application, DOM commit, optional post-frame observation, and
-`draft_context_ready`. TUI-only diagnostics include terminal-event drain and
-terminal draw commit. Where
-available, both surfaces retain the shared `Gateway::run_turn` entry and
-Gateway-event emission boundaries.
+`draft_context_ready`. TUI-only diagnostics include Framework execution-event
+receipt/application, authoritative Turn task completion, terminal-event drain,
+and terminal draw commit. Only Workbench retains managed `turn/start`
+receipt/admission/acceptance and public Gateway-event emission boundaries around
+the shared Thread Application. These surface-specific observations must not be
+presented as the same internal call graph.
 
 Every measured sample has an explicit correlation that distinguishes the main
 turn provider request from asynchronous title generation. Exactly one main
@@ -584,7 +586,7 @@ diagnostic sample excluded from percentiles. A provider response schedule must
 leave an observable interval between first output and completion so completion
 cannot collapse queued streaming evidence before the first surface commit.
 
-Comparison manifest schema v2 contains raw TUI and Workbench samples,
+Comparison manifest schema v3 contains raw TUI and Workbench samples,
 p50/p95 waterfalls, Workbench-minus-TUI deltas and ratios, environment and
 fixture fingerprints, content-free diagnostic marks, the TUI JSONL trace, and
 the Workbench Playwright trace. Durations are calculated only between marks in
@@ -592,25 +594,28 @@ one clock domain; cross-process boundaries use observations made by the common
 runner and remain labelled as runner-observed. The initial baseline has no
 absolute latency gate. Missing artifacts, ambiguous request correlation,
 duplicate main requests, unsafe fields, or an incomplete waterfall fail the
-profile while preserving partial evidence. Comparison v1 and v2 samples must
-never be aggregated because v1 included browser frame waits in its visible
-metrics.
+profile while preserving partial evidence. Comparison v1, v2, and v3 samples
+must never be aggregated: v1 included browser frame waits in its visible
+metrics, while v2 incorrectly modelled a Client-owned TUI prompt as a public
+Gateway Turn.
 
-Each raw sample also correlates one Gateway Turn and derives two diagnostic
-sub-waterfalls. The shared Gateway/runtime sub-waterfall covers Gateway entry,
-Native Adapter submission, runtime configuration, Agent start, prompt
-projection, first visible assistant event, and authoritative completion. The
-surface sub-waterfall covers first non-empty assistant receipt, controller
-application, surface commit, completion receipt/application, and settled
-surface commit. These
+Each raw sample derives a surface sub-waterfall covering first non-empty
+assistant receipt, controller application, surface commit, completion
+receipt/application, and settled surface commit. Workbench samples additionally
+correlate exactly one accepted managed Turn and derive a Workbench-only
+Gateway/runtime sub-waterfall covering `turn/start` receipt, Application
+admission, response acceptance, Native Adapter submission, prompt projection,
+first visible assistant event, and authoritative completion. These
 sub-waterfalls use only their owning Gateway or surface clock and are summarized
-independently from runner-observed cross-process spans.
-The comparison hard-fails duplicate public lifecycle, legacy terminal
-notifications, Web review scans on admission/relay/completion, missing first
-feedback, or hidden-surface request amplification. Native runtime undo snapshot
-work remains a shared TUI/Workbench stage. Latency p50/p95 stays report-only
-until three stable canonical-runner baselines are explicitly approved for a
-separate ratchet.
+independently from runner-observed cross-process spans. The report must not
+calculate a Gateway-minus-Framework delta from non-equivalent internal stages.
+
+The comparison hard-fails duplicate Workbench public lifecycle, legacy
+terminal notifications, Web review scans on admission/relay/completion,
+missing first feedback, or hidden-surface request amplification. Native runtime
+undo snapshot work remains a shared TUI/Workbench stage. Latency p50/p95 stays
+report-only until three stable canonical-runner baselines are explicitly
+approved for a separate ratchet.
 
 Workbench does not paint a cold-start Composer as editable with a placeholder
 Agent or empty authoritative runtime controls. Session history never gates
@@ -704,10 +709,16 @@ read/subscription plus `openDraft`, `load`, `send`, `setControl`, `interrupt`,
 observations and publishes one snapshot notification. The Module owns the
 scheduling queue: the first non-empty assistant text bypasses frame pacing,
 later replaceable updates coalesce per entry, and terminal observations flush
-same-Turn output before completion. Workbench hooks do not own session,
-resource, selector, delivery, or reconciliation state. Host lifecycle replay
-may dispose and then reattach the same Module owner; reattachment must restore
-Gateway subscriptions and cannot leave the reused owner permanently inert.
+same-Turn output before completion, including when the terminal carries no
+committed entry slice. A successful terminal without a committed entry slice
+preserves already-received live bodies and finalizes every pending or running
+same-Turn entry and block as completed; it cannot leave reasoning or evidence
+streaming after the authoritative Turn has settled. A terminal may discard
+later same-Turn observations, but must not discard observations already
+received in transport order. Workbench hooks do not own session, resource,
+selector, delivery, or reconciliation state. Host lifecycle replay may dispose
+and then reattach the same Module owner; reattachment must restore Gateway
+subscriptions and cannot leave the reused owner permanently inert.
 
 `send` returns a typed `accepted`, `reconciled`, `cancelled`, or `not_sent`
 outcome. A successful `turn/start` response is always `accepted`; when the

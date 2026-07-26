@@ -11,7 +11,7 @@ Agents and external ACP Agents first-class across every interactive surface.
 ## Scope
 
 - Agent Definition and Runtime Profile identity
-- Gateway `ThreadApplication` and `AgentSessionHost` Modules
+- Framework `Application`, Gateway Adapter, and `AgentSessionHost` Modules
 - Native and outbound ACP Agent Adapters
 - immutable thread binding and session lifecycle
 - typed inputs, controls, actions, interactions, delivery, and history
@@ -126,9 +126,11 @@ settled before its terminal becomes observable. An ACP-bound child never
 inherits parent activity as a display or control fallback, and interrupt or
 steer addressed to the child cannot target the parent turn.
 
-## Gateway Application Module
+## Framework And Gateway Modules
 
-Gateway owns one deep `ThreadApplication` Module. Its Interface is:
+`psychevo::Application` owns the one Thread/Turn execution authority described
+by [080 Framework and SDK](../080-sdk/spec.md). Gateway owns a deep Adapter
+Module whose transport-facing Interface is:
 
 ```text
 open_draft(origin, targetIntent) -> DraftOpenReceipt
@@ -141,16 +143,20 @@ respond(source, thread, interaction) -> InteractionReceipt
 read_history(source, thread, cursor?) -> HistoryPage
 ```
 
-The Interface hides source drafts, immutable bindings, profile capture,
-queueing, session attachment, control resolution, Adapter selection, delivery
-classification, projection, interactions, and history authority.
+The Gateway Interface hides source drafts, immutable bindings, profile capture,
+session attachment, control resolution, Adapter selection, delivery
+classification, projection, and history authority. It materializes or resumes a
+Framework Thread, constructs one typed `TurnRequest`, and calls the shared
+Framework Client. Gateway does not own another accepted-turn queue, control
+map, or shutdown authority.
 
 The concrete `run_turn` input contains typed content, target/control intent,
 surface environment and presentation policy, and observation/control sinks.
-`ThreadApplication` alone lowers that input into runtime-internal `RunOptions`
-and the private active-queue envelope. No caller Adapter may supply runtime
-state, native session identity, an external delegate, Adapter selection, or a
-preassembled `RunOptions`.
+`Application` captures execution dependencies and lowers the typed request at
+the Agent Session Adapter seam. Gateway may attach its private Native/ACP Agent
+Session Adapter and projection metadata, but no caller Adapter may supply
+runtime state, native session identity, a second queue, or a preassembled
+`RunOptions`.
 
 An unbound source draft stores `draft_agent_ref`, `draft_profile_ref`, and
 typed `draft_control_values`. These are caller intent for a prospective
@@ -177,8 +183,9 @@ Backend administration remains a sibling management Module and keeps
 `backend/install`, `backend/repair`, and `backend/upgrade`.
 
 Thread-prefixed transport names do not define one implementation Module. The
-core Thread Application above owns interactive draft, context, control, turn,
-action, interaction, and history invariants. A sibling Session Application
+Gateway Adapter above owns interactive draft, context, control, action,
+transport interaction, and history projection invariants; Framework owns Turn
+acceptance, execution, control, and pending-interaction facts. A sibling Session Application
 owns resume/read/trace/list/browser and rename/archive/restore/delete resource
 workflows. A sibling Session Import Application owns external Adapter
 discovery and import. `thread/realtime/*` remains part of the Voice
@@ -324,6 +331,12 @@ atomically promoted to initial sticky Thread preferences, while explicit
 `turnOverrides` remain one-turn-only. Gateway clears the source draft only
 after its values have been captured by the new binding.
 
+Source-bound callers, including Channels, resolve an existing public Thread
+before constructing `ThreadContext` or applying control precedence. Once the
+source is bound, sticky Thread preferences are authoritative; treating a later
+message as an unbound source draft would acknowledge a control mutation without
+delivering it and is forbidden.
+
 ### Actions, Interactions, And History
 
 `thread/action/run` accepts a sealed action union, not an open action id plus
@@ -464,7 +477,7 @@ input is never replayed; only the caller's new input is delivered.
 
 The Module has two production Adapters and deterministic fake Adapters:
 
-- `NativeAgentAdapter` lowers typed commands to `psychevo-runtime`
+- `NativeAgentAdapter` lowers typed commands to `psychevo`
 - `AcpAgentAdapter` lowers typed commands to a negotiated ACP Agent
 
 Raw ACP SDK types, requests, notifications, ids, secrets, or process handles do
@@ -828,7 +841,7 @@ user to leave the import surface.
 ## Retired Direct Runtime Hard Cut
 
 Direct Codex app-server and OpenCode HTTP/SSE Adapters are removed. The
-`psychevo-runtime-host` crate, direct worker/process code, direct Runtime Profile
+`psychevo-host` crate, direct worker/process code, direct Runtime Profile
 kinds, direct Gateway branches, direct protocol operations, and direct UI/test
 fixtures must not remain as dormant fallback paths.
 
@@ -886,14 +899,17 @@ controller and must not synchronously issue `thread/history/read` before
 rendering it. Explicit search and lazy-history surfaces may still page through
 `thread/history/read` independently.
 
-Every writable Thread surface performs an authoritative same-Thread refresh
-after applying a terminal event. This refresh replaces retained live entries
-and activity with the declared history projection even when the terminal wire
-payload carries no committed slice. Child and side Thread surfaces must not
-remain visually running, nor admit a later optimistic prompt against stale
-terminal-era activity, after Gateway already reports the Thread as idle. The
-refresh is keyed by the visible Thread identity, not by whether stale local
-turn correlation accepted the terminal reducer event.
+Every writable Thread surface applies an authoritative same-Thread terminal
+projection. For Native history, the Application-owned committed slice is that
+projection. For ACP or other Agent-owned history, the surface performs an
+epoch-guarded snapshot read after every terminal because even a non-empty
+committed slice can omit history reconciled by the Agent, including tool
+results. The projection replaces retained live entries and activity. Child and
+side Thread surfaces must not remain visually running, nor admit a later
+optimistic prompt against stale terminal-era activity, after Gateway already
+reports the Thread as idle. The refresh is keyed by the visible Thread
+identity, not by whether stale local turn correlation accepted the terminal
+reducer event.
 
 Opening, starting, resuming, refreshing, or leaving a Thread replaces the
 controller snapshot and resets its correlation state atomically before React

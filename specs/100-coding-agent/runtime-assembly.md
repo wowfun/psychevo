@@ -4,7 +4,7 @@ psychevo_self_edit: deny
 ---
 
 Define the first implementation slice contract for assembling the built-in
-`coding-agent` capability in `psychevo-runtime`.
+`coding-agent` capability in `psychevo`.
 
 This attachment is part of [100 Coding Agent](spec.md). It is not an
 independently numbered spec and does not define a stable public Rust API.

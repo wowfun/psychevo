@@ -3,7 +3,7 @@ name: 007. Tool Surface
 psychevo_self_edit: deny
 ---
 
-Define the agent-invocation scoped tool surface contract owned by `psychevo-runtime`.
+Define the agent-invocation scoped tool surface contract owned by `psychevo`.
 
 ## Scope
 

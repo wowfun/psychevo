@@ -80,11 +80,54 @@ pevo run -m deepseek/deepseek-chat "inspect the CLI entrypoints"
 
 ## 文档
 
+- [Rust 与 Python SDK 指南（英文）](docs/sdk.md)
 - [安装指南（英文）](docs/install.md)
 - [ACP 配置指南（英文）](docs/acp-configuration.md)
 - [Channels 指南（英文）](docs/channels/README.md)
 - [TUI 故障排除（英文）](docs/troubleshooting/tui.md)
 - [贡献指南（英文）](CONTRIBUTING.md)
+
+## Rust 与 Python SDK
+
+`psychevo` Rust crate 在进程内运行 Framework。一个 `Application` 负责
+Thread 与 Turn 状态、已接受任务、控制、交互和有序关闭：
+
+```rust
+use psychevo::{Application, StartThreadRequest, TurnRequest};
+
+let application = Application::builder()
+    .home("/tmp/psychevo-sdk")
+    .build()
+    .await?;
+let client = application.client();
+let thread = client
+    .start_thread(StartThreadRequest::new("."))
+    .await?;
+let turn = thread
+    .start_turn(TurnRequest::new("Inspect this repository"))
+    .await?;
+let result = turn.wait().await?;
+application.shutdown().await?;
+```
+
+异步 Python SDK 默认通过标准输入输出启动版本完全一致的 App Server：
+
+```python
+from pathlib import Path
+
+import psychevo
+
+
+async with psychevo.Client() as client:
+    thread = await client.start_thread(cwd=Path.cwd())
+    turn = await thread.start_turn("Inspect this repository")
+    result = await turn.wait()
+    print(result.final_answer)
+```
+
+Python 客户端也支持显式指定 App Server 可执行文件，或连接带身份验证的
+WebSocket 地址。它不会搜索 `PATH`、下载二进制文件或探测守护进程。生命周期、
+事件、控制、回调、传输配置和包结构详见 [SDK 指南（英文）](docs/sdk.md)。
 
 ## 更多使用方式
 
@@ -164,7 +207,8 @@ pnpm --filter @psychevo/workbench dev
 |------|------|
 | `psychevo-ai` | 提供方协议规范化和 AI 传输适配器。 |
 | `psychevo-agent-core` | 模型无关的智能体循环、工具特征、工具执行钩子、结果和中止处理。 |
-| `psychevo-runtime` | 编码智能体运行时装配、提供方和模型解析、上下文、工具、持久化、技能、智能体、权限和用量统计。 |
+| `psychevo` | 编码智能体运行时装配、提供方和模型解析、上下文、工具、持久化、技能、智能体、权限和用量统计。 |
+| `psychevo-gateway-protocol` | App Server 调度器和协议工具共享的私有生成式 schema。 |
 | `psychevo-gateway` | 供 `Web` 和命令行界面使用的本地 `Gateway API` 与 WebSocket 服务器。 |
 | `psychevo-acp` | 由 `pevo acp` 使用的 ACP 服务器封装和运行时桥接。 |
 | `psychevo-cli` | `pevo` 命令行入口、终端 `UI`、管理式 Web/Gateway 命令、设置和诊断。 |

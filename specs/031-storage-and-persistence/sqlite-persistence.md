@@ -27,7 +27,7 @@ Out of scope:
 ## Runtime Interface
 
 Production persistence is owned by the asynchronous
-`psychevo_runtime::state::StateRuntime` Module. It owns one SQLx SQLite pool for
+`psychevo::state::StateRuntime` Module. It owns one SQLx SQLite pool for
 the one Psychevo state database. Callers await semantic operations and cannot
 borrow connections, select pool members, or implement retry. The migration does
 not add a repository family, read pool, actor, second database, or compatibility
@@ -37,8 +37,12 @@ File-backed pools use at most five connections. In-memory test databases use
 one connection so every operation observes the same database. Every connection
 enables foreign keys, WAL journal mode, NORMAL synchronous mode, and a
 five-second busy timeout. Compound semantic writes acquire an explicit
-`BEGIN IMMEDIATE` transaction and commit or roll back atomically. A passive WAL
-checkpoint remains due after each fifty successful writes.
+`BEGIN IMMEDIATE` transaction and commit or roll back atomically. WAL
+maintenance uses SQLite's connection-native PASSIVE auto-checkpoint mechanism;
+the bundled SQLite build enables it at its default threshold of 1000 WAL pages
+for every new connection. Psychevo does not layer a write-count scheduler or a
+manual `PRAGMA wal_checkpoint` await onto semantic writes, Turn terminals, or
+caller receipts.
 
 Opening and closing `StateRuntime` are asynchronous. Every database-backed
 semantic operation is asynchronous; purely in-memory filesystem-grant state may
@@ -48,17 +52,18 @@ consumers.
 
 The runtime exposes a content-free diagnostic snapshot for tests and local
 diagnostics: pool size, idle and in-flight operations, completed and failed
-operations, busy/locked outcomes, acquire and execute latency, and checkpoint
-count. This snapshot is not a new public Gateway protocol or product UI.
+operations, busy/locked outcomes, and acquire and execute latency. This
+snapshot is not a new public Gateway protocol or product UI.
 
 ## Schema Migration
 
 SQLx migrations are the canonical schema entry point. The first migration is an
-idempotent v28 baseline: it can create a fresh database or register an existing
-valid v28 database without rewriting semantic data. `PRAGMA user_version`
-remains the compatibility marker. A fresh version-zero database is initialized
-to v28; an existing nonzero version other than v28 is rejected before ordinary
-queries.
+idempotent v28 baseline; v29 adds durable Framework pending-interaction facts.
+`PRAGMA user_version` remains the compatibility marker. A fresh version-zero
+database runs both migrations and is initialized to v29. Because Psychevo is
+pre-release and the Framework changes the authority boundary, an existing
+nonzero version other than v29 is rejected with explicit reset/new-database
+guidance before ordinary queries.
 
 Concurrent first open is serialized by SQLite and must produce one valid
 migration history. Production runtime code does not retain a rusqlite execution
@@ -81,6 +86,7 @@ The default first-slice SQLite shape contains:
 - `gateway_control_commands`
 - `gateway_turn_terminals`
 - `gateway_turn_deliveries`
+- `framework_interactions`
 - `gateway_channel_outbox`
 - `automations`
 - `automation_runs`
@@ -91,6 +97,27 @@ The default first-slice SQLite shape does not create:
 - `refs`
 - `artifacts`
 - a complete per-turn event-log table
+
+`framework_interactions` stores the durable blocking-action identity, owning
+Thread and Turn, kind, payload, pending/resolved/cancelled status, resolution,
+and timestamps. Live handlers are convenience responders; reconnect and
+snapshot recovery read this table instead of reconstructing pending actions
+from an event receiver. Interaction request, response, and terminal writes are
+order-independent: a response creates a durable resolution tombstone when
+necessary, and a request racing with Turn completion is cancelled rather than
+reviving stale pending work.
+
+The table key is `(turn_id, interaction_id)`, not `interaction_id` alone.
+Adapter-local call ids are allowed to repeat in different Turns. Conflict
+handling and follow-up updates include both key fields so an earlier resolved
+or cancelled row cannot be rebound to a later Turn.
+
+Framework Turn finalization writes the terminal fact, transitions any
+non-unknown delivery row to terminal and scrubs its retained input, and cancels
+pending interactions in one `BEGIN IMMEDIATE` transaction. A failed statement
+rolls back the complete semantic commit. The Framework keeps the delivery
+recovery fact and reports persistence failure instead of exposing a
+non-durable terminal result.
 
 This attachment defines implementation shape, not public contract shape. The
 first implementation slice uses the columns below as an internal contract, not
@@ -176,7 +203,7 @@ explicit default Agent), non-null `agent_fingerprint` and
 `agent_definition_json`, Runtime Profile identity/fingerprint/revision/snapshot,
 Adapter identity, ownership, optional native session identity, and binding
 revision. Repeating the same capture is idempotent; changing either Agent or
-Runtime Profile evidence is an immutable-binding conflict. Schema v28 is a
+Runtime Profile evidence is an immutable-binding conflict. Schema v29 is a
 reset cutover, so no legacy row is accepted without Agent snapshot evidence.
 
 The row also owns the common Thread control state. `thread_preferences_json`
@@ -502,9 +529,10 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 28`, WAL, foreign keys,
-short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and best-effort
-periodic `wal_checkpoint(PASSIVE)` every 50 successful writes.
+The current implementation uses `PRAGMA user_version = 29`, WAL, foreign keys,
+short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and SQLite's
+connection-native PASSIVE auto-checkpoint. Semantic write completion never
+starts a second Psychevo-owned checkpoint scheduler.
 The supported `:memory:` mode owns exactly one pool connection and disables
 idle timeout and maximum connection lifetime for that pool. The connection
 must remain alive for the full `StateRuntime` lifetime so recycling cannot

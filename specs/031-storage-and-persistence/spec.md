@@ -12,7 +12,7 @@ Define Psychevo's storage and persistence boundary for durable semantic facts.
 - optional persistence boundary for session continuity
 - optional persistence boundary for memory
 - optional persistence boundary for exceptional extension registry facts that affect agent-invocation inspection
-- optional persistence boundary for gateway source-to-thread bindings
+- optional persistence boundary for Framework source-to-Thread bindings
 - optional persistence boundary for local product automation definitions and
   run coordination
 - persistence attempt and outcome observability
@@ -37,7 +37,12 @@ A persisted fact is a durable representation of a semantic fact owned by another
 
 Durable evidence persistence is the baseline persistence requirement. Session continuity and memory may use persistence, but they are optional consumers and must not become required execution substrate.
 
-Runtime wires persistence boundaries into session coordination, agent-invocation assembly, and evidence sinks. This spec does not create a new crate boundary, storage service boundary, repository family, or ownership layer for semantic state. The first SQLite slice stays behind one runtime-owned state module interface so transactions that span session, evidence, gateway coordination, and automation records remain atomic.
+Framework wires persistence boundaries into Thread coordination,
+agent-invocation assembly, and evidence sinks. This spec does not create a new
+crate boundary, storage service boundary, repository family, or ownership layer
+for semantic state. SQLite stays behind one Framework-owned internal state
+Module so transactions that span Thread, evidence, source coordination, and
+automation records remain atomic.
 
 ## Persistable Facts
 
@@ -51,7 +56,13 @@ Memory facts from [010 Memory System](../010-memory-system/spec.md) may be persi
 
 Extension registry facts from [050 Capability Extensions](../050-capability-extensions/spec.md) are reconstructable by default from runtime assembly inputs, prompt-prefix metadata, message metadata, context evidence, and current source discovery. Implementations may persist exceptional registry facts only when another spec requires inspection of a non-default decision such as conflict, rejection, unavailability, or degradation. Persistence must not turn storage into the source of extension semantics or require a full durable registry snapshot for ordinary request reconstruction.
 
-Gateway source-to-thread bindings from [021 Gateway](../021-gateway/spec.md) may be persisted when a caller-facing source uses `Persistent` lifetime and needs continuity across process restarts or transport reconnects. Persistence stores routing and lineage facts only; invocation-scoped and process-scoped source bindings are not persisted, and runtime sessions and durable evidence remain the execution truth.
+Framework source-to-Thread bindings from
+[080 Framework and SDK](../080-sdk/spec.md) may be persisted when a
+caller-facing source uses `Persistent` lifetime and needs continuity across
+process restarts or transport reconnects. Persistence stores routing and
+lineage facts only; invocation-scoped and process-scoped source bindings are
+not persisted, and private Agent sessions and durable evidence remain the
+execution truth.
 
 Local product automation facts from [060 Automation](../060-automation/spec.md)
 may be persisted when a running Gateway/Web process schedules project
@@ -125,6 +136,8 @@ This spec does not define version fields, migration algorithms, compatibility ma
 - [010 Memory System](../010-memory-system/spec.md) defines optional memory facts that may use persistence.
 - [020 Interfaces](../020-interfaces/spec.md) defines caller-facing result access through session and evidence relationships.
 - [021 Gateway](../021-gateway/spec.md) defines gateway source mapping persistence needs.
+- [080 Framework and SDK](../080-sdk/spec.md) defines Framework ownership of
+  source-to-Thread continuity and the private state Module.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships and recoverability classes.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
   extension registry facts that may affect runtime assembly and evidence

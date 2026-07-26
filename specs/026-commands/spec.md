@@ -32,7 +32,7 @@ Out of scope:
 
 ## Command Contract
 
-The shared command catalog lives in `psychevo-runtime` when multiple
+The shared command catalog lives in `psychevo` when multiple
 entrypoints need to project the same command metadata. Runtime owns slash
 command recognition, canonical identity, alias resolution, argument parsing,
 capability requirements, active-turn availability, and UI-independent command

@@ -48,7 +48,7 @@ Required packaging and entrypoint coverage:
 - `pevo acp --help` and top-level command metadata include the ACP stdio server
   description.
 - Workspace dependency direction keeps `psychevo-acp` depending on
-  `psychevo-runtime` while runtime does not depend on CLI or ACP.
+  `psychevo` while runtime does not depend on CLI or ACP.
 - Product wrapper tests prove `pevo acp` does not call the `pevo run` command
   path.
 
@@ -70,6 +70,15 @@ Required ACP/runtime wiring coverage:
 - Prompt handling passes cwd, session id, mode, model, image inputs, inherited
   environment, config path, database path, approval handler, and ACP-provided
   MCP servers into normal runtime inputs.
+- Model-backed prompts pass the product snapshot root into Framework, and a
+  fixture verifies that `/undo` can restore both conversation and Tool-created
+  workspace changes.
+- Framework Tool start, update, and terminal events project to one stable ACP
+  Tool call id. Negotiated terminal-output fixtures verify incremental output
+  metadata and terminal exit; the non-terminal-output path verifies ordinary
+  content updates.
+- Framework completed-message usage and accounting reach the ACP accumulator
+  from event-top-level fields and contribute to prompt/usage projection.
 - Cancellation acts on the in-flight runtime control handle for the ACP actor
   without deleting durable session evidence.
 - ACP-provided MCP server declarations convert into runtime MCP source inputs
@@ -95,7 +104,7 @@ Relevant narrow validation:
 
 - `cargo test -p psychevo-acp`
 - `cargo test -p psychevo-cli`
-- `cargo test -p psychevo-runtime command_registry`
+- `cargo test -p psychevo command_registry`
 
 Broad deterministic validation:
 

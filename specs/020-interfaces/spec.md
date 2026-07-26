@@ -26,16 +26,29 @@ Out of scope:
 
 A caller is any product surface, library consumer, SDK, transport adapter, test harness, or automation layer that asks Psychevo to perform work.
 
-An entrypoint is a caller-facing way to invoke Psychevo. Gateway libraries are the stable interactive substrate entrypoint, while runtime libraries remain the execution substrate beneath Gateway. CLI is a product entrypoint category. SDK, HTTP, and other transports may exist as future entrypoint categories.
+An entrypoint is a caller-facing way to invoke Psychevo. The
+`psychevo::Client` Framework Interface is the stable interactive substrate.
+CLI/TUI, Gateway transports, inbound ACP, Rust SDK consumers, and the App
+Server all call that Interface. Python calls the same Interface through the App
+Server. CLI is a product entrypoint category, while SDK and transport entrypoints
+are concrete supported categories.
 
-Interactive entrypoints should route work through `psychevo-gateway` instead of reaching into lower layers for thread/turn orchestration. Gateway delegates execution to `psychevo-runtime`. ACP is a concrete transport entrypoint category for editor and agent-client integrations. Native Desktop is a concrete GUI entrypoint category, and Floating capsules are a concrete Desktop feature for selection-anchored question-and-answer workflows. `psychevo-agent-core` owns execution semantics, and `psychevo-ai` owns provider-neutral AI protocol semantics. Interface behavior must not redefine those lower-layer contracts.
+Interactive entrypoints route work through `psychevo::Client` instead of
+reaching into private run assembly or state modules for Thread/Turn
+orchestration. Gateway is a transport Adapter over that Client. ACP is a
+concrete transport entrypoint category for editor and agent-client integrations.
+Native Desktop is a concrete GUI entrypoint category, and Floating capsules are
+a concrete Desktop feature for selection-anchored question-and-answer
+workflows. `psychevo-agent-core` owns execution semantics, and `psychevo-ai`
+owns provider-neutral AI protocol semantics. Interface behavior must not
+redefine those lower-layer contracts.
 
 Interactive entrypoints provide a source identity with an explicit lifetime to
-Gateway. Invocation-only callers may avoid automatic source continuity, process
-surfaces may keep continuity inside one Gateway instance, and reconnectable
-transports may request persistent source binding. Interface specs choose the
-caller semantics; Gateway owns normalization, queueing, and source-to-thread
-resolution.
+Framework. Invocation-only callers may avoid automatic source continuity,
+process surfaces may keep continuity inside one Application instance, and
+reconnectable transports may request persistent source binding. Interface specs
+choose the caller semantics; Framework owns queueing and source-to-Thread
+resolution, while Gateway owns only wire identity normalization.
 
 This spec defines interface semantics, not implementation shape. Narrower interface specs may specialize product entrypoints or transport behavior while preserving this caller-facing boundary.
 

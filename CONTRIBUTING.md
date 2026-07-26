@@ -51,7 +51,7 @@ For focused code changes, prefer a narrower or subsystem-specific command that
 exercises the changed behavior, such as:
 
 ```bash
-cargo test -p psychevo-runtime
+cargo test -p psychevo
 cargo test -p psychevo-cli smoke_cli
 ```
 

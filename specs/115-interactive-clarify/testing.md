@@ -77,7 +77,7 @@ Required fullscreen TUI coverage:
 
 Relevant narrow validation:
 
-- `cargo test -p psychevo-runtime`
+- `cargo test -p psychevo`
 - `cargo test -p psychevo-cli`
 
 Broad deterministic validation:

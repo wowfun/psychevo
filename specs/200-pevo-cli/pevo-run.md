@@ -128,10 +128,12 @@ cwd, ordered by latest persisted activity then start time. Viewing or
 opening a session does not affect this ordering. If no matching session exists,
 runtime creates a new session.
 
-Routing `pevo run` through Gateway does not change that selection contract:
-Gateway resolves `--continue` against the canonical cwd and allowed sources
-before it materializes a new public thread. An invocation-scoped CLI source key
-must not force a second session when a matching run session already exists.
+Routing `pevo run` through the in-process Framework Client does not change that
+selection contract: Framework resolves `--continue` against the canonical cwd
+and allowed sources before it materializes a new public Thread. An
+invocation-scoped CLI source key must not force a second Thread when a matching
+run Thread already exists. `pevo run` does not construct private execution
+options or call the Native run loop directly.
 
 Supplying `--session` and `--continue` together is a usage error.
 
@@ -172,9 +174,23 @@ is Psychevo-owned and uses dotted event names:
 - `error`
 
 `item.*` events carry typed transcript entries rather than raw runtime event
-payloads. Tool and artifact entries include bounded preview/detail references
-when output is large. `turn.completed` includes usage when known and the
-terminal outcome. `turn.failed` and `error` contain bounded human-readable
+payloads. The `item` object uses the shared `TranscriptEntry` shape with stable
+entry and block ids across started, updated, and completed events. Message and
+Tool runtime JSON is projected into role, status, source, typed blocks,
+metadata, usage, and accounting; it is never placed under a generic `value`
+escape hatch.
+
+Every emitted block title and preview is capped at 512 Unicode scalar values.
+Body, detail, and Tool-result content are capped at 8,192 Unicode scalar
+values. Arbitrary metadata, raw input, raw output, usage, and accounting values
+larger than 4,096 serialized bytes are replaced by a typed truncation object
+containing `truncated`, `originalBytes`, and a bounded serialized `preview`.
+Artifact-id collections are capped at 64 items. These limits apply to every
+`item.*` line so a large Tool result cannot create unbounded NDJSON.
+
+Tool and artifact entries preserve bounded preview/detail or artifact
+references when output is large. `turn.completed` includes usage when known and
+the terminal outcome. `turn.failed` and `error` contain bounded human-readable
 diagnostics without provider secrets.
 
 Reasoning/thinking content is folded out of JSON output by default. Supplying
@@ -182,6 +198,11 @@ Reasoning/thinking content is folded out of JSON output by default. Supplying
 transcript entries or updates. Assistant message entries remain
 visible-transcript projections and must not carry provider reasoning wire
 fields.
+
+Live and release verifiers must inspect the shared typed transcript contract:
+block kind and content under `item.blocks[]`, and Tool lifecycle facts under
+the Tool block's metadata. They must not depend on the removed raw
+`item.kind`, `item.text`, or `item.value` escape-hatch shape.
 
 When a started run ends because the agent loop reached its model-turn budget,
 the terminal `turn.completed` or `turn.failed` JSON event includes

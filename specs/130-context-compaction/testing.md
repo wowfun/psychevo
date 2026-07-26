@@ -141,7 +141,7 @@ Required TUI and command coverage:
 
 Relevant narrow validation:
 
-- `cargo test -p psychevo-runtime`
+- `cargo test -p psychevo`
 - `cargo test -p psychevo-gateway`
 - `cargo test -p psychevo-cli`
 - `pnpm --filter @psychevo/workbench test`

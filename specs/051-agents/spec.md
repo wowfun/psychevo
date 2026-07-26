@@ -44,7 +44,7 @@ assembly, selected-agent specialization, child-agent control, and compatibility
 input handling. First-class agent run metadata remains runtime-owned; it must
 not move agent definition, lineage, or control state into `psychevo-agent-core`.
 
-In the first implementation slice, `psychevo-runtime` owns that orchestration
+In the first implementation slice, `psychevo` owns that orchestration
 and lowers selected agent definitions into the `AgentLoopRequest` and tool
 bindings consumed by `psychevo-agent-core`.
 
