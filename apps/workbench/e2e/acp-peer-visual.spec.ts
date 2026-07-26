@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { repoRoot, startPevoWeb } from "./harness";
@@ -14,6 +14,7 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
     mkdirSync(screenshotDir, { recursive: true });
     const fixture = prepareDeterministicAcpAgent("codex", screenshotDir);
     const server = await startPevoWeb({ live: false });
+    let failed = false;
     try {
       await page.goto(server.url);
       await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible();
@@ -112,7 +113,11 @@ test.describe("Workbench stable ACP v1 Agent visual streaming", () => {
       await expect(draftStatusRegion).toContainText("No session usage yet.");
       await assertNoHorizontalOverflow(page, draftStatusRegion);
       await capture(page, testInfo, `05-new-draft-status-${projectSuffix(isMobile)}`);
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
+      preserveFailedGatewayRoot(server.root, failed, testInfo, "acp-peer-visual");
       await server.stop();
     }
   });
@@ -171,6 +176,13 @@ async function capture(page: Page, testInfo: TestInfo, label: string) {
 
 function projectSuffix(isMobile: boolean) {
   return isMobile ? "mobile" : "desktop";
+}
+
+function preserveFailedGatewayRoot(root: string, failed: boolean, testInfo: TestInfo, check: string) {
+  if (!failed || !existsSync(root)) return;
+  cpSync(root, path.join(screenshotDir, `${check}-gateway-root-${testInfo.project.name}`), {
+    recursive: true
+  });
 }
 
 async function assertNoHorizontalOverflow(page: Page, locator: Locator) {

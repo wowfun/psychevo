@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import {
@@ -211,6 +211,9 @@ for (const adapter of ["native", "acp"] as const) {
         });
         finalized = true;
       } catch (error) {
+        if (server && existsSync(server.root)) {
+          cpSync(server.root, path.join(artifactRoot, "gateway-root"), { recursive: true });
+        }
         if (!page.isClosed()) {
           const failureProbeMarks = await readBrowserJourneyMarks(page).catch(() => []);
           for (const mark of failureProbeMarks) {

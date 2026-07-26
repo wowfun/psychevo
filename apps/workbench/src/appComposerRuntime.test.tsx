@@ -697,7 +697,7 @@ describe("Workbench first-class Agent runtime controls", () => {
       .toEqual(["thread/draft/open", "workspace/git/branches"]);
   });
 
-  it("refreshes authoritative Thread context after a completed turn", async () => {
+  it("refreshes Agent-owned authoritative Thread history and context after a completed turn", async () => {
     gatewayMock.runtimeContextRead = () => firstClassContext("opencode", {
       binding: {
         threadId: "thread-1",
@@ -727,6 +727,10 @@ describe("Workbench first-class Agent runtime controls", () => {
       entry.method === "thread/context/read"
       && (entry.params as { threadId?: string | null }).threadId === "thread-1"
     )).length;
+    const snapshotReadsBeforeCompletion = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/read"
+      && (entry.params as { threadId?: string | null }).threadId === "thread-1"
+    )).length;
 
     await act(async () => {
       for (const subscriber of gatewayMock.subscribers) {
@@ -745,7 +749,36 @@ describe("Workbench first-class Agent runtime controls", () => {
               startedAtMs: 1,
               completedAtMs: 2
             },
-            committedEntries: []
+            committedEntries: [{
+              id: "message:2",
+              threadId: "thread-1",
+              turnId: "turn-1",
+              messageSeq: 2,
+              role: "assistant",
+              status: "completed",
+              source: "runtime.message",
+              blocks: [{
+                id: "message:2:block:0",
+                kind: "text",
+                status: "completed",
+                order: 0,
+                source: "runtime.message",
+                title: null,
+                body: "Framework terminal entry",
+                preview: "Framework terminal entry",
+                detail: "Framework terminal entry",
+                artifactIds: [],
+                metadata: null,
+                result: null,
+                createdAtMs: 1,
+                updatedAtMs: 2
+              }],
+              metadata: null,
+              usage: null,
+              accounting: null,
+              createdAtMs: 1,
+              updatedAtMs: 2
+            }]
           }
         });
       }
@@ -757,6 +790,10 @@ describe("Workbench first-class Agent runtime controls", () => {
         entry.method === "thread/context/read"
         && (entry.params as { threadId?: string | null }).threadId === "thread-1"
       )).length).toBeGreaterThan(readsBeforeCompletion);
+      expect(gatewayMock.requestLog.filter((entry) => (
+        entry.method === "thread/read"
+        && (entry.params as { threadId?: string | null }).threadId === "thread-1"
+      )).length).toBeGreaterThan(snapshotReadsBeforeCompletion);
     });
   });
 

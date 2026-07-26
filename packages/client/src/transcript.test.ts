@@ -283,6 +283,40 @@ describe("applyLiveTranscriptEvent detached drafts", () => {
     expect(next.entries.some((candidate) => candidate.id === "turn:turn-agent:terminal")).toBe(true);
   });
 
+  it("finalizes preserved live output when a successful terminal has no committed slice", () => {
+    const current = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:reasoning",
+          status: "running",
+          source: "runtime.stream",
+          blocks: [block({
+            id: "live:turn-1:assistant:reasoning",
+            body: "stable reasoning",
+            kind: "reasoning",
+            source: "runtime.stream",
+            status: "running"
+          })]
+        })
+      ]
+    };
+
+    const next = applyLiveTranscriptEvent(current, {
+      type: "turnCompleted",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: completedTurn("turn-1", "thread-1"),
+      committedEntries: []
+    });
+
+    expect(next.activity.running).toBe(false);
+    expect(next.entries).toHaveLength(1);
+    expect(next.entries[0]?.blocks[0]?.body).toBe("stable reasoning");
+    expect(next.entries[0]?.status).toBe("completed");
+    expect(next.entries[0]?.blocks[0]?.status).toBe("completed");
+  });
+
   it("settles a failed terminal turn and keeps the diagnostic visible", () => {
     const current = {
       ...threadSnapshot(),

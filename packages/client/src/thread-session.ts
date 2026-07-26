@@ -418,11 +418,17 @@ export class ThreadSession {
 
   private enqueueGatewayEvent(event: GatewayEvent): void {
     if (event.type === "turnCompleted") {
-      this.eventQueue = this.eventQueue.filter((queued) => (
-        !("turnId" in queued) || queued.turnId !== event.turnId
-      ));
+      const sameTurn: GatewayEvent[] = [];
+      this.eventQueue = this.eventQueue.filter((queued) => {
+        if ("turnId" in queued && queued.turnId === event.turnId) {
+          sameTurn.push(queued);
+          return false;
+        }
+        return true;
+      });
       if (this.eventQueue.length === 0) this.cancelFrame();
-      this.controller.applyGatewayEvent(event);
+      this.firstAssistantTurns.delete(event.turnId);
+      this.controller.applyGatewayEvents([...sameTurn, event]);
       return;
     }
     if (!pacedGatewayEvent(event) || this.isFirstAssistantText(event)) {

@@ -513,6 +513,15 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             ) {
               params.refreshRuntimeContext();
             }
+            if (refreshAcpContext) {
+              void params.refreshSnapshot(
+                runtimeClient,
+                threadId,
+                undefined,
+                true,
+                params.viewEpochRef.current
+              );
+            }
             const scope = params.scopeRef.current;
             if (scope) {
               const epoch = params.viewEpochRef.current;

@@ -52,12 +52,12 @@ const CORE_METRICS = [
   "sendToSettledCommitMs"
 ] as const;
 const GATEWAY_METRICS = [
-  "gatewayEntryToThreadMaterializedMs",
-  "threadMaterializedToTurnStartedMs",
-  "turnStartedToAdapterMs",
+  "turnStartReceivedToAdmittedMs",
+  "turnAdmittedToAcceptedMs",
+  "turnAcceptedToAdapterMs",
   "adapterToUserEntryProjectedMs",
   "userEntryProjectedToFirstAssistantMs",
-  "firstAssistantToGatewayCompletedMs"
+  "firstAssistantToTurnCompletedMs"
 ] as const;
 const SURFACE_METRICS = [
   "assistantReceivedToControllerAppliedMs",
@@ -83,12 +83,6 @@ interface SurfaceSample extends Record<Exclude<CoreMetric, "sendToFeedbackCommit
     sequence: number;
   }>;
   firstEmitToCompletionMs: number;
-  gatewayStructure: {
-    reviewScans: number;
-    turnStarted: number;
-  };
-  gatewaySpans: Record<GatewayMetric, number>;
-  gatewayTurnId: string;
   index: number;
   mainRequestSequence: number;
   phase: SamplePhase;
@@ -100,6 +94,16 @@ interface SurfaceSample extends Record<Exclude<CoreMetric, "sendToFeedbackCommit
   sendToFeedbackCommitMs: number | null;
   sendToFirstSurfaceCommitMs: number;
   surfaceSpans: Record<SurfaceMetric, number>;
+  workbenchGateway?: GatewayTurnBreakdown;
+}
+
+interface GatewayTurnBreakdown {
+  spans: Record<GatewayMetric, number>;
+  structure: {
+    reviewScans: number;
+    turnStarted: number;
+  };
+  turnId: string;
 }
 
 interface MetricSummary {
@@ -113,7 +117,6 @@ interface SurfaceProfile {
   cold: SurfaceSample;
   samples: SurfaceSample[];
   startup: Record<string, number | string>;
-  gatewaySummary: Record<GatewayMetric, MetricSummary>;
   summary: Record<CoreMetric, MetricSummary>;
   surfaceSummary: Record<SurfaceMetric, MetricSummary>;
   traceDiagnostic: SurfaceSample;
@@ -135,19 +138,19 @@ interface ComparisonManifest {
     warmupSamples: 1;
   };
   delta: MetricDelta<CoreMetric>;
-  gatewayDelta: MetricDelta<GatewayMetric>;
   environment: {
     platform: string;
     playwrightProject: string;
   };
   error?: { message: string; name: string };
   outcome: "failed" | "passed";
-  schemaVersion: 2;
+  schemaVersion: 3;
   surfaceDelta: MetricDelta<SurfaceMetric>;
   surfaces?: {
     tui: SurfaceProfile;
     workbench: SurfaceProfile;
   };
+  workbenchGatewaySummary?: Record<GatewayMetric, MetricSummary>;
 }
 
 type MetricDelta<Metric extends string> = Record<Metric, {
@@ -201,7 +204,7 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
   const scratch = mkdtempSync(path.join(tmpdir(), "psychevo-surface-comparison-"));
   const manifestBase: Omit<
     ComparisonManifest,
-    "delta" | "gatewayDelta" | "outcome" | "surfaceDelta"
+    "delta" | "outcome" | "surfaceDelta"
   > = {
     artifacts: {
       providerEvents: relativeArtifact(artifactRoot, artifacts.providerEvents),
@@ -227,7 +230,7 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
       platform: process.platform,
       playwrightProject: testInfo.project.name
     },
-    schemaVersion: 2
+    schemaVersion: 3
   };
   let fixture: DeterministicNativeModelFixture | null = null;
   let tui: TuiPtyDriver | null = null;
@@ -257,7 +260,6 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
     const tuiProfile = await runTuiProfile({
       control: fixture.journey,
       driver: tui,
-      gatewayTracePath: artifacts.tuiGatewayTrace,
       inputReady: tuiInputReady.record,
       processStarted: tuiProcessStarted.record,
       tracePath: artifacts.tuiTrace
@@ -332,11 +334,6 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
     const manifest: ComparisonManifest = {
       ...manifestBase,
       delta,
-      gatewayDelta: compareMetricSummaries(
-        tuiProfile.gatewaySummary,
-        workbenchProfile.gatewaySummary,
-        GATEWAY_METRICS
-      ),
       outcome: "passed",
       surfaceDelta: compareMetricSummaries(
         tuiProfile.surfaceSummary,
@@ -356,7 +353,8 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
             ...startupDurations
           }
         }
-      }
+      },
+      workbenchGatewaySummary: summarizeWorkbenchGatewaySpans(workbenchProfile.samples)
     };
     writeFileSync(artifacts.report, renderReport(manifest));
     validateComparison(manifest, artifactRoot);
@@ -392,7 +390,6 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
     writeFileSync(artifacts.manifest, `${JSON.stringify({
       ...manifestBase,
       delta: emptyDelta(),
-      gatewayDelta: emptyMetricDelta(GATEWAY_METRICS),
       error: safeError,
       outcome: "failed",
       surfaceDelta: emptyMetricDelta(SURFACE_METRICS)
@@ -409,7 +406,6 @@ test("profiles the same Native journey through fullscreen TUI and Workbench", as
 async function runTuiProfile(options: {
   control: DeterministicJourneyControl;
   driver: TuiPtyDriver;
-  gatewayTracePath: string;
   inputReady: TuiTraceRecord;
   processStarted: TuiTraceRecord;
   tracePath: string;
@@ -440,7 +436,6 @@ async function runTuiProfile(options: {
   if (!cold || !warmup || !traceDiagnostic) throw new Error("TUI profile phases are incomplete");
   return {
     cold,
-    gatewaySummary: summarizeSampleSpans(samples, "gatewaySpans", GATEWAY_METRICS),
     samples,
     startup: {
       clockDomainId: options.inputReady.clockDomainId,
@@ -449,7 +444,7 @@ async function runTuiProfile(options: {
     summary: summarizeSamples(samples),
     surfaceSummary: summarizeSampleSpans(samples, "surfaceSpans", SURFACE_METRICS),
     traceDiagnostic,
-    transport: "in-process-gateway",
+    transport: "in-process-framework",
     warmup
   };
 }
@@ -457,7 +452,6 @@ async function runTuiProfile(options: {
 async function runTuiSample(options: {
   control: DeterministicJourneyControl;
   driver: TuiPtyDriver;
-  gatewayTracePath: string;
   index: number;
   mainRequestSequence: number;
   phase: SamplePhase;
@@ -483,7 +477,6 @@ async function runTuiSample(options: {
   ));
   await assertMainRequestCountSettled(options.control, options.mainRequestSequence);
   const diagnostics = tuiSampleDiagnostics(options.tracePath, options.index);
-  const gateway = gatewayTurnBreakdown(options.gatewayTracePath, options.index);
   return {
     clockDomains: {
       runner: "node:hrtime",
@@ -492,9 +485,6 @@ async function runTuiSample(options: {
     diagnostics,
     firstEmitToCompletionMs: providerDuration(firstEmit, completion),
     firstSurfaceCommitToSettledCommitMs: tuiDuration(firstVisible.record, settled.record),
-    gatewayStructure: gateway.structure,
-    gatewaySpans: gateway.spans,
-    gatewayTurnId: gateway.turnId,
     index: options.index,
     longTaskCount: 0,
     longTaskDurationMs: 0,
@@ -549,7 +539,6 @@ async function runWorkbenchProfile(options: {
   }
   return {
     cold,
-    gatewaySummary: summarizeSampleSpans(samples, "gatewaySpans", GATEWAY_METRICS),
     samples,
     startup: {},
     summary: summarizeSamples(samples),
@@ -648,9 +637,6 @@ async function runWorkbenchSample(options: {
     diagnostics: browserMarks,
     firstEmitToCompletionMs: providerDuration(firstEmit, completion),
     firstSurfaceCommitToSettledCommitMs: settled.monotonicMs - firstVisible.monotonicMs,
-    gatewayStructure: gateway.structure,
-    gatewaySpans: gateway.spans,
-    gatewayTurnId: gateway.turnId,
     index: options.index,
     longTaskCount: longTasks.length,
     longTaskDurationMs: longTasks.reduce((total, mark) => (
@@ -668,7 +654,8 @@ async function runWorkbenchSample(options: {
     sendToFirstSurfaceCommitMs: firstVisible.monotonicMs - send.monotonicMs,
     sendToRequestMs: providerMonotonicMs(request) - sendRunner.runnerMonotonicMs,
     sendToSettledCommitMs: settled.monotonicMs - send.monotonicMs,
-    surfaceSpans: workbenchSurfaceBreakdown(browserMarks)
+    surfaceSpans: workbenchSurfaceBreakdown(browserMarks),
+    workbenchGateway: gateway
   };
 }
 
@@ -824,18 +811,15 @@ function tuiSampleDiagnostics(tracePath: string, sampleIndex: number): SurfaceSa
 function gatewayTurnBreakdown(
   tracePath: string,
   turnIndex: number
-): {
-  structure: SurfaceSample["gatewayStructure"];
-  spans: Record<GatewayMetric, number>;
-  turnId: string;
-} {
+): GatewayTurnBreakdown {
   const records = readGatewayTrace(tracePath);
-  const entered = records.filter((record) => record.event === "gateway_run_turn_entered")[turnIndex];
-  if (!entered?.turnId) {
-    throw new Error(`missing Gateway turn ${turnIndex} in ${tracePath}`);
+  const received = records.filter((record) => record.event === "turn_start_received")[turnIndex];
+  const admitted = records.filter((record) => record.event === "turn_start_admitted")[turnIndex];
+  if (!received || !admitted?.turnId) {
+    throw new Error(`missing managed turn/start ${turnIndex} in ${tracePath}`);
   }
-  const turn = records.filter((record) => record.turnId === entered.turnId);
-  const materialized = requireGatewayMark(turn, "gateway_thread_materialized");
+  const turn = records.filter((record) => record.turnId === admitted.turnId);
+  const accepted = requireGatewayMark(turn, "turn_start_accepted");
   const adapter = requireGatewayMark(turn, "native_adapter_submitted");
   const turnStarted = turn.filter((record) => (
     record.event === "gateway_event_emitted" && record.eventType === "turnStarted"
@@ -865,8 +849,9 @@ function gatewayTurnBreakdown(
     throw new Error(`Gateway turn ${entered.turnId} has an incomplete prompt/output projection`);
   }
   assertOneClockDomain([
-    entered,
-    materialized,
+    received,
+    admitted,
+    accepted,
     turnStarted[0]!,
     adapter,
     promptProjected,
@@ -880,13 +865,13 @@ function gatewayTurnBreakdown(
     },
     spans: {
       adapterToUserEntryProjectedMs: gatewayDuration(adapter, promptProjected),
-      firstAssistantToGatewayCompletedMs: gatewayDuration(firstAssistant, completed),
-      gatewayEntryToThreadMaterializedMs: gatewayDuration(entered, materialized),
-      threadMaterializedToTurnStartedMs: gatewayDuration(materialized, turnStarted[0]!),
-      turnStartedToAdapterMs: gatewayDuration(turnStarted[0]!, adapter),
+      firstAssistantToTurnCompletedMs: gatewayDuration(firstAssistant, completed),
+      turnStartReceivedToAdmittedMs: gatewayDuration(received, admitted),
+      turnAdmittedToAcceptedMs: gatewayDuration(admitted, accepted),
+      turnAcceptedToAdapterMs: gatewayDuration(accepted, adapter),
       userEntryProjectedToFirstAssistantMs: gatewayDuration(promptProjected, firstAssistant),
     },
-    turnId: entered.turnId
+    turnId: admitted.turnId
   };
 }
 
@@ -969,8 +954,8 @@ function browserStartupDurations(
 function tuiSurfaceBreakdown(
   diagnostics: SurfaceSample["diagnostics"]
 ): Record<SurfaceMetric, number> {
-  const received = requireDiagnostic(diagnostics, "gateway_first_assistant_event_received");
-  const applied = requireDiagnostic(diagnostics, "gateway_first_assistant_event_applied");
+  const received = requireDiagnostic(diagnostics, "first_assistant_event_received");
+  const applied = requireDiagnostic(diagnostics, "first_assistant_event_applied");
   const visible = requireDiagnostic(diagnostics, "first_output_surface_committed");
   const completionReceived = requireDiagnostic(diagnostics, "turn_completed_received");
   const completionApplied = requireDiagnostic(diagnostics, "turn_completed_applied");
@@ -982,7 +967,7 @@ function workbenchSurfaceBreakdown(
   diagnostics: SurfaceSample["diagnostics"]
 ): Record<SurfaceMetric, number> {
   const received = requireDiagnostic(diagnostics, "gateway_first_nonempty_assistant_received");
-  const applied = requireDiagnostic(diagnostics, "controller_first_nonempty_assistant_applied");
+  const applied = requireDiagnostic(diagnostics, "client_first_nonempty_assistant_applied");
   const visible = requireDiagnostic(diagnostics, "first_output_surface_committed");
   const completionReceived = requireDiagnostic(diagnostics, "turn_completed_received");
   const completionApplied = requireDiagnostic(diagnostics, "turn_completed_applied");
@@ -1068,7 +1053,7 @@ function summarizeSamples(samples: SurfaceSample[]): Record<CoreMetric, MetricSu
 
 function summarizeSampleSpans<Metric extends GatewayMetric | SurfaceMetric>(
   samples: SurfaceSample[],
-  field: "gatewaySpans" | "surfaceSpans",
+  field: "surfaceSpans",
   metrics: readonly Metric[]
 ): Record<Metric, MetricSummary> {
   if (samples.length === 0) throw new Error("cannot summarize an empty span sample set");
@@ -1076,6 +1061,16 @@ function summarizeSampleSpans<Metric extends GatewayMetric | SurfaceMetric>(
     samples,
     metrics,
     (sample, metric) => (sample[field] as Record<Metric, number>)[metric]
+  );
+}
+
+function summarizeWorkbenchGatewaySpans(
+  samples: SurfaceSample[]
+): Record<GatewayMetric, MetricSummary> {
+  return summarizeMetricValues(
+    samples,
+    GATEWAY_METRICS,
+    (sample, metric) => sample.workbenchGateway?.spans[metric] ?? null
   );
 }
 
@@ -1146,7 +1141,7 @@ function percentile(values: number[], quantile: number): number {
 }
 
 function validateComparison(manifest: ComparisonManifest, root: string): void {
-  expect(manifest.schemaVersion).toBe(2);
+  expect(manifest.schemaVersion).toBe(3);
   if (manifest.outcome !== "passed" || !manifest.surfaces) {
     throw new Error("surface comparison did not produce both passed surfaces");
   }
@@ -1160,29 +1155,29 @@ function validateComparison(manifest: ComparisonManifest, root: string): void {
         expect(Number.isFinite(value), `${surfaceName}.${metric} must be finite`).toBe(true);
         expect(value, `${surfaceName}.${metric} must be non-negative`).toBeGreaterThanOrEqual(0);
       }
-      for (const [group, metrics] of [
-        ["gatewaySpans", GATEWAY_METRICS],
-        ["surfaceSpans", SURFACE_METRICS]
-      ] as const) {
-        for (const metric of metrics) {
-          const value = (sample[group] as Record<string, number>)[metric];
-          expect(Number.isFinite(value), `${surfaceName}.${group}.${metric} must be finite`).toBe(true);
-          expect(value, `${surfaceName}.${group}.${metric} must be non-negative`).toBeGreaterThanOrEqual(0);
-        }
+      for (const metric of SURFACE_METRICS) {
+        const value = sample.surfaceSpans[metric];
+        expect(Number.isFinite(value), `${surfaceName}.surfaceSpans.${metric} must be finite`).toBe(true);
+        expect(value, `${surfaceName}.surfaceSpans.${metric} must be non-negative`).toBeGreaterThanOrEqual(0);
       }
-      expect(sample.gatewayTurnId, `${surfaceName} sample must correlate one Gateway Turn`).not.toBe("");
-      expect(sample.gatewayStructure).toEqual({ reviewScans: 0, turnStarted: 1 });
       if (surfaceName === "workbench") {
+        expect(sample.workbenchGateway?.turnId, "Workbench sample must correlate one Gateway Turn")
+          .not.toBe("");
+        expect(sample.workbenchGateway?.structure).toEqual({ reviewScans: 0, turnStarted: 1 });
+        for (const metric of GATEWAY_METRICS) {
+          const value = sample.workbenchGateway?.spans[metric];
+          expect(Number.isFinite(value), `workbench.gatewaySpans.${metric} must be finite`).toBe(true);
+          expect(value, `workbench.gatewaySpans.${metric} must be non-negative`).toBeGreaterThanOrEqual(0);
+        }
         expect(sample.diagnostics.filter((mark) => (
           mark.id === "rpc_response_arrived"
           && mark.data.observedSampleIndex !== mark.data.originSampleIndex
         ))).toEqual([]);
+      } else {
+        expect(sample.workbenchGateway).toBeUndefined();
       }
     }
     expect(surface.summary).toEqual(summarizeSamples(surface.samples));
-    expect(surface.gatewaySummary).toEqual(
-      summarizeSampleSpans(surface.samples, "gatewaySpans", GATEWAY_METRICS)
-    );
     expect(surface.surfaceSummary).toEqual(
       summarizeSampleSpans(surface.samples, "surfaceSpans", SURFACE_METRICS)
     );
@@ -1191,11 +1186,9 @@ function validateComparison(manifest: ComparisonManifest, root: string): void {
     manifest.surfaces.tui.summary,
     manifest.surfaces.workbench.summary
   ));
-  expect(manifest.gatewayDelta).toEqual(compareMetricSummaries(
-    manifest.surfaces.tui.gatewaySummary,
-    manifest.surfaces.workbench.gatewaySummary,
-    GATEWAY_METRICS
-  ));
+  expect(manifest.workbenchGatewaySummary).toEqual(
+    summarizeWorkbenchGatewaySpans(manifest.surfaces.workbench.samples)
+  );
   expect(manifest.surfaceDelta).toEqual(compareMetricSummaries(
     manifest.surfaces.tui.surfaceSummary,
     manifest.surfaces.workbench.surfaceSummary,
@@ -1278,20 +1271,20 @@ function renderReport(manifest: ComparisonManifest): string {
     "Interpretation:",
     "",
     "- sendToRequest isolates surface admission before the shared provider boundary.",
-    "- requestToFirstSurfaceCommit includes Gateway projection, surface delivery, reconciliation, and DOM/terminal commit.",
+    "- requestToFirstSurfaceCommit includes each surface's real execution-event delivery, reconciliation, and DOM/terminal commit.",
     "- sendToFeedbackCommit measures optimistic running commit independently from model output.",
     "- Browser post-frame and Long Task observations are diagnostics, not substitutes for paint evidence.",
-    "- gatewayStructure requires one turnStarted and zero synchronous workspace review scans per turn.",
+    "- Workbench Gateway evidence requires one turnStarted and zero synchronous workspace review scans per turn.",
+    "- TUI uses the in-process Framework Client, so no synthetic Gateway lifecycle or Gateway-minus-Framework delta is reported.",
     "- Detailed content-free marks remain in the JSONL and manifest diagnostics.",
     ""
   );
-  appendComparisonTable(
+  appendSummaryTable(
     lines,
-    "Shared Gateway/runtime stages",
+    "Workbench Gateway/runtime stages",
     GATEWAY_METRICS,
-    manifest.surfaces.tui.gatewaySummary,
-    manifest.surfaces.workbench.gatewaySummary,
-    manifest.gatewayDelta
+    manifest.workbenchGatewaySummary
+      ?? summarizeWorkbenchGatewaySpans(manifest.surfaces.workbench.samples)
   );
   appendComparisonTable(
     lines,
@@ -1367,6 +1360,26 @@ function appendComparisonTable<Metric extends string>(
     const delta = deltaSummary[metric];
     lines.push(
       `| ${metric} | ${formatMs(tui.p50)} | ${formatMs(workbench.p50)} | ${formatMs(delta.p50Ms)} | ${formatRatio(delta.ratioP50)} | ${formatMs(tui.p95)} | ${formatMs(workbench.p95)} |`
+    );
+  }
+  lines.push("");
+}
+
+function appendSummaryTable<Metric extends string>(
+  lines: string[],
+  title: string,
+  metrics: readonly Metric[],
+  summary: Record<Metric, MetricSummary>
+): void {
+  lines.push(
+    `## ${title}`,
+    "",
+    "| Metric | p50 | p95 |",
+    "|---|---:|---:|"
+  );
+  for (const metric of metrics) {
+    lines.push(
+      `| ${metric} | ${formatMs(summary[metric].p50)} | ${formatMs(summary[metric].p95)} |`
     );
   }
   lines.push("");

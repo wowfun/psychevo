@@ -106,7 +106,11 @@ export function applyLiveTranscriptEvent(
           )
         : committedEntries.length > 0
           ? mergeCommittedEntries(snapshot, event.turnId, committedEntries)
-          : removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId);
+          : finalizePendingEntriesForTurn(
+              removeEmptyLiveOverlayForTurn(snapshot.entries, event.turnId),
+              event.turnId,
+              "completed"
+            );
       return {
         ...snapshot,
         thread: threadForTurn(snapshot, terminalThreadId),
@@ -420,7 +424,7 @@ function mergeTerminalCommittedEntries(
 function finalizePendingEntriesForTurn(
   entries: TranscriptEntry[],
   turnId: string,
-  status: "failed" | "cancelled"
+  status: "completed" | "failed" | "cancelled"
 ): TranscriptEntry[] {
   return sortTranscriptEntries(entries.map((entry) => {
     if (entry.turnId !== turnId) {

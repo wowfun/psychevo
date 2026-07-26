@@ -199,7 +199,7 @@ test.describe("Native and ACP Agent application-path validation", () => {
       expect(
         opencodeContext.capabilities.find((capability) => capability.id === "opencode.sessionFork")
           ?.unavailableReason
-      ).toMatch(/ThreadApplication does not expose/i);
+      ).toMatch(/does not expose `opencode\.sessionFork`/i);
       expectCapability(opencodeContext, "direct.steer", false);
       expect(opencodeContext.selectedTargetId).toBe(opencodeTarget.targetId);
       await capture(page, testInfo, screenshots, "opencode-acp-common-controls");

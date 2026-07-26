@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { startPevoWeb } from "./harness";
@@ -178,6 +178,7 @@ test.describe("Native and ACP Agent application visual contract", () => {
     const fixture = prepareDeterministicAcpAgent("codex", screenshotDir, "active_next_control");
     const server = await startPevoWeb({ configAppend: fixture.configAppend, live: false });
     const websocketFrames = captureWebSocketFrames(page);
+    let failed = false;
     try {
       await page.goto(server.url);
       const target = targetByIdentity(
@@ -266,7 +267,11 @@ test.describe("Native and ACP Agent application visual contract", () => {
         }, null, 2)
       );
       await capture(page, testInfo, "next-turn-model-observed");
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
+      preserveFailedGatewayRoot(server.root, failed, testInfo, "active-turn-next-control");
       writeFileSync(
         path.join(screenshotDir, `active-turn-rpc-${testInfo.project.name}.json`),
         JSON.stringify(rpcFrameProof(websocketFrames), null, 2)
@@ -828,6 +833,13 @@ async function waitForPendingInteraction(
     return interaction?.actionId ?? null;
   }, { timeout: 30_000 }).not.toBeNull();
   return interaction as { actionId: string; kind: string };
+}
+
+function preserveFailedGatewayRoot(root: string, failed: boolean, testInfo: TestInfo, check: string) {
+  if (!failed || !existsSync(root)) return;
+  cpSync(root, path.join(screenshotDir, `${check}-gateway-root-${testInfo.project.name}`), {
+    recursive: true
+  });
 }
 
 async function respondToInteraction(

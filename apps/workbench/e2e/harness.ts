@@ -9,6 +9,7 @@ const testRoot = path.join(repoRoot, ".local/playwright");
 export interface PevoWebServer {
   dbPath: string;
   env: NodeJS.ProcessEnv;
+  logPath: string;
   root: string;
   url: string;
   cwd: string;
@@ -96,6 +97,7 @@ export async function startPevoWeb({
   return {
     dbPath,
     env,
+    logPath: path.join(home, "gateway", "server.log"),
     root,
     url,
     cwd: resolvedCwd,

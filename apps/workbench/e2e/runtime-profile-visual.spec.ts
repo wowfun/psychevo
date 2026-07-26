@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { startPevoWeb } from "./harness";
@@ -45,6 +45,7 @@ test.describe("ACP Runtime Profile targeted visual contract", () => {
     mkdirSync(screenshotDir, { recursive: true });
     const fixture = prepareDeterministicAcpAgent("opencode", screenshotDir);
     const server = await startPevoWeb({ configAppend: fixture.configAppend, live: false });
+    let failed = false;
     try {
       await page.goto(server.url);
       await selectRuntime(page, fixture.profileLabel);
@@ -68,7 +69,11 @@ test.describe("ACP Runtime Profile targeted visual contract", () => {
       await expect(detail.getByRole("button", { name: "Revert", exact: true })).toHaveCount(0);
       await expect(detail.getByRole("button", { name: /auth|login|repair/i })).toHaveCount(0);
       await capture(page, testInfo, "acp-unsupported-direct-actions");
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
+      preserveFailedGatewayRoot(server.root, failed, testInfo, "opencode-standard-events");
       await server.stop();
     }
   });
@@ -114,5 +119,12 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({
     fullPage: true,
     path: path.join(screenshotDir, `${name}-${testInfo.project.name}.png`)
+  });
+}
+
+function preserveFailedGatewayRoot(root: string, failed: boolean, testInfo: TestInfo, check: string) {
+  if (!failed || !existsSync(root)) return;
+  cpSync(root, path.join(screenshotDir, `${check}-gateway-root-${testInfo.project.name}`), {
+    recursive: true
   });
 }

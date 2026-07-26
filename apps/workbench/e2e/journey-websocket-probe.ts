@@ -184,6 +184,32 @@ export async function installJourneyWebSocketProbe(
           ));
       });
     }
+    function entryProjectionFacts(entry: Record<string, unknown> | null): Record<string, unknown> {
+      if (entry?.role !== "assistant" || !Array.isArray(entry.blocks)) {
+        return { assistantChars: 0, blockStatuses: [], entryMetadataKeys: [], streamSeq: null };
+      }
+      let assistantChars = 0;
+      const blockStatuses: string[] = [];
+      for (const value of entry.blocks) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+        const block = value as Record<string, unknown>;
+        if (block.kind === "text" && typeof block.body === "string") {
+          assistantChars += block.body.length;
+        }
+        if (typeof block.status === "string") {
+          blockStatuses.push(block.status);
+        }
+      }
+      const metadata = entry.metadata && typeof entry.metadata === "object" && !Array.isArray(entry.metadata)
+        ? entry.metadata as Record<string, unknown>
+        : null;
+      return {
+        assistantChars,
+        blockStatuses,
+        entryMetadataKeys: metadata ? Object.keys(metadata).sort() : [],
+        streamSeq: typeof metadata?.streamSeq === "number" ? metadata.streamSeq : null
+      };
+    }
     function inspectPaintedState(): void {
       const shell = document.querySelector(".appShell");
       const composer = document.querySelector<HTMLTextAreaElement>('.pevo-composer textarea');
@@ -330,6 +356,8 @@ export async function installJourneyWebSocketProbe(
             listener.handleEvent(event);
           }
         };
+        let firstAssistantApplied = false;
+        let turnCompletedApplied = false;
 
         if (message?.method === "gateway/event" && eventType) {
           const eventTurnId = typeof params?.turnId === "string" ? params.turnId : null;
@@ -349,7 +377,11 @@ export async function installJourneyWebSocketProbe(
             && (eventType === "entryStarted" || eventType === "entryUpdated" || eventType === "entryCompleted")
           ) {
             const hasVisibleAssistantText = entryHasNonEmptyAssistantText(entry);
-            record("gateway_assistant_event_received", { eventType, hasVisibleAssistantText });
+            record("gateway_assistant_event_received", {
+              eventType,
+              hasVisibleAssistantText,
+              ...entryProjectionFacts(entry)
+            });
             if (
               hasVisibleAssistantText
               && eventTurnId
@@ -357,10 +389,12 @@ export async function installJourneyWebSocketProbe(
             ) {
               firstNonEmptyAssistantTurns.add(eventTurnId);
               record("gateway_first_nonempty_assistant_received", { eventType });
+              firstAssistantApplied = true;
             }
           }
           if (eventType === "turnCompleted") {
             record("turn_completed_received", { transport: "websocket" });
+            turnCompletedApplied = true;
           }
         }
         if (requestId) {
@@ -384,6 +418,12 @@ export async function installJourneyWebSocketProbe(
           return;
         }
         deliver();
+        if (firstAssistantApplied) {
+          record("client_first_nonempty_assistant_applied");
+        }
+        if (turnCompletedApplied) {
+          record("turn_completed_applied");
+        }
       };
       Reflect.apply(originalAddEventListener, this, [type, wrapped, options]);
     } as typeof WebSocket.prototype.addEventListener;

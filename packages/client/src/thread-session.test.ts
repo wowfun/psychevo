@@ -172,7 +172,7 @@ describe("ThreadSession", () => {
     });
   });
 
-  it("applies first assistant output immediately and prevents terminal overtaking", async () => {
+  it("applies first assistant output immediately and flushes later output before terminal", async () => {
     vi.useFakeTimers();
     const client = new FakeThreadSessionClient();
     const session = readySession(client, runningSnapshot());
@@ -199,7 +199,7 @@ describe("ThreadSession", () => {
     await vi.runAllTimersAsync();
 
     expect(session.getSnapshot()?.activity.running).toBe(false);
-    expect(session.getSnapshot()?.entries.at(-1)?.blocks[0]?.body).toBe("first");
+    expect(session.getSnapshot()?.entries.at(-1)?.blocks[0]?.body).toBe("second");
     vi.useRealTimers();
   });
 });
