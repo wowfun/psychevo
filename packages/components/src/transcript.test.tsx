@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 import { TranscriptPanel } from "./transcript";
@@ -550,6 +550,22 @@ describe("TranscriptPanel evidence titles", () => {
 });
 
 describe("TranscriptPanel externally owned history", () => {
+  it("offers cursor-driven loading for earlier messages", () => {
+    const onLoadOlderHistory = vi.fn();
+    render(
+      <TranscriptPanel
+        entries={[scrollEntry("thread-a")]}
+        history={{ owner: "psychevo", fidelity: "full", cursor: "message:100", hint: null }}
+        onLoadOlderHistory={onLoadOlderHistory}
+        threadId="thread-a"
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+
+    expect(onLoadOlderHistory).toHaveBeenCalledOnce();
+  });
+
   it("keeps a retained earlier-turn live answer before a later detached optimistic prompt", () => {
     const firstQuestion: TranscriptEntry = {
       ...transcriptEntry([transcriptBlock({
@@ -1130,6 +1146,105 @@ describe("TranscriptPanel session scroll behavior", () => {
     expect(scrollToMock).toHaveBeenLastCalledWith({ top: 1200, behavior: "auto" });
     expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
   });
+
+  it("windows a long dynamic-height transcript and moves the mounted range on scroll", async () => {
+    const entries = Array.from({ length: 120 }, (_, index) => ({
+      ...scrollEntry("thread-a", `entry-${index + 1}`),
+      messageSeq: index + 1
+    }));
+    const { container } = render(<TranscriptPanel entries={entries} threadId="thread-a" />);
+    const scroller = transcriptScroller(container);
+
+    await waitFor(() => {
+      expect(container.querySelector(".pevo-virtualTranscript")?.getAttribute("data-virtualized"))
+        .toBe("true");
+    });
+    const initialRows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-transcript-entry-id]")
+    );
+    expect(initialRows.length).toBeGreaterThan(0);
+    expect(initialRows.length).toBeLessThan(30);
+    const initialIds = initialRows.map((row) => row.dataset.transcriptEntryId);
+
+    setScrollTop(scroller, 8_000);
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const nextIds = Array.from(
+        container.querySelectorAll<HTMLElement>("[data-transcript-entry-id]")
+      ).map((row) => row.dataset.transcriptEntryId);
+      expect(nextIds).not.toEqual(initialIds);
+      expect(nextIds.length).toBeLessThan(30);
+    });
+  });
+
+  it("compensates an above-viewport row resize exactly once", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    const heights = new Map<string, number>();
+    const resize = new Map<Element, () => void>();
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe = (target: Element) => {
+        resize.set(target, () => this.callback([], this as unknown as ResizeObserver));
+      };
+      unobserve = (target: Element) => resize.delete(target);
+      disconnect = () => {};
+    }
+    globalThis.ResizeObserver = TestResizeObserver as unknown as typeof ResizeObserver;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      const id = this.dataset.transcriptEntryId ?? "";
+      const height = heights.get(id) ?? 132;
+      return {
+        bottom: height,
+        height,
+        left: 0,
+        right: 0,
+        top: 0,
+        width: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({})
+      } as DOMRect;
+    };
+    try {
+      const entries = Array.from({ length: 60 }, (_, index) => ({
+        ...scrollEntry("thread-a", `entry-${index + 1}`),
+        messageSeq: index + 1
+      }));
+      const { container } = render(
+        <TranscriptPanel entries={entries} threadId="thread-a" />
+      );
+      const scroller = transcriptScroller(container);
+      setScrollTop(scroller, 1_200);
+      fireEvent.scroll(scroller);
+      const row = await waitFor(() => {
+        const candidate = Array.from(
+          container.querySelectorAll<HTMLElement>("[data-transcript-entry-id]")
+        ).find((element) => Number(element.dataset.transcriptEntryId?.split("-")[1]) <= 8);
+        expect(candidate).toBeTruthy();
+        return candidate!;
+      });
+      const id = row.dataset.transcriptEntryId!;
+      heights.set(id, 142);
+      await act(async () => {
+        resize.get(row)?.();
+      });
+      setScrollTop(scroller, 1_200);
+      fireEvent.scroll(scroller);
+      heights.set(id, 172);
+
+      await act(async () => {
+        resize.get(row)?.();
+      });
+
+      expect(scroller.scrollTop).toBe(1_230);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+    }
+  });
+
 });
 
 function scrollEntry(threadId: string, id = `entry-${threadId}`): TranscriptEntry {

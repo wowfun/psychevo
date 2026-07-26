@@ -29,7 +29,10 @@ export function createVisualFloatingRuntime(): FloatingRuntime {
     async connectGateway() {
       const client = new GatewayClient(new VisualGatewayTransport());
       await client.connect();
-      return client;
+      return {
+        client,
+        dispose: () => client.close()
+      };
     },
     async initialActivation() {
       return visualActivation("initial");

@@ -366,12 +366,12 @@ export function WorkspaceFileSurface({
     }
     const controller = new AbortController();
     let disposed = false;
-    const kind = previewKind(lease.path, lease.content);
+    const kind = previewKind(lease.path, lease.content ?? null);
     const wholeFileLimit = kind === "excalidraw"
       ? EXCALIDRAW_LIMIT_BYTES
       : WHOLE_FILE_LIMIT_BYTES;
 
-    if (requiresWholeFile(kind) && lease.sizeBytes > wholeFileLimit) {
+    if (requiresWholeFile(kind) && (lease.sizeBytes ?? 0) > wholeFileLimit) {
       setFailure(kind === "excalidraw"
         ? "Excalidraw preview is limited to 5 MiB."
         : "Preview requires the whole file and is limited to 32 MiB.");
@@ -1375,11 +1375,11 @@ async function materializePreview({
       return {
         kind: "vendor",
         mediaType: lease.mediaType,
-        size: lease.sizeBytes,
+        size: lease.sizeBytes ?? 0,
         url: resourceUrl
       };
     case "vendor-blob": {
-      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes, WHOLE_FILE_LIMIT_BYTES, signal, onProgress);
+      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes ?? 0, WHOLE_FILE_LIMIT_BYTES, signal, onProgress);
       const extension = extensionForPath(lease.path);
       const safeBytes = HEIC_EXTENSIONS.has(extension)
         ? bytes
@@ -1398,7 +1398,7 @@ async function materializePreview({
       };
     }
     case "table": {
-      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes, WHOLE_FILE_LIMIT_BYTES, signal, onProgress);
+      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes ?? 0, WHOLE_FILE_LIMIT_BYTES, signal, onProgress);
       const delimiter = extensionForPath(lease.path) === "tsv" ? "\t" : ",";
       const result = await import("./workspace-file-parse").then(({ runWorkspaceFileParseTask }) => (
         runWorkspaceFileParseTask({ bytes, delimiter, kind: "table" }, signal)
@@ -1412,14 +1412,14 @@ async function materializePreview({
       };
     }
     case "zip": {
-      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes, WHOLE_FILE_LIMIT_BYTES, signal, onProgress);
+      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes ?? 0, WHOLE_FILE_LIMIT_BYTES, signal, onProgress);
       const result = await import("./workspace-file-parse").then(({ runWorkspaceFileParseTask }) => (
         runWorkspaceFileParseTask({ bytes, kind: "zip" }, signal)
       ));
       return { kind: "zip", entries: result.entries };
     }
     case "excalidraw": {
-      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes, EXCALIDRAW_LIMIT_BYTES, signal, onProgress);
+      const bytes = await readPreviewBytes(resourceUrl, lease.sizeBytes ?? 0, EXCALIDRAW_LIMIT_BYTES, signal, onProgress);
       const result = await import("./workspace-file-parse").then(({ runWorkspaceFileParseTask }) => (
         runWorkspaceFileParseTask({ bytes, kind: "excalidraw" }, signal)
       ));

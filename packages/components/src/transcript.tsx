@@ -1,5 +1,5 @@
 import { ArrowDownToLine, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, GitFork, Image as ImageIcon, Maximize2, Pencil, Volume2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import {
   sideInheritedMetadataHidden,
   type GatewayActivity,
@@ -31,10 +31,12 @@ export interface TranscriptPanelProps {
   history?: TranscriptHistoryView | null | undefined;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onForkUserMessage?: ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
+  onLoadOlderHistory?: (() => void | Promise<void>) | undefined;
   onReadUserMessageDraft?: ((entry: TranscriptEntry) => Promise<ThreadHistoryDraftReadResult>) | undefined;
   onUpdateUserMessage?: ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
   onOpenAgentSession?: ((session: TranscriptAgentSession) => void) | undefined;
   onReadAloudText?: ((text: string) => void | Promise<void>) | undefined;
+  olderHistoryLoading?: boolean | undefined;
   threadId?: string | null;
   workspaceFileLinks?: WorkspaceFileLinkContext;
 }
@@ -50,6 +52,9 @@ type MutateUserMessageHandler = ((entry: TranscriptEntry, draft: ThreadEditableD
 const ACTIVITY_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const BOTTOM_THRESHOLD_PX = 48;
 const TRANSCRIPT_SCROLL_MEMORY_LIMIT = 64;
+const TRANSCRIPT_VIRTUAL_ESTIMATE_PX = 132;
+const TRANSCRIPT_VIRTUAL_MIN_ENTRIES = 40;
+const TRANSCRIPT_VIRTUAL_OVERSCAN_PX = 720;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type TranscriptScrollMemory = {
@@ -57,7 +62,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, history, onCopyText, onForkUserMessage, onOpenAgentSession, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, threadId, workspaceFileLinks }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, history, onCopyText, onForkUserMessage, onLoadOlderHistory, onOpenAgentSession, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, olderHistoryLoading = false, threadId, workspaceFileLinks }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -68,6 +73,7 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
   const orderedEntries = useMemo(() => orderTranscriptEntries(entries), [entries]);
   const visibleEntries = useMemo(() => visibleTranscriptEntries(orderedEntries), [orderedEntries]);
   const threadKey = useMemo(() => transcriptThreadKey(threadId, visibleEntries), [threadId, visibleEntries]);
+  const virtualTranscript = useVirtualTranscript(visibleEntries, scrollRef);
   const hasRunningActivityBlock = useMemo(
     () => visibleEntries.some((entry) => visibleBlocks(entry).some(isRunningActivityBlock)),
     [visibleEntries]
@@ -92,6 +98,7 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
       scrollTranscript(scroller, top);
       updateFollowingBottom(atBottom);
       rememberCurrentTranscriptScroll(scrollMemoryRef.current, threadKey, top, atBottom);
+      virtualTranscript.syncViewport(scroller);
       return;
     }
     if (!followingBottom) {
@@ -99,7 +106,8 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
     }
     scrollTranscript(scroller, scroller.scrollHeight);
     rememberCurrentTranscriptScroll(scrollMemoryRef.current, threadKey, scroller.scrollHeight, true);
-  }, [followingBottom, threadKey, visibleEntries, activity?.running]);
+    virtualTranscript.syncViewport(scroller);
+  }, [followingBottom, threadKey, visibleEntries, activity?.running, virtualTranscript.syncViewport]);
 
   useEffect(() => () => {
     if (scrollIdleTimer.current !== null) {
@@ -123,6 +131,7 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
         onScroll={(event) => {
           const target = event.currentTarget;
           const atBottom = transcriptAtBottom(target);
+          virtualTranscript.syncViewport(target);
           updateFollowingBottom(atBottom);
           rememberCurrentTranscriptScroll(scrollMemoryRef.current, activeThreadKeyRef.current ?? threadKey, target.scrollTop, atBottom);
           setScrolling(true);
@@ -135,24 +144,45 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
           }, 900);
         }}
       >
+        {history?.cursor && onLoadOlderHistory && (
+          <div className="pevo-transcriptLoadEarlier">
+            <ActionButton
+              onClick={() => void onLoadOlderHistory()}
+              pending={olderHistoryLoading}
+              size="compact"
+              variant="ghost"
+            >
+              Load earlier messages
+            </ActionButton>
+          </div>
+        )}
         {historyFidelityNotice(history)}
         {visibleEntries.length === 0 ? (
           <div className="pevo-empty pevo-emptyThread">No messages yet</div>
         ) : (
-          visibleEntries.map((entry) => (
-            <TranscriptEntryView
-              activityTick={activityTick}
-              entry={entry}
-              key={entry.id}
-              onCopyText={onCopyText}
-              onForkUserMessage={onForkUserMessage}
-              onOpenAgentSession={onOpenAgentSession}
-              onReadAloudText={onReadAloudText}
-              onReadUserMessageDraft={onReadUserMessageDraft}
-              onUpdateUserMessage={onUpdateUserMessage}
-              workspaceFileLinks={workspaceFileLinks}
-            />
-          ))
+          <div className="pevo-virtualTranscript" data-virtualized={virtualTranscript.virtualized || undefined}>
+            {virtualTranscript.topSpacerPx > 0 && (
+              <div aria-hidden className="pevo-transcriptSpacer" style={{ height: virtualTranscript.topSpacerPx }} />
+            )}
+            {visibleEntries.slice(virtualTranscript.startIndex, virtualTranscript.endIndex).map((entry) => (
+              <MeasuredTranscriptEntry
+                activityTick={activityTick}
+                entry={entry}
+                key={entry.id}
+                onCopyText={onCopyText}
+                onForkUserMessage={onForkUserMessage}
+                onMeasure={virtualTranscript.measureEntry}
+                onOpenAgentSession={onOpenAgentSession}
+                onReadAloudText={onReadAloudText}
+                onReadUserMessageDraft={onReadUserMessageDraft}
+                onUpdateUserMessage={onUpdateUserMessage}
+                workspaceFileLinks={workspaceFileLinks}
+              />
+            ))}
+            {virtualTranscript.bottomSpacerPx > 0 && (
+              <div aria-hidden className="pevo-transcriptSpacer" style={{ height: virtualTranscript.bottomSpacerPx }} />
+            )}
+          </div>
         )}
       </div>
       {!followingBottom && (
@@ -166,6 +196,7 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
             if (scroller) {
               scrollTranscript(scroller, scroller.scrollHeight);
               rememberCurrentTranscriptScroll(scrollMemoryRef.current, activeThreadKeyRef.current ?? threadKey, scroller.scrollHeight, true);
+              virtualTranscript.syncViewport(scroller);
             }
             updateFollowingBottom(true);
           }}
@@ -173,6 +204,195 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
         />
       )}
     </section>
+  );
+}
+
+type VirtualTranscriptWindow = {
+  bottomSpacerPx: number;
+  endIndex: number;
+  measureEntry(entryId: string, height: number): void;
+  startIndex: number;
+  syncViewport(scroller: HTMLElement): void;
+  topSpacerPx: number;
+  virtualized: boolean;
+};
+
+function useVirtualTranscript(
+  entries: TranscriptEntry[],
+  scrollRef: RefObject<HTMLDivElement | null>
+): VirtualTranscriptWindow {
+  const heightsRef = useRef(new Map<string, number>());
+  const previousLayoutRef = useRef<{
+    entryIds: string[];
+    offsets: number[];
+    scrollTop: number;
+  } | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [viewport, setViewport] = useState({ height: 0, top: 0 });
+  const entryIds = entries.map((entry) => entry.id);
+  const offsets = [0];
+  for (const entryId of entryIds) {
+    offsets.push(
+      (offsets[offsets.length - 1] ?? 0)
+      + (heightsRef.current.get(entryId) ?? TRANSCRIPT_VIRTUAL_ESTIMATE_PX)
+    );
+  }
+
+  const syncViewport = useMemo(() => (scroller: HTMLElement) => {
+    const next = {
+      height: scroller.clientHeight,
+      top: scroller.scrollTop
+    };
+    setViewport((current) => (
+      current.height === next.height && current.top === next.top ? current : next
+    ));
+  }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    syncViewport(scroller);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => syncViewport(scroller));
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [scrollRef, syncViewport]);
+
+  useIsomorphicLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    const previous = previousLayoutRef.current;
+    if (scroller && previous && previous.entryIds.length > 0 && entryIds.length > 0) {
+      const previousAnchorIndex = virtualIndexAtOffset(previous.offsets, previous.scrollTop);
+      const anchorId = previous.entryIds[previousAnchorIndex];
+      const nextAnchorIndex = anchorId ? entryIds.indexOf(anchorId) : -1;
+      if (nextAnchorIndex >= 0) {
+        const previousAnchorOffset = previous.offsets[previousAnchorIndex] ?? 0;
+        const nextAnchorOffset = offsets[nextAnchorIndex] ?? 0;
+        const delta = nextAnchorOffset - previousAnchorOffset;
+        if (delta !== 0) {
+          scroller.scrollTop += delta;
+          syncViewport(scroller);
+        }
+      }
+    }
+    previousLayoutRef.current = {
+      entryIds,
+      offsets,
+      scrollTop: scroller?.scrollTop ?? viewport.top
+    };
+  }, [entryIds.join("\u0000"), offsets[offsets.length - 1], revision, scrollRef, syncViewport]);
+
+  const measureEntry = useMemo(() => (entryId: string, height: number) => {
+    if (!Number.isFinite(height) || height <= 0) return;
+    const previousHeight = heightsRef.current.get(entryId) ?? TRANSCRIPT_VIRTUAL_ESTIMATE_PX;
+    if (Math.abs(previousHeight - height) < 0.5) return;
+    const scroller = scrollRef.current;
+    heightsRef.current.set(entryId, height);
+    setRevision((value) => value + 1);
+    if (scroller) syncViewport(scroller);
+  }, [scrollRef, syncViewport]);
+
+  const virtualized = entries.length >= TRANSCRIPT_VIRTUAL_MIN_ENTRIES && viewport.height > 0;
+  if (!virtualized) {
+    return {
+      bottomSpacerPx: 0,
+      endIndex: entries.length,
+      measureEntry,
+      startIndex: 0,
+      syncViewport,
+      topSpacerPx: 0,
+      virtualized: false
+    };
+  }
+
+  const rangeStart = Math.max(0, viewport.top - TRANSCRIPT_VIRTUAL_OVERSCAN_PX);
+  const rangeEnd = viewport.top + viewport.height + TRANSCRIPT_VIRTUAL_OVERSCAN_PX;
+  let startIndex = virtualIndexAtOffset(offsets, rangeStart);
+  let endIndex = Math.min(entries.length, virtualIndexAtOffset(offsets, rangeEnd) + 1);
+  const focusedEntry = typeof document === "undefined"
+    ? null
+    : document.activeElement?.closest<HTMLElement>("[data-transcript-entry-id]")
+      ?.dataset.transcriptEntryId ?? null;
+  if (focusedEntry) {
+    const focusedIndex = entryIds.indexOf(focusedEntry);
+    if (focusedIndex >= 0) {
+      startIndex = Math.min(startIndex, focusedIndex);
+      endIndex = Math.max(endIndex, focusedIndex + 1);
+    }
+  }
+  return {
+    bottomSpacerPx: Math.max(0, (offsets[entries.length] ?? 0) - (offsets[endIndex] ?? 0)),
+    endIndex,
+    measureEntry,
+    startIndex,
+    syncViewport,
+    topSpacerPx: offsets[startIndex] ?? 0,
+    virtualized: true
+  };
+}
+
+function virtualIndexAtOffset(offsets: number[], target: number): number {
+  let low = 0;
+  let high = Math.max(0, offsets.length - 2);
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((offsets[middle + 1] ?? Number.POSITIVE_INFINITY) <= target) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function MeasuredTranscriptEntry({
+  activityTick,
+  entry,
+  onCopyText,
+  onForkUserMessage,
+  onMeasure,
+  onOpenAgentSession,
+  onReadAloudText,
+  onReadUserMessageDraft,
+  onUpdateUserMessage,
+  workspaceFileLinks
+}: {
+  activityTick: number;
+  entry: TranscriptEntry;
+  onCopyText: CopyTextHandler;
+  onForkUserMessage: MutateUserMessageHandler;
+  onMeasure(entryId: string, height: number): void;
+  onOpenAgentSession: OpenAgentSessionHandler;
+  onReadAloudText: ReadAloudTextHandler;
+  onReadUserMessageDraft: ReadUserMessageDraftHandler;
+  onUpdateUserMessage: MutateUserMessageHandler;
+  workspaceFileLinks: WorkspaceFileLinkContext | undefined;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => onMeasure(entry.id, element.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [entry.id, onMeasure]);
+  return (
+    <div className="pevo-transcriptEntry" data-transcript-entry-id={entry.id} ref={ref}>
+      <TranscriptEntryView
+        activityTick={activityTick}
+        entry={entry}
+        onCopyText={onCopyText}
+        onForkUserMessage={onForkUserMessage}
+        onOpenAgentSession={onOpenAgentSession}
+        onReadAloudText={onReadAloudText}
+        onReadUserMessageDraft={onReadUserMessageDraft}
+        onUpdateUserMessage={onUpdateUserMessage}
+        workspaceFileLinks={workspaceFileLinks}
+      />
+    </div>
   );
 }
 
@@ -262,15 +482,17 @@ function rememberCurrentTranscriptScroll(
 
 function orderTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
   return [...entries].sort((left, right) => {
-    if (left.messageSeq !== null && right.messageSeq !== null && left.messageSeq !== right.messageSeq) {
-      return left.messageSeq - right.messageSeq;
+    const leftMessageSeq = left.messageSeq ?? null;
+    const rightMessageSeq = right.messageSeq ?? null;
+    if (leftMessageSeq !== null && rightMessageSeq !== null && leftMessageSeq !== rightMessageSeq) {
+      return leftMessageSeq - rightMessageSeq;
     }
-    if (left.messageSeq !== right.messageSeq) {
+    if (leftMessageSeq !== rightMessageSeq) {
       const timelineComparison = compareTimelineMs(left, right);
       if (timelineComparison !== 0) {
         return timelineComparison;
       }
-      return left.messageSeq !== null ? -1 : 1;
+      return leftMessageSeq !== null ? -1 : 1;
     }
     const sameTurn = Boolean(left.turnId) && left.turnId === right.turnId;
     if (sameTurn) {
@@ -1206,7 +1428,7 @@ function HistoryMessageEditor({
   onFork(draft: ThreadEditableDraft): void | Promise<void>;
   onUpdate(draft: ThreadEditableDraft): void | Promise<void>;
 }) {
-  const [parts, setParts] = useState(() => draft.parts.map((part) => ({ ...part })));
+  const [parts, setParts] = useState(() => (draft.parts ?? []).map((part) => ({ ...part })));
   const [pending, setPending] = useState<"update" | "fork" | null>(null);
   const hasPayload = parts.some((part) => part.type === "image" || part.text.trim());
   async function commit(kind: "update" | "fork") {

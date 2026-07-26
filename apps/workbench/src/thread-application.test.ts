@@ -21,20 +21,20 @@ const scope = {
 
 describe("Workbench Thread Application boundary", () => {
   it("reads opaque history pages and replaces bootstrap entries", async () => {
-    const first = entry("entry-1", "first");
-    const second = entry("entry-2", "second");
+    const older = entry("entry-1", "first");
+    const latest = entry("entry-2", "second");
     const request = vi.fn(async (_method: string, params: { cursor?: string | null }) => (
       params.cursor
         ? {
             threadId: "thread-1",
             history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
-            entries: [second],
+            entries: [older],
             nextCursor: null
           }
         : {
             threadId: "thread-1",
             history: { owner: "psychevo", fidelity: "full", cursor: "entry-1", hint: null },
-            entries: [first],
+            entries: [latest],
             nextCursor: "entry-1"
           }
     ));

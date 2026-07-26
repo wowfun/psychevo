@@ -4,7 +4,7 @@ import { LocalHostStorage, capabilityFailure, unsupported, type GatewayEndpoint,
 import type { WorkbenchRuntime } from "@psychevo/workbench/runtime";
 import {
   desktopFallbackCwd,
-  desktopGatewayClient,
+  desktopGatewayConnection,
   desktopGatewayEndpoint,
   downloadSessionArtifact,
   type DesktopDownloadSessionResult,
@@ -48,8 +48,10 @@ export async function createDesktopWorkbenchRuntime(connectionId: string): Promi
     desktopGatewayEndpoint(),
     desktopFallbackCwd()
   ]);
+  const connection = desktopGatewayConnection(connectionId);
   return {
-    client: desktopGatewayClient(connectionId),
+    client: connection.client,
+    dispose: connection.dispose,
     endpoint,
     fallbackCwd,
     host: createDesktopHost(endpoint),
@@ -70,9 +72,14 @@ export function createDesktopFloatingRuntime(connectionId: string): FloatingRunt
       return floatingCaptureSelection();
     },
     async connectGateway() {
-      const client = desktopGatewayClient(connectionId);
-      await client.connect();
-      return client;
+      const connection = desktopGatewayConnection(connectionId);
+      try {
+        await connection.client.connect();
+        return connection;
+      } catch (error) {
+        await connection.dispose();
+        throw error;
+      }
     },
     async initialActivation() {
       return floatingInitialActivation();
@@ -98,7 +105,7 @@ export function createDesktopFloatingRuntime(connectionId: string): FloatingRunt
           : discovery;
         session.setContext(context);
         const controls = session.turnControls(context.selectedTargetId ?? "", Object.fromEntries(
-          context.controls.flatMap((control) => (
+          (context.controls ?? []).flatMap((control) => (
             control.effectiveValue == null ? [] : [[control.id, control.effectiveValue]]
           ))
         ));

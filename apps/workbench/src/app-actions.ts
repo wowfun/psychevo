@@ -139,7 +139,7 @@ type AppActionsParams = {
   setRuntimeOptionsError: Dispatch<SetStateAction<string | null>>;
   setRuntimeOptionsLoading: Dispatch<SetStateAction<boolean>>;
   setWorkspaceBranch: Dispatch<SetStateAction<string | null | undefined>>;
-  setRuntimeContext: Dispatch<SetStateAction<ThreadContextReadResult | null>>;
+  setRuntimeContext(value: ThreadContextReadResult | null): void;
   setRuntimeContextTargetId: Dispatch<SetStateAction<string>>;
   setSelectedTargetId: Dispatch<SetStateAction<string>>;
   setSnapshot: Dispatch<SetStateAction<ThreadSnapshot>>;
@@ -231,7 +231,6 @@ export function createAppActions(params: AppActionsParams) {
       params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
       params.setSnapshot(normalized);
       params.setDraftSession(createHistoryDraftSession(epoch, nextScope.cwd));
-      params.threadSession.setContext(nextContext);
       params.setRuntimeContext(nextContext);
       params.setWorkspaceBranch(workspaceBranch);
       params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
@@ -313,8 +312,8 @@ export function createAppActions(params: AppActionsParams) {
       ? {
           ...current,
           project: current.project
-            ? { ...current.project, branch: result.current }
-            : current.project
+            ? { ...current.project, branch: result.current ?? null }
+            : null
         }
       : current);
     try {
@@ -677,7 +676,7 @@ export function createAppActions(params: AppActionsParams) {
       ? {
           ...current,
           channels: {
-            channels: current.channels.channels.map((item) => (
+            channels: (current.channels?.channels ?? []).map((item) => (
               item.id === result.channel.id ? result.channel : item
             ))
           }
@@ -699,7 +698,7 @@ export function createAppActions(params: AppActionsParams) {
       ? {
           ...current,
           channels: {
-            channels: upsertChannel(current.channels.channels, nextChannel)
+            channels: upsertChannel(current.channels?.channels ?? [], nextChannel)
           }
         }
       : current);
@@ -802,7 +801,7 @@ export function createAppActions(params: AppActionsParams) {
         ? {
             ...current,
             channels: {
-              channels: upsertChannel(current.channels.channels, channel)
+              channels: upsertChannel(current.channels?.channels ?? [], channel)
             }
           }
         : current);
@@ -841,3 +840,5 @@ export function createAppActions(params: AppActionsParams) {
     setChannelEnabled
   };
 }
+
+export type ReturnTypeOfAppActions = ReturnType<typeof createAppActions>;

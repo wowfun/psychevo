@@ -23,7 +23,7 @@ import {
   startupDraftScope
 } from "./session-utils";
 import { transcriptMayContainWorkspaceFile } from "./search-model";
-import type { WorkbenchRuntimeFactory } from "./runtime";
+import type { WorkbenchRuntime, WorkbenchRuntimeFactory } from "./runtime";
 import {
   PINNED_SESSIONS_KEY,
   PREFS_APPEARANCE_VERSION,
@@ -333,6 +333,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
   useEffect(() => {
     let alive = true;
     let activeClient: GatewayClient | null = null;
+    let activeRuntime: WorkbenchRuntime | null = null;
     let openThreadUnlisten: (() => void) | null = null;
     let connectionUnlisten: (() => void) | null = null;
     let initialized = false;
@@ -504,7 +505,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             }
             const refreshAcpContext = context?.binding?.backendKind === "acp"
               || context?.history.owner === "agent";
-            const refreshTurnSensitiveActions = context?.actions.some((action) => (
+            const refreshTurnSensitiveActions = context?.actions?.some((action) => (
               TURN_SETTLEMENT_CONTEXT_ACTIONS.has(action.id)
             )) ?? false;
             if (
@@ -588,9 +589,10 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       try {
         const runtime = await params.createRuntime();
         if (!alive) {
-          runtime.client.close();
+          await runtime.dispose();
           return;
         }
+        activeRuntime = runtime;
         activeClient = runtime.client;
         params.setHost(runtime.host);
         params.setEndpoint(runtime.endpoint);
@@ -618,7 +620,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
         }
         await runtime.client.connect();
         if (!alive) {
-          runtime.client.close();
+          await runtime.dispose();
           return;
         }
         params.setStatus("connected");
@@ -698,7 +700,6 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           params.selectedThreadIdRef.current = normalized.thread?.id ?? null;
           params.setSnapshot(normalized);
           params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));
-          params.threadSession.setContext(nextContext);
           params.setRuntimeContext(nextContext);
           params.setWorkspaceBranch(workspaceBranch);
           params.setRuntimeContextTargetId(nextContext.selectedTargetId ?? "");
@@ -747,9 +748,11 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
       }
       openThreadUnlisten?.();
       connectionUnlisten?.();
-      activeClient?.close();
+      activeClient = null;
+      void activeRuntime?.dispose();
+      activeRuntime = null;
     };
-  }, []);
+  }, [params.createRuntime]);
 
   const activeScopeSourceKey = params.activeScope
     ? [

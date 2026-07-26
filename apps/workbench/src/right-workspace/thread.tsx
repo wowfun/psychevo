@@ -422,9 +422,7 @@ function adaptThreadSessionClient(client: GatewayClient | null): ThreadSessionCl
       nextRetryMs: null,
       state: "connected"
     },
-    request: (method, params, options) => options === undefined
-      ? client.request(method, params)
-      : client.request(method, params, options),
+    request: (method, ...arguments_) => client.request(method, ...arguments_),
     subscribe: () => () => undefined,
     subscribeConnectionState: (handler) =>
       optional.subscribeConnectionState?.(handler) ?? (() => undefined)

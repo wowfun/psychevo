@@ -41,13 +41,18 @@ export interface FloatingRuntime {
   captureRegion?(bounds: Rect): Promise<HostCapabilityResult<{ dataUrl: string; name: string }>>;
   captureSelection(): Promise<FloatingActivation>;
   closeFloatingWindow?(): Promise<void>;
-  connectGateway(): Promise<GatewayClient>;
+  connectGateway(): Promise<FloatingGatewayConnection>;
   fitWindowToContent?(size: { width: number; height: number }): Promise<void>;
   initialActivation(): Promise<FloatingActivation>;
   locale?: string;
   openThreadInWorkbench?(threadId: string): Promise<void>;
   startWindowDrag?(): Promise<void>;
   turnControls?(context: FloatingTurnControlsContext): Promise<FloatingTurnPreparation | null>;
+}
+
+export interface FloatingGatewayConnection {
+  client: GatewayClient;
+  dispose(): Promise<void> | void;
 }
 
 export interface FloatingTurnControlsContext {
@@ -120,15 +125,15 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
 
   useEffect(() => {
     let disposed = false;
-    let nextClient: GatewayClient | null = null;
+    let connection: FloatingGatewayConnection | null = null;
     void runtime.connectGateway()
-      .then((connectedClient) => {
+      .then((connected) => {
         if (!disposed) {
-          nextClient = connectedClient;
-          setClient(nextClient);
+          connection = connected;
+          setClient(connected.client);
           setBridgeReady(true);
         } else {
-          connectedClient.close();
+          return connected.dispose();
         }
       })
       .catch((error) => {
@@ -139,7 +144,7 @@ export function FloatingApp({ runtime }: { runtime: FloatingRuntime }) {
       });
     return () => {
       disposed = true;
-      nextClient?.close();
+      void connection?.dispose();
     };
   }, [runtime]);
 
@@ -492,7 +497,7 @@ async function floatingTurnPreparation(
   let context = discovery;
   if (!threadId) {
     const discoveryTargetId = discovery.selectedTargetId ?? discovery.suggestedTargetId;
-    const targetView = discovery.compatibleTargets.find(
+    const targetView = discovery.compatibleTargets?.find(
       (candidate) => candidate.targetId === discoveryTargetId
     ) ?? null;
     const target = targetView ? {

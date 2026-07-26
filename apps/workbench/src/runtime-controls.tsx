@@ -203,11 +203,12 @@ export function RuntimeControlFields({
   );
   if (visibleControls.length === 0) return null;
   return <>{visibleControls.map((control) => {
+    const choices = control.choices ?? [];
     const value = Object.prototype.hasOwnProperty.call(values, control.id)
       ? values[control.id]
       : control.effectiveValue;
     const valueLabel = runtimeControlValueLabel(control, value);
-    if (!control.enabled || control.mutability === "readOnly" || control.choices.length === 0) {
+    if (!control.enabled || control.mutability === "readOnly" || choices.length === 0) {
       return (
         <span
           aria-label={`${control.label}: ${valueLabel} (${control.enabled ? "read-only" : "unavailable"})`}
@@ -220,14 +221,14 @@ export function RuntimeControlFields({
       );
     }
     const unavailableKey = "__unavailable__";
-    const selectedIndex = control.choices.findIndex((choice) => valuesEqual(choice.value, value));
+    const selectedIndex = choices.findIndex((choice) => valuesEqual(choice.value, value));
     const selectedKey = selectedIndex < 0 ? unavailableKey : String(selectedIndex);
     const optionKeys = selectedIndex < 0
-      ? [unavailableKey, ...control.choices.map((_, index) => String(index))]
-      : control.choices.map((_, index) => String(index));
+      ? [unavailableKey, ...choices.map((_, index) => String(index))]
+      : choices.map((_, index) => String(index));
     const optionLabels: Record<string, string> = {
       [unavailableKey]: control.surfaceRole === "model" ? "Unavailable" : `Choose ${control.label}`,
-      ...Object.fromEntries(control.choices.map((choice, index) => [
+      ...Object.fromEntries(choices.map((choice, index) => [
         String(index),
         runtimeControlChoiceLabel(control, choice.label, choice.value)
       ]))
@@ -242,7 +243,7 @@ export function RuntimeControlFields({
         values={optionKeys}
         onChange={(key) => {
           if (key === unavailableKey) return;
-          const choice = control.choices[Number(key)];
+          const choice = choices[Number(key)];
           if (choice) onChange(control, choice.value);
         }}
       />
@@ -471,9 +472,14 @@ export function runtimeControlAsConfigOption(
   control: ThreadControlDescriptorView | null
 ): RuntimeModeOption | null {
   if (!control) return null;
-  const values = control.choices.flatMap((choice): RuntimeModeValue[] => (
+  const values = (control.choices ?? []).flatMap((choice): RuntimeModeValue[] => (
     typeof choice.value === "string"
-      ? [{ value: choice.value, name: choice.label, description: choice.description, group: null }]
+      ? [{
+          value: choice.value,
+          name: choice.label,
+          description: choice.description ?? null,
+          group: null
+        }]
       : []
   ));
   return {

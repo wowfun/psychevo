@@ -53,7 +53,7 @@ function UsageWindowCard({ window }: { window: WorkbenchUsageStats["windows"][nu
         </div>
         <div>
           <span>Cache read</span>
-          <strong>{formatPercent(window.cacheReadPercent)}</strong>
+          <strong>{formatPercent(window.cacheReadPercent ?? null)}</strong>
         </div>
         <div>
           <span>Sessions</span>

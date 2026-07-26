@@ -20,6 +20,23 @@ afterEach(() => {
 });
 
 describe("FloatingApp Gateway flow", () => {
+  it("disposes the connection resource on surface cleanup", async () => {
+    const transport = new TestGatewayTransport();
+    const client = new GatewayClient(transport);
+    await client.connect();
+    const dispose = vi.fn(() => client.close());
+    const { unmount } = render(
+      <FloatingApp runtime={floatingRuntime(transport, {
+        connectGateway: async () => ({ client, dispose })
+      })} />
+    );
+    await toolbarButton("Ask");
+
+    unmount();
+
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
   it("uses turn/start threadId for the first floating submit", async () => {
     const transport = new TestGatewayTransport();
     render(<FloatingApp runtime={floatingRuntime(transport)} />);
@@ -249,7 +266,10 @@ function floatingRuntime(
     async connectGateway() {
       const client = new GatewayClient(transport);
       await client.connect();
-      return client;
+      return {
+        client,
+        dispose: () => client.close()
+      };
     },
     async initialActivation() {
       return activation("initial");

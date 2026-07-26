@@ -642,18 +642,18 @@ export function ComposerSubmitControls({
   const reasoning = explicitReasoning;
   const reasoningSelectable = reasoningControl?.enabled === true
     && reasoningControl.mutability === "selectable"
-    && reasoningControl.choices.some((choice) => typeof choice.value === "string");
+    && reasoningControl.choices?.some((choice) => typeof choice.value === "string") === true;
   const reasoningPresentation = reasoningSelectable
     ? "selectable"
     : explicitReasoning
       ? "readOnly"
       : "hidden";
-  const reasoningValues = reasoningControl?.choices.flatMap((choice): string[] => (
+  const reasoningValues = reasoningControl?.choices?.flatMap((choice): string[] => (
     typeof choice.value === "string" ? [choice.value] : []
   )) ?? [];
   const richModelControl = modelControl?.mutability === "selectable"
     && modelControl.enabled
-    && modelControl.choices.some((choice) => typeof choice.value === "string");
+    && modelControl.choices?.some((choice) => typeof choice.value === "string") === true;
 
   usePopoverDismiss(contextOpen, contextPopoverRef, contextTriggerRef, () => setContextOpen(false));
 

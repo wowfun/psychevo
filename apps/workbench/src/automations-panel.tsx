@@ -517,7 +517,7 @@ function draftFromAutomation(automation: AutomationTaskView): AutomationDraft {
     id: automation.id,
     cwd: automation.cwd,
     targetKind: automation.kind === "threadHeartbeat" ? "threadHeartbeat" : "project",
-    targetThreadId: automation.targetThreadId,
+    targetThreadId: automation.targetThreadId ?? null,
     title: automation.title,
     prompt: automation.prompt,
     scheduleKind: schedule.kind,
@@ -545,7 +545,7 @@ function draftFromGenerated(generated: AutomationDraftView, cwd: string): Automa
     onceAt: schedule.kind === "once" ? dateTimeLocalValue(schedule.at) : defaultOnceAt(),
     time: schedule.kind === "daily" || schedule.kind === "weekly" ? schedule.time : "09:00",
     weekdays: schedule.kind === "weekly" ? schedule.weekdays : [1, 2, 3, 4, 5],
-    executionPolicy: generated.execution.policy
+    executionPolicy: generated.execution?.policy ?? "autoSandbox"
   };
 }
 
@@ -625,7 +625,9 @@ function preferredThreadId(
 }
 
 function automationOpenThreadId(automation: AutomationTaskView): string | null {
-  return automation.targetThreadId ?? automation.runs.find((run) => run.threadId)?.threadId ?? null;
+  return automation.targetThreadId
+    ?? automation.runs?.find((run) => run.threadId)?.threadId
+    ?? null;
 }
 
 function sessionLabel(session: SessionSummary, currentThreadId: string | null): string {

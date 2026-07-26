@@ -53,7 +53,7 @@ const inFlightReads = new WeakMap<GatewayClient, Map<string, Promise<unknown>>>(
 function requestOnce<M extends GatewayMethod>(
   client: GatewayClient,
   method: M,
-  params?: GatewayRequestInit<M>
+  params: GatewayRequestInit<M>
 ): Promise<GatewayRequestResults[M]> {
   let requests = inFlightReads.get(client);
   if (!requests) {
@@ -505,6 +505,8 @@ export function createSurfaceActions(params: SurfaceActionsParams) {
   };
 }
 
+export type ReturnTypeOfSurfaceActions = ReturnType<typeof createSurfaceActions>;
+
 export function sessionsFromThreadBrowser(result: ThreadBrowserResult): SessionSummary[] {
   const seen = new Set<string>();
   const sessions: SessionSummary[] = [];
@@ -524,7 +526,7 @@ export function workspacesFromThreadBrowser(result: ThreadBrowserResult): Sessio
   return result.workspaces.map((workspace) => ({
     cwd: workspace.cwd,
     displayPath: workspace.project.displayPath,
-    hiddenCount: workspace.hiddenCount,
-    nextCursor: workspace.nextCursor
+    hiddenCount: workspace.hiddenCount ?? 0,
+    nextCursor: workspace.nextCursor ?? null
   }));
 }

@@ -74,8 +74,8 @@ export function channelDraftFromChannel(channel: WorkbenchChannel): ChannelSetti
     model: channel.model ?? "",
     permissionMode: channel.permissionMode ?? "default",
     requireMention: channel.requireMention,
-    allowUsersText: channel.allowlist.users.join("\n"),
-    allowGroupsText: channel.allowlist.groups.join("\n"),
+    allowUsersText: (channel.allowlist.users ?? []).join("\n"),
+    allowGroupsText: (channel.allowlist.groups ?? []).join("\n"),
     credentialEnv: channel.credential.env ?? ""
   };
 }
@@ -161,10 +161,11 @@ export function channelProspectiveTarget(
   const normalized = runtimeRef.trim();
   if (!normalized) {
     const targetId = context.selectedTargetId ?? context.suggestedTargetId;
-    return context.compatibleTargets.find((target) => target.targetId === targetId) ?? null;
+    return context.compatibleTargets?.find((target) => target.targetId === targetId) ?? null;
   }
-  const candidates = context.compatibleTargets.filter((target) => target.runtimeProfileRef === normalized);
-  const profile = context.profiles.find((candidate) => candidate.id === normalized);
+  const candidates = (context.compatibleTargets ?? [])
+    .filter((target) => target.runtimeProfileRef === normalized);
+  const profile = context.profiles?.find((candidate) => candidate.id === normalized);
   const preferredAgentRefs = uniqueStrings([
     profile?.defaultAgent ?? "",
     profile?.backendRef ?? ""
@@ -186,7 +187,7 @@ export function channelControlDescriptor(
   context: ThreadContextReadResult | null,
   predicate: (control: ThreadControlDescriptorView) => boolean
 ): ThreadControlDescriptorView | null {
-  return context?.controls.find(predicate) ?? null;
+  return context?.controls?.find(predicate) ?? null;
 }
 
 export function channelControlIsExposed(control: ThreadControlDescriptorView | null): boolean {
@@ -201,7 +202,7 @@ export function channelControlStringChoices(control: ThreadControlDescriptorView
     return [];
   }
   const seen = new Set<string>();
-  return control.choices.flatMap((choice) => {
+  return (control.choices ?? []).flatMap((choice) => {
     if (typeof choice.value !== "string" || seen.has(choice.value)) {
       return [];
     }
@@ -396,7 +397,7 @@ export function ChannelSetupCard({
         loading: false,
         message: result.message,
         qrImage: result.qrImage ?? null,
-        qrSvg: result.qrSvg,
+        qrSvg: result.qrSvg ?? null,
         qrUrl: result.qrUrl,
         sessionId: result.sessionId,
         status: result.status
@@ -732,11 +733,13 @@ export function formatRunnerTimestamp(value: number | null | undefined): string 
 
 export function channelAllowlistSummary(channel: WorkbenchChannel): string {
   const parts = [];
-  if (channel.allowlist.users.length) {
-    parts.push(`${channel.allowlist.users.length} user${channel.allowlist.users.length === 1 ? "" : "s"}`);
+  const users = channel.allowlist.users ?? [];
+  const groups = channel.allowlist.groups ?? [];
+  if (users.length) {
+    parts.push(`${users.length} user${users.length === 1 ? "" : "s"}`);
   }
-  if (channel.allowlist.groups.length) {
-    parts.push(`${channel.allowlist.groups.length} group${channel.allowlist.groups.length === 1 ? "" : "s"}`);
+  if (groups.length) {
+    parts.push(`${groups.length} group${groups.length === 1 ? "" : "s"}`);
   }
   return parts.length ? parts.join(", ") : "none";
 }

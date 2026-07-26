@@ -18,6 +18,33 @@
   background: transparent;
 }
 
+.pevo-virtualTranscript,
+.pevo-transcriptEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.pevo-virtualTranscript {
+  width: 100%;
+}
+
+.pevo-transcriptEntry {
+  gap: 11px;
+  padding-bottom: 11px;
+  box-sizing: border-box;
+}
+
+.pevo-transcriptSpacer {
+  min-height: 0;
+  pointer-events: none;
+}
+
+.pevo-transcriptLoadEarlier {
+  display: flex;
+  justify-content: center;
+}
+
 .pevo-historyNotice {
   width: min(760px, 100%);
   justify-self: start;
@@ -1099,6 +1126,11 @@
   .pevo-threadItems {
     gap: 9px;
     padding: 12px;
+  }
+
+  .pevo-transcriptEntry {
+    gap: 9px;
+    padding-bottom: 9px;
   }
 
   .pevo-reasoning,

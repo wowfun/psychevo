@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 
 const bridge = vi.hoisted(() => ({
   desktopFallbackCwd: vi.fn().mockResolvedValue("/repo"),
-  desktopGatewayClient: vi.fn(() => ({ client: true })),
+  desktopGatewayConnection: vi.fn(() => ({
+    client: { client: true },
+    dispose: vi.fn()
+  })),
   desktopGatewayEndpoint: vi.fn().mockResolvedValue({
     httpBase: "http://127.0.0.1:58080",
     wsUrl: "ws://127.0.0.1:58080/ws"

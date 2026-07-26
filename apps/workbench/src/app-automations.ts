@@ -192,3 +192,5 @@ export function useAutomations(params: UseAutomationsParams) {
     saveAutomation
   };
 }
+
+export type ReturnTypeOfAutomations = ReturnType<typeof useAutomations>;

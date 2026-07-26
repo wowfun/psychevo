@@ -146,7 +146,7 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
           target: null,
           scope: params.scope
         });
-        if (context.actions.some((action) => action.id === "interrupt" && action.enabled)) {
+        if (context.actions?.some((action) => action.id === "interrupt" && action.enabled)) {
           await params.client.request("thread/action/run", {
             scope: params.scope,
             threadId,
@@ -219,3 +219,5 @@ export function createRightWorkspaceActions(params: RightWorkspaceActionsParams)
     revealRightWorkspace
   };
 }
+
+export type ReturnTypeOfRightWorkspaceActions = ReturnType<typeof createRightWorkspaceActions>;

@@ -285,7 +285,7 @@ function ChannelSettingsDetail({
       const context = parseThreadContext(await client.request("thread/context/read", {
         threadId: null,
         target: {
-          agentRef: target.agentRef,
+          agentRef: target.agentRef ?? null,
           runtimeProfileRef: target.runtimeProfileRef
         },
         scope
@@ -317,7 +317,9 @@ function ChannelSettingsDetail({
   const draftSignature = channelDraftSignature(draft);
   const dirty = draftSignature !== savedSignature;
   const targetContext = targetContextState.context;
-  const selectedTarget = targetContext?.compatibleTargets.find((target) => target.targetId === targetContext.selectedTargetId) ?? null;
+  const selectedTarget = targetContext?.compatibleTargets?.find(
+    (target) => target.targetId === targetContext.selectedTargetId
+  ) ?? null;
   const targetReady = selectedTarget?.ready ?? false;
   const modelControl = channelControlDescriptor(targetContext, (control) => control.surfaceRole === "model");
   const modelControlExposed = channelControlIsExposed(modelControl);

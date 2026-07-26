@@ -91,7 +91,7 @@ export function patchSessionSummariesFromGatewayEvent(
     next = {
       ...current,
       activity,
-      updatedAtMs: activity.updatedAtMs ?? current.updatedAtMs
+      updatedAtMs: activity.updatedAtMs ?? current.updatedAtMs ?? null
     };
   } else if (event.type === "titleChanged") {
     next = {
@@ -111,7 +111,7 @@ export function patchSessionSummariesFromGatewayEvent(
     next = {
       ...current,
       activity,
-      updatedAtMs: completedAtMs ?? current.updatedAtMs
+      updatedAtMs: completedAtMs ?? current.updatedAtMs ?? null
     };
   }
   const patched = sessions.slice();

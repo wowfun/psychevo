@@ -859,8 +859,8 @@ function providerDraftFromView(provider: ModelProviderView, options: ModelOption
     noAuth: provider.noAuth || provider.credentialStatus === "notRequired",
     modelId: firstModel?.id ?? "",
     modelName: firstModel?.name ?? "",
-    context: firstModel?.limit.context ? String(firstModel.limit.context) : "",
-    output: firstModel?.limit.output ? String(firstModel.limit.output) : "",
+    context: firstModel?.limit?.context ? String(firstModel.limit.context) : "",
+    output: firstModel?.limit?.output ? String(firstModel.limit.output) : "",
     advancedFormat: "json",
     advanced: ""
   };

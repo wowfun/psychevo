@@ -50,7 +50,7 @@ export function threadActionDescriptor(
   context: ThreadContextReadResult | null | undefined,
   kind: WorkbenchThreadActionKind
 ): ThreadActionDescriptorView | null {
-  return context?.actions.find((action) => action.id === kind) ?? null;
+  return context?.actions?.find((action) => action.id === kind) ?? null;
 }
 
 export function enabledThreadAction(
@@ -66,22 +66,27 @@ export async function readProjectedThreadHistory(
   scope: GatewayRequestScope,
   threadId: string
 ): Promise<ProjectedThreadHistory> {
-  const entries: TranscriptEntry[] = [];
+  const pages: TranscriptEntry[][] = [];
   const cursors = new Set<string>();
   let cursor: string | null = null;
   let history: ThreadHistoryView | null = null;
 
   do {
-    const page: ThreadHistoryPage = await client.request("thread/history/read", {
+    const result = await client.request("thread/history/read", {
       scope,
       threadId,
       cursor,
       limit: 200
     });
+    const page: ThreadHistoryPage = {
+      ...result,
+      entries: result.entries ?? [],
+      nextCursor: result.nextCursor ?? null
+    };
     if (page.threadId !== threadId) {
       throw new Error(`Thread history response changed identity from ${threadId} to ${page.threadId}.`);
     }
-    entries.push(...page.entries);
+    pages.push(page.entries);
     history = page.history;
     cursor = page.nextCursor;
     if (cursor) {
@@ -95,7 +100,7 @@ export async function readProjectedThreadHistory(
   if (!history) {
     throw new Error(`Thread history for ${threadId} returned no page.`);
   }
-  return { entries, history };
+  return { entries: pages.reverse().flat(), history };
 }
 
 export async function hydrateThreadSnapshotHistory(

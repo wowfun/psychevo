@@ -36,6 +36,8 @@ export class DesktopGatewayTransport implements GatewayTransport {
   private generation: number | null = null;
   private listenersPromise: Promise<void> | null = null;
   private messageUnlisten: UnlistenFn | null = null;
+  private disposed = false;
+  private disposePromise: Promise<void> | null = null;
   private readonly disconnectHandlers = new Set<(message: string) => void>();
   private readonly messageHandlers = new Set<GatewayRawMessageHandler>();
   readonly connectionId: string;
@@ -45,6 +47,9 @@ export class DesktopGatewayTransport implements GatewayTransport {
   }
 
   async connect(): Promise<void> {
+    if (this.disposed) {
+      throw new Error("Desktop Gateway transport is disposed");
+    }
     if (this.connected) {
       return;
     }
@@ -58,7 +63,7 @@ export class DesktopGatewayTransport implements GatewayTransport {
         ownerWindow: this.ownerWindow
       }))
       .then(async (generation) => {
-        if (epoch !== this.connectEpoch) {
+        if (this.disposed || epoch !== this.connectEpoch) {
           await invoke("gateway_disconnect", {
             connectionId: this.connectionId,
             generation
@@ -101,6 +106,9 @@ export class DesktopGatewayTransport implements GatewayTransport {
   }
 
   send(data: string): void {
+    if (this.disposed) {
+      throw new Error("Desktop Gateway transport is disposed");
+    }
     const generation = this.generation;
     if (!this.connected || generation === null) {
       throw new Error("Gateway bridge is not connected");
@@ -120,6 +128,33 @@ export class DesktopGatewayTransport implements GatewayTransport {
         handler(message);
       }
     });
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposePromise) {
+      return this.disposePromise;
+    }
+    this.disposed = true;
+    this.close();
+    this.disposePromise = this.releaseListeners();
+    return this.disposePromise;
+  }
+
+  private async releaseListeners(): Promise<void> {
+    try {
+      await this.listenersPromise;
+    } catch {
+      // Listener setup owns its partial-failure cleanup.
+    }
+    const messageUnlisten = this.messageUnlisten;
+    const disconnectUnlisten = this.disconnectUnlisten;
+    this.messageUnlisten = null;
+    this.disconnectUnlisten = null;
+    this.listenersPromise = null;
+    messageUnlisten?.();
+    disconnectUnlisten?.();
+    this.messageHandlers.clear();
+    this.disconnectHandlers.clear();
   }
 
   private ensureListeners(): Promise<void> {
@@ -182,8 +217,21 @@ function desktopGatewayConnectionNonce(): string {
   return `${Date.now().toString(36)}-${nextDesktopGatewayConnectionSeq++}`;
 }
 
-export function desktopGatewayClient(label: string): GatewayClient {
-  return new GatewayClient(new DesktopGatewayTransport(label));
+export interface DesktopGatewayConnection {
+  client: GatewayClient;
+  dispose(): Promise<void>;
+}
+
+export function desktopGatewayConnection(label: string): DesktopGatewayConnection {
+  const transport = new DesktopGatewayTransport(label);
+  const client = new GatewayClient(transport);
+  return {
+    client,
+    dispose: async () => {
+      client.close();
+      await transport.dispose();
+    }
+  };
 }
 
 export function desktopGatewayEndpoint(): Promise<GatewayEndpoint> {

@@ -7,6 +7,7 @@ import {
 
 export interface WorkbenchRuntime {
   client: GatewayClient;
+  dispose(): Promise<void> | void;
   endpoint: GatewayEndpoint;
   fallbackCwd: string;
   host: PsychevoHost;
@@ -17,8 +18,10 @@ export type WorkbenchRuntimeFactory = () => Promise<WorkbenchRuntime> | Workbenc
 
 export function createBrowserWorkbenchRuntime(): WorkbenchRuntime {
   const host = createBrowserHost(window.location, window.localStorage);
+  const client = new GatewayClient(host.endpoint);
   return {
-    client: new GatewayClient(host.endpoint),
+    client,
+    dispose: () => client.close(),
     endpoint: host.endpoint,
     fallbackCwd: browserFallbackCwd(),
     host

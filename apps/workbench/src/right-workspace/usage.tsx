@@ -130,7 +130,7 @@ export function SessionUsageGrid({
   usage: SessionUsageSummaryView;
 }) {
   const metrics = [
-    { label: "Session tokens", value: formatUsageTotal(usage.effectiveTotalTokens, usage.totalStatus) },
+    { label: "Session tokens", value: formatUsageTotal(usage.effectiveTotalTokens ?? null, usage.totalStatus) },
     { label: "Cache read", value: formatPercent(usage.cacheReadPercent) },
     { label: "Cost", value: formatNanodollars(usage.estimatedCostNanodollars) },
     { label: "Reasoning", value: formatCompactNumber(usage.reasoningTokens) },

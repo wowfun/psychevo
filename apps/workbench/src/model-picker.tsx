@@ -224,7 +224,7 @@ export function ModelReasoningSelector({
                     <ModelReasoningRow
                       key={option.value}
                       checked={model === option.value}
-                      free={option.free}
+                      free={option.free ?? false}
                       label={modelShortLabel(option)}
                       value={option.value}
                       onSelect={() => selectModel(option)}
@@ -340,7 +340,7 @@ export function modelOptionsForThreadControl(
   const metadata = new Map(
     modelOptionsForControls(controls, model).map((option) => [option.value, option])
   );
-  return control.choices.flatMap((choice): ModelOptionView[] => {
+  return (control.choices ?? []).flatMap((choice): ModelOptionView[] => {
     if (typeof choice.value !== "string" || !choice.value.trim()) return [];
     const value = choice.value.trim();
     const existing = metadata.get(value);
@@ -350,7 +350,7 @@ export function modelOptionsForThreadControl(
       ...fallback,
       name: choice.label.trim() && choice.label.trim() !== value
         ? choice.label.trim()
-        : fallback.name
+        : fallback.name ?? null
     }];
   });
 }
@@ -366,7 +366,7 @@ export function modelLabelForThreadControl(
   if (metadataName) {
     return metadataName;
   }
-  const choice = control.choices.find((option) => option.value === model);
+  const choice = control.choices?.find((option) => option.value === model);
   const choiceLabel = choice?.label.trim();
   if (choiceLabel && choiceLabel !== model) {
     return choiceLabel;

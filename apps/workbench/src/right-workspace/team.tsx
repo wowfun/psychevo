@@ -154,7 +154,7 @@ export function TeamPanel({
                             childSessionId: agent.childSessionId,
                             parentSessionId: agent.parentSessionId,
                             task: agent.task,
-                            taskName: agent.taskName,
+                            taskName: agent.taskName ?? null,
                             title: agent.taskName ?? agent.agentName
                           });
                         }}

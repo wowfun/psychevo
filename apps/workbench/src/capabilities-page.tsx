@@ -2755,7 +2755,7 @@ function emptyRuntimeProfileDraft(): RuntimeProfileDraft {
 
 function runtimeProfileDraftFromRead(profile: RuntimeProfileView, options: unknown | null): RuntimeProfileDraft {
   return {
-    target: runtimeProfileMutableTargetFromSources(profile.sourceTargets) ?? "profile",
+    target: runtimeProfileMutableTargetFromSources(profile.sourceTargets ?? []) ?? "profile",
     id: profile.id,
     runtime: runtimeProfileKind(profile.runtime),
     enabled: profile.enabled,
@@ -2766,7 +2766,7 @@ function runtimeProfileDraftFromRead(profile: RuntimeProfileView, options: unkno
     defaultAgent: profile.defaultAgent ?? "",
     approvalMode: profile.approvalMode ?? "",
     sandbox: profile.sandbox ?? "",
-    workspaceRootsText: profile.workspaceRoots.join("\n"),
+    workspaceRootsText: (profile.workspaceRoots ?? []).join("\n"),
     optionsText: options == null ? "" : JSON.stringify(options, null, 2)
   };
 }

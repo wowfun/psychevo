@@ -58,7 +58,7 @@ export function StatusPanel(props: StatusPanelProps) {
           <div className="pevo-sessionUsageGrid">
             <div>
               <span>Session tokens</span>
-              <strong>{formatUsageTotal(props.usage.effectiveTotalTokens, props.usage.totalStatus)}</strong>
+              <strong>{formatUsageTotal(props.usage.effectiveTotalTokens ?? null, props.usage.totalStatus)}</strong>
             </div>
             <div>
               <span>Cache read</span>

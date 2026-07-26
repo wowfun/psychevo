@@ -38,7 +38,34 @@ const THREAD_ACTION_KINDS = new Set<ThreadActionKind>([
   "unrevertConversation"
 ]);
 
-export function parseThreadContext(value: unknown): ThreadContextReadResult {
+export type WorkbenchRuntimeProfile = RuntimeProfileView & {
+  capabilities: NonNullable<RuntimeProfileView["capabilities"]>;
+  diagnostics: NonNullable<RuntimeProfileView["diagnostics"]>;
+  health: NonNullable<RuntimeProfileView["health"]>;
+  optionKeys: NonNullable<RuntimeProfileView["optionKeys"]>;
+  provenance: string;
+  readinessStages: NonNullable<RuntimeProfileView["readinessStages"]>;
+  sourceTargets: BackendConfigTarget[];
+  stability: NonNullable<RuntimeProfileView["stability"]> | null;
+  workspaceRoots: string[];
+};
+
+export type WorkbenchThreadContext = ThreadContextReadResult & {
+  actions: ThreadActionDescriptorView[];
+  capabilities: NonNullable<ThreadContextReadResult["capabilities"]>;
+  compatibleTargets: RunnableTargetView[];
+  contextRevision: string;
+  controlRevision: string;
+  controls: ThreadControlDescriptorView[];
+  history: NonNullable<ThreadContextReadResult["history"]>;
+  inputCapabilities: NonNullable<ThreadContextReadResult["inputCapabilities"]>;
+  pendingInteractions: NonNullable<ThreadContextReadResult["pendingInteractions"]>;
+  profiles: WorkbenchRuntimeProfile[];
+  sendability: NonNullable<ThreadContextReadResult["sendability"]>;
+  stability: NonNullable<ThreadContextReadResult["stability"]> | null;
+};
+
+export function parseThreadContext(value: unknown): WorkbenchThreadContext {
   const record = objectValue(value);
   const profiles = arrayValue(record.profiles).map(parseRuntimeProfile).filter((profile) => profile.id);
   const runtimeProfileRef = stringValue(record.runtimeProfileRef)
@@ -106,7 +133,9 @@ export function parseThreadContext(value: unknown): ThreadContextReadResult {
       cursor: nullableString(history.cursor),
       hint: nullableString(history.hint)
     },
-    pendingInteractions: arrayValue(record.pendingInteractions) as ThreadContextReadResult["pendingInteractions"],
+    pendingInteractions: arrayValue(record.pendingInteractions) as NonNullable<
+      ThreadContextReadResult["pendingInteractions"]
+    >,
     contextRevision: stringValue(record.contextRevision),
     controlRevision: stringValue(record.controlRevision)
   };
@@ -142,7 +171,7 @@ function threadHistoryOwner(value: unknown): ThreadHistoryOwnerView {
   return value === "agent" || value === "process" ? value : "psychevo";
 }
 
-export function parseRuntimeProfile(value: unknown): RuntimeProfileView {
+export function parseRuntimeProfile(value: unknown): WorkbenchRuntimeProfile {
   const record = objectValue(value);
   const runtimeValue = stringValue(record.runtime);
   const runtime = runtimeValue === "acp" || runtimeValue === "native" ? runtimeValue : "";
@@ -177,7 +206,7 @@ export function parseRuntimeProfile(value: unknown): RuntimeProfileView {
 }
 
 export function runtimeProfileDisplayLabel(profile: RuntimeProfileView): string {
-  const label = profile.label.trim() || profile.id;
+  const label = profile.label?.trim() || profile.id;
   if (profile.runtime !== "acp") return label;
   const base = label.replace(/\s*\(ACP\)\s*$/i, "").trim()
     || profile.id.replace(/^acp:/i, "").trim();
@@ -185,7 +214,7 @@ export function runtimeProfileDisplayLabel(profile: RuntimeProfileView): string 
 }
 
 export function runtimeProfileProvenance(profile: RuntimeProfileView): string {
-  return profile.provenance.trim() || defaultRuntimeProvenance(profile.runtime);
+  return profile.provenance?.trim() || defaultRuntimeProvenance(profile.runtime);
 }
 
 export function runtimeProfileCapsuleLabel(profile: RuntimeProfileView): string {
@@ -193,7 +222,9 @@ export function runtimeProfileCapsuleLabel(profile: RuntimeProfileView): string 
 }
 
 export function runtimeProfileSourceLabel(profile: RuntimeProfileView): string {
-  if (profile.sourceTargets.length > 0) return profile.sourceTargets.map(capitalize).join(" + ");
+  if ((profile.sourceTargets ?? []).length > 0) {
+    return (profile.sourceTargets ?? []).map(capitalize).join(" + ");
+  }
   return profile.generated ? "Generated" : "Configured";
 }
 
@@ -223,7 +254,7 @@ export function runtimeControlValueLabel(
   control: ThreadControlDescriptorView,
   value: unknown = control.effectiveValue
 ): string {
-  const choice = control.choices.find((candidate) => valuesEqual(candidate.value, value));
+  const choice = control.choices?.find((candidate) => valuesEqual(candidate.value, value));
   if (choice) return choice.label;
   if (value == null || value === "") return "Unavailable";
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -338,11 +369,15 @@ function parseReadinessStage(value: unknown): RuntimeReadinessStageView {
   };
 }
 
-function parseRuntimeStability(value: unknown): RuntimeProfileView["stability"] {
+function parseRuntimeStability(
+  value: unknown
+): NonNullable<RuntimeProfileView["stability"]> | null {
   return value === "stable" || value === "experimental" || value === "unavailable" ? value : null;
 }
 
-function parseRuntimeCapabilities(value: unknown): RuntimeProfileView["capabilities"] {
+function parseRuntimeCapabilities(
+  value: unknown
+): NonNullable<RuntimeProfileView["capabilities"]> {
   return arrayValue(value).map((capability) => {
     const record = objectValue(capability);
     return {

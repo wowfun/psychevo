@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DesktopGatewayTransport, desktopGatewayConnectionId } from "./bridge";
+import {
+  DesktopGatewayTransport,
+  desktopGatewayConnection,
+  desktopGatewayConnectionId
+} from "./bridge";
 
 const tauriCore = vi.hoisted(() => ({
   invoke: vi.fn()
@@ -114,6 +118,61 @@ describe("DesktopGatewayTransport", () => {
       generation: 2,
       message: "second generation"
     });
+  });
+
+  it("disposes both listeners exactly once and permanently closes the transport", async () => {
+    const messageUnlisten = vi.fn();
+    const disconnectUnlisten = vi.fn();
+    tauriEvent.listen.mockImplementation(async (eventName: string) => (
+      eventName === "gateway-message" ? messageUnlisten : disconnectUnlisten
+    ));
+    const transport = new DesktopGatewayTransport("workbench");
+    await transport.connect();
+
+    await Promise.all([transport.dispose(), transport.dispose()]);
+
+    expect(messageUnlisten).toHaveBeenCalledOnce();
+    expect(disconnectUnlisten).toHaveBeenCalledOnce();
+    await expect(transport.connect()).rejects.toThrow("disposed");
+    expect(() => transport.send("{}")).toThrow("disposed");
+  });
+
+  it("releases listeners that resolve after dispose starts", async () => {
+    let resolveMessage!: (unlisten: () => void) => void;
+    let resolveDisconnect!: (unlisten: () => void) => void;
+    const messageUnlisten = vi.fn();
+    const disconnectUnlisten = vi.fn();
+    tauriEvent.listen.mockImplementation((eventName: string) => new Promise((resolve) => {
+      if (eventName === "gateway-message") {
+        resolveMessage = resolve;
+      } else {
+        resolveDisconnect = resolve;
+      }
+    }));
+    const transport = new DesktopGatewayTransport("workbench");
+    const connecting = transport.connect();
+    const disposing = transport.dispose();
+
+    resolveMessage(messageUnlisten);
+    resolveDisconnect(disconnectUnlisten);
+    await disposing;
+    await expect(connecting).rejects.toThrow("replaced");
+
+    expect(messageUnlisten).toHaveBeenCalledOnce();
+    expect(disconnectUnlisten).toHaveBeenCalledOnce();
+  });
+
+  it("closes the Gateway client before tearing down native listeners", async () => {
+    const connection = desktopGatewayConnection("workbench");
+    await connection.client.connect();
+    const pending = connection.client.request("thread/read", {
+      threadId: "thread-1"
+    }, { timeoutMs: 0 });
+
+    await connection.dispose();
+
+    expect(connection.client.connectionSnapshot().state).toBe("closed");
+    await expect(pending).rejects.toThrow("Gateway connection closed");
   });
 });
 

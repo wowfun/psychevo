@@ -1,8 +1,47 @@
-import { lazy, Suspense, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import {
+  lazy,
+  Suspense,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type MutableRefObject,
+  type RefObject,
+  type SetStateAction
+} from "react";
 import { AlertTriangle, GripVertical, MessageSquare, PanelLeft, PanelRight, Search } from "lucide-react";
-import { ActionButton, Composer, HistoryPanel, IconButton, NavItem, TranscriptPanel, type WorkspaceFileLinkContext } from "@psychevo/components";
-import { appendOptimisticPrompt, scopeForCwd } from "@psychevo/client";
-import type { ThreadEditableInputPart } from "@psychevo/protocol";
+import {
+  ActionButton,
+  Composer,
+  HistoryPanel,
+  IconButton,
+  NavItem,
+  TranscriptPanel,
+  type HistoryDraftSession,
+  type WorkspaceFileLinkContext
+} from "@psychevo/components";
+import { scopeForCwd, type GatewayClient } from "@psychevo/client";
+import type { GatewayEndpoint, PsychevoHost } from "@psychevo/host";
+import type {
+  ContextReadResult,
+  GatewayActivity,
+  GatewayRequestScope,
+  InitializeResult,
+  ModelOptionView,
+  PendingActionView,
+  SessionSummary,
+  SessionUsageSummaryView,
+  SettingsReadResult,
+  ThreadContextReadResult,
+  ThreadControlDescriptorView,
+  ThreadEditableInputPart,
+  ThreadSnapshot,
+  UsageReadResult,
+  WorkspaceChangesResult,
+  WorkspaceDiffResult,
+  WorkspaceFilesResult
+} from "@psychevo/protocol";
 import { LeftUtilityRail, MainSurface, PinnedPanel } from "./app-shell";
 import { CommandFeedbackView, CommandOverlayView } from "./command-overlay";
 import { ComposerRequests, ComposerSubmitControls } from "./composer-controls";
@@ -15,20 +54,252 @@ import { DEFAULT_RIGHT_WIDTH_PX } from "./storage";
 import { EMPTY_BACKEND_DRAFT, backendDraftFromBackend } from "./capabilities-agents-config";
 import { confirmedSteerTurnId } from "./gateway-event-feed";
 import {
-  enabledThreadAction,
-  runThreadInterrupt,
-  snapshotThreadApplicationTarget
+  enabledThreadAction
 } from "./thread-application";
 import type { PendingAttachment, RightWorkspaceTab } from "./types";
+import type {
+  Appearance,
+  BackendDraft,
+  CapabilityTab,
+  CommandFeedback,
+  CommandOverlay,
+  DebugEvent,
+  MainView,
+  SessionBrowserWorkspaceState,
+  SettingsSection,
+  TerminalNotificationEvent,
+  TraceState,
+  WorkbenchBackend,
+  WorkbenchBackendDoctor,
+  WorkbenchChannelDoctor,
+  WorkbenchCommand
+} from "./types";
 import { DeleteSessionDialog } from "./delete-session-dialog";
 import { SessionArchivePanel } from "./session-archive-panel";
+import type { GatewayThreadEventFeed } from "./gateway-event-feed";
+import type { ReturnTypeOfAppActions } from "./app-actions";
+import type { ReturnTypeOfAutomations } from "./app-automations";
+import type { ReturnTypeOfCommandActions } from "./command-actions";
+import type { ReturnTypeOfRightWorkspaceActions } from "./right-workspace-actions";
+import type { ReturnTypeOfSurfaceActions } from "./surface-actions";
+import type { WorkbenchIntentOwner } from "./workbench-intents";
 
 const logoUrl = new URL("../../../assets/psychevo-logo.svg", import.meta.url).href;
 const RightWorkspace = lazy(async () => ({
   default: (await import("./right-workspace")).RightWorkspace
 }));
 
-export function WorkbenchLayout(props: Record<string, any>) {
+type SetState<T> = Dispatch<SetStateAction<T>>;
+type MobilePanel = "history" | "transcript" | "status";
+type AppActions = ReturnTypeOfAppActions;
+type SurfaceActions = ReturnTypeOfSurfaceActions;
+type RightActions = ReturnTypeOfRightWorkspaceActions;
+type AutomationModel = ReturnTypeOfAutomations;
+type CommandActions = ReturnTypeOfCommandActions;
+
+export type ThreadViewModel = {
+  activeCommandOverlay: CommandOverlay | null;
+  activeScope: GatewayRequestScope | null;
+  activeWorkbenchCwd: string;
+  activity: GatewayActivity;
+  attachments: PendingAttachment[];
+  changeRunnableTarget(targetId: string): Promise<void>;
+  changeRuntimeControl(control: ThreadControlDescriptorView, value: unknown): Promise<void>;
+  clearCommandTransientUi(): void;
+  client: GatewayClient | null;
+  commandFeedback: CommandFeedback;
+  commands: WorkbenchCommand[];
+  composerDraftPatch: {
+    id: number;
+    text: string;
+    inputParts?: ThreadEditableInputPart[];
+  } | null;
+  composerPresentationReady: boolean;
+  composerShellVisible: boolean;
+  contextMatchesTarget: boolean;
+  contextUsage: ContextReadResult | null;
+  controls: SettingsReadResult["controls"] | null;
+  currentThreadId: string | undefined;
+  disabled: boolean;
+  error: string | null;
+  executeCommand: CommandActions["executeCommand"];
+  fallbackCwd: string;
+  handleAttachment: AppActions["handleAttachment"];
+  handleAttachmentFiles: AppActions["handleAttachmentFiles"];
+  init: InitializeResult | null;
+  latestGatewayEvent: GatewayThreadEventFeed;
+  loadOlderHistory(): Promise<void>;
+  onComposerRetry(): void | Promise<void>;
+  onGatewayRetry(): void | Promise<void>;
+  onReadAloudText(text: string): void;
+  olderHistoryLoading: boolean;
+  onVoiceAutoSpeakToggle(): void;
+  onVoiceDictationToggle(): void;
+  onVoiceRealtimeToggle(): void;
+  patchComposerDraft(text: string, inputParts?: ThreadEditableInputPart[]): void;
+  pendingClarifyActions: PendingActionView[];
+  pendingPermissionActions: PendingActionView[];
+  refreshObservability: SurfaceActions["refreshObservability"];
+  runAction: SurfaceActions["runAction"];
+  runCommandAlternateAction: CommandActions["runCommandAlternateAction"];
+  running: boolean;
+  runtimeContext: ThreadContextReadResult | null;
+  runtimeControlDrafts: Record<string, unknown>;
+  runtimeControls: ThreadControlDescriptorView[];
+  runtimeOptionsError: string | null;
+  runtimeOptionsLoading: boolean;
+  runtimeProfiles: NonNullable<ThreadContextReadResult["profiles"]>;
+  selectedTargetId: string;
+  sessionUsage: SessionUsageSummaryView | null;
+  setAttachments: SetState<PendingAttachment[]>;
+  setCommandFeedback: SetState<CommandFeedback>;
+  settings: SettingsReadResult | undefined;
+  snapshot: ThreadSnapshot;
+  startShell: AppActions["startShell"];
+  status: string;
+  submitTurn: AppActions["submitTurn"];
+  transcriptEntries: ThreadSnapshot["entries"];
+  turnBlockReason: string;
+  turnSendable: boolean;
+  voiceAutoSpeak: boolean;
+  voiceListening: boolean;
+  voiceRealtimeActive: boolean;
+  workbenchIntents: WorkbenchIntentOwner;
+};
+
+export type HistoryViewModel = {
+  archivedSessions: SessionSummary[];
+  createWorkspace: AppActions["createWorkspace"];
+  endpoint: GatewayEndpoint | null;
+  historyLoading: boolean;
+  host: PsychevoHost | null;
+  leftCollapsed: boolean;
+  loadingOlderCwd: string | null;
+  loadOlderSessions(cwd: string): Promise<void>;
+  pinnedSessionIds: string[];
+  pinnedSessions: SessionSummary[];
+  refreshHistory: SurfaceActions["refreshHistory"];
+  sessionBrowserWorkspaces: SessionBrowserWorkspaceState[];
+  sessions: SessionSummary[];
+  setDraftSession: SetState<HistoryDraftSession | null>;
+  setLeftCollapsed: SetState<boolean>;
+  startNewThread: AppActions["startNewThread"];
+  switchMainView(value: MainView): void;
+  togglePinnedSession(threadId: string): void;
+  workspaceDialogOpen: boolean;
+  setWorkspaceDialogOpen: SetState<boolean>;
+};
+
+export type WorkspaceViewModel = {
+  acceptWorkspaceChange: AppActions["acceptWorkspaceChange"];
+  activeRightTab: RightWorkspaceTab | null;
+  activeRightTabId: string | null;
+  beginRightResize: RightActions["beginRightResize"];
+  clearRightWorkspaceTabPendingPrompt: RightActions["clearRightWorkspaceTabPendingPrompt"];
+  closeRightWorkspaceTab: RightActions["closeRightWorkspaceTab"];
+  copyText: AppActions["copyText"];
+  debugEnabled: boolean;
+  debugEvents: DebugEvent[];
+  openDiffPreview: AppActions["openDiffPreview"];
+  openAgentSessionTab: RightActions["openAgentSessionTab"];
+  openFilePreview: AppActions["openFilePreview"];
+  openRightWorkspaceTab: RightActions["openRightWorkspaceTab"];
+  readWorkspaceFolders: AppActions["readWorkspaceFolders"];
+  readWorkspaceGitBranches: AppActions["readWorkspaceGitBranches"];
+  checkoutWorkspaceGitBranch: AppActions["checkoutWorkspaceGitBranch"];
+  refreshAgentSurface(
+    nextClient?: GatewayClient | null,
+    scope?: GatewayRequestScope
+  ): Promise<void>;
+  refreshSnapshot: SurfaceActions["refreshSnapshot"];
+  refreshTrace: SurfaceActions["refreshTrace"];
+  refreshWorkspaceSurface: SurfaceActions["refreshWorkspaceSurface"];
+  rejectWorkspaceChange: AppActions["rejectWorkspaceChange"];
+  revealRightWorkspace: RightActions["revealRightWorkspace"];
+  rightCollapsed: boolean;
+  rightTabs: RightWorkspaceTab[];
+  rightWidthPx: number;
+  saveFileFromEditor: AppActions["saveFileFromEditor"];
+  setActiveRightTabId: SetState<string | null>;
+  setDirtyRightTabs: SetState<Record<string, boolean>>;
+  setError: SetState<string | null>;
+  setRightCollapsed: SetState<boolean>;
+  setRightTabs: SetState<RightWorkspaceTab[]>;
+  setRightWidthPx: SetState<number>;
+  terminalEvents: TerminalNotificationEvent[];
+  traceState: TraceState;
+  workspaceBranch: string | null | undefined;
+  workspaceChanges: WorkspaceChangesResult | null;
+  workspaceDiff: WorkspaceDiffResult | null;
+  workspaceFiles: WorkspaceFilesResult | null;
+};
+
+export type CapabilityViewModel = {
+  appearance: Appearance;
+  automations: AutomationModel["automations"];
+  automationsError: AutomationModel["automationsError"];
+  automationsLoading: AutomationModel["automationsLoading"];
+  backendDoctor: Record<string, WorkbenchBackendDoctor>;
+  backendDraft: BackendDraft | null;
+  backends: WorkbenchBackend[];
+  capabilitiesTab: CapabilityTab;
+  channelDoctor: Record<string, WorkbenchChannelDoctor>;
+  deleteAutomation: AutomationModel["deleteAutomation"];
+  deleteBackend: AppActions["deleteBackend"];
+  deleteChannel: AppActions["deleteChannel"];
+  doctorBackend: AppActions["doctorBackend"];
+  doctorChannel: AppActions["doctorChannel"];
+  doctorChannels: AppActions["doctorChannels"];
+  draftAutomation: AutomationModel["draftAutomation"];
+  loadChannelSources: AppActions["loadChannelSources"];
+  loadThreadSearchText: AppActions["loadThreadSearchText"];
+  mainView: MainView;
+  mobilePanel: MobilePanel;
+  onModelAssignmentSaved(): Promise<void>;
+  onModelCatalogLoaded(options: ModelOptionView[]): void;
+  openAutomationThread: AutomationModel["openAutomationThread"];
+  openCapabilitiesTab(tab?: CapabilityTab): void;
+  openSettingsSection(section: SettingsSection): void;
+  pauseAutomation: AutomationModel["pauseAutomation"];
+  pollWechatQrSetup: AppActions["pollWechatQrSetup"];
+  refreshAutomations: AutomationModel["refreshAutomations"];
+  refreshUsageStats(nextClient?: GatewayClient | null): Promise<void>;
+  resumeAutomation: AutomationModel["resumeAutomation"];
+  runAutomation: AutomationModel["runAutomation"];
+  saveAutomation: AutomationModel["saveAutomation"];
+  saveBackendDraft: AppActions["saveBackendDraft"];
+  setAppearance: SetState<Appearance>;
+  setBackendDraft: SetState<BackendDraft | null>;
+  setCapabilitiesTab: SetState<CapabilityTab>;
+  setChannelEnabled: AppActions["setChannelEnabled"];
+  setDebugEnabled: SetState<boolean>;
+  setMobilePanel: SetState<MobilePanel>;
+  setSettingsSection: SetState<SettingsSection>;
+  settingsSection: SettingsSection;
+  showSessionChrome: boolean;
+  startWechatQrSetup: AppActions["startWechatQrSetup"];
+  updateBackendDraftFields: AppActions["updateBackendDraftFields"];
+  updateChannel: AppActions["updateChannel"];
+  updateMainView(value: MainView): void;
+  usageStats: UsageReadResult | null;
+  usageStatsError: string | null;
+  usageStatsLoading: boolean;
+};
+
+export type WorkbenchLayoutProps = {
+  capabilities: CapabilityViewModel;
+  history: HistoryViewModel;
+  thread: ThreadViewModel;
+  workspace: WorkspaceViewModel;
+};
+
+export function WorkbenchLayout(props: WorkbenchLayoutProps) {
+  const groupedProps = {
+    ...props.capabilities,
+    ...props.history,
+    ...props.thread,
+    ...props.workspace
+  };
   const {
     activeCommandOverlay,
     activeRightTab,
@@ -45,16 +316,17 @@ export function WorkbenchLayout(props: Record<string, any>) {
     backendDoctor,
     backendDraft,
     backends,
-    beginExplicitViewSwitch,
     beginRightResize,
     capabilitiesTab,
     changeRuntimeControl,
     changeRunnableTarget,
     clearRightWorkspaceTabPendingPrompt,
+    closeRightWorkspaceTab,
     channelDoctor,
     client,
     commandFeedback,
     commands,
+    composerDraftPatch,
     composerPresentationReady,
     composerShellVisible,
     contextUsage,
@@ -84,6 +356,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     init,
     leftCollapsed,
     latestGatewayEvent,
+    loadOlderHistory,
     loadingOlderCwd,
     loadChannelSources,
     loadOlderSessions,
@@ -98,8 +371,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
     openAutomationThread,
     openFilePreview,
     openRightWorkspaceTab,
+    openSettingsSection,
     onModelAssignmentSaved,
     onModelCatalogLoaded,
+    olderHistoryLoading,
     pendingClarifyActions,
     pendingPermissionActions,
     patchComposerDraft,
@@ -112,6 +387,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     refreshHistory,
     refreshObservability,
     refreshSnapshot,
+    refreshTrace,
     refreshUsageStats,
     refreshWorkspaceSurface,
     readWorkspaceFolders,
@@ -121,6 +397,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     rightCollapsed,
     rightTabs,
     rightWidthPx,
+    revealRightWorkspace,
     runAction,
     runAutomation,
     runCommandAlternateAction,
@@ -149,15 +426,15 @@ export function WorkbenchLayout(props: Record<string, any>) {
     setDebugEnabled,
     setDirtyRightTabs,
     setDraftSession,
+    setError,
     setLeftCollapsed,
-    setMainView,
     setMobilePanel,
     setRightCollapsed,
     setRightTabs,
     setRightWidthPx,
     setCommandFeedback,
     setSettingsSection,
-    setSnapshot,
+    setWorkspaceDialogOpen,
     settings,
     settingsSection,
     showSessionChrome,
@@ -167,7 +444,6 @@ export function WorkbenchLayout(props: Record<string, any>) {
     startWechatQrSetup,
     status,
     submitTurn,
-    submitThreadTurn,
     switchMainView,
     terminalEvents,
     togglePinnedSession,
@@ -176,6 +452,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     voiceAutoSpeak,
     voiceListening,
     voiceRealtimeActive,
+    workbenchIntents,
     updateBackendDraftFields,
     updateChannel,
     updateMainView,
@@ -194,7 +471,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
     onVoiceRealtimeToggle,
     onGatewayRetry,
     onComposerRetry
-  } = props;
+  } = groupedProps;
 
   const workspaceFileLinks: WorkspaceFileLinkContext | undefined = workspaceFiles
     ? {
@@ -203,10 +480,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
         root: workspaceFiles.root
       }
     : undefined;
-  const selectedRuntimeRef = runtimeContext?.compatibleTargets.find((target: any) => (
+  const selectedRuntimeRef = runtimeContext?.compatibleTargets?.find((target) => (
     target.targetId === selectedTargetId
   ))?.runtimeProfileRef ?? null;
-  const selectedRuntimeProfile = (runtimeProfiles ?? []).find((profile: any) => (
+  const selectedRuntimeProfile = runtimeProfiles.find((profile) => (
     profile.id === selectedRuntimeRef
   )) ?? null;
   const runtimeSafetyParts = [selectedRuntimeProfile?.approvalMode, selectedRuntimeProfile?.sandbox]
@@ -215,32 +492,29 @@ export function WorkbenchLayout(props: Record<string, any>) {
     ? ["Profile safety", ...runtimeSafetyParts].join(" · ")
     : null;
   const activeRuntimeControls = runtimeControls ?? [];
-  const modelControl = activeRuntimeControls.find((control: any) => control.surfaceRole === "model") ?? null;
-  const reasoningControl = activeRuntimeControls.find((control: any) => control.surfaceRole === "reasoning") ?? null;
+  const modelControl = activeRuntimeControls.find((control) => control.surfaceRole === "model") ?? null;
+  const reasoningControl = activeRuntimeControls.find((control) => control.surfaceRole === "reasoning") ?? null;
   const inputCapabilities = contextMatchesTarget ? runtimeContext?.inputCapabilities ?? [] : [];
-  const textCapability = inputCapabilities.find((capability: any) => capability.kind === "text") ?? null;
+  const textCapability = inputCapabilities.find((capability) => capability.kind === "text") ?? null;
   const promptTextUnavailableReason = !currentThreadId && runtimeOptionsLoading
     ? null
     : textCapability?.enabled
     ? null
     : textCapability?.unavailableReason ?? turnBlockReason;
-  const attachmentCapabilities = inputCapabilities.filter((capability: any) => (
+  const attachmentCapabilities = inputCapabilities.filter((capability) => (
     capability.kind === "image"
     || capability.kind === "resource"
     || capability.kind === "embeddedContext"
   ));
-  const attachmentsEnabled = attachmentCapabilities.some((capability: any) => capability.enabled);
+  const attachmentsEnabled = attachmentCapabilities.some((capability) => capability.enabled);
   const attachmentUnavailableReason = attachmentsEnabled
     ? null
-    : attachmentCapabilities.find((capability: any) => capability.unavailableReason)?.unavailableReason
+    : attachmentCapabilities.find((capability) => capability.unavailableReason)?.unavailableReason
       ?? turnBlockReason;
-  const agentMentionsEnabled = inputCapabilities.some((capability: any) => (
-    capability.kind === "agentMention" && capability.enabled
-  ));
   const steerTurnId = confirmedSteerTurnId(
     latestGatewayEvent,
     snapshot.thread?.id ?? null,
-    activity.activeTurnId
+    activity.activeTurnId ?? null
   );
   const steerAvailable = Boolean(steerTurnId)
     && contextMatchesTarget
@@ -248,12 +522,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
   const historyEditAvailable = enabledThreadAction(runtimeContext, "revertConversation") !== null;
   const pointForkAvailable = enabledThreadAction(runtimeContext, "forkBefore") !== null;
   const forkSource = snapshot.thread?.forkedFromThreadId
-    ? [...sessions, ...archivedSessions].find((session: any) => (
+    ? [...sessions, ...archivedSessions].find((session) => (
         session.id === snapshot.thread?.forkedFromThreadId
       )) ?? null
     : null;
   const [sessionArchiveView, setSessionArchiveView] = useState(false);
-  const [pendingDeleteSession, setPendingDeleteSession] = useState<any | null>(null);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<SessionSummary | null>(null);
   const [deleteSessionPending, setDeleteSessionPending] = useState(false);
   const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
   const draftSession = showSessionChrome && !currentThreadId;
@@ -306,14 +580,14 @@ export function WorkbenchLayout(props: Record<string, any>) {
         <WorkspacePickerDialog
           ariaLabel="Open workspace"
           disabled={disabled}
-          onCancel={() => props.setWorkspaceDialogOpen(false)}
+          onCancel={() => setWorkspaceDialogOpen(false)}
           onCreate={async (parent, name) => {
             await createWorkspace(name, parent);
-            props.setWorkspaceDialogOpen(false);
+            setWorkspaceDialogOpen(false);
           }}
           onOpen={async (cwd) => {
             await startNewThread(cwd);
-            props.setWorkspaceDialogOpen(false);
+            setWorkspaceDialogOpen(false);
           }}
           onReadFolders={readWorkspaceFolders}
           title="Open workspace"
@@ -326,14 +600,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
           onConfirm={() => void runAction(async () => {
             setDeleteSessionPending(true);
             try {
-              const deletingCurrent = pendingDeleteSession.id === currentThreadId;
-              setDraftSession(null);
-              await client?.request("thread/delete", { threadId: pendingDeleteSession.id });
+              await workbenchIntents.deleteSession(pendingDeleteSession);
               setPendingDeleteSession(null);
-              if (deletingCurrent) {
-                await startNewThread(undefined, { refreshHistory: false });
-              }
-              await Promise.all([refreshHistory(), refreshHistory(client, true)]);
             } finally {
               setDeleteSessionPending(false);
             }
@@ -399,54 +667,24 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   currentThreadId={currentThreadId}
                   disabled={disabled}
                   sessions={pinnedSessions}
-                  onResume={(threadId) => void runAction(async () => {
-                    const epoch = beginExplicitViewSwitch();
-                    await refreshSnapshot(client, threadId, undefined, false, epoch);
-                    updateMainView("transcript");
-                    setMobilePanel("transcript");
-                  })}
+                  onResume={(threadId) => void runAction(async () => workbenchIntents.openThread(threadId))}
                   onUnpin={togglePinnedSession}
                 />
                 {sessionArchiveView ? (
                   <SessionArchivePanel
                     archivedSessions={archivedSessions}
                     client={client}
-                    currentThreadId={currentThreadId}
+                    currentThreadId={currentThreadId ?? null}
                     disabled={disabled}
                     scope={importScope}
-                    onActivateArchived={async (threadId) => {
-                      if (!client) return;
-                      await client.request("thread/restore", { threadId });
-                      await Promise.all([refreshHistory(client), refreshHistory(client, true)]);
-                      const epoch = beginExplicitViewSwitch();
-                      await refreshSnapshot(client, threadId, undefined, false, epoch);
-                      updateMainView("transcript");
-                      setMobilePanel("transcript");
-                    }}
+                    onActivateArchived={workbenchIntents.activateArchived}
                     onDeleteArchived={(session) => setPendingDeleteSession(session)}
-                    onImportSession={async (profile, candidateId, targetId, activate) => {
-                      if (!client) return;
-                      const imported = await client.request("thread/import", {
-                        archived: !activate,
-                        candidateId,
-                        scope: importScope,
-                        targetId
-                      });
-                      const threadId = imported.snapshot.thread?.id;
-                      if (!threadId) throw new Error(`Imported ${profile.profileLabel} session did not publish a Thread.`);
-                      await Promise.all([refreshHistory(client), refreshHistory(client, true)]);
-                      const epoch = beginExplicitViewSwitch();
-                      await refreshSnapshot(client, threadId, undefined, !activate, epoch, true);
-                      updateMainView("transcript");
-                      setMobilePanel("transcript");
-                    }}
-                    onOpenArchived={async (threadId) => {
-                      const epoch = beginExplicitViewSwitch();
-                      await refreshSnapshot(client, threadId, undefined, true, epoch, true);
-                      updateMainView("transcript");
-                      setMobilePanel("transcript");
-                    }}
-                    onOpenWorkspace={() => props.setWorkspaceDialogOpen(true)}
+                    onImportSession={workbenchIntents.importSession}
+                    onOpenArchived={(threadId) => workbenchIntents.openThread(threadId, {
+                      allowDetachedAdoption: true,
+                      readOnly: true
+                    })}
+                    onOpenWorkspace={() => setWorkspaceDialogOpen(true)}
                     onRefreshArchived={() => refreshHistory(client, true)}
                     onShowActive={() => setSessionArchiveView(false)}
                   />
@@ -461,15 +699,10 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   loadingOlderCwd={loadingOlderCwd}
                   loading={historyLoading}
                   sessions={sessions}
-                  onArchive={(threadId) => void runAction(async () => {
-                    setDraftSession(null);
-                    await client?.request("thread/archive", { threadId });
-                    await refreshHistory();
-                    await refreshHistory(client, true);
-                  })}
+                  onArchive={(threadId) => void runAction(async () => workbenchIntents.archiveSession(threadId))}
                   onDelete={(threadId) => void runAction(async () => {
                     const session = [...sessions, ...archivedSessions]
-                      .find((candidate: any) => candidate.id === threadId);
+                      .find((candidate) => candidate.id === threadId);
                     if (session) setPendingDeleteSession(session);
                   })}
                   onExport={(threadId) => {
@@ -477,52 +710,24 @@ export function WorkbenchLayout(props: Record<string, any>) {
                       void host?.open.downloadSession(endpoint, threadId, "export");
                     }
                   }}
-                  onFork={(threadId) => void runAction(async () => {
-                    const session = sessions.find((candidate: any) => candidate.id === threadId);
-                    if (!session) return;
-                    const result = await client?.request("thread/action/run", {
-                      action: { kind: "fork" },
-                      scope: scopeForCwd(session.cwd),
-                      threadId
-                    });
-                    const forkedThreadId = result?.kind === "fork" ? result.snapshot.thread?.id : null;
-                    if (!forkedThreadId) return;
-                    const epoch = beginExplicitViewSwitch();
-                    await refreshSnapshot(client, forkedThreadId, undefined, false, epoch);
-                    await refreshHistory();
-                    updateMainView("transcript");
-                    setMobilePanel("transcript");
-                  })}
+                  onFork={(threadId) => void runAction(async () => workbenchIntents.forkSession(threadId))}
                   onImportSessions={() => setSessionArchiveView(true)}
                   onNew={() => void runAction(async () => {
                     await startNewThread();
                   })}
-                  onCreateWorkspace={() => props.setWorkspaceDialogOpen(true)}
+                  onCreateWorkspace={() => setWorkspaceDialogOpen(true)}
                   onNewInCwd={(cwd) => void runAction(async () => {
                     await startNewThread(cwd);
                   })}
                   onLoadOlderSessions={(cwd) => void runAction(async () => loadOlderSessions(cwd))}
                   onTogglePinned={togglePinnedSession}
-                  onRename={(threadId, title) => void runAction(async () => {
-                    await client?.request("thread/rename", { threadId, title });
-                    await refreshHistory();
-                  })}
-                  onRestore={(threadId) => void runAction(async () => {
-                    setDraftSession(null);
-                    await client?.request("thread/restore", { threadId });
-                    await refreshHistory();
-                    await refreshHistory(client, true);
-                  })}
+                  onRename={(threadId, title) => void runAction(async () => workbenchIntents.renameSession(threadId, title))}
+                  onRestore={(threadId) => void runAction(async () => workbenchIntents.restoreSession(threadId))}
                   onResumeDraft={() => {
                     switchMainView("transcript");
                     setMobilePanel("transcript");
                   }}
-                  onResume={(threadId) => void runAction(async () => {
-                    const epoch = beginExplicitViewSwitch();
-                    await refreshSnapshot(client, threadId, undefined, false, epoch);
-                    updateMainView("transcript");
-                    setMobilePanel("transcript");
-                  })}
+                  onResume={(threadId) => void runAction(async () => workbenchIntents.openThread(threadId))}
                   onShare={(threadId) => {
                     if (endpoint) {
                       void host?.open.downloadSession(endpoint, threadId, "share");
@@ -536,7 +741,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               value={mainView}
               onChange={(value) => {
                 if (value === "settings") {
-                  props.openSettingsSection(settingsSection);
+                  openSettingsSection(settingsSection);
                 } else {
                   switchMainView(value);
                   setMobilePanel("transcript");
@@ -554,8 +759,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 disabled={!forkSource}
                 onClick={() => void runAction(async () => {
                   if (!forkSource) return;
-                  const epoch = beginExplicitViewSwitch();
-                  await refreshSnapshot(client, forkSource.id, undefined, false, epoch);
+                  await workbenchIntents.openThread(forkSource.id);
                 })}
                 title={forkSource ? "Open source thread" : `Source thread ${snapshot.thread.forkedFromThreadId} is unavailable`}
                 type="button"
@@ -586,7 +790,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               backends={backends}
               capabilitiesTab={capabilitiesTab}
               channelDoctor={channelDoctor}
-              channels={settings?.channels.channels ?? []}
+              channels={settings?.channels?.channels ?? []}
               client={client}
               controls={controls}
               currentThreadId={currentThreadId ?? null}
@@ -633,12 +837,12 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 openCapabilitiesTab("agents");
                 setBackendDraft({ ...EMPTY_BACKEND_DRAFT });
               }}
-              onOpenSession={(threadId, readOnly = false) => void runAction(async () => {
-                const epoch = beginExplicitViewSwitch();
-                await refreshSnapshot(client, threadId, undefined, readOnly, epoch, readOnly);
-                updateMainView("transcript");
-                setMobilePanel("transcript");
-              })}
+              onOpenSession={(threadId, readOnly = false) => void runAction(async () => (
+                workbenchIntents.openThread(threadId, {
+                  allowDetachedAdoption: readOnly,
+                  readOnly
+                })
+              ))}
               onOpenAutomationThread={openAutomationThread}
               onSettingsSectionChange={setSettingsSection}
               onSaveBackendDraft={(draft) => void runAction(async () => saveBackendDraft(draft))}
@@ -653,57 +857,17 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   activity={activity}
                   entries={transcriptEntries}
                   history={snapshot.history}
+                  onLoadOlderHistory={() => void runAction(loadOlderHistory)}
                   onCopyText={copyText}
                   {...(historyEditAvailable && pointForkAvailable ? {
-                    onReadUserMessageDraft: async (entry: any) => {
-                      const target = snapshotThreadApplicationTarget(snapshot);
-                      if (!client || !target) throw new Error("The active Thread is unavailable.");
-                      return client.request("thread/history/draft/read", {
-                        ...target,
-                        messageId: entry.id
-                      });
-                    },
-                    onUpdateUserMessage: async (entry: any, draft: any) => {
-                      const target = snapshotThreadApplicationTarget(snapshot);
-                      if (!client || !target) throw new Error("The active Thread is unavailable.");
-                      const result = await client.request("thread/action/run", {
-                        ...target,
-                        action: { kind: "revertConversation", messageId: entry.id, draft }
-                      });
-                      if (result.kind !== "revertConversation") return;
-                      if (result.noOp) {
-                        setSnapshot(result.snapshot);
-                        return;
-                      }
-                      const text = editableDraftText(draft.parts);
-                      await submitThreadTurn(
-                        target.threadId,
-                        text,
-                        [],
-                        text,
-                        draft.parts
-                      );
-                    },
-                    onForkUserMessage: async (entry: any, draft: any) => {
-                      const target = snapshotThreadApplicationTarget(snapshot);
-                      if (!client || !target) throw new Error("The active Thread is unavailable.");
-                      const result = await client.request("thread/action/run", {
-                        ...target,
-                        action: { kind: "forkBefore", messageId: entry.id }
-                      });
-                      if (result.kind !== "forkBefore" || !result.snapshot.thread?.id) return;
-                      const epoch = beginExplicitViewSwitch();
-                      setSnapshot(result.snapshot);
-                      await refreshSnapshot(client, result.snapshot.thread.id, undefined, false, epoch);
-                      prefillEditableDraft(draft.parts, patchComposerDraft, setAttachments);
-                      await refreshHistory();
-                      updateMainView("transcript");
-                      setMobilePanel("transcript");
-                    }
+                    onReadUserMessageDraft: workbenchIntents.readUserMessageDraft,
+                    onUpdateUserMessage: workbenchIntents.updateUserMessage,
+                    onForkUserMessage: workbenchIntents.forkUserMessage
                   } : {})}
                   onOpenAgentSession={openAgentSessionTab}
                   threadId={snapshot.thread?.id ?? null}
                   onReadAloudText={onReadAloudText}
+                  olderHistoryLoading={olderHistoryLoading}
                   {...(workspaceFileLinks ? { workspaceFileLinks } : {})}
                 />
               )}
@@ -741,15 +905,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
               <div className="historyEditingStrip" role="status">
                 <span>{snapshot.historyEditing.hiddenEntryCount} hidden {snapshot.historyEditing.hiddenEntryCount === 1 ? "entry" : "entries"}</span>
                 <ActionButton onClick={() => void runAction(async () => {
-                  const target = snapshotThreadApplicationTarget(snapshot);
-                  if (!client || !target) return;
-                  const result = await client.request("thread/action/run", {
-                    ...target,
-                    action: { kind: "unrevertConversation" }
-                  });
-                  if (result.kind !== "unrevertConversation") return;
-                  setSnapshot(result.snapshot);
-                  prefillEditableDraft(result.draft.parts, patchComposerDraft, setAttachments);
+                  await workbenchIntents.restoreEditedHistory();
                 })} size="compact" type="button" variant="caution">
                   Restore history
                 </ActionButton>
@@ -765,24 +921,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
             <Composer
               attachmentUnavailableReason={attachmentUnavailableReason}
               attachments={attachments}
-              completionProvider={async (text, cursor) => {
-                const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
-                const result = await client?.request("completion/list", {
-                  cursor,
-                  scope,
-                  text,
-                  threadId: snapshot.thread?.id ?? null
-                }) ?? { items: [], replacement: null };
-                return {
-                  ...result,
-                  items: result.items.filter((item: any) => (
-                    agentMentionsEnabled
-                    || item.target?.kind !== "agent"
-                  ))
-                };
-              }}
+              completionProvider={workbenchIntents.completion}
               disabled={composerInteractionDisabled}
-              draftPatch={props.composerDraftPatch ?? undefined}
+              draftPatch={composerDraftPatch ?? undefined}
               placeholder={composerPresentationReady ? "Ask Psychevo..." : "Preparing runtime environment…"}
               leftControls={(
                 <>
@@ -848,44 +989,8 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 <ComposerRequests
                   clarifies={pendingClarifyActions}
                   permissions={pendingPermissionActions}
-                  onClarify={(request, answers, cancel) => void runAction(async () => {
-                    const target = snapshotThreadApplicationTarget(snapshot, request.threadId);
-                    if (!client || !target) {
-                      setInteractionFeedback(setCommandFeedback, false, "Clarify response does not belong to the active Thread.");
-                      return;
-                    }
-                    const response = await client.request("thread/interaction/respond", {
-                      ...target,
-                      interactionId: request.actionId,
-                      response: cancel
-                        ? { kind: "cancelClarify" }
-                        : { kind: "clarify", answers: answers ?? [] }
-                    });
-                    setInteractionFeedback(
-                      setCommandFeedback,
-                      acceptedInteractionResponse(response),
-                      response.accepted ? "Clarify response accepted." : "Clarify response was not accepted."
-                    );
-                    await refreshSnapshot(client, target.threadId, undefined, true);
-                  })}
-                  onPermission={(request, decision, directory) => void runAction(async () => {
-                    const target = snapshotThreadApplicationTarget(snapshot, request.threadId);
-                    if (!client || !target) {
-                      setInteractionFeedback(setCommandFeedback, false, "Permission response does not belong to the active Thread.");
-                      return;
-                    }
-                    const response = await client.request("thread/interaction/respond", {
-                      ...target,
-                      interactionId: request.actionId,
-                      response: { kind: "permission", decision, ...(directory ? { directory } : {}) }
-                    });
-                    setInteractionFeedback(
-                      setCommandFeedback,
-                      acceptedInteractionResponse(response),
-                      response.accepted ? "Permission response accepted." : "Permission response was not accepted."
-                    );
-                    await refreshSnapshot(client, target.threadId, undefined, true);
-                  })}
+                  onClarify={(request, answers, cancel) => void runAction(async () => workbenchIntents.respondClarify(request, answers, cancel))}
+                  onPermission={(request, decision, directory) => void runAction(async () => workbenchIntents.respondPermission(request, decision, directory))}
                 />
               ) : null}
               running={running}
@@ -896,48 +1001,11 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 onAttachFiles: (files: File[]) => void runAction(async () => handleAttachmentFiles(files))
               } : {})}
               onCommand={(command) => void runAction(async () => executeCommand(command, "composer"))}
-              onInterrupt={() => void runAction(async () => {
-                const target = snapshotThreadApplicationTarget(snapshot);
-                if (!client || !target) {
-                  setCommandFeedback?.({
-                    accepted: false,
-                    command: "interrupt",
-                    message: "Interrupt is not available for the active Thread.",
-                    feedbackAnchor: "composer"
-                  });
-                  return;
-                }
-                await runThreadInterrupt(client, target);
-                await refreshSnapshot(client, target.threadId, undefined, true, props.viewEpochRef.current);
-              })}
+              onInterrupt={() => void runAction(workbenchIntents.interrupt)}
               onModeChange={() => {}}
-              onRemoveAttachment={(id) => setAttachments((current: any[]) => current.filter((attachment) => attachment.id !== id))}
+              onRemoveAttachment={(id) => setAttachments((current: PendingAttachment[]) => current.filter((attachment) => attachment.id !== id))}
               onShell={(command) => void runAction(async () => startShell(command))}
-              onSteer={(text) => void runAction(async () => {
-                if (!steerTurnId) {
-                  return;
-                }
-                const target = snapshotThreadApplicationTarget(snapshot);
-                if (!client || !target || !steerAvailable) {
-                  return;
-                }
-                clearCommandTransientUi();
-                const result = await client.request("thread/action/run", {
-                  ...target,
-                  action: { kind: "steer", expectedTurnId: steerTurnId, text }
-                });
-                if (result.kind === "steer" && result.accepted) {
-                  setSnapshot((current: any) => appendOptimisticPrompt(current, text));
-                  await refreshHistory();
-                } else {
-                  setCommandFeedback?.({
-                    accepted: false,
-                    command: "/steer",
-                    message: "The selected Runtime Profile does not support steering this turn.",
-                    feedbackAnchor: "composer"
-                  });
-                }
-              })}
+              onSteer={(text) => void runAction(async () => workbenchIntents.steer(text))}
               onSubmit={(text, mentions, orderedInput, isInputCurrent) => runAction(
                 async () => submitTurn(text, mentions, undefined, orderedInput, isInputCurrent)
               ).then((accepted: unknown) => accepted === true)}
@@ -957,7 +1025,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 ? settings?.project?.displayPath ?? activeWorkbenchCwd
                 : init?.scope.cwd === activeWorkbenchCwd
                   ? init.displayCwd
-                  : sessionBrowserWorkspaces.find((workspace: any) => workspace.cwd === activeWorkbenchCwd)?.displayPath
+                  : sessionBrowserWorkspaces.find((workspace) => workspace.cwd === activeWorkbenchCwd)?.displayPath
                     ?? activeWorkbenchCwd}
               runtimeSafetyLabel={runtimeSafetyLabel}
               profile={init?.profile ?? null}
@@ -999,7 +1067,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 root={workspaceFiles?.root ?? settings?.cwd ?? ""}
                 scope={activeScope ?? init?.scope ?? null}
                 sessionId={snapshot.thread?.id ?? null}
-                status={props.status}
+                status={status}
                 usage={sessionUsage}
                 tabs={rightTabs}
                 terminalEvents={terminalEvents}
@@ -1012,7 +1080,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 onActivate={setActiveRightTabId}
                 onAcceptChange={(turnId, path) => void runAction(async () => acceptWorkspaceChange(turnId, path))}
                 onChangedFile={(path) => void runAction(async () => openDiffPreview(path))}
-                onClose={props.closeRightWorkspaceTab}
+                onClose={closeRightWorkspaceTab}
                 onCopyText={copyText}
                 onDirtyTabChange={(tabId, dirty) => {
                   setDirtyRightTabs((current: Record<string, boolean>) => current[tabId] === dirty ? current : { ...current, [tabId]: dirty });
@@ -1032,7 +1100,7 @@ export function WorkbenchLayout(props: Record<string, any>) {
                 onOpenExternal={(url) => void runAction(async () => {
                   const result = await host?.open.openExternal(url);
                   if (!result?.ok) {
-                    props.setError(result?.message ?? "Open externally is not supported by this host.");
+                    setError(result?.message ?? "Open externally is not supported by this host.");
                   }
                 })}
                 onOpenKind={(kind) => {
@@ -1055,9 +1123,9 @@ export function WorkbenchLayout(props: Record<string, any>) {
                   await refreshAgentSurface();
                   await refreshWorkspaceSurface();
                 })}
-                onRefreshTrace={() => void props.refreshTrace()}
+                onRefreshTrace={() => void refreshTrace()}
                 onSaveFile={(path, content, expectedRevision, force) => saveFileFromEditor(path, content, expectedRevision, force)}
-                onShowHome={() => props.revealRightWorkspace(null)}
+                onShowHome={() => revealRightWorkspace(null)}
               />
             </Suspense>
           </aside>
@@ -1103,53 +1171,4 @@ function useComposerDockTransition(
     previousRectRef.current = nextRect;
     previousDraftRef.current = draftSession;
   }, [draftSession, present, ref]);
-}
-
-function editableDraftText(parts: ThreadEditableInputPart[]): string {
-  return parts
-    .filter((part): part is Extract<ThreadEditableInputPart, { type: "text" }> => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
-}
-
-function prefillEditableDraft(
-  parts: ThreadEditableInputPart[],
-  patchComposerDraft: (text: string, parts?: ThreadEditableInputPart[]) => void,
-  setAttachments: (attachments: PendingAttachment[]) => void
-) {
-  patchComposerDraft(editableDraftText(parts), parts);
-  const attachments = parts.flatMap((part, index): PendingAttachment[] => {
-    if (part.type !== "image") return [];
-    const source = part.input.kind === "localPath" ? part.input.path : part.input.url;
-    const name = source.split(/[\\/]/).pop()?.split(/[?#]/)[0] || `image-${index + 1}`;
-    return [{
-      id: `history:${index}:${source}`,
-      input: part,
-      kind: "image",
-      name,
-      ...(part.input.kind === "url" ? { previewUrl: part.input.url } : {}),
-      size: 0,
-      sizeLabel: "From history"
-    }];
-  });
-  setAttachments(attachments);
-}
-
-function acceptedInteractionResponse(value: unknown): boolean {
-  return typeof value === "object"
-    && value !== null
-    && (value as { accepted?: unknown }).accepted === true;
-}
-
-function setInteractionFeedback(
-  setCommandFeedback: ((feedback: Record<string, unknown>) => void) | undefined,
-  accepted: boolean,
-  message: string
-) {
-  setCommandFeedback?.({
-    accepted,
-    command: "thread/interaction/respond",
-    message,
-    feedbackAnchor: "composer"
-  });
 }

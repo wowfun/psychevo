@@ -72,8 +72,13 @@ import {
 import { createRightWorkspaceActions } from "./right-workspace-actions";
 import {
   EMPTY_GATEWAY_EVENT_FEED,
+  confirmedSteerTurnId,
   type GatewayThreadEventFeed
 } from "./gateway-event-feed";
+import {
+  enabledThreadAction
+} from "./thread-application";
+import { createWorkbenchIntentOwner } from "./workbench-intents";
 import {
   browserFallbackCwd,
   createBrowserWorkbenchRuntime,
@@ -152,14 +157,21 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const confirmAction = useConfirmAction();
   const threadSession = useMemo(() => new ThreadSession({ snapshot: EMPTY_SNAPSHOT }), []);
   const composerSessionCoordinator = useMemo(() => new ComposerSessionCoordinator(), []);
-  const threadSnapshotStore = useMemo(() => ({
-    getSnapshot: () => threadSession.getSnapshot() ?? EMPTY_SNAPSHOT,
+  const threadSessionViewStore = useMemo(() => ({
+    getSnapshot: () => threadSession.getView(),
     subscribe: (listener: () => void) => threadSession.subscribe(listener)
   }), [threadSession]);
-  const snapshot = useSyncExternalStore(
-    threadSnapshotStore.subscribe,
-    threadSnapshotStore.getSnapshot,
-    threadSnapshotStore.getSnapshot
+  const threadSessionView = useSyncExternalStore(
+    threadSessionViewStore.subscribe,
+    threadSessionViewStore.getSnapshot,
+    threadSessionViewStore.getSnapshot
+  );
+  const snapshot = threadSessionView.threadSnapshot ?? EMPTY_SNAPSHOT;
+  const runtimeContext = useMemo(
+    () => threadSessionView.context
+      ? parseThreadContext(threadSessionView.context)
+      : null,
+    [threadSessionView.context]
   );
   const [client, setClient] = useState<GatewayClient | null>(null);
   const [startupStable, setStartupStable] = useState(false);
@@ -169,6 +181,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [activeScope, setActiveScope] = useState<GatewayRequestScope | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [olderHistoryLoading, setOlderHistoryLoading] = useState(false);
   const [archivedSessions, setArchivedSessions] = useState<SessionSummary[]>([]);
   const [sessionBrowserWorkspaces, setSessionBrowserWorkspaces] = useState<SessionBrowserWorkspaceState[]>([]);
   const [loadingOlderCwd, setLoadingOlderCwd] = useState<string | null>(null);
@@ -193,7 +206,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const [commandFeedback, setCommandFeedback] = useState<CommandFeedback>(null);
   const [activeCommandOverlay, setActiveCommandOverlay] = useState<CommandOverlay | null>(null);
   const [selectedTargetId, setSelectedTargetId] = useState<string>("");
-  const [runtimeContext, setRuntimeContext] = useState<ThreadContextReadResult | null>(null);
   const [runtimeContextTargetId, setRuntimeContextTargetId] = useState<string>("");
   const [runtimeContextRefreshRevision, setRuntimeContextRefreshRevision] = useState(0);
   const [runtimeControlDrafts, setRuntimeControlDrafts] = useState<Record<string, unknown>>({});
@@ -250,6 +262,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const pendingTargetSelectionRef = useRef<string | null>(null);
   const runtimeTargetTransitionRef = useRef(false);
   const runtimeMutationSequenceRef = useRef(0);
+  const olderHistoryLoadSequenceRef = useRef(0);
   const startupRetryRef = useRef(false);
 
   useEffect(() => {
@@ -258,6 +271,10 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   }, [client, threadSession]);
 
   useEffect(() => () => threadSession.dispose(), [threadSession]);
+
+  function setRuntimeContext(context: ThreadContextReadResult | null): void {
+    threadSession.setContext(context ? parseThreadContext(context) : null);
+  }
 
   function setSnapshot(value: ThreadSnapshot | ((current: ThreadSnapshot) => ThreadSnapshot)) {
     const current = threadSession.getSnapshot() ?? EMPTY_SNAPSHOT;
@@ -320,7 +337,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     }
     if (!client || (!startupStable && !startupRetryRef.current)) {
       setRuntimeContext(null);
-      threadSession.setContext(null);
       return;
     }
     if (
@@ -353,7 +369,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         return;
       }
       setRuntimeContext(context);
-      threadSession.setContext(context);
       const pendingTarget = context.compatibleTargets.find((target) => (
         target.targetId === pendingTargetSelectionRef.current
       )) ?? null;
@@ -380,7 +395,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       if (cancelled) return;
       setRuntimeContext(null);
       setRuntimeContextTargetId("");
-      threadSession.setContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     }).finally(() => {
       if (!cancelled) setRuntimeOptionsLoading(false);
@@ -459,23 +473,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setMainView(value);
   }
   const sessionUsage = observability?.usage ?? null;
-  const {
-    adoptSnapshotScope,
-    pushDebugEvent,
-    refreshAgentSurface,
-    refreshCommands,
-    refreshHistory,
-    refreshObservability,
-    refreshRevertedThreadSnapshot,
-    refreshSettings,
-    refreshSnapshot,
-    refreshTrace,
-    refreshWorkspaceChanges,
-    refreshWorkspaceDiff,
-    refreshWorkspaceFiles,
-    refreshWorkspaceSurface,
-    runAction
-  } = createSurfaceActions({
+  const surfaceActions = createSurfaceActions({
     activeScope,
     client,
     currentThreadId: currentThreadId ?? null,
@@ -507,6 +505,23 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setWorkspaceFiles,
     onSnapshotAdopted: () => setStartupStable(true)
   });
+  const {
+    adoptSnapshotScope,
+    pushDebugEvent,
+    refreshAgentSurface,
+    refreshCommands,
+    refreshHistory,
+    refreshObservability,
+    refreshRevertedThreadSnapshot,
+    refreshSettings,
+    refreshSnapshot,
+    refreshTrace,
+    refreshWorkspaceChanges,
+    refreshWorkspaceDiff,
+    refreshWorkspaceFiles,
+    refreshWorkspaceSurface,
+    runAction
+  } = surfaceActions;
 
   useEffect(() => {
     if (
@@ -535,6 +550,20 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setRuntimeContextRefreshRevision((current) => current + 1);
   }
 
+  const automationModel = useAutomations({
+    activeScope,
+    activeWorkbenchCwd,
+    client,
+    fallbackCwd,
+    initScope: init?.scope ?? null,
+    mainView,
+    settingsCwd: settings?.cwd,
+    beginExplicitViewSwitch,
+    refreshSnapshot,
+    runAction,
+    setMobilePanel,
+    updateMainView
+  });
   const {
     applyGatewayEvent,
     gatewayEventQueueRef,
@@ -557,20 +586,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     resumeAutomation,
     runAutomation,
     saveAutomation
-  } = useAutomations({
-    activeScope,
-    activeWorkbenchCwd,
-    client,
-    fallbackCwd,
-    initScope: init?.scope ?? null,
-    mainView,
-    settingsCwd: settings?.cwd,
-    beginExplicitViewSwitch,
-    refreshSnapshot,
-    runAction,
-    setMobilePanel,
-    updateMainView
-  });
+  } = automationModel;
 
   async function loadOlderSessions(cwd: string) {
     if (!client) {
@@ -596,6 +612,26 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       setSessionBrowserWorkspaces((current) => mergeBrowserWorkspaces(current, workspacesFromThreadBrowser(result)));
     } finally {
       setLoadingOlderCwd(null);
+    }
+  }
+
+  async function loadOlderHistory() {
+    if (olderHistoryLoading || !snapshot.history.cursor) {
+      return;
+    }
+    const epoch = viewEpochRef.current;
+    const sequence = olderHistoryLoadSequenceRef.current + 1;
+    olderHistoryLoadSequenceRef.current = sequence;
+    setOlderHistoryLoading(true);
+    try {
+      await threadSession.loadOlder();
+    } finally {
+      if (
+        olderHistoryLoadSequenceRef.current === sequence
+        && viewEpochRef.current === epoch
+      ) {
+        setOlderHistoryLoading(false);
+      }
     }
   }
 
@@ -716,6 +752,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   function beginExplicitViewSwitch(): number {
     composerSessionCoordinator.cancelPending();
     runtimeMutationSequenceRef.current += 1;
+    olderHistoryLoadSequenceRef.current += 1;
+    setOlderHistoryLoading(false);
     runtimeTargetTransitionRef.current = false;
     pendingTargetSelectionRef.current = null;
     viewEpochRef.current += 1;
@@ -784,15 +822,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setMobilePanel("history");
   }
 
-  const {
-    beginRightResize,
-    clearRightWorkspaceTabPendingPrompt,
-    closeRightWorkspaceTab,
-    openAgentSessionTab,
-    openReviewTab,
-    openRightWorkspaceTab,
-    revealRightWorkspace
-  } = createRightWorkspaceActions({
+  const rightWorkspaceActions = createRightWorkspaceActions({
     activeRightTabId,
     client,
     confirmAction,
@@ -812,37 +842,17 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setRightWidthPx,
     updateMainView
   });
-
   const {
-    acceptWorkspaceChange,
-    checkoutWorkspaceGitBranch,
-    copyText,
-    createWorkspace,
-    deleteBackend,
-    deleteChannel,
-    doctorChannel,
-    doctorBackend,
-    doctorChannels,
-    handleAttachment,
-    handleAttachmentFiles,
-    loadChannelSources,
-    loadThreadSearchText,
-    openDiffPreview,
-    openFilePreview,
-    rejectWorkspaceChange,
-    readWorkspaceFolders,
-    readWorkspaceGitBranches,
-    saveBackendDraft,
-    saveFileFromEditor,
-    pollWechatQrSetup,
-    startWechatQrSetup,
-    startNewThread,
-    startShell,
-    submitTurn,
-    updateChannel,
-    updateBackendDraftFields,
-    setChannelEnabled
-  } = createAppActions({
+    beginRightResize,
+    clearRightWorkspaceTabPendingPrompt,
+    closeRightWorkspaceTab,
+    openAgentSessionTab,
+    openReviewTab,
+    openRightWorkspaceTab,
+    revealRightWorkspace
+  } = rightWorkspaceActions;
+
+  const appActions = createAppActions({
     activeScope,
     attachments,
     client,
@@ -899,6 +909,36 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     threadSession,
     updateMainView
   });
+  const {
+    acceptWorkspaceChange,
+    checkoutWorkspaceGitBranch,
+    copyText,
+    createWorkspace,
+    deleteBackend,
+    deleteChannel,
+    doctorChannel,
+    doctorBackend,
+    doctorChannels,
+    handleAttachment,
+    handleAttachmentFiles,
+    loadChannelSources,
+    loadThreadSearchText,
+    openDiffPreview,
+    openFilePreview,
+    rejectWorkspaceChange,
+    readWorkspaceFolders,
+    readWorkspaceGitBranches,
+    saveBackendDraft,
+    saveFileFromEditor,
+    pollWechatQrSetup,
+    startWechatQrSetup,
+    startNewThread,
+    startShell,
+    submitTurn,
+    updateChannel,
+    updateBackendDraftFields,
+    setChannelEnabled
+  } = appActions;
 
   async function retryComposerStartup() {
     if (!client) {
@@ -945,9 +985,12 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     setRuntimeOptionsLoading(true);
     setRuntimeOptionsError(null);
     if (runtimeBinding) {
-      setRuntimeContext((current) => current ? { ...current, binding: null, selectionState: "draft" } : current);
+      setRuntimeContext(
+        runtimeContext
+          ? { ...runtimeContext, binding: null, selectionState: "draft" }
+          : null
+      );
       setRuntimeContextTargetId("");
-      threadSession.setContext(null);
     }
     const scope = activeScope ?? init?.scope ?? scopeForCwd(settings?.cwd ?? fallbackCwd);
     try {
@@ -971,7 +1014,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       }
       const context = parseThreadContext(result.context);
       setRuntimeContext(context);
-      threadSession.setContext(context);
       setRuntimeContextTargetId(context.selectedTargetId ?? "");
       pendingTargetSelectionRef.current = null;
       if (result.problem) {
@@ -987,7 +1029,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       composerSessionCoordinator.cancelPending();
       pendingTargetSelectionRef.current = null;
       setRuntimeContextTargetId("");
-      threadSession.setContext(null);
+      setRuntimeContext(null);
       setRuntimeOptionsError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (ownsTransition()) {
@@ -1027,7 +1069,6 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         ) {
           return;
         }
-        setRuntimeContext(result.context);
         setRuntimeContextTargetId(result.context.selectedTargetId ?? "");
         setRuntimeControlDrafts((current) => {
           const next = { ...current };
@@ -1263,7 +1304,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     }
   }, [currentThreadId]);
 
-  const { executeCommand, runCommandAlternateAction } = createCommandActions({
+  const commandActions = createCommandActions({
     activeScope,
     activity,
     client,
@@ -1312,41 +1353,234 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     submitTurn,
     updateMainView
   });
+  const { executeCommand, runCommandAlternateAction } = commandActions;
 
-  return <WorkbenchLayout {...{
-    acceptWorkspaceChange, activeCommandOverlay, activeRightTab, activeRightTabId, activeScope, activeWorkbenchCwd,
-    automations, automationsError, automationsLoading,
-    activity, appearance, archivedSessions, attachments, backendDoctor, backendDraft, backends, beginExplicitViewSwitch, capabilitiesTab,
-    beginRightResize, changeRuntimeControl, changeRunnableTarget, clearCommandTransientUi, client, closeRightWorkspaceTab, commandFeedback,
-    channelDoctor, commands, composerDraftPatch, contextUsage, controls, copyText, createWorkspace, currentThreadId, patchComposerDraft,
-    debugEnabled, debugEvents, deleteBackend, deleteChannel, disabled, doctorBackend, doctorChannel, doctorChannels, endpoint, error,
-    executeCommand, handleAttachment, handleAttachmentFiles, host, init, latestGatewayEvent, leftCollapsed, loadChannelSources, loadThreadSearchText,
-    historyLoading, loadingOlderCwd, loadOlderSessions, mainView, mobilePanel, openCapabilitiesTab, openDiffPreview, openAgentSessionTab, openFilePreview, openRightWorkspaceTab, openSettingsSection,
-    openAutomationThread,
-    onModelAssignmentSaved: refreshWorkbenchControls, onModelCatalogLoaded: mergeModelCatalogOptions,
-    pendingClarifyActions, pendingPermissionActions, pinnedSessionIds, pinnedSessions, pollWechatQrSetup,
-    refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext, refreshHistory, refreshObservability, refreshSnapshot, refreshTrace, refreshWorkspaceSurface, rejectWorkspaceChange,
-    readWorkspaceFolders, readWorkspaceGitBranches, checkoutWorkspaceGitBranch,
-    revealRightWorkspace, rightCollapsed, rightTabs, rightWidthPx, runAction,
-    deleteAutomation, draftAutomation, pauseAutomation, refreshAutomations, resumeAutomation, runAutomation, saveAutomation,
-    runCommandAlternateAction, running, runtimeContext, runtimeControls, runtimeControlDrafts, runtimeOptionsError, runtimeOptionsLoading, runtimeProfiles,
-    saveBackendDraft, saveFileFromEditor,
-    selectedTargetId, contextMatchesTarget: runtimeContextTargetId === selectedTargetId && Boolean(selectedTargetId), sessionBrowserWorkspaces, sessionUsage, sessions, setActiveRightTabId, setAppearance,
-    setAttachments, setBackendDraft, setCapabilitiesTab, setChannelEnabled, setDebugEnabled, setDirtyRightTabs, setDraftSession, setLeftCollapsed, setMainView,
-    setMobilePanel, setCommandFeedback, setRightCollapsed, setRightTabs, setRightWidthPx,
-    setSettingsSection, setSnapshot, setWorkspaceDialogOpen, fallbackCwd, settings, settingsSection,
-    usageStats, usageStatsError, usageStatsLoading, refreshUsageStats,
-    clearRightWorkspaceTabPendingPrompt, showSessionChrome, snapshot, startNewThread, startShell, startWechatQrSetup, status, submitTurn, submitThreadTurn, switchMainView, terminalEvents,
-    togglePinnedSession, traceState, transcriptEntries, turnBlockReason, turnSendable, updateBackendDraftFields, updateChannel, updateMainView, viewEpochRef,
-    voiceAutoSpeak, voiceListening, voiceRealtimeActive: Boolean(voiceRealtimeSessionId),
-    onReadAloudText: readAloudText, onVoiceAutoSpeakToggle: toggleVoiceAutoSpeak,
-    onVoiceDictationToggle: toggleVoiceDictation, onVoiceRealtimeToggle: toggleVoiceRealtime,
-    composerPresentationReady: startupStable,
-    composerShellVisible,
-    onGatewayRetry: () => void client?.reconnectNow(),
-    onComposerRetry: retryComposerStartup,
-    workspaceBranch, workspaceChanges, workspaceDialogOpen, workspaceDiff, workspaceFiles
-  }} />;
+  const contextMatchesTarget = runtimeContextTargetId === selectedTargetId && Boolean(selectedTargetId);
+  const inputCapabilities = contextMatchesTarget ? runtimeContext?.inputCapabilities ?? [] : [];
+  const agentMentionsEnabled = inputCapabilities.some((capability) => (
+    capability.kind === "agentMention" && capability.enabled
+  ));
+  const steerTurnId = confirmedSteerTurnId(
+    latestGatewayEvent,
+    snapshot.thread?.id ?? null,
+    activity.activeTurnId ?? null
+  );
+  const steerAvailable = Boolean(steerTurnId)
+    && contextMatchesTarget
+    && enabledThreadAction(runtimeContext, "steer") !== null;
+  const importScope = activeScope ?? init?.scope ?? scopeForCwd(activeWorkbenchCwd);
+  const workbenchIntents = createWorkbenchIntentOwner({
+    activeScope,
+    agentMentionsEnabled,
+    archivedSessions,
+    beginExplicitViewSwitch,
+    clearCommandTransientUi,
+    client,
+    currentThreadId: currentThreadId ?? null,
+    fallbackCwd,
+    importScope,
+    initScope: init?.scope ?? null,
+    patchComposerDraft,
+    refreshHistory,
+    refreshSnapshot,
+    sessions,
+    setAttachments,
+    setCommandFeedback,
+    setDraftSession,
+    setMobilePanel,
+    setSnapshot,
+    settings,
+    snapshot,
+    startNewThread,
+    steerAvailable,
+    steerTurnId,
+    submitThreadTurn,
+    updateMainView,
+    viewEpochRef
+  });
+
+  return (
+    <WorkbenchLayout
+      thread={{
+        activeCommandOverlay,
+        activeScope,
+        activeWorkbenchCwd,
+        activity,
+        attachments,
+        changeRunnableTarget,
+        changeRuntimeControl,
+        clearCommandTransientUi,
+        client,
+        commandFeedback,
+        commands,
+        composerDraftPatch,
+        composerPresentationReady: startupStable,
+        composerShellVisible,
+        contextMatchesTarget,
+        contextUsage,
+        controls,
+        currentThreadId,
+        disabled,
+        error,
+        executeCommand,
+        fallbackCwd,
+        handleAttachment,
+        handleAttachmentFiles,
+        init,
+        latestGatewayEvent,
+        loadOlderHistory,
+        onComposerRetry: retryComposerStartup,
+        onGatewayRetry: () => void client?.reconnectNow(),
+        onReadAloudText: readAloudText,
+        onVoiceAutoSpeakToggle: toggleVoiceAutoSpeak,
+        onVoiceDictationToggle: toggleVoiceDictation,
+        onVoiceRealtimeToggle: toggleVoiceRealtime,
+        patchComposerDraft,
+        olderHistoryLoading,
+        pendingClarifyActions,
+        pendingPermissionActions,
+        refreshObservability,
+        runAction,
+        runCommandAlternateAction,
+        running,
+        runtimeContext,
+        runtimeControlDrafts,
+        runtimeControls,
+        runtimeOptionsError,
+        runtimeOptionsLoading,
+        runtimeProfiles,
+        selectedTargetId,
+        sessionUsage,
+        setAttachments,
+        setCommandFeedback,
+        settings,
+        snapshot,
+        startShell,
+        status,
+        submitTurn,
+        transcriptEntries,
+        turnBlockReason,
+        turnSendable,
+        voiceAutoSpeak,
+        voiceListening,
+        voiceRealtimeActive: Boolean(voiceRealtimeSessionId),
+        workbenchIntents
+      }}
+      history={{
+        archivedSessions,
+        createWorkspace,
+        endpoint,
+        historyLoading,
+        host,
+        leftCollapsed,
+        loadingOlderCwd,
+        loadOlderSessions,
+        pinnedSessionIds,
+        pinnedSessions,
+        refreshHistory,
+        sessionBrowserWorkspaces,
+        sessions,
+        setDraftSession,
+        setLeftCollapsed,
+        setWorkspaceDialogOpen,
+        startNewThread,
+        switchMainView,
+        togglePinnedSession,
+        workspaceDialogOpen
+      }}
+      workspace={{
+        acceptWorkspaceChange,
+        activeRightTab,
+        activeRightTabId,
+        beginRightResize,
+        checkoutWorkspaceGitBranch,
+        clearRightWorkspaceTabPendingPrompt,
+        closeRightWorkspaceTab,
+        copyText,
+        debugEnabled,
+        debugEvents,
+        openAgentSessionTab,
+        openDiffPreview,
+        openFilePreview,
+        openRightWorkspaceTab,
+        readWorkspaceFolders,
+        readWorkspaceGitBranches,
+        refreshAgentSurface: refreshAgentSurfaceAndRuntimeContext,
+        refreshSnapshot,
+        refreshTrace,
+        refreshWorkspaceSurface,
+        rejectWorkspaceChange,
+        revealRightWorkspace,
+        rightCollapsed,
+        rightTabs,
+        rightWidthPx,
+        saveFileFromEditor,
+        setActiveRightTabId,
+        setDirtyRightTabs,
+        setError,
+        setRightCollapsed,
+        setRightTabs,
+        setRightWidthPx,
+        terminalEvents,
+        traceState,
+        workspaceBranch,
+        workspaceChanges,
+        workspaceDiff,
+        workspaceFiles
+      }}
+      capabilities={{
+        appearance,
+        automations,
+        automationsError,
+        automationsLoading,
+        backendDoctor,
+        backendDraft,
+        backends,
+        capabilitiesTab,
+        channelDoctor,
+        deleteAutomation,
+        deleteBackend,
+        deleteChannel,
+        doctorBackend,
+        doctorChannel,
+        doctorChannels,
+        draftAutomation,
+        loadChannelSources,
+        loadThreadSearchText,
+        mainView,
+        mobilePanel,
+        onModelAssignmentSaved: refreshWorkbenchControls,
+        onModelCatalogLoaded: mergeModelCatalogOptions,
+        openAutomationThread,
+        openCapabilitiesTab,
+        openSettingsSection,
+        pauseAutomation,
+        pollWechatQrSetup,
+        refreshAutomations,
+        refreshUsageStats,
+        resumeAutomation,
+        runAutomation,
+        saveAutomation,
+        saveBackendDraft,
+        setAppearance,
+        setBackendDraft,
+        setCapabilitiesTab,
+        setChannelEnabled,
+        setDebugEnabled,
+        setMobilePanel,
+        setSettingsSection,
+        settingsSection,
+        showSessionChrome,
+        startWechatQrSetup,
+        updateBackendDraftFields,
+        updateChannel,
+        updateMainView,
+        usageStats,
+        usageStatsError,
+        usageStatsLoading
+      }}
+    />
+  );
 }
 
 function retainJourneyStateMark(name: string): void {

@@ -493,3 +493,5 @@ export function createCommandActions(params: CommandActionsParams) {
     runCommandAlternateAction
   };
 }
+
+export type ReturnTypeOfCommandActions = ReturnType<typeof createCommandActions>;

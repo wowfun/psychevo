@@ -215,8 +215,8 @@ export function HistoryPanel(props: HistoryPanelProps) {
                   const title = session.displayTitle?.trim() || session.title?.trim() || shortId(session.id);
                   const editing = editingId === session.id;
                   const pinned = pinnedSessionIds.has(session.id);
-                  const forkAction = session.lifecycle?.actions.find((action) => action.id === "fork");
-                  const deleteAction = session.lifecycle?.actions.find((action) => action.id === "delete");
+                  const forkAction = session.lifecycle?.actions?.find((action) => action.id === "fork");
+                  const deleteAction = session.lifecycle?.actions?.find((action) => action.id === "delete");
                   const forkSource = session.forkedFromThreadId
                     ? sessions.find((candidate) => candidate.id === session.forkedFromThreadId) ?? null
                     : null;

@@ -429,11 +429,11 @@ function slashTargetGroups(settings: SlashSettingsResult | null): SlashTargetGro
   }
   const groups = new Map<string, SlashTargetGroup>();
   for (const entry of settings.aliases) {
-    const group = ensureSlashTargetGroup(groups, entry.target, entry.targetSummary);
+    const group = ensureSlashTargetGroup(groups, entry.target, entry.targetSummary ?? null);
     group.aliases.push(entry);
   }
   for (const entry of settings.keybinds) {
-    const group = ensureSlashTargetGroup(groups, entry.target, entry.targetSummary);
+    const group = ensureSlashTargetGroup(groups, entry.target, entry.targetSummary ?? null);
     group.keybinds.push(entry);
   }
   return [...groups.values()].sort((left, right) => left.target.localeCompare(right.target));

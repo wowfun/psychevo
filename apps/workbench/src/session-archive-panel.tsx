@@ -124,7 +124,7 @@ export function SessionArchivePanel({
     activate: boolean
   ) {
     const targetId = selectedTargets[profile.runtimeProfileRef]
-      ?? profile.targets.find((target) => target.ready)?.targetId;
+      ?? profile.targets?.find((target) => target.ready)?.targetId;
     if (!targetId) return;
     setPendingId(candidateId);
     setError(null);
@@ -136,7 +136,8 @@ export function SessionArchivePanel({
           candidateProfile.runtimeProfileRef === profile.runtimeProfileRef
             ? {
                 ...candidateProfile,
-                sessions: candidateProfile.sessions.filter((session) => session.candidateId !== candidateId)
+                sessions: (candidateProfile.sessions ?? [])
+                  .filter((session) => session.candidateId !== candidateId)
               }
             : candidateProfile
         ))
@@ -205,7 +206,7 @@ export function SessionArchivePanel({
 
         {result?.profiles.map((profile) => {
           const selectedTarget = selectedTargets[profile.runtimeProfileRef]
-            ?? profile.targets.find((target) => target.ready)?.targetId
+            ?? profile.targets?.find((target) => target.ready)?.targetId
             ?? "";
           return (
             <SourceGroup
@@ -213,7 +214,7 @@ export function SessionArchivePanel({
               key={profile.runtimeProfileRef}
               label={profile.profileLabel}
               onToggle={() => toggleGroup(profile.runtimeProfileRef)}
-              trailing={profile.targets.length > 1 ? (
+              trailing={(profile.targets ?? []).length > 1 ? (
                 <select
                   aria-label={`Agent target for ${profile.profileLabel}`}
                   className="pevo-fieldControl pevo-fieldControl--compact"
@@ -224,26 +225,28 @@ export function SessionArchivePanel({
                   }))}
                   value={selectedTarget}
                 >
-                  {profile.targets.map((target) => (
+                  {(profile.targets ?? []).map((target) => (
                     <option disabled={!target.ready} key={target.targetId} value={target.targetId}>{target.label}</option>
                   ))}
                 </select>
               ) : null}
             >
-              {profile.sessions.map((session) => (
+              {(profile.sessions ?? []).map((session) => (
                 <AgentCandidateRow
                   disabled={disabled || Boolean(pendingId) || !selectedTarget}
                   key={session.candidateId}
                   pending={pendingId === session.candidateId}
                   title={session.title?.trim() || "Untitled Agent session"}
-                  updatedAt={session.updatedAt}
+                  updatedAt={session.updatedAt ?? null}
                   onActivate={() => void importSession(profile, session.candidateId, true)}
                   onOpen={() => void importSession(profile, session.candidateId, false)}
                 />
               ))}
-              {profile.status === "ready" && profile.sessions.length === 0 ? (
+              {profile.status === "ready" && (profile.sessions ?? []).length === 0 ? (
                 <p className="pevo-sessionSourceState">
-                  {profile.alreadyImportedCount > 0 ? "All sessions are already in Psychevo" : "No sessions found"}
+                  {(profile.alreadyImportedCount ?? 0) > 0
+                    ? "All sessions are already in Psychevo"
+                    : "No sessions found"}
                 </p>
               ) : null}
               {profile.error ? <p className="pevo-sessionSourceState is-error" role="alert">{profile.error.message}</p> : null}
@@ -324,7 +327,7 @@ function ArchivedSessionRow({
   session: SessionSummary;
 }) {
   const title = session.displayTitle?.trim() || session.title?.trim() || shortId(session.id);
-  const deleteAction = session.lifecycle?.actions.find((action) => action.id === "delete");
+  const deleteAction = session.lifecycle?.actions?.find((action) => action.id === "delete");
   return (
     <article className={`pevo-sessionRow ${active ? "is-active" : ""}`}>
       <button className="pevo-sessionMain" disabled={disabled} onClick={onOpen} type="button">
@@ -404,7 +407,7 @@ function AgentCandidateRow({
 
 function defaultTargetSelections(result: ThreadImportListResult): Record<string, string> {
   return Object.fromEntries(result.profiles.flatMap((profile) => {
-    const target = profile.targets.find((candidate) => candidate.ready);
+    const target = profile.targets?.find((candidate) => candidate.ready);
     return target ? [[profile.runtimeProfileRef, target.targetId]] : [];
   }));
 }

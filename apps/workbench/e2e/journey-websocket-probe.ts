@@ -160,18 +160,23 @@ export async function installJourneyWebSocketProbe(
     }, true);
 
     let firstOutputScheduled = false;
+    let firstOutputTurnId: string | null = null;
     let optimisticPromptScheduled = false;
     let sendFeedbackScheduled = false;
     let turnSettledScheduled = false;
-    let assistantCountAtSampleStart = 0;
-    let userCountAtSampleStart = 0;
+    let latestUserEntryIdAtSampleStart: string | null = null;
     let lastComposerState: string | null = null;
-    function nonEmptyMessageCount(selector: string): number {
-      return Array.from(document.querySelectorAll(selector))
-        .filter((element) => Boolean(element.textContent?.trim())).length;
+    function latestNonEmptyEntryId(selector: string): string | null {
+      const messages = Array.from(document.querySelectorAll<HTMLElement>(selector))
+        .filter((element) => Boolean(element.textContent?.trim()));
+      return messages.at(-1)?.dataset.entryId ?? null;
     }
-    function assistantTextCount(): number {
-      return nonEmptyMessageCount('.pevo-message.is-assistant[data-block-kind="text"]');
+    function hasAssistantTextForTurn(turnId: string | null): boolean {
+      return turnId !== null && Array.from(document.querySelectorAll<HTMLElement>(
+        '.pevo-message.is-assistant[data-block-kind="text"]'
+      )).some((element) => (
+        element.dataset.turnId === turnId && Boolean(element.textContent?.trim())
+      ));
     }
     function entryHasNonEmptyAssistantText(entry: Record<string, unknown> | null): boolean {
       if (entry?.role !== "assistant" || !Array.isArray(entry.blocks)) return false;
@@ -240,8 +245,7 @@ export async function installJourneyWebSocketProbe(
         });
       }
       lastComposerState = composerState;
-      const assistantCount = assistantTextCount();
-      if (assistantCount > assistantCountAtSampleStart && !firstOutputScheduled) {
+      if (hasAssistantTextForTurn(firstOutputTurnId) && !firstOutputScheduled) {
         firstOutputScheduled = true;
         const data = {
           turnState: document.querySelector(".appShell")?.getAttribute("data-turn-state") ?? null
@@ -249,7 +253,9 @@ export async function installJourneyWebSocketProbe(
         record("first_output_surface_committed", data);
         record("first_output_visible", data);
       }
-      const optimistic = nonEmptyMessageCount(".pevo-message.is-user") > userCountAtSampleStart;
+      const latestUserEntryId = latestNonEmptyEntryId(".pevo-message.is-user");
+      const optimistic = latestUserEntryId !== null
+        && latestUserEntryId !== latestUserEntryIdAtSampleStart;
       if (optimistic && !optimisticPromptScheduled) {
         optimisticPromptScheduled = true;
         record("optimistic_prompt_surface_committed");
@@ -388,6 +394,7 @@ export async function installJourneyWebSocketProbe(
               && !firstNonEmptyAssistantTurns.has(eventTurnId)
             ) {
               firstNonEmptyAssistantTurns.add(eventTurnId);
+              firstOutputTurnId = eventTurnId;
               record("gateway_first_nonempty_assistant_received", { eventType });
               firstAssistantApplied = true;
             }
@@ -432,11 +439,11 @@ export async function installJourneyWebSocketProbe(
       beginSample(nextSampleIndex) {
         sampleIndex = nextSampleIndex;
         firstOutputScheduled = false;
+        firstOutputTurnId = null;
         optimisticPromptScheduled = false;
         sendFeedbackScheduled = false;
         turnSettledScheduled = false;
-        assistantCountAtSampleStart = assistantTextCount();
-        userCountAtSampleStart = nonEmptyMessageCount(".pevo-message.is-user");
+        latestUserEntryIdAtSampleStart = latestNonEmptyEntryId(".pevo-message.is-user");
         lastComposerState = document.querySelector(".appShell")?.getAttribute("data-composer-state") ?? null;
         record("sample_began");
       },
@@ -468,11 +475,11 @@ export async function installJourneyWebSocketProbe(
       },
       resetSample() {
         firstOutputScheduled = false;
+        firstOutputTurnId = null;
         optimisticPromptScheduled = false;
         sendFeedbackScheduled = false;
         turnSettledScheduled = false;
-        assistantCountAtSampleStart = assistantTextCount();
-        userCountAtSampleStart = nonEmptyMessageCount(".pevo-message.is-user");
+        latestUserEntryIdAtSampleStart = latestNonEmptyEntryId(".pevo-message.is-user");
         lastComposerState = document.querySelector(".appShell")?.getAttribute("data-composer-state") ?? null;
       }
     };
