@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "enum": [
+    "allow_once",
+    "allow_turn",
+    "allow_session",
+    "allow_always",
+    "deny"
+  ],
+  "title": "AppApprovalOutcome",
+  "type": "string"
+}

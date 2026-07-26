@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppApprovalOutcome": {
+      "enum": [
+        "allow_once",
+        "allow_turn",
+        "allow_session",
+        "allow_always",
+        "deny"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "filesystemDirectory": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "outcome": {
+      "$ref": "#/definitions/AppApprovalOutcome"
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "title": "AppApprovalResult",
+  "type": "object"
+}

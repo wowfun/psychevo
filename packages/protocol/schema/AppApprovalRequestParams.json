@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "allowAlways": {
+      "type": "boolean"
+    },
+    "callId": {
+      "type": "string"
+    },
+    "filesystem": true,
+    "matchedRule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "suggestedRule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "toolCallId": {
+      "type": "string"
+    },
+    "toolName": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "allowAlways",
+    "callId",
+    "reason",
+    "summary",
+    "threadId",
+    "toolCallId",
+    "toolName",
+    "turnId"
+  ],
+  "title": "AppApprovalRequestParams",
+  "type": "object"
+}

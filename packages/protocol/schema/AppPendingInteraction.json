@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "interactionId": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "payload": true,
+    "requestedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "resolution": true,
+    "resolvedAtMs": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "interactionId",
+    "kind",
+    "payload",
+    "requestedAtMs",
+    "status",
+    "threadId",
+    "turnId"
+  ],
+  "title": "AppPendingInteraction",
+  "type": "object"
+}

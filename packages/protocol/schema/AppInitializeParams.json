@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppClientCapabilities": {
+      "type": "object"
+    },
+    "AppProductInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "capabilities": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AppClientCapabilities"
+        }
+      ],
+      "default": {}
+    },
+    "client": {
+      "$ref": "#/definitions/AppProductInfo"
+    },
+    "protocolMax": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "protocolMin": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "client",
+    "protocolMax",
+    "protocolMin"
+  ],
+  "title": "AppInitializeParams",
+  "type": "object"
+}

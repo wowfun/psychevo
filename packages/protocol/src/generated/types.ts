@@ -4,6 +4,74 @@ export type JsonSafeI64 = number;
 
 export type JsonSafeU64 = number;
 
+export type AppProductInfo = { name: string, version: string, };
+
+export type AppClientCapabilities = Record<string, never>;
+
+export type AppInitializeParams = { client: AppProductInfo, protocolMin: number, protocolMax: number, capabilities: AppClientCapabilities, };
+
+export type AppServerCapabilities = { threads: boolean, turns: boolean, eventReplay: string, interactions: boolean, customTools: boolean, };
+
+export type AppInitializeResult = { server: AppProductInfo, protocolVersion: number, protocolMin: number, protocolMax: number, capabilities: AppServerCapabilities, };
+
+export type AppThreadStartParams = { cwd: string, source: string | null, metadata: unknown, };
+
+export type AppThreadIdParams = { threadId: string, };
+
+export type AppThreadForkParams = { threadId: string, beforeSessionSeq: number | null, };
+
+export type AppThreadCompactParams = { threadId: string, model: string | null, reasoningEffort: string | null, instructions: string | null, force: boolean, };
+
+export type AppThreadListParams = { cwd: string | null, archived: boolean, sources: Array<string>, };
+
+export type AppTurnStartParams = { threadId: string, prompt: string, clientTurnId: string | null, source: string | null, model: string | null, reasoningEffort: string | null, noAgents: boolean, noSkills: boolean, inheritedEnv: { [key in string]?: string } | null, useRegisteredApprovalHandler: boolean, useRegisteredClarifyHandler: boolean, };
+
+export type AppTurnIdParams = { turnId: string, };
+
+export type AppTurnSteerParams = { turnId: string, input: string, };
+
+export type AppInteractionRespondParams = { turnId: string, interactionId: string, response: AppInteractionResponse, };
+
+export type AppInteractionResponse = { "kind": "permission", outcome: AppApprovalOutcome, filesystemDirectory?: string, } | { "kind": "clarify", answers: Array<Array<string>>, } | { "kind": "cancel" };
+
+export type AppToolExecutionMode = "parallel" | "sequential";
+
+export type AppToolDefinition = { name: string, description: string, parameters: unknown, executionMode: AppToolExecutionMode, timeoutMs: number, };
+
+export type AppToolRegisterParams = { tools: Array<AppToolDefinition>, approvalHandler: boolean, clarifyHandler: boolean, };
+
+export type AppToolCallParams = { callId: string, toolName: string, arguments: unknown, threadId: string, turnId: string, };
+
+export type AppToolCallResult = { result: unknown, modelContent: string | null, isError: boolean, };
+
+export type AppApprovalRequestParams = { callId: string, threadId: string, turnId: string, toolCallId: string, toolName: string, summary: string, reason: string, matchedRule: string | null, suggestedRule: string | null, allowAlways: boolean, filesystem: unknown, };
+
+export type AppApprovalOutcome = "allow_once" | "allow_turn" | "allow_session" | "allow_always" | "deny";
+
+export type AppApprovalResult = { outcome: AppApprovalOutcome, filesystemDirectory: string | null, };
+
+export type AppPendingInteraction = { interactionId: string, threadId: string, turnId: string, kind: string, status: string, payload: unknown, resolution: unknown, requestedAtMs: number, resolvedAtMs: number | null, };
+
+export type AppThreadItem = { sessionSeq: number, message: unknown, usage: unknown, metadata: unknown, accounting: unknown, };
+
+export type AppThreadSummary = { id: string, source: string, cwd: string, title: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId: string | null, };
+
+export type AppThreadSnapshot = { id: string, source: string, cwd: string, title: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId: string | null, pendingInteractions: Array<AppPendingInteraction>, items: Array<AppThreadItem>, };
+
+export type AppThreadListResult = { threads: Array<AppThreadSummary>, };
+
+export type AppTurnReceipt = { accepted: boolean, threadId: string, turnId: string, clientTurnId: string | null, };
+
+export type AppTurnOutcome = "completed" | "stopped" | "failed" | "interrupted";
+
+export type AppTurnResult = { threadId: string, outcome: AppTurnOutcome, finalAnswer: string, provider: string, model: string, reasoningEffort: string | null, toolFailures: number, contextLimit: number | null, contextSnapshot: unknown, warnings: Array<unknown>, terminalReason: unknown, terminalError: unknown, selectedAgent: unknown, selectedSkills: Array<unknown>, };
+
+export type AppItemStage = "started" | "updated" | "completed";
+
+export type AppTurnEvent = { "type": "accepted", receipt: AppTurnReceipt, } | { "type": "started", threadId: string, turnId: string, } | { "type": "message", stage: AppItemStage, message: unknown, usage?: unknown | null, metadata?: unknown | null, accounting?: unknown | null, } | { "type": "reasoning_delta", text: string, } | { "type": "reasoning_completed", text: string | null, } | { "type": "tool", stage: AppItemStage, data: unknown, } | { "type": "interaction_requested", interactionId: string, kind: string, payload: unknown, } | { "type": "interaction_resolved", interactionId: string, reason: string, } | { "type": "warning", data: unknown, } | { "type": "completed", threadId: string, turnId: string, outcome: AppTurnOutcome, } | { "type": "failed", threadId: string, turnId: string, message: string, } | { "type": "resync_required", missed: number, };
+
+export type AppTurnEventNotification = { turnId: string, event: AppTurnEvent, };
+
 export type SourceKey = string;
 
 export type GatewaySourceLifetime = "invocation" | "process" | "persistent";

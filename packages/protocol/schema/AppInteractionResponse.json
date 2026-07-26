@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppApprovalOutcome": {
+      "enum": [
+        "allow_once",
+        "allow_turn",
+        "allow_session",
+        "allow_always",
+        "deny"
+      ],
+      "type": "string"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "filesystemDirectory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "permission"
+          ],
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/definitions/AppApprovalOutcome"
+        }
+      },
+      "required": [
+        "kind",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "answers": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "clarify"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "answers",
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "kind": {
+          "enum": [
+            "cancel"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "AppInteractionResponse"
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppTurnOutcome": {
+      "enum": [
+        "completed",
+        "stopped",
+        "failed",
+        "interrupted"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "contextLimit": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "contextSnapshot": true,
+    "finalAnswer": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "outcome": {
+      "$ref": "#/definitions/AppTurnOutcome"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selectedAgent": true,
+    "selectedSkills": {
+      "default": [],
+      "items": true,
+      "type": "array"
+    },
+    "terminalError": true,
+    "terminalReason": true,
+    "threadId": {
+      "type": "string"
+    },
+    "toolFailures": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "warnings": {
+      "default": [],
+      "items": true,
+      "type": "array"
+    }
+  },
+  "required": [
+    "finalAnswer",
+    "model",
+    "outcome",
+    "provider",
+    "threadId",
+    "toolFailures"
+  ],
+  "title": "AppTurnResult",
+  "type": "object"
+}

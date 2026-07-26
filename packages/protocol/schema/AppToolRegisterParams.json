@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppToolDefinition": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "executionMode": {
+          "$ref": "#/definitions/AppToolExecutionMode"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameters": true,
+        "timeoutMs": {
+          "default": 300000,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "description",
+        "executionMode",
+        "name",
+        "parameters"
+      ],
+      "type": "object"
+    },
+    "AppToolExecutionMode": {
+      "enum": [
+        "parallel",
+        "sequential"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "approvalHandler": {
+      "default": false,
+      "type": "boolean"
+    },
+    "clarifyHandler": {
+      "default": false,
+      "type": "boolean"
+    },
+    "tools": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/AppToolDefinition"
+      },
+      "type": "array"
+    }
+  },
+  "title": "AppToolRegisterParams",
+  "type": "object"
+}

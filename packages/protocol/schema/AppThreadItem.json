@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "accounting": true,
+    "message": true,
+    "metadata": true,
+    "sessionSeq": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "usage": true
+  },
+  "required": [
+    "message",
+    "sessionSeq"
+  ],
+  "title": "AppThreadItem",
+  "type": "object"
+}

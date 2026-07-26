@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppProductInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "AppServerCapabilities": {
+      "properties": {
+        "customTools": {
+          "type": "boolean"
+        },
+        "eventReplay": {
+          "type": "string"
+        },
+        "interactions": {
+          "type": "boolean"
+        },
+        "threads": {
+          "type": "boolean"
+        },
+        "turns": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "customTools",
+        "eventReplay",
+        "interactions",
+        "threads",
+        "turns"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "capabilities": {
+      "$ref": "#/definitions/AppServerCapabilities"
+    },
+    "protocolMax": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "protocolMin": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "protocolVersion": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "server": {
+      "$ref": "#/definitions/AppProductInfo"
+    }
+  },
+  "required": [
+    "capabilities",
+    "protocolMax",
+    "protocolMin",
+    "protocolVersion",
+    "server"
+  ],
+  "title": "AppInitializeResult",
+  "type": "object"
+}

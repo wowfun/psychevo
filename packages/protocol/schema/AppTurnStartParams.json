@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "clientTurnId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "inheritedEnv": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "noAgents": {
+      "default": false,
+      "type": "boolean"
+    },
+    "noSkills": {
+      "default": false,
+      "type": "boolean"
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "reasoningEffort": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "useRegisteredApprovalHandler": {
+      "default": false,
+      "type": "boolean"
+    },
+    "useRegisteredClarifyHandler": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "prompt",
+    "threadId"
+  ],
+  "title": "AppTurnStartParams",
+  "type": "object"
+}

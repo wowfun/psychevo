@@ -1,0 +1,27 @@
+[build-system]
+requires = []
+build-backend = "build_backend"
+backend-path = ["."]
+
+[project]
+name = "psychevo-cli-bin"
+version = "0.1.0"
+description = "Platform pevo CLI, TUI, and Workbench assets"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/wowfun/psychevo"
+Documentation = "https://github.com/wowfun/psychevo/blob/main/docs/install.md"
+Repository = "https://github.com/wowfun/psychevo"
+
+[tool.psychevo-build]
+kind = "cli"

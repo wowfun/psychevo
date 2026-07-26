@@ -1,0 +1,132 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppPendingInteraction": {
+      "properties": {
+        "interactionId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "payload": true,
+        "requestedAtMs": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "resolution": true,
+        "resolvedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "interactionId",
+        "kind",
+        "payload",
+        "requestedAtMs",
+        "status",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "AppThreadItem": {
+      "properties": {
+        "accounting": true,
+        "message": true,
+        "metadata": true,
+        "sessionSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": true
+      },
+      "required": [
+        "message",
+        "sessionSeq"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "activeTurnId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "archived": {
+      "type": "boolean"
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "items": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/AppThreadItem"
+      },
+      "type": "array"
+    },
+    "messageCount": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "pendingInteractions": {
+      "default": [],
+      "items": {
+        "$ref": "#/definitions/AppPendingInteraction"
+      },
+      "type": "array"
+    },
+    "source": {
+      "type": "string"
+    },
+    "startedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "toolCallCount": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "updatedAtMs": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "archived",
+    "cwd",
+    "id",
+    "messageCount",
+    "source",
+    "startedAtMs",
+    "toolCallCount",
+    "updatedAtMs"
+  ],
+  "title": "AppThreadSnapshot",
+  "type": "object"
+}

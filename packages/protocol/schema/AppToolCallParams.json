@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "arguments": true,
+    "callId": {
+      "type": "string"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "toolName": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "arguments",
+    "callId",
+    "threadId",
+    "toolName",
+    "turnId"
+  ],
+  "title": "AppToolCallParams",
+  "type": "object"
+}

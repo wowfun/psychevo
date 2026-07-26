@@ -1,0 +1,305 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AppItemStage": {
+      "enum": [
+        "started",
+        "updated",
+        "completed"
+      ],
+      "type": "string"
+    },
+    "AppTurnOutcome": {
+      "enum": [
+        "completed",
+        "stopped",
+        "failed",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "AppTurnReceipt": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "clientTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "receipt": {
+          "$ref": "#/definitions/AppTurnReceipt"
+        },
+        "type": {
+          "enum": [
+            "accepted"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "receipt",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "started"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
+        "turnId",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "accounting": true,
+        "message": true,
+        "metadata": true,
+        "stage": {
+          "$ref": "#/definitions/AppItemStage"
+        },
+        "type": {
+          "enum": [
+            "message"
+          ],
+          "type": "string"
+        },
+        "usage": true
+      },
+      "required": [
+        "message",
+        "stage",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "reasoning_delta"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "enum": [
+            "reasoning_completed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": true,
+        "stage": {
+          "$ref": "#/definitions/AppItemStage"
+        },
+        "type": {
+          "enum": [
+            "tool"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "stage",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "interactionId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "payload": true,
+        "type": {
+          "enum": [
+            "interaction_requested"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "interactionId",
+        "kind",
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "interactionId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "interaction_resolved"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "interactionId",
+        "reason",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "data": true,
+        "type": {
+          "enum": [
+            "warning"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "data",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "outcome": {
+          "$ref": "#/definitions/AppTurnOutcome"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "completed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "threadId",
+        "turnId",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "threadId",
+        "turnId",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "missed": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "resync_required"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "missed",
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "AppTurnEvent"
+}
