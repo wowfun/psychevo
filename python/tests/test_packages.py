@@ -21,6 +21,9 @@ class PackageTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.wheels = self.root / "wheels"
         self.wheels.mkdir()
+        self.uv = shutil.which("uv")
+        if self.uv is None:
+            self.fail("uv is required for deterministic PEP 517 build/install tests")
         suffix = ".exe" if os.name == "nt" else ""
         self.app_server = self.root / f"psychevo-app-server{suffix}"
         self.pevo = self.root / f"pevo{suffix}"
@@ -48,23 +51,25 @@ class PackageTests(unittest.TestCase):
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
     def _build_wheel(self, project: str, env: dict[str, str] | None = None) -> Path:
-        result = subprocess.run(
+        before = set(self.wheels.glob("*.whl"))
+        subprocess.run(
             [
-                sys.executable,
-                "-c",
-                (
-                    "import build_backend,sys;"
-                    "print(build_backend.build_wheel(sys.argv[1]))"
-                ),
+                self.uv,
+                "build",
+                "--wheel",
+                "--out-dir",
                 str(self.wheels),
+                str(PYTHON_ROOT / project),
             ],
-            cwd=PYTHON_ROOT / project,
+            cwd=ROOT,
             env={**os.environ, **(env or {})},
             check=True,
             text=True,
             capture_output=True,
         )
-        return self.wheels / result.stdout.strip().splitlines()[-1]
+        built = set(self.wheels.glob("*.whl")) - before
+        self.assertEqual(len(built), 1, f"expected one new wheel for {project}: {built}")
+        return built.pop()
 
     def _build_all(self) -> tuple[Path, Path, Path]:
         sdk = self._build_wheel("psychevo")
@@ -94,8 +99,9 @@ class PackageTests(unittest.TestCase):
             sdk_names = archive.namelist()
         self.assertIn("Requires-Dist: psychevo-app-server-bin==0.1.0", metadata)
         self.assertIn("Provides-Extra: cli", metadata)
-        self.assertIn(
-            'Requires-Dist: psychevo-cli-bin==0.1.0; extra == "cli"', metadata
+        self.assertRegex(
+            metadata,
+            r"Requires-Dist: psychevo-cli-bin==0\.1\.0; extra == ['\"]cli['\"]",
         )
         self.assertNotIn("telemetry", metadata.lower())
         self.assertNotIn("Provides-Extra: all", metadata)
@@ -129,25 +135,27 @@ class PackageTests(unittest.TestCase):
     def test_sdk_sdist_rebuilds_and_binary_projects_reject_sdist(self) -> None:
         sdist_dir = self.root / "sdists"
         sdist_dir.mkdir()
-        result = subprocess.run(
+        before = set(sdist_dir.glob("*.tar.gz"))
+        subprocess.run(
             [
-                sys.executable,
-                "-c",
-                (
-                    "import build_backend,sys;"
-                    "print(build_backend.build_sdist(sys.argv[1]))"
-                ),
+                self.uv,
+                "build",
+                "--sdist",
+                "--out-dir",
                 str(sdist_dir),
+                str(PYTHON_ROOT / "psychevo"),
             ],
-            cwd=PYTHON_ROOT / "psychevo",
+            cwd=ROOT,
             check=True,
             text=True,
             capture_output=True,
         )
-        sdist = sdist_dir / result.stdout.strip()
+        built = set(sdist_dir.glob("*.tar.gz")) - before
+        self.assertEqual(len(built), 1)
+        sdist = built.pop()
         with tarfile.open(sdist) as archive:
             names = archive.getnames()
-        self.assertTrue(any(name.endswith("/build_backend.py") for name in names))
+        self.assertFalse(any(name.endswith("/build_backend.py") for name in names))
         self.assertTrue(any(name.endswith("/pyproject.toml") for name in names))
         self.assertTrue(any(name.endswith("/README.md") for name in names))
         self.assertTrue(any(name.endswith("/LICENSE") for name in names))
@@ -156,12 +164,14 @@ class PackageTests(unittest.TestCase):
         for project in ("app-server-bin", "cli-bin"):
             rejected = subprocess.run(
                 [
-                    sys.executable,
-                    "-c",
-                    "import build_backend,sys;build_backend.build_sdist(sys.argv[1])",
+                    self.uv,
+                    "build",
+                    "--sdist",
+                    "--out-dir",
                     str(sdist_dir),
+                    str(PYTHON_ROOT / project),
                 ],
-                cwd=PYTHON_ROOT / project,
+                cwd=ROOT,
                 text=True,
                 capture_output=True,
             )
@@ -171,20 +181,15 @@ class PackageTests(unittest.TestCase):
     def test_local_wheels_install_together_and_cli_uses_bundled_assets(self) -> None:
         self._build_all()
         environment = self.root / "venv"
-        uv = shutil.which("uv")
-        if uv is None:
-            self.skipTest("uv is required for the isolated wheel install test")
-        subprocess.run([uv, "venv", "--python", sys.executable, environment], check=True)
+        subprocess.run([self.uv, "venv", "--python", sys.executable, environment], check=True)
         python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        pevo = environment / ("Scripts/pevo.exe" if os.name == "nt" else "bin/pevo")
         subprocess.run(
             [
-                uv,
+                self.uv,
                 "pip",
                 "install",
                 "--python",
                 str(python),
-                "--no-index",
                 "--find-links",
                 str(self.wheels),
                 "psychevo[cli]==0.1.0",
@@ -202,7 +207,8 @@ class PackageTests(unittest.TestCase):
                     "assert psychevo.__version__ == "
                     "psychevo_app_server_bin.__version__ == "
                     "psychevo_cli_bin.__version__ == '0.1.0';"
-                    "print(psychevo_app_server_bin.executable())"
+                    "print(psychevo_app_server_bin.executable());"
+                    "print(psychevo_cli_bin.workbench_dist())"
                 ),
             ],
             check=True,
@@ -210,13 +216,7 @@ class PackageTests(unittest.TestCase):
             capture_output=True,
         )
         self.assertIn("psychevo-app-server", probe.stdout)
-        cli = subprocess.run(
-            [str(pevo)],
-            check=True,
-            text=True,
-            capture_output=True,
-        )
-        self.assertIn("psychevo_cli_bin/workbench", cli.stdout.replace("\\", "/"))
+        self.assertIn("psychevo_cli_bin/workbench", probe.stdout.replace("\\", "/"))
 
 
 if __name__ == "__main__":

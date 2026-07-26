@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import base64
-import csv
-import hashlib
-import io
 import os
 import subprocess
 import sysconfig
 import tomllib
-import zipfile
 from pathlib import Path
+from zipfile import ZipInfo
+
+from wheel.wheelfile import WheelFile
 
 _ROOT = Path(__file__).parent
 _REPOSITORY = _ROOT.parents[1]
@@ -174,21 +172,10 @@ def _write_wheel(
     *,
     executable_paths: set[str],
 ) -> None:
-    records: list[tuple[str, str, str]] = []
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as wheel:
+    with WheelFile(target, "w") as wheel:
         for path, content in sorted(entries.items()):
-            info = zipfile.ZipInfo(path)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info = ZipInfo(path)
             info.external_attr = (
                 (0o755 if path in executable_paths else 0o644) & 0xFFFF
             ) << 16
             wheel.writestr(info, content)
-            digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(
-                b"="
-            )
-            records.append((path, f"sha256={digest.decode()}", str(len(content))))
-        record_path = f"{dist_info}/RECORD"
-        records.append((record_path, "", ""))
-        buffer = io.StringIO()
-        csv.writer(buffer, lineterminator="\n").writerows(records)
-        wheel.writestr(record_path, buffer.getvalue().encode())

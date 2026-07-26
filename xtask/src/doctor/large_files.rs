@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use clap::Args;
 use serde::Serialize;
 
-const DEFAULT_ROOTS: &[&str] = &["apps", "crates", "packages", "specs", "tools"];
+const DEFAULT_ROOTS: &[&str] = &["apps", "crates", "packages", "specs", "xtask"];
 const IGNORED_DIRS: &[&str] = &[
     "target",
     "dist",
@@ -13,6 +13,19 @@ const IGNORED_DIRS: &[&str] = &[
     "coverage",
     "test-results",
     ".local",
+    "vendor",
+    "vendored",
+];
+const IGNORED_FILES: &[&str] = &[
+    "Cargo.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "uv.lock",
+    "yarn.lock",
+];
+const BINARY_EXTENSIONS: &[&str] = &[
+    "avif", "bmp", "eot", "gif", "ico", "jpeg", "jpg", "otf", "pdf", "png", "ttf", "wasm", "webp",
+    "woff", "woff2",
 ];
 
 #[derive(Debug, Args)]
@@ -85,7 +98,7 @@ pub(crate) fn run(command: LargeFilesCommand, repo_root: &Path) -> Result<()> {
         test: command.test_limit,
         generated: command.generated_limit,
     };
-    let roots = selected_roots(&command.roots);
+    let roots = selected_roots(repo_root, &command.roots);
     let report = inventory(repo_root, &roots, limits)?;
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -99,9 +112,13 @@ pub(crate) fn run(command: LargeFilesCommand, repo_root: &Path) -> Result<()> {
     }
 }
 
-fn selected_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+fn selected_roots(repo_root: &Path, roots: &[PathBuf]) -> Vec<PathBuf> {
     if roots.is_empty() {
-        DEFAULT_ROOTS.iter().map(PathBuf::from).collect()
+        DEFAULT_ROOTS
+            .iter()
+            .map(PathBuf::from)
+            .filter(|root| repo_root.join(root).exists())
+            .collect()
     } else {
         roots.to_vec()
     }
@@ -156,6 +173,9 @@ fn scan_dir(
             }
             scan_dir(repo_root, &path, limits, oversized)?;
         } else if file_type.is_file() {
+            if is_ignored_file(&path) {
+                continue;
+            }
             inspect_file(repo_root, &path, limits, oversized)?;
         }
     }
@@ -169,8 +189,9 @@ fn inspect_file(
     oversized: &mut Vec<LargeFileRow>,
 ) -> Result<()> {
     let display_path = display_path(repo_root, path);
-    let lines = count_lines(path)?;
-    let category = category_for(&display_path);
+    let contents = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let lines = contents.iter().filter(|byte| **byte == b'\n').count();
+    let category = category_for(&display_path, &contents);
     let limit = limits.limit_for(category);
     if lines > limit {
         oversized.push(LargeFileRow {
@@ -183,13 +204,8 @@ fn inspect_file(
     Ok(())
 }
 
-fn count_lines(path: &Path) -> Result<usize> {
-    let contents = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    Ok(contents.iter().filter(|byte| **byte == b'\n').count())
-}
-
-fn category_for(path: &str) -> FileCategory {
-    if is_generated(path) {
+fn category_for(path: &str, contents: &[u8]) -> FileCategory {
+    if is_generated(path) || has_generated_header(contents) {
         FileCategory::Generated
     } else if is_test(path) {
         FileCategory::Test
@@ -198,9 +214,19 @@ fn category_for(path: &str) -> FileCategory {
     }
 }
 
+fn has_generated_header(contents: &[u8]) -> bool {
+    let prefix = &contents[..contents.len().min(1024)];
+    let header = String::from_utf8_lossy(prefix).to_ascii_lowercase();
+    header.contains("@generated")
+        || header.contains("code generated")
+        || (header.contains("generated") && header.contains("do not edit"))
+}
+
 fn is_generated(path: &str) -> bool {
     path.contains("/generated/")
         || path.starts_with("generated/")
+        || path.contains("/gen/")
+        || path.starts_with("gen/")
         || direct_protocol_schema_json(path)
 }
 
@@ -232,6 +258,18 @@ fn is_ignored_dir(path: &Path) -> bool {
         .and_then(|name| name.to_str())
         .map(|name| IGNORED_DIRS.contains(&name))
         .unwrap_or(false)
+}
+
+fn is_ignored_file(path: &Path) -> bool {
+    let file_name = path.file_name().and_then(|name| name.to_str());
+    if file_name.is_some_and(|name| IGNORED_FILES.contains(&name)) {
+        return true;
+    }
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            BINARY_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
 }
 
 fn display_root(root: &Path) -> String {
@@ -322,6 +360,7 @@ mod tests {
         let temp = TempRoot::new("classifies");
         temp.write_lines("apps/workbench/src/App.tsx", 4);
         temp.write_lines("apps/workbench/src/App.test.tsx", 5);
+        temp.write_lines("apps/desktop/src-tauri/gen/schemas/desktop-schema.json", 3);
         temp.write_lines("packages/protocol/src/generated/types.ts", 3);
         temp.write_lines("packages/protocol/schema/system.json", 3);
         temp.write_lines("specs/240-pevo-web/spec.md", 5);
@@ -345,6 +384,12 @@ mod tests {
         assert_eq!(
             rows,
             vec![
+                (
+                    FileCategory::Generated,
+                    3,
+                    2,
+                    "apps/desktop/src-tauri/gen/schemas/desktop-schema.json"
+                ),
                 (
                     FileCategory::Generated,
                     3,
@@ -398,31 +443,62 @@ mod tests {
 
     #[test]
     fn selected_roots_default_to_product_source_roots() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root");
         assert_eq!(
-            selected_roots(&[]),
+            selected_roots(repo_root, &[]),
             vec![
                 PathBuf::from("apps"),
                 PathBuf::from("crates"),
                 PathBuf::from("packages"),
                 PathBuf::from("specs"),
-                PathBuf::from("tools"),
+                PathBuf::from("xtask"),
             ]
         );
     }
 
     #[test]
-    fn inventory_scans_tools_with_default_roots() {
-        let temp = TempRoot::new("default-tools");
-        for root in selected_roots(&[]) {
-            fs::create_dir_all(temp.path.join(root)).expect("create default root");
-        }
-        temp.write_lines("tools/doctor-fixture/src/lib.rs", 4);
+    fn default_roots_scan_existing_xtask_and_omit_absent_optional_roots() {
+        let temp = TempRoot::new("default-roots");
+        fs::create_dir_all(temp.path.join("crates")).expect("create crates root");
+        fs::create_dir_all(temp.path.join("xtask")).expect("create xtask root");
+        temp.write_lines("xtask/src/main.rs", 4);
 
-        let roots = selected_roots(&[]);
+        let roots = selected_roots(&temp.path, &[]);
         let report = inventory(&temp.path, &roots, test_limits()).expect("inventory");
 
-        assert_eq!(report.roots.last().map(String::as_str), Some("tools"));
+        assert_eq!(report.roots, vec!["crates", "xtask"]);
         assert_eq!(report.oversized.len(), 1);
-        assert_eq!(report.oversized[0].path, "tools/doctor-fixture/src/lib.rs");
+        assert_eq!(report.oversized[0].path, "xtask/src/main.rs");
+    }
+
+    #[test]
+    fn inventory_ignores_vendor_binary_assets_and_lockfiles() {
+        let temp = TempRoot::new("non-source");
+        temp.write_lines("apps/vendor/dependency.js", 99);
+        temp.write_lines("apps/assets/font.woff2", 99);
+        temp.write_lines("apps/assets/module.wasm", 99);
+        temp.write_lines("apps/Cargo.lock", 99);
+        temp.write_lines("apps/pnpm-lock.yaml", 99);
+
+        let report =
+            inventory(&temp.path, &[PathBuf::from("apps")], test_limits()).expect("inventory");
+
+        assert!(report.oversized.is_empty(), "{report:?}");
+    }
+
+    #[test]
+    fn generated_header_classifies_owned_source_without_a_generated_path() {
+        let temp = TempRoot::new("generated-header");
+        let path = temp.path.join("crates/example/src/types.rs");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+        fs::write(&path, "// @generated; DO NOT EDIT\nx\nx\n").expect("write generated file");
+
+        let report =
+            inventory(&temp.path, &[PathBuf::from("crates")], test_limits()).expect("inventory");
+
+        assert_eq!(report.oversized.len(), 1);
+        assert_eq!(report.oversized[0].category, FileCategory::Generated);
     }
 }

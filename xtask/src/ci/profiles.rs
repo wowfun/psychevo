@@ -27,7 +27,7 @@ const CHANGED_STEPS: &[WorkflowStep] = &[
 const RUST_BROAD_STEPS: &[WorkflowStep] = &[
     WorkflowStep {
         id: "sdk-architecture",
-        description: "Check SDK crate graph, publication boundary, and internal feature use",
+        description: "Check SDK dependency direction, publication boundary, and product facade use",
         action: WorkflowStepAction::SdkArchitecture,
         live: false,
     },
@@ -239,8 +239,27 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
         live: false,
     },
     WorkflowStep {
-        id: "verify-python-sdk-packages",
-        description: "Build and install the Python SDK and binary wheels",
+        id: "test-python-sdk-client",
+        description: "Run every Python SDK client and transport test",
+        action: WorkflowStepAction::Command(&[
+            "uv",
+            "run",
+            "--no-project",
+            "--with",
+            "websockets>=15,<16",
+            "python",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "python/psychevo/tests",
+            "-v",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
+        id: "verify-python-package-contracts",
+        description: "Build and install all Python wheel and sdist contracts",
         action: WorkflowStepAction::Command(&[
             "python3",
             "-m",
@@ -265,13 +284,18 @@ const PACKAGE_STEPS: &[WorkflowStep] = &[
         live: false,
     },
     WorkflowStep {
+        id: "smoke-installed-python-artifacts",
+        description: "Run the installed SDK through the real bundled App Server and fake provider",
+        action: WorkflowStepAction::Command(&[
+            "python3",
+            "python/tests/installed_artifact_smoke.py",
+        ]),
+        live: false,
+    },
+    WorkflowStep {
         id: "checksum-local-artifacts",
         description: "Write local checksums without publishing artifacts",
-        action: WorkflowStepAction::Command(&[
-            "sh",
-            "-c",
-            "mkdir -p \"$PSYCHEVO_CI_ARTIFACT_ROOT/package\" && if [ -x target/release/pevo ]; then sha256sum target/release/pevo > \"$PSYCHEVO_CI_ARTIFACT_ROOT/package/pevo.sha256\"; fi",
-        ]),
+        action: WorkflowStepAction::Command(&["python3", "scripts/write_package_checksums.py"]),
         live: false,
     },
 ];
@@ -509,6 +533,18 @@ mod tests {
         let plan = plan_profile("package", None).expect("package profile");
         assert_eq!(plan.profile.kind, ProfileKind::Cd);
         assert!(plan.profile.artifact_only);
+        assert_eq!(
+            plan.steps.iter().map(|step| step.id).collect::<Vec<_>>(),
+            vec![
+                "verify-rust-sdk-packages",
+                "test-python-sdk-client",
+                "verify-python-package-contracts",
+                "build-cli-release",
+                "build-workbench",
+                "smoke-installed-python-artifacts",
+                "checksum-local-artifacts",
+            ]
+        );
         let forbidden = ["publish", "deploy", "upload", "tag", "push"];
         for step in plan.steps {
             let command = step.command.join(" ").to_ascii_lowercase();

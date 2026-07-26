@@ -91,7 +91,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo",
             test: "live_xiaomi_token_plan_read_tool",
-            features: &["internal"],
+            features: &["product"],
             provider_required: true,
         },
     },
@@ -102,7 +102,7 @@ pub(crate) const LIVE_CHECKS: &[LiveCheck] = &[
         action: LiveCheckAction::CargoIgnoredTest {
             package: "psychevo",
             test: "live_xiaomi_token_plan_model_fetch",
-            features: &["internal"],
+            features: &["product"],
             provider_required: true,
         },
     },
@@ -647,13 +647,13 @@ mod tests {
     }
 
     #[test]
-    fn psychevo_live_checks_enable_the_private_internal_surface() {
+    fn psychevo_live_checks_enable_the_private_product_surface() {
         for id in ["runtime-provider-read", "runtime-model-fetch"] {
             let command = command_for_plan(check_by_id(id).expect("runtime live check"));
             assert!(
                 command
                     .windows(2)
-                    .any(|args| args == ["--features", "internal"]),
+                    .any(|args| args == ["--features", "product"]),
                 "{id} plan must compile its private integration-test surface: {command:?}"
             );
         }
