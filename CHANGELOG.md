@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-26
+
+- Made the Framework the authority for Thread lifecycle, supervision,
+  persistence, activity, and control routing.
+- Simplified Gateway, App Server, SDK, CLI, Desktop, and Workbench integration
+  around the Framework while retaining product capabilities.
+- Improved bounded transcript history, packaging coverage, and CI profiling,
+  visual, and live validation.
+
 ## 2026-07-25
 
 - Replaced the pre-release Runtime crate with the public `psychevo` Framework

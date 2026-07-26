@@ -158,6 +158,14 @@ Session Adapter and projection metadata, but no caller Adapter may supply
 runtime state, native session identity, a second queue, or a preassembled
 `RunOptions`.
 
+Root and same-process delegated-child Agent calls are both Framework Turns.
+They use the same private `ApplicationRuntime`, queue/control ownership,
+interaction rendezvous, terminal commit, and shutdown settlement. Gateway may
+own the outbound ACP process and transport Adapter, but it must not register a
+shadow delegated Turn activity or call a second internal Agent run loop.
+Gateway-local Shell activity and foreign transport ownership remain separate
+tagged activity variants.
+
 An unbound source draft stores `draft_agent_ref`, `draft_profile_ref`, and
 typed `draft_control_values`. These are caller intent for a prospective
 `RunnableTarget`; they are not a runtime binding and must not be named or
@@ -353,10 +361,14 @@ unsupported, hidden, stale, or kind-mismatched interactions fail closed.
 public response contract.
 
 `thread/history/read` reads Psychevo's projected transcript for one authorized
-Thread. Its opaque cursor is the last returned stable transcript entry id;
-unknown cursors fail closed. Pages preserve the `ThreadHistoryView` owner and
-fidelity reported by `ThreadContext` and never read an adapter-native session
-history directly.
+Thread. The initial read returns the latest tail; a subsequent opaque `before`
+cursor is derived from the oldest stable entry id already held and returns only
+older entries. Unknown and cross-Thread cursors fail closed. The default page
+is 100 entries and the hard maximum is 200. Pages preserve the
+`ThreadHistoryView` owner and fidelity reported by `ThreadContext`, have Store
+and allocation cost bounded by the requested page, and never read an
+adapter-native session history directly. Search and export use the same bounded
+reader as streams rather than collecting the complete Thread in memory.
 
 ### Controls
 
@@ -867,25 +879,30 @@ direct naming and assumptions are removed.
 
 ## Workbench And Channels
 
-The TypeScript client owns a headless `ThreadController` that combines context,
-transcript, controls, interactions, revisions, and pending-turn state. React
-subscribes to its snapshot and dispatches intents. It does not pair definitions
-and profiles, infer sendability, or branch on runtime names.
+The TypeScript client owns one headless `ThreadSession` that combines context,
+transcript, controls, interactions, revisions, pending-turn state, and paged
+history. It publishes one immutable
+`ThreadSessionView { snapshot, context }`; a context-only change is therefore
+observable in the same subscription transaction as a transcript change. React
+subscribes to that view and dispatches intents. It does not mirror
+`runtimeContext`, pair definitions and profiles, infer sendability, or branch
+on runtime names.
 
-The production Workbench uses that controller as the sole reducer for the
-selected Thread's turn lifecycle. Submission calls `beginTurn` before sending
-`turn/start` and `acceptTurnStart` after the response; `gateway/event`,
-`turn/result`, and `turn/error` enter `applyGatewayEvent`, `applyTurnResult`, and
-`applyTurnError` respectively. A first-turn event or terminal may arrive before
-the `turn/start` response, and acceptance must bind the already-reduced snapshot
-without discarding streamed entries or resurrecting a settled turn. React does
-not independently invoke transcript or terminal snapshot reducers. A paced
-live entry still queued when its terminal arrives is stale after that terminal
-and cannot reopen or overwrite the settled turn.
+The production Workbench uses that Session as the sole reducer for the selected
+Thread's turn lifecycle. Submission begins the optimistic Turn before sending
+`turn/start` and binds the returned receipt after acceptance. Typed
+`gateway/event` observations, including the sole `TurnCompleted`, enter one
+private reducer. There are no parallel `turn/result` or `turn/error` client
+reducers. A first-turn event or terminal may arrive before the `turn/start`
+response, and acceptance must bind the already-reduced view without discarding
+streamed entries or resurrecting a settled Turn. React does not independently
+invoke transcript, context, or terminal reducers. A paced live entry still
+queued when its terminal arrives is stale after that terminal and cannot reopen
+or overwrite the settled Turn.
 
 Every independently rendered writable Thread surface, including right-workspace
 child Agent and side-conversation panels, keeps one lifecycle-stable
-`ThreadController` for that visible Thread. History hydration, optimistic prompt
+`ThreadSession` for that visible Thread. History hydration, optimistic prompt
 creation, `turn/start` acceptance or rejection, and Gateway event reduction all
 enter that same controller. A visible panel must not keep raw React transcript
 state while a detached or throwaway controller owns its submitted turn. Headless

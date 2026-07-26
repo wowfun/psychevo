@@ -14,6 +14,7 @@ process behavior, and product-level environment variables.
 
 - `pevo` command families
 - `pevo` command descriptions projected through process help
+- global help and version discovery
 - global Psychevo home layout
 - `pevo init`
 - `pevo run`
@@ -33,6 +34,13 @@ Out of scope:
   credential pools
 - SQLite schema details beyond product path selection
 - SDK, HTTP, MCP, or HTTP/WebSocket ACP transports
+
+## Global Discovery
+
+`pevo --version` and `pevo -V` print the compiled CLI package version and exit
+successfully without initializing a profile or runtime. This is the installed
+binary identity used by package validation. `pevo --help` remains the
+human-readable command discovery surface.
 
 ## Psychevo Home
 
@@ -211,6 +219,12 @@ TUI-local debug projections such as usage parts and allowlisted provider
 metadata summaries. Debug projection does not change `pevo run --format json`,
 does not expose folded reasoning in sanitized transcript messages, and does not
 turn provider metadata into transcript content.
+
+Every CLI command that owns an Application shutdown treats a non-clean
+`ShutdownReport` as command failure. Adapter shutdown errors, task panic or
+abort, and terminal-persistence failure retain their report details in the
+diagnostic and produce a non-success process result; only a clean report is a
+successful teardown.
 
 `pevo web` is the convenience entrypoint for the managed local Web UI. With no
 subcommand it is equivalent to `pevo gateway open`, defaults to the current

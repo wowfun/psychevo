@@ -55,9 +55,22 @@ The Framework's public domain model uses only Thread and Turn terminology.
 Native provider session identifiers and external Agent session identifiers are
 private implementation and persistence facts.
 
+Application implements this authority through one private deep
+`ApplicationRuntime`. Its internal `ThreadCell`, `TurnSlot`, and
+`InteractionWaiter` records are data-only state owned by that Module, not peer
+Managers, actors, public extension points, or independently supervised tasks.
+The Module has one in-memory index for per-Thread admission/mutation
+serialization, accepted-Turn execution and finalization, and interaction
+rendezvous. Each Thread cell contains one FIFO operation queue shared by Turns
+and archive, fork, and compact reservations. A queued mutation therefore waits
+for earlier accepted Turns and precedes later Turn admissions without a
+per-Thread actor or resident worker. An idle Thread cell is removed when it has
+no running or queued Turn, mutation reservation, or waiter. Correctness must
+not depend on a process-lifetime map entry per Thread.
+
 ## Rust Crate Boundary
 
-The source workspace keeps seven product crates:
+The current source workspace has the following product crates:
 
 ```text
 psychevo-agent-core -> psychevo-ai
@@ -71,16 +84,27 @@ psychevo-cli -> psychevo + psychevo-gateway + psychevo-acp
 development tooling. `psychevo-gateway`, `psychevo-acp`, and `psychevo-cli` are
 private product crates. The TUI remains an internal `psychevo-cli` module.
 
+The invariant is the acyclic dependency direction
+protocol/core → Framework → transport/host, not an exact workspace-member
+inventory or an exact snapshot of every dependency edge. A private
+implementation crate may be inserted or moved without updating an inventory
+allowlist, provided it creates no reverse dependency or cycle and does not
+change the public distribution contract. The product crates and direct edges
+shown above describe the current required surfaces, not a prohibition on
+deepening one of their implementations.
+
 Only `psychevo-ai`, `psychevo-agent-core`, and `psychevo` are Rust SDK crates
 published to crates.io. Their public dependency manifests use released
 versions; path dependencies may additionally be present for workspace
 development.
 
 The published `psychevo` crate has an empty default feature set and exports the
-Framework interface. Private first-party product crates enable its `internal`
-feature to assemble Gateway, ACP, CLI, and TUI behavior from lower modules.
-That feature is an unsupported workspace bridge rather than part of the stable
-SDK interface.
+Framework interface. Private first-party product crates enable its `product`
+feature to assemble Gateway, ACP, CLI, and TUI behavior through one
+`__product` facade. The feature is an unsupported workspace bridge rather than
+part of the stable SDK interface. It does not make the raw `state`, `run`,
+`tools`, configuration, or other implementation modules public; an external
+crate that enables it can reach only the deliberately re-exported facade.
 
 `psychevo` is the successor of the pre-release `psychevo-runtime` package.
 There is no `psychevo_runtime` compatibility crate or crate-name alias.
@@ -104,12 +128,21 @@ The stable high-level interface contains:
 - `Client::start_thread`, `Client::resume_thread`, and summary-only
   `Client::list_threads`;
 - Thread identity and authoritative snapshot access plus `start_turn`,
-  `respond`, `compact`, `fork`, and `archive`; a snapshot includes the ordered
-  durable message items needed to rebuild a client projection;
+  `respond`, `compact`, `fork`, and `archive`; an ordinary snapshot includes a
+  bounded latest transcript page and its older-history cursor;
 - `TurnHandle::receipt`, a bounded event stream, `wait`, `steer`, and
   `interrupt`;
+- a bounded `HistoryReader` for latest-page, older-page, streaming search, and
+  streaming export reads;
 - typed approval and clarify interactions exposed both as durable pending
   interactions and as optional convenience handlers.
+
+`TurnRequest` keeps its raw field layout private. Callers use `new`, cohesive
+domain configuration methods for input, identity, model/runtime selection,
+permissions, environment, Agent/Skill/MCP selection, and `tool`; Adapter-only
+facts remain behind the private first-party bridge. This preserves every
+supported input while preventing callers from depending on the storage layout
+of execution policy and capability assembly.
 
 The high-level interface does not expose the state store, a SQLite pool,
 runtime-internal run options, a Native session id, event persistence sinks, or
@@ -122,12 +155,14 @@ grant callers access to the internal queue or state Module.
 
 Private Adapter input may carry only facts required to finish a captured
 execution target, such as an already prepared ACP source key, initial
-source-draft controls, a workspace snapshot root, and a read-only raw event
-observer used by first-party renderers that need Native usage or provider
-metadata. The observer cannot admit, queue, control, or complete a Turn.
-Application lifecycle events are the single source for first-party Turn
-started, completed, and failed notifications; raw Adapter terminal events are
-projection fences and are not published as a second terminal.
+source-draft controls, and a workspace snapshot root. Adapter observations enter
+one Application-owned bounded `TurnEventStream`; there is no synchronous raw
+observer callback beside that stream. Rich first-party projection, usage, and
+provider metadata must be represented by typed stream variants rather than a
+second callback authority. Application lifecycle events are the single source
+for first-party Turn started, completed, interaction, and terminal
+notifications; Adapter terminal observations are projection fences and are not
+published as a second terminal.
 
 Application admission persists a delivery intent but does not confirm delivery
 before the selected Adapter reaches its own dispatch boundary. The Adapter is
@@ -152,18 +187,30 @@ prior Turn's terminal interaction state suppress a new pending interaction.
 
 The terminal fact, delivery transition, and cancellation of still-pending
 interactions form one semantic commit. Application does not publish a terminal
-event, resolve `TurnHandle::wait`, or discard the active handle until that
-commit succeeds. A persistence failure is returned to the current waiter and
-retains the unfinalized delivery/recovery facts; an in-memory result is never
-reported as durable completion. Adapter failures persist their error terminal
-without requiring a successful `TurnResult`, and `resume_turn` reconstructs the
-same failed handle and error from that terminal.
+event or resolve `TurnHandle::wait` with a semantic outcome until that commit
+succeeds. A terminal-store failure releases the Thread execution slot and
+public running/control projection, retains the same-process typed result in a
+private `PendingTerminal`, and resolves the current waiter with a typed
+persistence failure. `resume_turn` and shutdown retry that same pending commit
+once; the idempotent semantic transaction is the only terminal writer.
+
+Psychevo deliberately does not add a recovery table, outbox, or staged terminal
+payload. After process loss, a durable nonterminal delivery row is reported as
+`OutcomeIndeterminate`; Application never replays the input, guesses a terminal
+outcome, or fabricates Failed merely because the prior process disappeared.
+Adapter failures persist their error terminal without requiring a successful
+`TurnResult`. A durably committed terminal remains resumable as that exact
+outcome.
 
 ## Accepted Turn Lifetime
 
-Starting a turn first durably materializes its public Thread and Turn identity,
-then returns an acceptance receipt and `TurnHandle`. Accepted work is owned by
-Application supervision:
+Starting a turn reserves its Thread queue slot and an Application-owned
+`TurnSlot` before the first accepted-Turn write. One transaction materializes
+the public Thread and Turn identity, delivery intent, and retained
+`clientTurnId` receipt. The slot is registered with control, event, completion,
+and abort ownership before admission can close or the receipt can escape.
+Application then returns the acceptance receipt and `TurnHandle`. Accepted work
+is owned by Application supervision:
 
 - dropping a Thread, TurnHandle, event receiver, App Server connection, or
   transport never cancels accepted work;
@@ -174,10 +221,20 @@ Application supervision:
   state last.
 
 Admission is acquired before the first accepted-Turn write and held through
-active-handle registration. Shutdown closes admission only after those
-in-progress admission sections finish. A caller therefore observes either an
-accepted Turn with a supervised handle or a rejection with no delivery row or
-client receipt; shutdown cannot leave a never-executed ghost Turn.
+active-slot registration. Caller cancellation during or after the acceptance
+transaction drops only that caller's receipt receiver. A caller therefore
+observes either an accepted, supervised Turn whose durable delivery and receipt
+facts agree, or a rejection with neither fact; shutdown cannot leave a
+never-executed ghost Turn.
+
+The Thread cell is also the linearization point for archive, fork, compact, and
+Turn admission. Turn execution acquires its FIFO operation permit before
+constructing the Adapter execution context. That context is O(1) in transcript
+size and carries Thread identity, cwd, and binding facts; an Adapter that needs
+history uses the bounded `HistoryReader`. Archive, fork, compact, and a racing
+Turn cannot pass independent check-then-write guards. Dropping a queued
+operation removes its reservation and releases its successor; completion or
+cancellation cannot strand the Thread queue.
 
 Event receivers are bounded. A slow receiver may observe an explicit lag or
 resync condition instead of applying unbounded backpressure to execution. The
@@ -189,6 +246,30 @@ restart cannot recreate an in-flight provider or external Agent request because
 those protocols do not provide a common durable execution identity or
 exactly-once resume contract. Delivery state remains durable and the Framework
 does not guess by replaying an unknown request.
+
+`AgentSessionAdapter::run_turn` and `shutdown` are async contracts: one poll may
+not perform unbounded synchronous blocking, dropping/aborting the future must be
+cancellation-safe, and the Adapter owns cleanup of every socket, child process,
+reader, and blocking worker it creates. Graceful shutdown may drain accepted
+work without the force deadline. Force shutdown has one ten-second total
+deadline and orders work as follows:
+
+1. close Application admission and signal every active control;
+2. invoke bounded Adapter shutdown so owned sockets and children can exit;
+3. join accepted tasks within the remaining deadline;
+4. abort residual cancellation-safe tasks and settle their Turn slots;
+5. drain pending interaction, event, and terminal work;
+6. close state last.
+
+The shutdown report distinguishes Adapter timeout, task panic, abort, pending
+terminal persistence, and Adapter contract violation. A non-conforming
+in-process Adapter that blocks inside one poll cannot be safely killed; the
+host may terminate the process, but Application must not report a clean
+shutdown. A forced shutdown requested while another caller owns a graceful
+drain upgrades that same drain immediately; it does not wait behind the
+unbounded graceful task join. Every first-party host treats a non-clean report
+as failed teardown and preserves its details in the returned error or process
+failure instead of treating `Ok(ShutdownReport)` as unconditional success.
 
 ## App Server
 
@@ -214,6 +295,18 @@ Each connection applies protocol-state transitions in wire receive order.
 state mutation before a later normal request is dispatched. After that ordered
 prefix, independent ordinary requests and reverse-callback responses may run
 concurrently. Stdio and WebSocket use the same rule.
+
+Each connection admits at most 64 concurrent ordinary requests. One
+connection-local task owner continuously reaps completed requests, reverse
+callbacks, and event relays while the connection remains open. Disconnect
+aborts connection-local waits, callbacks, and relays, but not accepted
+Application Turns or a durable mutation already adopted by Application/State.
+Terminal observation removes the connection's live Turn handle. Relay ids
+remain as bounded tombstones for the connection lifetime so repeated
+`turn/resume` does not duplicate a relay in the cursor-less v1 protocol.
+Completed tombstones use a finite FIFO capacity; active relays remain live
+ownership rather than tombstones, and evicting an old completed id cannot
+remove a currently active relay.
 
 The App Server exposes typed Thread, Turn, snapshot, event subscription,
 interaction response, custom-tool registration, and shutdown operations. HTTP,
@@ -252,6 +345,11 @@ Thread id, and Turn id. Results or structured failures correlate by call id.
 Disconnect, timeout, malformed results, or unknown calls fail the Tool
 invocation without guessing a different client.
 
+Custom-tool registration compiles the supplied JSON Schema once and rejects an
+invalid or unsupported schema. Every execution validates the complete argument
+value against that compiled schema before sending a reverse callback. Validation
+failure is a typed Tool invocation error and never invokes client code.
+
 Approval and clarify facts are always durable pending interactions. A live
 handler is only a convenience responder. Disconnect, timeout, or handler error
 fails closed and leaves or resolves the durable interaction according to the
@@ -264,13 +362,23 @@ pending interaction automatically; without one, the caller reads
 `pending_interactions` and uses `interaction/respond`.
 
 Application wraps every Runtime approval handler at Turn acceptance. The
-wrapper durably records the typed permission request before waiting and owns
-the exactly-once response rendezvous for that Turn. A caller may answer through
+wrapper registers a private waiter, durably records the typed permission
+request, and only then publishes and waits. A caller may answer through async
 `Thread::respond` or `TurnHandle::respond`; when a client-hosted convenience
-handler is present, its result races the same Framework rendezvous and the first
-valid response wins. Completion, interruption, timeout, and forced shutdown
-close the rendezvous and resolve or cancel its durable record. Adapter-local
-permission maps are not authoritative for Framework Turns.
+handler is present, its result races the same Framework rendezvous.
+
+Response handling is adopted by Application before the caller awaits its
+receipt. One compare-and-set from pending to resolved persists the full tagged
+Permission, Clarify answer, or Clarify cancellation payload. Only the winner
+wakes the waiter, synchronously from that committed payload or its
+durable-kind-defined cancellation mapping. Caller or
+connection cancellation after adoption drops only the receipt; it cannot split
+commit from wake. Completion, interruption, timeout, and forced shutdown race
+through the same terminal cancellation transaction. Adapter-local permission
+maps are not authoritative for Framework Turns. Application resolves the
+durable interaction kind before committing: a typed response for the wrong kind
+is rejected without changing the row, while a generic cancellation adopts and
+wakes the waiter selected by the durable kind.
 
 ## Python SDK
 
@@ -299,6 +407,21 @@ It does not search `PATH`, download a binary, discover or create a daemon,
 connect to raw TCP or Unix sockets, load Rust through FFI, expose a Python
 Provider or Agent backend, or expose arbitrary runtime hooks.
 
+The Client has one persistent terminal error. EOF, malformed protocol,
+transport failure, callback-loop failure, or a transport exception while
+sending a request, notification, or callback response records that error,
+fails every pending request and Turn waiter, and makes every later operation
+fail immediately with the same cause. Delivery-unknown mutations are not
+replayed on the half-closed transport. Turn handles are removed after their
+terminal settles. The Client does not implement automatic reconnect or request
+replay.
+
+Remote WebSocket framing, masking, fragmentation, ping/pong, close, and message
+size enforcement are delegated to the maintained `websockets` Python library.
+The Psychevo transport owns only authentication headers, the JSON-RPC
+handshake, bounded text-message decoding, and terminal error propagation; it
+does not maintain a second RFC 6455 state machine.
+
 ## Python Distribution
 
 PyPI uses three distributions with one product version:
@@ -313,6 +436,15 @@ PyPI uses three distributions with one product version:
 `psychevo[cli]` is the only CLI extra and pins `psychevo-cli-bin==V`. There is
 no `telemetry` or `all` extra. The binary packages do not silently fall back to
 another installed version.
+
+The App Server binary wheel builds
+`psychevo-gateway --bin psychevo-app-server --no-default-features` plus only
+the explicit features required by that binary. Pure-Python packages use one
+standard PEP 517 backend configuration rather than repository-local duplicate
+backend implementations. Package validation discovers both SDK test
+directories, installs the built artifacts into a clean environment, and runs a
+fake-provider stdio smoke through the installed binary and installed Python
+client.
 
 ## Compatibility
 
@@ -357,6 +489,8 @@ Acceptance requires:
   interactions, and completion across transports;
 - callback routing, disconnect, timeout, lag/resync, reconnect, shutdown, and
   protocol-negotiation tests;
+- standalone `psychevo --no-default-features --all-targets` compilation without
+  workspace feature unification;
 - Rust package and Python sdist/wheel content and install tests;
 - all repository visual checks and all explicitly configured live checks.
 

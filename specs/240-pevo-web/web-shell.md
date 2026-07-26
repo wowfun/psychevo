@@ -131,7 +131,7 @@ catalog rows appear immediately in Settings and the composer without persisting
 each row to config. The page must not silently hot-swap the currently running
 turn or move session-scoped composer controls into Settings.
 The composer presents Agent Definition and Runtime Profile through one grouped
-target selector. Before binding, the headless `ThreadController` receives
+target selector. Before binding, the headless `ThreadSession` receives
 compatible `RunnableTarget` choices from `thread/context/read`; React does not
 pair targets or infer compatibility. After binding, the selector becomes
 immutable provenance and changing either identity starts a new public thread.
@@ -588,10 +588,10 @@ new global default.
 Workbench observes accepted-turn settlement through Gateway live events and
 `thread/read` snapshots. Provider/runtime failures after turn acceptance must
 settle as a thread-scoped terminal turn status and render as diagnostic/status
-projection in the affected thread. `turn/error` is reserved for request-level
-fallback or pre-acceptance failures and is not the source of truth for accepted
-turn failure. Turn terminal events stop running activity, clear active-turn UI,
-and reconcile pending tool/reasoning rows as failed or interrupted.
+projection in the affected thread. Pre-acceptance JSON-RPC failures reject the
+request; there is no parallel `turn/error` notification. `TurnCompleted` stops
+running activity, clears active-turn UI, and reconciles pending tool/reasoning
+rows as failed or interrupted.
 
 Interrupt actions are scoped to the current thread or opened child thread.
 Workbench may show immediate local interrupting state after sending

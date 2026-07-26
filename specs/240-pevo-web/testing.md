@@ -241,6 +241,31 @@ required. They must not print tokens or secrets.
   initial deadline, capped reconnect backoff, manual Retry, request timeout and
   abort classification, unknown delivery without replay, stale-generation
   suppression, malformed-frame recovery, and notification-handler isolation.
+- Generated-protocol tests cover required versus optional serde fields without
+  blanket `Partial`, and validate representative results for every registered
+  method. A response with the right JSON-RPC id but the wrong method result
+  shape rejects that pending request and closes the generation as a protocol
+  fault.
+- Browser and Desktop transport tests distinguish reconnectable `close()` from
+  terminal async `dispose()`, prove listener/native-bridge cleanup is awaited,
+  and reject connect/send after disposal. Repeated disposal is harmless.
+- `ThreadSessionView` tests prove a context-only update publishes exactly one
+  view, `load` atomically replaces snapshot/context/correlation, and a stale
+  context, older-page result, or control receipt cannot enter a later view
+  epoch or target identity. Workbench keeps no writable `runtimeContext` state
+  outside the Session.
+- History tests seed a Thread larger than two pages, assert the first read
+  returns the latest 100 entries, prepend older pages by stable cursor without
+  duplication or scroll jump, and keep a live latest-page row while older
+  history loads. The main Transcript retains a load-earlier action while a
+  cursor exists. Dynamic-height virtualization is exercised with an
+  above-viewport resize, expanded Tool evidence, streamed growth, keyboard
+  focus, copy, search, and export; one resize delta produces one anchor
+  compensation.
+- Browser journey probes identify newly committed user entries by durable entry
+  identity and assistant output by Turn identity. Mounted DOM node counts are
+  not lifecycle evidence because virtualization may mount one row while
+  unmounting another.
 - Workbench tests distinguish cold boot failure from post-boot disconnect,
   preserve transcript and edited draft during reconnect, disable rather than
   queue Send while disconnected, generation-guard rehydration, and reconcile an

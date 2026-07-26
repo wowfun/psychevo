@@ -13,6 +13,13 @@ App packages follow the same rule. Files such as `apps/*/src/App.*` are
 composition roots for wiring state, host/client calls, and high-level layout;
 semantic UI surfaces, inspector panes, sidebar chrome, composer controls,
 data normalization, and storage helpers must live in separate app-local modules.
+The top-level Workbench Layout accepts typed
+`{ view: WorkbenchView, intents: WorkbenchIntents }` props. It renders the
+immutable view and reports user intent; it does not accept an open
+`Record<string, unknown>`, call Gateway RPCs, or own Thread lifecycle state.
+App may compose a small number of cohesive view models when each removes a
+corresponding group of duplicated state/effects/RPC branches; file-count or
+line-count reduction alone is not a reason to add another store.
 Large app CSS entrypoints should aggregate smaller style files by surface or
 layout area instead of accumulating all page, pane, and component overrides in
 one stylesheet.

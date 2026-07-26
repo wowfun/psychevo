@@ -205,9 +205,12 @@ When a child invocation targets an agent definition with `backend.ref` and a
 external delegation boundary instead of synthesizing a native child loop.
 Runtime owns target validation, effective catalog visibility, unsupported
 background/fork checks, and the model-visible `spawn_agent` tool result shape.
-The concrete peer transport is injected as an optional runtime-to-Gateway
-delegate because Gateway owns ACP client sessions and peer observation. If that
-delegate is not available, the `spawn_agent` tool must return a structured
+The concrete peer transport is injected as an optional Framework Agent Session
+Adapter because Gateway owns ACP processes, connections, and protocol
+projection. The delegated child itself is an accepted Framework Turn with the
+same Application supervision, control, interaction, and terminal semantics as a
+root Turn; Gateway does not register or execute a shadow Turn. If the Adapter is
+not available, the `spawn_agent` tool must return a structured
 unavailable result rather than falling back to a native child thread that only
 has the peer's name.
 The Psychevo child thread created before delegation is the canonical live scope

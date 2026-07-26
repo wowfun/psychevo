@@ -17,7 +17,8 @@ peer-agent backends. It does not own Thread or Turn orchestration.
 
 - transport-neutral thread and turn model
 - source identity and source-to-thread mapping
-- active-turn queue, steer, interrupt, and reset semantics
+- transport projection of Framework-owned Turn queue, steer, interrupt, and
+  reset semantics
 - transport projection of Framework-owned permission and clarify interactions
 - canonical caller-facing item and event projection
 - typed live observation projection without generic raw debug persistence
@@ -82,12 +83,13 @@ Automation scheduling, Channel reconciliation, prewarming, and comparable
 transport producers. Accepted Turns never move into the transport supervisor.
 Connection-local request tasks remain in the connection's local task set; they
 are not moved into a global registry merely for uniformity.
-Application admission acquires a supervised activity permit before its first asynchronous
-operation. Closing admission and acquiring that permit share one atomic
-boundary, so shutdown cannot observe an empty closed tracker while an admitted
-request is still materializing its Thread or receipt. Queue workers for Turn,
-Shell, and Compact activities are Application-owned; queue advancement never
-creates a detached execution task.
+Application admission acquires a supervised activity permit before its first
+asynchronous operation. Closing admission and acquiring that permit share one
+atomic boundary, so shutdown cannot observe an empty closed tracker while an
+admitted request is still materializing its Thread or receipt. Framework owns
+Turn and Compact serialization. Gateway owns local Shell serialization and
+transport producers. Queue advancement never creates a detached execution
+task.
 
 Shutdown is idempotent and ordered:
 
@@ -279,36 +281,43 @@ skill inputs. Agent and ACP-capability mentions provide capability metadata and
 disambiguation for the turn, but they do not override the unbound turn's
 explicit `RunnableTarget`.
 
-Each gateway thread has at most one active turn. Normal inputs submitted while
-a turn is active enter a Gateway-owned FIFO queue for the same source/thread
-selector. Queued callers wait for their own turn result; Gateway serializes
-execution before invoking the backend. Steer input targets the active turn and
-may be updated or canceled until runtime commits it. Interrupt aborts the active
-turn and clears pending in-memory control state for that turn.
+Each Framework Thread has at most one active Turn. Normal inputs submitted
+while a Turn is active enter the Framework-owned FIFO for that materialized
+Thread. Gateway resolves the source selector, calls the Client once, and
+projects the returned queue state; it does not serialize the same Turn again.
+Steer targets the active Framework Turn and may be updated or canceled until
+runtime commits it. Interrupt targets the activity id and owner described by
+the current activity projection.
 
-Gateway active state is observable across processes. The owning Gateway records
-a durable activity claim with thread id when known, source key, turn id,
-activity kind, owner id, generation, start/update timestamps, lease expiry, and
-queued-turn count. The in-process `RunControlHandle` remains the fast path for
-the owner, but every Gateway must merge local active state with durable activity
-when reporting `GatewayActivityView`, mutation guards, and session summaries.
+Gateway active state is a tagged projection with one owner per activity:
+
+- `frameworkTurn { activityId, turnId, kind: root|delegatedChild, phase,
+  controls }`;
+- `gatewayLocal { activityId, kind: shell, controls }`;
+- `foreign { activityId, ownerId, generation, leaseExpiresAt, controls }`.
+
+Compact is a Framework Thread mutation and does not create a Gateway activity.
+Queued counts are not summed across variants. Same-process delegated children
+are Framework Turns, not Gateway-local shadow Turns.
+
+Foreign state remains observable across processes through its durable activity
+claim. A foreign owner records thread id when known, source key, activity id,
+owner id, generation, start/update timestamps, lease expiry, and queued count.
+For a current leased `turn` claim, the projection uses the claim's explicit
+Turn id as `activeTurnId`; it never substitutes an activity id, transcript
+entry id, or locally inferred id. The claim remains tagged `foreign` unless the
+same-process Framework authority supplies the matching `frameworkTurn`.
 Expired leases are stale rather than authoritative. A stale owner may be
 superseded by a newer generation; late completion or release from the old
 generation must not clear the new owner.
 
-Another Gateway may take over stale or cooperatively released work by claiming a
-new generation and continuing from persisted transcript state plus bounded turn
-intent. Takeover is continuation, not hot migration: runtime futures, provider
-streams, tool processes, and `RunControlHandle`s are not moved between
-processes. If continuation is impossible, Gateway exposes a bounded failure and
-does not start a duplicate owner for the same generation.
-
-Control APIs first try the local owner. For a foreign owner, Gateway records a
-durable control command addressed to that activity owner. The live owner polls
-and applies interrupt, steer, permission, clarify, and cooperative takeover
-commands against its in-memory controls. If the owner lease expires before the
-command is applied, the caller may retry through takeover or receive a bounded
-stale-owner error.
+Control routing switches on the tagged owner and exact `activityId`.
+Framework-root or delegated-child control calls Framework only. Gateway-local
+Shell control calls the local Gateway owner only. Foreign control records one
+durable command addressed to that owner and activity. There is no
+provenance-blind fan-out, short-circuit fallback, or “interrupt all” route.
+Permission and Clarify responses use their durable interaction routing context,
+not the currently selected activity as a fallback.
 
 Starting a new thread or resuming a history thread rebinds the source key
 without archiving, ending, or deleting the previously bound thread. Historical
@@ -407,9 +416,9 @@ selector can target a concrete thread id or a source key. Gateway resolves the
 selector against active in-memory state, process bindings, and persistent
 bindings according to the source lifetime.
 
-`clear_queue(selector)` removes queued turns for a selector and resolves their
-waiting callers with a queue-cleared error. ACP cancel/stop semantics map to
-`interrupt` plus `clear_queue`.
+Clearing queued Turns is a Framework Thread action and resolves their waiting
+callers with a queue-cleared error. ACP cancel/stop semantics map to the same
+Framework interrupt and queue-clear actions for an accepted ACP-backed Turn.
 
 Public steering crosses `thread/action/run` with action kind `steer` and an
 `expectedTurnId`. Gateway rejects or ignores stale steering when that id does
@@ -476,18 +485,21 @@ source, settings, and related commands use WebSocket requests and server
 notifications.
 
 The facade dispatches requests with bounded concurrency instead of awaiting one
-handler in the socket receive loop. Each connection permits at most 32 active
+handler in the socket receive loop. Each connection permits at most 64 active
 requests and writes responses through one writer; responses may complete out of
 order and are correlated by JSON-RPC id. Ordering belongs to Framework: draft
 mutations serialize by canonical source generation, bound Thread mutations
 serialize through the Thread authority, and unrelated reads or sources remain
 concurrent. The transport does not maintain a second
-global method-classification scheduler. Completed per-request tasks are reaped
-while the connection remains open; the task registry is bounded by active work,
-not by the lifetime request count of a long-lived socket. When all permits are
-occupied, waiting for the next permit remains concurrent with polling socket
-Close/error and completed request tasks; a saturated connection therefore
-disconnects promptly without waiting for one of its requests to finish.
+global method-classification scheduler. Completed per-request,
+reverse-callback, and relay tasks are reaped while the connection remains open;
+the task registry is bounded by active work, not by the lifetime request count
+of a long-lived socket. When all permits are occupied, waiting for the next
+permit remains concurrent with polling socket Close/error and completed tasks;
+a saturated connection therefore disconnects promptly without waiting for one
+request to finish. Disconnect aborts connection-local work, but accepted
+Application Turns and State-adopted durable mutations finish under their owning
+supervisor.
 
 The central JSON-RPC dispatcher owns method matching, typed parameter parsing,
 conversion of transport values into typed Framework requests, calling the
@@ -724,6 +736,22 @@ Store read count scale with the returned page, not with the total candidate set.
 Title fallback may use the first displayable user text without loading the full
 transcript.
 
+`thread/read`, `thread/resume`, and the initial `ThreadSnapshot` return the
+latest transcript tail first. The default page is 100 entries and the hard
+maximum is 200. `before` is an opaque cursor derived from the oldest stable
+entry id in the returned page; an unknown or cross-Thread cursor fails closed.
+`thread/history/read` loads strictly older entries and preserves canonical
+order in each page. Its Store query cost and returned allocation are bounded by
+the requested page, not the Thread's total message count. Linked entry updates
+needed to render a returned Tool or Agent block may be included only within a
+documented bounded expansion.
+
+Workbench prepends older pages without replacing the visible latest-page live
+overlay. Search and export consume a streaming history reader and do not
+materialize the whole Thread in Gateway memory. A full transcript remains
+available through repeated pages or streaming export; bounded reads do not
+remove history or change UX.
+
 Explicit `thread/resume` may target a session from a different cwd than
 the caller's current scope. In that case Gateway rebinds the caller's source to
 the target session and returns a snapshot whose scope/project is the session's
@@ -776,12 +804,24 @@ Application Module calls, and error behavior in its transport implementation.
 Generating dispatcher handlers or changing JSON-RPC execution behavior is not
 required by this contract.
 
+Generation derives request requiredness field by field from Rust serde
+semantics. It must not wrap request params or generated wire objects in blanket
+`Partial<...>`. The same registry emits one runtime result validator per
+`GatewayMethod`; a client validates the response against the method retained by
+its pending request before resolving it. A mismatched result is a protocol
+fault, not a value for the caller to cast.
+
 Generated protocol validation must be free of `ts-rs` serde-attribute parse
 warnings. If a Rust wire field is omitted during serialization, the generated
 TypeScript type and JSON Schema must also model that field as optional.
 Otherwise Gateway should serialize the field explicitly, using `null` for absent
 optional values and `[]` for empty collections, so Rust JSON, generated
 TypeScript, and generated schema describe the same wire shape.
+For tagged enum variants, `rename_all_fields` is part of that same hard
+contract: generated schema property names must match the serialized variant
+field names. Protocol tests must serialize representative multi-field variants
+and validate those values against their generated schemas, including active
+Thread activity returned by `thread/read` and `thread/resume`.
 `thread/browser` therefore always emits each workspace's `nextCursor`; the last
 page uses an explicit `null`, matching its required nullable TypeScript field.
 
@@ -878,6 +918,11 @@ Adapter command. Ordering has exactly one owner: the Framework active
 queue for Native execution and the outbound ACP process pool's resident
 per-session actor for ACP execution. The seam routes identity and is
 not a second mailbox layered over either authority.
+
+If ACP startup terminates an accepted Adapter operation, the process pool
+returns the most specific observed startup status. In particular, an
+incompatible negotiated protocol remains an incompatible-protocol failure and
+cannot be overwritten by the generic fact that the process mailbox closed.
 
 Before Framework delivers a first prompt, it persists the Thread binding,
 including Agent Definition and Runtime Profile snapshots, implementation kind,

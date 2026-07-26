@@ -290,6 +290,13 @@ inject results into model context. If the owning runtime/TUI connection is
 detached, an active session may remain alive briefly for reconnect; after a
 short timeout it must be cleaned up or terminated.
 
+A command that completes before yielding and returns `session_id: null` takes
+the foreground fast path: runtime collects its owned readers, emits its normal
+completion, and drops all session state immediately. It does not start a
+detached cleanup sleeper or reconnect grace timer. Only a yielded live session
+is registered with the shared session reaper and receives the bounded detach
+grace period.
+
 Successful command and poll results return a JSON object with the strict stable
 fields:
 - `chunk_id`: monotonically increasing output chunk number for the session

@@ -87,9 +87,13 @@ making source-qualified acceptance facts available internally.
 Built-in tools, clarify tools, skill tools, MCP tools, plugin worker tools, and
 agent tools enter the same registry interface. A contributed tool name becomes
 model-visible only when its execution binding is registered for the accepted
-invocation and the current mode permits it. Duplicate model-visible names are
-conflicts; later duplicates are omitted with source-qualified facts rather than
-silently replacing earlier bindings.
+invocation and the current mode permits it. Building the invocation
+`ToolRouter` is fallible. Duplicate canonical identities or duplicate
+provider-visible/display names are source-qualified conflicts and reject the
+ambiguous router before generation; insertion order never selects a winner.
+Source discovery may omit a declaration under an explicit precedence policy
+before router construction, but a router that was constructed successfully
+has a one-to-one canonical/display lookup and requires no fallback dispatch.
 
 ## Toolsets
 

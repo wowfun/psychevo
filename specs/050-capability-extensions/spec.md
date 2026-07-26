@@ -261,6 +261,12 @@ snapshots in the same agent invocation. Explicit invocation configuration may
 disable synthetic `tool_search`; it must not change install, package, or
 manifest semantics.
 
+Router construction rejects duplicate canonical identities and duplicate
+provider-visible/display names with both source identities. It never keeps the
+first or last binding according to insertion order. Precedence-based omission,
+when an owning source contract defines one, happens before router construction
+and remains visible as a source-qualified acceptance fact.
+
 Prompt-prefix records freeze the request reconstruction boundary. They retain
 prompt slots, prompt hash, model-visible tool declaration hash, MCP runtime
 snapshot hash, and minimal runtime metadata needed to reconstruct or mark

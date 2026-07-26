@@ -175,7 +175,11 @@ kind-specific, but routing and lifecycle fields are shared: `action_id`,
 and accepted response metadata when available.
 
 Runtime remains authoritative for permission and tool execution decisions.
-Gateway and other surfaces provide request/response rendezvous and recovery.
+Application owns request/response rendezvous and recovery. It commits a pending
+request before publishing `action_requested`, and it compare-and-sets the full
+tagged response before waking the runtime waiter or publishing
+`action_resolved`. Gateway and other surfaces only project and submit those
+typed facts.
 Late, duplicate, expired, or stale-owner responses must not resume work; they
 must be reported to the caller as not accepted.
 
@@ -189,6 +193,13 @@ Gateway exposes a curated typed projection. Ordinary Gateway events must not
 carry raw runtime JSON fallback payloads. Public projection events must use
 stable names and stable identities for turns, entries, blocks, tools, actions,
 warnings, activity, title, and terminal outcomes.
+
+Within Application, Adapter and lifecycle observations enter one bounded typed
+`TurnEventStream`. A synchronous observer callback is not a parallel delivery
+seam. A slow or failed subscriber cannot block or unwind Turn execution. When a
+subscriber falls behind, it receives one explicit resync condition for the
+accumulated gap and must re-read the authoritative bounded Thread snapshot;
+Application does not add an unbounded relay or durable full-event journal.
 
 Presentation transports own delivery state. WebSocket, ACP, TUI, channel, and
 dashboard adapters may track whether a preview was sent, whether final content

@@ -78,6 +78,9 @@ failure isolation should be covered with fake installers and fake LSP servers.
 - Non-zero process exits are successful tool results with `exit_code` set.
 - `exec_command` yields long-running commands with `session_id`; `write_stdin`
   can poll with empty `chars`.
+- A foreground command that returns `session_id: null` leaves no session/reaper
+  entry and creates no detach cleanup sleeper; a yielded command registers one
+  reaper deadline and is cleaned once after its grace period.
 - The creating task can poll and write to a yielded session; another task sees
   the same numeric `session_id` as unknown and cannot observe or mutate it.
 - `write_stdin` can send stdin to TTY or PTY-fallback sessions and rejects

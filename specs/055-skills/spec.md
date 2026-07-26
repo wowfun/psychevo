@@ -79,6 +79,14 @@ under `<cwd>/.psychevo/skills` or `$PSYCHEVO_HOME/skills`; plugin-provided,
 configured external, explicit, `.agents/skills`, and system/built-in skills are
 read-only from GUI management.
 
+Every skill management create/edit/patch/supporting-file write resolves target
+identity through the same canonical `FilesystemIdentity` used by permission
+review and final mutation. Existing symlinks or junctions are followed; a
+missing target uses its deepest existing canonical ancestor. The operation
+revalidates identity immediately before replacement and fails with
+`path_identity_changed` if it no longer matches the reviewed mutable skill
+root. A lexical containment check is not sufficient.
+
 `platforms: [linux|macos|windows]` restricts normal activation to matching OSes.
 Unsupported skills remain inspectable through explicit view/detail surfaces but
 are omitted from automatic prompt indexes, dynamic slash, and marker activation.
@@ -156,17 +164,20 @@ an explicit selected skill. Unknown markers remain ordinary text. Ambiguous
 markers are rejected rather than resolved by precedence.
 
 Explicitly selected skills are injected as separate hidden contextual-user
-messages containing the full skill body. Relative references in injected skill
-content are resolved against the skill directory. Injected fragments are the
-already-loaded skill body for that turn, so the model should follow them
-directly and only load supporting files when needed. Injected fragments are
-durable context evidence anchored to the accepted user prompt.
+messages containing the rendered full skill body. Relative references in
+injected skill content are resolved against the skill directory. Injected
+fragments are the already-loaded skill body for that turn, so the model should
+follow them directly and only load supporting files when needed. Injected
+fragments are durable context evidence anchored to the accepted user prompt.
 
-Skill content preprocessing supports `${PSYCHEVO_SKILL_DIR}` and
-`${PSYCHEVO_SESSION_ID}`. Runtime also accepts legacy aliases for imported skill
-packages. Inline shell snippets written as ``!`cmd` `` are disabled by default.
-When `skills.inline_shell` is enabled, snippets run before injection with
-timeout/error/truncation markers inlined into the skill content.
+Skill rendering is pure and runs only after the accepted runtime session id is
+known. It substitutes `${PSYCHEVO_SKILL_DIR}` and
+`${PSYCHEVO_SESSION_ID}` plus documented legacy variable aliases for imported
+packages. It performs no filesystem discovery, subprocess launch, shell
+evaluation, network request, or mutation. Inline ``!`cmd` `` syntax and
+`skills.inline_shell` are removed; a skill that needs command execution
+instructs the Agent to use the ordinary permissioned `exec` Tool, preserving
+normal Tool results, event order, context, cancellation, and UX.
 
 ## Tools
 
@@ -322,6 +333,18 @@ under `skills.disabled`, `skills.platform_disabled`, and `skills.config.*`.
 
 Runtime ignores legacy disabled sidecars and old `.provenance.json`; no migration
 or compatibility shim is required before the product is released.
+
+## Validation
+
+- Explicitly selected-skill injection expands both supported variables only
+  after the accepted session id exists and stores the rendered body as context
+  evidence.
+- Literal inline shell syntax never launches a process even if a stale config
+  contains `skills.inline_shell`; ordinary `exec` remains available through its
+  normal Tool and permission path.
+- Project and Profile supporting-file writes reject symlink/junction escape and
+  a target identity changed after approval, while ordinary in-root writes keep
+  their existing UX.
 
 ## Related Topics
 

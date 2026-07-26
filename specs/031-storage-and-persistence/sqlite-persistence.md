@@ -102,22 +102,32 @@ The default first-slice SQLite shape does not create:
 Thread and Turn, kind, payload, pending/resolved/cancelled status, resolution,
 and timestamps. Live handlers are convenience responders; reconnect and
 snapshot recovery read this table instead of reconstructing pending actions
-from an event receiver. Interaction request, response, and terminal writes are
-order-independent: a response creates a durable resolution tombstone when
-necessary, and a request racing with Turn completion is cancelled rather than
-reviving stale pending work.
+from an event receiver. A request row is committed before publication. A
+response performs one compare-and-set from pending to resolved and stores the
+complete tagged Permission decision, Clarify answer, or Clarify cancellation in
+`resolution_json`; it does not create a tombstone for an unknown request or
+infer a winner from a no-op upsert. Turn completion cancels only rows still
+pending. The committed typed response is the value used to wake the
+in-process waiter; a committed generic cancellation is mapped to the
+kind-defined cancellation value by the same adopted response path.
 
 The table key is `(turn_id, interaction_id)`, not `interaction_id` alone.
 Adapter-local call ids are allowed to repeat in different Turns. Conflict
 handling and follow-up updates include both key fields so an earlier resolved
-or cancelled row cannot be rebound to a later Turn.
+or cancelled row cannot be rebound to a later Turn. Thread interaction reads
+preserve request order; requests committed in the same clock millisecond use
+their SQLite insertion order as the deterministic tie-breaker.
 
 Framework Turn finalization writes the terminal fact, transitions any
 non-unknown delivery row to terminal and scrubs its retained input, and cancels
 pending interactions in one `BEGIN IMMEDIATE` transaction. A failed statement
 rolls back the complete semantic commit. The Framework keeps the delivery
-recovery fact and reports persistence failure instead of exposing a
-non-durable terminal result.
+fact, releases public running state, and reports persistence failure instead of
+exposing a non-durable terminal result. It may retain the typed terminal value
+only in same-process memory for an idempotent retry. This schema does not stage
+terminal payloads or add a recovery/outbox table; after process loss, a
+nonterminal delivery fact yields `OutcomeIndeterminate` and is never replayed
+or guessed.
 
 This attachment defines implementation shape, not public contract shape. The
 first implementation slice uses the columns below as an internal contract, not

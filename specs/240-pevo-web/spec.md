@@ -59,6 +59,11 @@ packages in the first slice:
   and request/notification orchestration. It does not own endpoint discovery,
   host storage, browser download/open helpers, clipboard, file pickers,
   notifications, or native shell lifecycle.
+  Each pending request retains its `GatewayMethod`. The generated
+  method-to-result validator registry validates the `result` before resolving
+  that request; a wrong result shape is a protocol fault that rejects the
+  request and closes the current transport generation. Callers never recover
+  type safety through a blanket cast.
 - `@psychevo/host`: host capability contract and first browser/managed-Web
   implementation. It owns endpoint discovery, download/open helpers, host
   storage, clipboard, file and image picking, notification requests, theme
@@ -143,8 +148,13 @@ frames are connection faults that close the current generation and enter
 recovery. One notification handler failure is isolated and reported through a
 bounded diagnostic subscription without preventing other handlers or frames.
 The injected `GatewayTransport` remains the narrow Adapter interface for
-connect, close, send, message, and disconnect operations; connection policy is
-not duplicated in browser or native transports.
+connect, reconnectable `close`, terminal async `dispose`, send, message, and
+disconnect operations; connection policy is not duplicated in browser or
+native transports. `close()` ends only the current generation and permits a
+later `connect()`. `dispose()` is idempotent, awaits listener/bridge teardown,
+and makes every later connect or send fail closed. `GatewayClient.dispose()`
+awaits transport disposal after rejecting pending requests and removing its
+subscriptions.
 
 ## Web And PWA Builds
 
@@ -247,7 +257,9 @@ Definition entry point before the first turn. `ComposerSessionCoordinator`
 owns only the draft-open/prepare readiness epoch and the one pending first-turn
 waiter. `ThreadSession` remains the sole owner of Thread context, transcript,
 activity, admission, optimistic delivery, receipt reconciliation, reconnect
-hydration, and turn acceptance. Its reducer is private to that Module. The
+hydration, paged history, and turn acceptance. It publishes one immutable
+`ThreadSessionView { snapshot, context }`; Workbench does not keep a second
+writable React `runtimeContext` mirror. Its reducer is private to that Module. The
 compact target control
 renders one visible Agent identity per compatible target: Native uses
 `agentLabel`, while ACP appends `(ACP)` to that same Agent label without
@@ -703,10 +715,19 @@ reviving provisional activity. Only a coordinator-owned draft open or target
 preparation may enable this pending submission path; unrelated context or
 control mutations keep Send disabled until their authoritative result applies.
 
-`ThreadSession` is the only caller-facing Thread Module. It exposes snapshot
-read/subscription plus `openDraft`, `load`, `send`, `setControl`, `interrupt`,
-`respond`, and `dispose`. Its private reducer batch-applies replaceable
-observations and publishes one snapshot notification. The Module owns the
+`ThreadSession` is the only caller-facing Thread Module. It exposes one
+immutable `ThreadSessionView { snapshot, context }` read/subscription plus
+`openDraft`, `load`, `loadOlder`, `send`, `setControl`, `interrupt`, `respond`,
+and `dispose`. `load` resets snapshot, context, paging cursor, correlation, and
+live overlay in one commit. `loadOlder` prepends a strictly older page while
+preserving scroll-anchor identity and the latest-page live overlay. A stale
+page or context response cannot update a later view epoch. Its private reducer
+batch-applies replaceable observations and publishes one view notification.
+`setControl` captures the same view epoch, Thread identity, target identity,
+and a latest-wins control mutation sequence before awaiting its receipt. A
+receipt that no longer matches those facts is returned to its caller but cannot
+mutate or publish the current Session view.
+The Module owns the
 scheduling queue: the first non-empty assistant text bypasses frame pacing,
 later replaceable updates coalesce per entry, and terminal observations flush
 same-Turn output before completion, including when the terminal carries no
@@ -719,6 +740,18 @@ received in transport order. Workbench hooks do not own session, resource,
 selector, delivery, or reconciliation state. Host lifecycle replay may dispose
 and then reattach the same Module owner; reattachment must restore Gateway
 subscriptions and cannot leave the reused owner permanently inert.
+
+The Transcript renders retained pages through dynamic-height virtualization.
+Measurement follows actual row height and keeps the visible anchor stable when
+older pages are prepended, evidence expands, or streamed content grows.
+The main Workbench exposes a compact load-earlier action whenever the retained
+snapshot has an older-history cursor; it prepends through `ThreadSession`
+instead of silently truncating the Thread. One layout-anchor calculation owns
+scroll compensation for a measured row-height change, so the same delta is
+never applied both during measurement and after the revision commit.
+Virtualization is a presentation projection only: copy, search, export, Agent
+navigation, file links, keyboard focus, accessibility semantics, and live
+completion operate on the full retained Session state.
 
 `send` returns a typed `accepted`, `reconciled`, `cancelled`, or `not_sent`
 outcome. A successful `turn/start` response is always `accepted`; when the

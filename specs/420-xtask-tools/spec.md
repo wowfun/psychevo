@@ -91,15 +91,18 @@ The repository large-file diagnostic interface is:
 - `cargo xtask doctor large-files [--root <path>]... [--json]`
 - `cargo xtask doctor large-files [--root <path>]... --prod-limit <lines> --test-limit <lines> --generated-limit <lines>`
 
-`large-files` is non-mutating. With no `--root` values, it scans `apps`,
-`crates`, `packages`, `specs`, and `tools`. It ignores common generated/cache
-output directories: `target`, `dist`, `node_modules`, `coverage`,
-`test-results`, and `.local`.
+`large-files` is non-mutating. With no `--root` values, it scans the existing
+owned source roots among `apps`, `crates`, `packages`, `specs`, and `xtask`.
+An absent optional root is omitted rather than making the default command fail.
+It ignores common generated/cache/vendor output directories and binary assets:
+`target`, `dist`, `node_modules`, `coverage`, `test-results`, `.local`,
+vendored dependency trees, fonts, Wasm binaries, and lockfiles.
 
 The diagnostic classifies files as:
 
 - `generated`: files under a `generated` path segment and direct JSON schema
-  files under `packages/protocol/schema/`.
+  files under `packages/protocol/schema/`, plus files marked by a repo-owned
+  generated header.
 - `test`: files under `tests` or `e2e` path segments, `*.test.*` files, and
   `*.spec.*` files outside the top-level `specs/` tree.
 - `production`: all other scanned files.
@@ -111,9 +114,10 @@ the compact inventory format grouped by category and descending line count.
 exits zero when no oversized files are found and non-zero when any scanned file
 exceeds its category limit.
 
-The command is a manual/local diagnostic in v1. It must not be added to
-`changed` or `rust-broad` until the current repository either satisfies the
-limits or intentionally adopts a reviewed baseline.
+The command is a manual/local diagnostic in v1. Threshold findings are review
+navigation, not an architecture verdict. It must not be added to `changed` or
+`rust-broad` until the current repository either satisfies the limits or
+intentionally adopts a reviewed behavioral baseline.
 
 Oversized-file remediation must preserve the module's existing external
 interface where callers already have a stable seam. Production files should be

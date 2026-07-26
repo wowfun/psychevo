@@ -88,8 +88,9 @@ Initial profiles:
 - `changed`: lightweight local confidence for the current checkout; v1 plans
   format checking and lets future work add diff-aware selection.
 - `rust-broad`: Rust workspace broad gate; checks generated Gateway protocol
-  bindings and the CLI no-default-features core graph before format, clippy,
-  and tests.
+  bindings, compiles `psychevo --no-default-features --all-targets` as an
+  independent consumer without workspace feature unification, and checks the
+  CLI no-default-features core graph before format, clippy, and tests.
 - `desktop-rust`: independent Desktop Rust workspace gate; first checks root
   and Desktop manifest parity, then checks formatting, runs clippy with warnings
   denied, and tests all targets using the shipped `native-runtime` feature. It
@@ -116,22 +117,39 @@ Initial profiles:
   are required only for Workbench; the shared provider and surface-commit
   boundaries remain the cross-surface control.
 - `live`: opt-in live validation using explicit provider credentials.
-- `package`: artifact-only CD profile that builds local reviewable artifacts
-  and checksums without publishing or creating hosted release objects.
+- `package`: artifact-only CD profile that builds local reviewable artifacts,
+  builds the App Server with no default features, discovers both Python SDK
+  test directories, installs the real wheels/sdist into a clean environment,
+  runs an installed fake-provider stdio smoke, and writes checksums without
+  publishing or creating hosted release objects. An unavailable required
+  install/smoke prerequisite fails or reports the profile blocked; it is not a
+  successful skip.
 
 ## Hosted CI
 
-The initial hosted workflow runs on pull requests and pushes to `main` with two
-Linux jobs. `rust` runs `cargo xtask ci run --profile rust-broad`, installs the
-Linux WebKit development package required to compile Tauri, and runs
+The pull-request workflow runs two Linux jobs. `rust` runs
+`cargo xtask ci run --profile rust-broad`, installs the Linux WebKit
+development package required to compile Tauri, and runs
 `cargo xtask ci run --profile desktop-rust`. `web` installs the root
-`packageManager` version with a
-frozen lockfile and runs `cargo xtask ci run --profile web`.
+`packageManager` version with a frozen lockfile and runs
+`cargo xtask ci run --profile web`.
 
-The initial workflow has no aggregate job, operating-system matrix, live
-provider work, Playwright, WDIO, nightly, fuzz, soak, package publishing, or
-host mutation. Those checks remain separate until a demonstrated coverage gap
-justifies adding them.
+A separate artifact-only workflow runs on pushes to `main` and explicit manual
+dispatch across Linux, macOS, and Windows. Every matrix runner builds the
+Workbench, release CLI and Desktop bundle for that host, builds the real Python
+SDK/App Server/CLI artifacts, installs them into a clean environment, and runs
+the fake-provider stdio smoke through the installed Python Client. A platform
+is release-eligible only after its own runner succeeds; the existence or local
+validation of the workflow does not claim that another operating system
+passed. This workflow never publishes packages, creates a hosted release, or
+uses provider credentials. Its artifact upload explicitly includes hidden
+paths because the Python wheel, sdist, and checksum staging root is `.local`;
+the presence of a non-hidden Desktop bundle cannot mask missing Python
+artifacts.
+
+Hosted workflows have no aggregate release job, live provider work, nightly,
+fuzz, or soak work. Full visual and live profiles remain manual, artifact-owned
+entrypoints until a demonstrated scheduling need justifies hosting them.
 
 Workflow definitions are code-owned in `xtask` for v1. Do not add a public
 TOML/YAML manifest until there are multiple real adapters or external
@@ -170,10 +188,10 @@ Registered live checks:
 - `runtime-provider-read`: runtime ignored live provider read-tool check.
 - `runtime-model-fetch`: runtime ignored Xiaomi `/models` fetch/cache check.
 - Runtime live checks owned by the `psychevo` package compile with its private
-  `internal` feature because their integration-test harness deliberately
-  exercises non-public runtime seams. The live plan must show that feature
-  explicitly; validation must not make those seams public merely to compile a
-  repository-owned test.
+  `product` facade feature because their integration-test harness deliberately
+  exercises first-party runtime seams. The live plan must show that feature
+  explicitly; validation must not make the raw implementation modules public
+  merely to compile a repository-owned test.
 - `gateway-automation-live`: gateway automation ignored live check.
 - `codex-plugin-broker-live`: read installed Codex plugins through the
   capability broker. A missing Codex executable is a `blocked` result for this
