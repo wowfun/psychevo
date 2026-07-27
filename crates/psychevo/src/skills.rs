@@ -35,5 +35,8 @@ pub use management::{
 #[path = "skills/selection_scan.rs"]
 mod selection_scan;
 pub(crate) use selection_scan::{find_skill, skill_prompt_visible_for_activation};
+#[path = "skills/runtime.rs"]
+mod runtime;
+pub(crate) use runtime::SkillRuntime;
 #[path = "skills/paths.rs"]
 mod paths;

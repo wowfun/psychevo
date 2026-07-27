@@ -1,7 +1,5 @@
-use std::any::{Any, TypeId};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +7,6 @@ use crate::config::{
     PluginPolicyConfig, ToolsetContribution, load_mcp_oauth_access_token, load_run_config,
     resolve_psychevo_home,
 };
-use crate::contribution_projection::ContributionProjection;
 use crate::hooks::HookSourceDescriptor;
 use crate::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
 use crate::paths::canonical_cwd;
@@ -23,7 +20,7 @@ pub struct SelectedCapabilityRoot {
     pub id: String,
     #[serde(default, skip_serializing_if = "CapabilityRootAuthority::is_local")]
     pub authority: CapabilityRootAuthority,
-    pub location: CapabilityRootLocation,
+    pub path: PathBuf,
 }
 
 impl SelectedCapabilityRoot {
@@ -31,7 +28,7 @@ impl SelectedCapabilityRoot {
         Self {
             id: id.into(),
             authority: CapabilityRootAuthority::Local,
-            location: CapabilityRootLocation::Local { path: path.into() },
+            path: path.into(),
         }
     }
 
@@ -47,7 +44,7 @@ impl SelectedCapabilityRoot {
                 plugin: plugin.into(),
                 marketplace: marketplace.into(),
             },
-            location: CapabilityRootLocation::Local { path: path.into() },
+            path: path.into(),
         }
     }
 }
@@ -69,209 +66,6 @@ impl CapabilityRootAuthority {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapabilityRootLocation {
-    Local { path: std::path::PathBuf },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExtensionDataScope {
-    Session,
-    Thread,
-    Turn,
-}
-
-#[derive(Default, Clone)]
-pub struct ExtensionDataInit {
-    values: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
-}
-
-impl ExtensionDataInit {
-    pub fn insert<T>(&mut self, value: T)
-    where
-        T: Send + Sync + 'static,
-    {
-        self.values.insert(TypeId::of::<T>(), Arc::new(value));
-    }
-}
-
-pub struct ExtensionData {
-    scope: ExtensionDataScope,
-    values: Mutex<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
-}
-
-impl ExtensionData {
-    pub fn new(scope: ExtensionDataScope) -> Self {
-        Self {
-            scope,
-            values: Mutex::new(HashMap::new()),
-        }
-    }
-
-    pub fn from_init(scope: ExtensionDataScope, init: ExtensionDataInit) -> Self {
-        Self {
-            scope,
-            values: Mutex::new(init.values),
-        }
-    }
-
-    pub fn scope(&self) -> ExtensionDataScope {
-        self.scope
-    }
-
-    pub fn insert<T>(&self, value: T)
-    where
-        T: Send + Sync + 'static,
-    {
-        self.values
-            .lock()
-            .expect("extension data mutex poisoned")
-            .insert(TypeId::of::<T>(), Arc::new(value));
-    }
-
-    pub fn get<T>(&self) -> Option<Arc<T>>
-    where
-        T: Send + Sync + 'static,
-    {
-        self.values
-            .lock()
-            .expect("extension data mutex poisoned")
-            .get(&TypeId::of::<T>())
-            .cloned()
-            .and_then(|value| value.downcast::<T>().ok())
-    }
-}
-
-pub trait McpServerContributor: Send + Sync {
-    fn id(&self) -> &str;
-    fn servers(&self) -> Vec<McpServerInput>;
-}
-
-pub trait ToolContributor: Send + Sync {
-    fn id(&self) -> &str;
-    fn tools(&self) -> Vec<RuntimeTool>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionRegistryDiagnostic {
-    pub kind: String,
-    pub contributor_id: String,
-    pub message: String,
-}
-
-#[derive(Default)]
-pub struct ExtensionRegistryBuilder {
-    mcp_server_contributors: Vec<Arc<dyn McpServerContributor>>,
-    tool_contributors: Vec<Arc<dyn ToolContributor>>,
-    diagnostics: Vec<ExtensionRegistryDiagnostic>,
-}
-
-impl ExtensionRegistryBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn mcp_server_contributor(&mut self, contributor: Arc<dyn McpServerContributor>) {
-        replace_contributor(
-            &mut self.mcp_server_contributors,
-            contributor,
-            &mut self.diagnostics,
-            "mcp_server",
-        );
-    }
-
-    pub fn tool_contributor(&mut self, contributor: Arc<dyn ToolContributor>) {
-        replace_contributor(
-            &mut self.tool_contributors,
-            contributor,
-            &mut self.diagnostics,
-            "tool",
-        );
-    }
-
-    pub fn build(self) -> ExtensionRegistry {
-        ExtensionRegistry {
-            mcp_server_contributors: self.mcp_server_contributors,
-            tool_contributors: self.tool_contributors,
-            diagnostics: self.diagnostics,
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct ExtensionRegistry {
-    mcp_server_contributors: Vec<Arc<dyn McpServerContributor>>,
-    tool_contributors: Vec<Arc<dyn ToolContributor>>,
-    diagnostics: Vec<ExtensionRegistryDiagnostic>,
-}
-
-impl ExtensionRegistry {
-    pub fn mcp_server_contributors(&self) -> &[Arc<dyn McpServerContributor>] {
-        &self.mcp_server_contributors
-    }
-
-    pub fn tool_contributors(&self) -> &[Arc<dyn ToolContributor>] {
-        &self.tool_contributors
-    }
-
-    pub fn diagnostics(&self) -> &[ExtensionRegistryDiagnostic] {
-        &self.diagnostics
-    }
-
-    pub(crate) fn mcp_servers(&self) -> Vec<McpServerInput> {
-        self.mcp_server_contributors
-            .iter()
-            .flat_map(|contributor| contributor.servers())
-            .collect()
-    }
-
-    pub(crate) fn runtime_tools(&self) -> Vec<RuntimeTool> {
-        self.tool_contributors
-            .iter()
-            .flat_map(|contributor| contributor.tools())
-            .collect()
-    }
-}
-
-trait IdentifiedContributor {
-    fn contributor_id(&self) -> &str;
-}
-
-impl IdentifiedContributor for dyn McpServerContributor {
-    fn contributor_id(&self) -> &str {
-        self.id()
-    }
-}
-
-impl IdentifiedContributor for dyn ToolContributor {
-    fn contributor_id(&self) -> &str {
-        self.id()
-    }
-}
-
-fn replace_contributor<T: ?Sized + IdentifiedContributor>(
-    contributors: &mut Vec<Arc<T>>,
-    contributor: Arc<T>,
-    diagnostics: &mut Vec<ExtensionRegistryDiagnostic>,
-    kind: &str,
-) {
-    if let Some(index) = contributors
-        .iter()
-        .position(|existing| existing.contributor_id() == contributor.contributor_id())
-    {
-        let id = contributor.contributor_id().to_string();
-        contributors[index] = contributor;
-        diagnostics.push(ExtensionRegistryDiagnostic {
-            kind: "replacement".to_string(),
-            contributor_id: id.clone(),
-            message: format!("later {kind} contributor `{id}` replaced the earlier registration"),
-        });
-    } else {
-        contributors.push(contributor);
-    }
-}
-
 pub(crate) struct ExtensionAssemblyInput<'a> {
     pub(crate) home: &'a Path,
     pub(crate) cwd: &'a Path,
@@ -284,13 +78,13 @@ pub(crate) struct ExtensionAssemblyInput<'a> {
 
 #[derive(Default)]
 pub(crate) struct ExtensionAssembly {
-    pub(crate) registry: ExtensionRegistry,
+    pub(crate) mcp_servers: Vec<McpServerInput>,
+    pub(crate) runtime_tools: Vec<RuntimeTool>,
     pub(crate) skill_inputs: Vec<PathBuf>,
     pub(crate) agent_inputs: Vec<String>,
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) warnings: Vec<RunWarning>,
-    pub(crate) projection: ContributionProjection,
 }
 
 #[derive(Clone, Default)]
@@ -304,8 +98,8 @@ pub(crate) struct AcceptedExtensionInputs {
 impl ExtensionAssembly {
     pub(crate) fn accepted_inputs(&self) -> AcceptedExtensionInputs {
         AcceptedExtensionInputs {
-            mcp_servers: self.registry.mcp_servers(),
-            runtime_tools: self.registry.runtime_tools(),
+            mcp_servers: self.mcp_servers.clone(),
+            runtime_tools: self.runtime_tools.clone(),
             hook_sources: self.hook_sources.clone(),
             toolsets: self.toolsets.clone(),
         }
@@ -338,7 +132,7 @@ pub fn resolve_mcp_server_handoffs(
         mcp_servers,
         runtime_tools: Vec::new(),
     });
-    let available = assembly.registry.mcp_servers();
+    let available = assembly.mcp_servers;
     let mut resolved = Vec::with_capacity(names.len());
     for name in names {
         let mut matches = available.iter().filter(|server| server.name == *name);
@@ -420,12 +214,12 @@ pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Extensio
     let mut runtime_tools = input.runtime_tools;
     runtime_tools.extend(plugin_assembly.runtime_tools.iter().cloned());
 
-    let registry = registry_from_static_inputs(mcp_servers, runtime_tools);
     let mut warnings = plugin_assembly.warnings.clone();
     warnings.extend(selected_root_contributions.warnings.clone());
 
     ExtensionAssembly {
-        registry,
+        mcp_servers,
+        runtime_tools,
         skill_inputs: plugin_assembly
             .skill_inputs
             .iter()
@@ -451,7 +245,6 @@ pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Extensio
             .chain(selected_root_contributions.toolsets)
             .collect(),
         warnings,
-        projection: plugin_assembly.projection.clone(),
     }
 }
 
@@ -471,11 +264,10 @@ pub(crate) fn selected_root_contributions(
 ) -> SelectedRootContributions {
     let mut out = SelectedRootContributions::default();
     for root in roots {
-        let CapabilityRootLocation::Local { path } = &root.location;
-        let root_path = if path.is_absolute() {
-            path.clone()
+        let root_path = if root.path.is_absolute() {
+            root.path.clone()
         } else {
-            cwd.join(path)
+            cwd.join(&root.path)
         };
         let has_manifest = has_recognized_manifest(&root_path);
         match load_plugin_manifest(&root_path, true) {
@@ -541,48 +333,6 @@ fn has_recognized_manifest(root: &Path) -> bool {
         .any(|path| root.join(path).is_file())
 }
 
-pub(crate) fn registry_from_static_inputs(
-    mcp_servers: Vec<McpServerInput>,
-    runtime_tools: Vec<RuntimeTool>,
-) -> ExtensionRegistry {
-    let mut builder = ExtensionRegistryBuilder::new();
-    if !mcp_servers.is_empty() {
-        builder.mcp_server_contributor(Arc::new(StaticMcpServerContributor { mcp_servers }));
-    }
-    if !runtime_tools.is_empty() {
-        builder.tool_contributor(Arc::new(StaticToolContributor { runtime_tools }));
-    }
-    builder.build()
-}
-
-struct StaticMcpServerContributor {
-    mcp_servers: Vec<McpServerInput>,
-}
-
-impl McpServerContributor for StaticMcpServerContributor {
-    fn id(&self) -> &str {
-        "static-mcp"
-    }
-
-    fn servers(&self) -> Vec<McpServerInput> {
-        self.mcp_servers.clone()
-    }
-}
-
-struct StaticToolContributor {
-    runtime_tools: Vec<RuntimeTool>,
-}
-
-impl ToolContributor for StaticToolContributor {
-    fn id(&self) -> &str {
-        "static-tools"
-    }
-
-    fn tools(&self) -> Vec<RuntimeTool> {
-        self.runtime_tools.clone()
-    }
-}
-
 fn agent_files_from_roots(roots: &[std::path::PathBuf]) -> Vec<String> {
     let mut out = Vec::new();
     for root in roots {
@@ -606,7 +356,7 @@ fn collect_agent_files(path: &Path, out: &mut Vec<String>) {
 
 fn extension_warning(message: String) -> RunWarning {
     RunWarning {
-        kind: "extension_registry".to_string(),
+        kind: "extension_assembly".to_string(),
         message,
         source_path: None,
         suggestion: None,
@@ -618,89 +368,6 @@ mod tests {
     use super::*;
 
     use std::fs;
-
-    #[derive(Debug, PartialEq, Eq)]
-    struct Marker(&'static str);
-
-    struct TestMcpContributor {
-        id: &'static str,
-        server: &'static str,
-    }
-
-    impl McpServerContributor for TestMcpContributor {
-        fn id(&self) -> &str {
-            self.id
-        }
-
-        fn servers(&self) -> Vec<McpServerInput> {
-            vec![McpServerInput::new(
-                self.server,
-                crate::types::McpTransportInput::Unsupported {
-                    kind: "test".to_string(),
-                },
-            )]
-        }
-    }
-
-    #[test]
-    fn extension_data_stores_values_by_type() {
-        let mut init = ExtensionDataInit::default();
-        init.insert(Marker("thread"));
-        let data = ExtensionData::from_init(ExtensionDataScope::Thread, init);
-
-        assert_eq!(data.scope(), ExtensionDataScope::Thread);
-        assert_eq!(data.get::<Marker>().as_deref(), Some(&Marker("thread")));
-        assert!(data.get::<String>().is_none());
-    }
-
-    #[test]
-    fn registry_preserves_contributor_order() {
-        let mut builder = ExtensionRegistryBuilder::new();
-        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
-            id: "a",
-            server: "a",
-        }));
-        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
-            id: "b",
-            server: "b",
-        }));
-
-        let names = builder
-            .build()
-            .mcp_servers()
-            .into_iter()
-            .map(|server| server.name)
-            .collect::<Vec<_>>();
-
-        assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
-    }
-
-    #[test]
-    fn registry_replaces_duplicate_contributor_id_in_place_with_diagnostic() {
-        let mut builder = ExtensionRegistryBuilder::new();
-        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
-            id: "package:review",
-            server: "old",
-        }));
-        builder.mcp_server_contributor(Arc::new(TestMcpContributor {
-            id: "package:review",
-            server: "new",
-        }));
-
-        let registry = builder.build();
-
-        assert_eq!(registry.mcp_servers()[0].name, "new");
-        assert_eq!(registry.mcp_server_contributors().len(), 1);
-        assert_eq!(
-            registry.diagnostics(),
-            &[ExtensionRegistryDiagnostic {
-                kind: "replacement".to_string(),
-                contributor_id: "package:review".to_string(),
-                message: "later mcp_server contributor `package:review` replaced the earlier registration"
-                    .to_string(),
-            }]
-        );
-    }
 
     #[tokio::test]
     async fn mcp_handoff_resolves_named_secret_without_debug_leak_and_rejects_duplicates() {
@@ -867,8 +534,7 @@ mod tests {
         );
         assert_eq!(
             assembly
-                .registry
-                .mcp_servers()
+                .mcp_servers
                 .into_iter()
                 .map(|server| server.name)
                 .collect::<Vec<_>>(),

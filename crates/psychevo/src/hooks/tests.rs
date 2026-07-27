@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -643,12 +642,68 @@ async fn permission_request_hook_deny_uses_feedback_reason() {
 #[test]
 fn worker_handler_calls_hooks_call_adapter() {
     let temp = tempdir().expect("temp");
-    let worker = temp.path().join("worker.py");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let plugin = temp.path().join("plugin");
+    fs::create_dir_all(plugin.join(".codex-plugin")).expect("plugin manifest dir");
+    fs::create_dir_all(&cwd).expect("cwd");
+    fs::write(
+        plugin.join(".codex-plugin/plugin.json"),
+        r#"{"name":"hook-plugin","version":"1.0.0","description":"hooks"}"#,
+    )
+    .expect("plugin manifest");
+    let worker = plugin.join("worker.py");
     fs::write(
         &worker,
-        include_str!("../../tests/fixtures/hook_worker_call_adapter.py"),
+        format!(
+            "#!/usr/bin/env python3\n{}",
+            include_str!("../../tests/fixtures/hook_worker_call_adapter.py")
+        ),
     )
     .expect("worker");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&worker).expect("worker metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&worker, permissions).expect("worker executable");
+    }
+    fs::write(
+        plugin.join("psychevo.plugin.json"),
+        serde_json::to_vec(&json!({
+            "runtime": {
+                "worker": {
+                    "command": "./worker.py"
+                }
+            }
+        }))
+        .expect("overlay"),
+    )
+    .expect("plugin overlay");
+    let record = crate::plugins::install_plugin(
+        &home,
+        &cwd,
+        crate::plugins::PluginInstallOptions {
+            source: plugin.display().to_string(),
+            source_kind: None,
+            scope: crate::plugins::PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install plugin");
+    let manifest =
+        crate::plugins::load_plugin_manifest(&record.package_root, true).expect("manifest");
+    let worker_spec = manifest.worker.clone().expect("worker spec");
+    let session = crate::plugins::PluginWorkerSession::start(
+        &record,
+        &manifest,
+        &worker_spec,
+        &BTreeMap::new(),
+    )
+    .expect("worker session");
     let mut source = source(
         "plugin",
         json!({"PostToolUse": [{"hooks": [{"type": "worker"}]}]}),
@@ -657,14 +712,15 @@ fn worker_handler_calls_hooks_call_adapter() {
         plugin_name: "hook-plugin".to_string(),
         plugin_version: "1.0.0".to_string(),
         plugin_source: "local".to_string(),
-        plugin_root: temp.path().to_path_buf(),
-        plugin_data: temp.path().join("data"),
-        manifest_path: temp.path().join(".codex-plugin/plugin.json"),
+        plugin_root: record.package_root.clone(),
+        plugin_data: record.data_root.clone(),
+        manifest_path: record.manifest_path.clone(),
         manifest_resources: vec!["hooks".to_string()],
         psychevo_extensions: vec!["runtime".to_string()],
-        command: PathBuf::from("python3"),
-        args: vec![worker.display().to_string()],
+        command: worker_spec.command,
+        args: worker_spec.args,
         env: BTreeMap::new(),
+        session: Some(session),
     });
     let runtime = HookRuntime::new(
         temp.path().to_path_buf(),

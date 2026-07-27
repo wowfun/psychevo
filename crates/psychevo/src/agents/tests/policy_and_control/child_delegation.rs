@@ -583,6 +583,9 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let manifest =
         crate::plugins::load_plugin_manifest(&record.package_root, true).expect("manifest");
     let worker = manifest.worker.clone().expect("worker");
+    let worker_session =
+        crate::plugins::PluginWorkerSession::start(&record, &manifest, &worker, &BTreeMap::new())
+            .expect("plugin worker session");
     let plugin_source = crate::hooks::HookSourceDescriptor {
         source_id: format!("plugin:{}@{}", record.name, record.source_slug),
         source_kind: "plugin".to_string(),
@@ -601,6 +604,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
             command: worker.command,
             args: worker.args,
             env: BTreeMap::new(),
+            session: Some(worker_session),
         }),
     };
     write_trusted_hook_config(&home, &cwd, std::slice::from_ref(&plugin_source));

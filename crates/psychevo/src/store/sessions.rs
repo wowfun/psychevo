@@ -14,7 +14,8 @@ use crate::types::SessionSummary;
 use super::store_message_fields::parse_optional_json;
 use super::{
     ChildSessionSnapshotInput, SessionBrowserRequest, SessionBrowserWorkspaceProjection,
-    SessionListProjection, StateRuntime,
+    SessionListCursor, SessionListProjection, SessionListProjectionPage, SessionSummaryPage,
+    StateRuntime,
 };
 
 impl StateRuntime {
@@ -232,6 +233,73 @@ impl StateRuntime {
         result
     }
 
+    pub(crate) async fn list_session_summary_page(
+        &self,
+        cwd: Option<&str>,
+        sources: &[String],
+        archived: bool,
+        cursor: Option<&SessionListCursor>,
+        limit: usize,
+    ) -> Result<SessionSummaryPage> {
+        let limit = limit.clamp(1, 200);
+        let sources_json = serde_json::to_string(sources)?;
+        let source_filter_disabled = i64::from(sources.is_empty());
+        let cursor_updated_at_ms = cursor.map(|cursor| cursor.updated_at_ms);
+        let cursor_id = cursor.map(|cursor| cursor.id.as_str());
+        let mut operation = self.begin_sqlx_operation();
+        let result = async {
+            let mut conn = self.acquire_sqlx().await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT id, source, parent_session_id, cwd, model, provider, started_at_ms,
+                       updated_at_ms, ended_at_ms, end_reason, archived_at_ms,
+                       message_count, tool_call_count, title
+                FROM sessions
+                WHERE (?1 IS NULL OR cwd = ?1)
+                  AND ((?2 = 0 AND archived_at_ms IS NULL)
+                    OR (?2 = 1 AND archived_at_ms IS NOT NULL))
+                  AND (?3 = 1 OR source IN (SELECT value FROM json_each(?4)))
+                  AND (
+                    ?5 IS NULL
+                    OR updated_at_ms < ?5
+                    OR (updated_at_ms = ?5 AND id < ?6)
+                  )
+                ORDER BY updated_at_ms DESC, id DESC
+                LIMIT ?7
+                "#,
+            )
+            .bind(cwd)
+            .bind(i64::from(archived))
+            .bind(source_filter_disabled)
+            .bind(sources_json)
+            .bind(cursor_updated_at_ms)
+            .bind(cursor_id)
+            .bind(i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX))
+            .fetch_all(&mut *conn)
+            .await?;
+            let mut summaries = rows
+                .into_iter()
+                .map(|row| session_summary_from_sqlx_row(&row))
+                .collect::<Result<Vec<_>>>()?;
+            let has_more = summaries.len() > limit;
+            summaries.truncate(limit);
+            let next_cursor = has_more.then(|| {
+                let last = summaries.last().expect("non-empty paged session result");
+                SessionListCursor {
+                    updated_at_ms: last.updated_at_ms,
+                    id: last.id.clone(),
+                }
+            });
+            Ok(SessionSummaryPage {
+                summaries,
+                next_cursor,
+            })
+        }
+        .await;
+        operation.finish(&result);
+        result
+    }
+
     pub async fn browse_human_sessions(
         &self,
         request: SessionBrowserRequest<'_>,
@@ -358,10 +426,14 @@ impl StateRuntime {
         &self,
         cwd: Option<&str>,
         archived: bool,
+        cursor: Option<&SessionListCursor>,
         limit: usize,
-    ) -> Result<Vec<SessionListProjection>> {
+    ) -> Result<SessionListProjectionPage> {
         let internal_sources_json = serde_json::to_string(SIDE_CONVERSATION_SESSION_SOURCES)?;
         let archived = i64::from(archived);
+        let cursor_updated_at_ms = cursor.map(|cursor| cursor.updated_at_ms);
+        let cursor_id = cursor.map(|cursor| cursor.id.as_str());
+        let limit = limit.clamp(1, 200);
         let mut operation = self.begin_sqlx_operation();
         let result = async {
             let mut conn = self.acquire_sqlx().await?;
@@ -389,21 +461,42 @@ impl StateRuntime {
               AND s.parent_session_id IS NULL
               AND s.source NOT IN (SELECT value FROM json_each(?3))
               AND json_type(s.metadata_json, '$.agentSessionImportState') IS NULL
-            ORDER BY s.updated_at_ms DESC, s.id ASC
-            LIMIT ?4
+              AND (
+                ?4 IS NULL
+                OR s.updated_at_ms < ?4
+                OR (s.updated_at_ms = ?4 AND s.id < ?5)
+              )
+            ORDER BY s.updated_at_ms DESC, s.id DESC
+            LIMIT ?6
             "#,
             )
             .bind(cwd)
             .bind(archived)
             .bind(internal_sources_json)
-            .bind(limit as i64)
+            .bind(cursor_updated_at_ms)
+            .bind(cursor_id)
+            .bind(i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX))
             .fetch_all(&mut *conn)
             .await?;
-            rows.into_iter()
+            let mut sessions = rows
+                .into_iter()
                 .map(|row| {
                     projection_from_raw(session_projection_from_row(&row)?).map(|value| value.0)
                 })
-                .collect()
+                .collect::<Result<Vec<_>>>()?;
+            let has_more = sessions.len() > limit;
+            sessions.truncate(limit);
+            let next_cursor = has_more.then(|| {
+                let last = sessions.last().expect("non-empty paged session result");
+                SessionListCursor {
+                    updated_at_ms: last.summary.updated_at_ms,
+                    id: last.summary.id.clone(),
+                }
+            });
+            Ok(SessionListProjectionPage {
+                sessions,
+                next_cursor,
+            })
         }
         .await;
         operation.finish(&result);

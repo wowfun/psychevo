@@ -100,7 +100,15 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         ));
     }
 
-    let records = store.load_message_records(&summary.id).await?;
+    let previous = store.latest_valid_session_compaction(&summary.id).await?;
+    let records = store
+        .load_message_records_from(
+            &summary.id,
+            previous
+                .as_ref()
+                .map(|record| record.first_kept_session_seq),
+        )
+        .await?;
     if records.len() < MIN_SUMMARIZED_MESSAGES + 1 {
         return Ok(skipped_result(
             &summary.id,
@@ -130,7 +138,6 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
     }
     let current = resolve_run_provider(&run_options, &loaded)?;
 
-    let previous = store.latest_valid_session_compaction(&summary.id).await?;
     let preparation = prepare_compaction(
         &records,
         previous.as_ref(),
@@ -266,20 +273,18 @@ pub(crate) async fn load_projected_messages(
     session_id: &str,
     max_context_messages: Option<usize>,
 ) -> Result<Vec<Message>> {
-    let records = store.load_message_records(session_id).await?;
     let Some(compaction) = store.latest_valid_session_compaction(session_id).await? else {
+        let records = store.load_message_records(session_id).await?;
         return Ok(prune_context(
             records.into_iter().map(|record| record.message).collect(),
             max_context_messages,
         ));
     };
+    let records = store
+        .load_message_records_from(session_id, Some(compaction.first_kept_session_seq))
+        .await?;
     let mut messages = vec![compaction_summary_message(&compaction)];
-    messages.extend(
-        records
-            .into_iter()
-            .filter(|record| record.session_seq >= compaction.first_kept_session_seq)
-            .map(|record| record.message),
-    );
+    messages.extend(records.into_iter().map(|record| record.message));
     Ok(prune_context(messages, max_context_messages))
 }
 
@@ -774,6 +779,7 @@ pub(crate) fn auto_compaction_check_run_options(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     }
@@ -821,6 +827,7 @@ pub(crate) fn compaction_run_options(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     }

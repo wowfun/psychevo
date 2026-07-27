@@ -126,6 +126,7 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
@@ -265,7 +266,7 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
     } else {
         None
     };
-    let extension_tools = extension_assembly.registry.runtime_tools();
+    let extension_tools = extension_assembly.runtime_tools.clone();
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         cwd: cwd.clone(),
         task_id: summary.id.clone(),
@@ -284,11 +285,15 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         ),
         image_generation: None,
         web_search: Default::default(),
-        tool_selection: Default::default(),
-        custom_toolsets: BTreeMap::new(),
-        contributed_toolsets: extension_assembly.toolsets.clone(),
+        selection: crate::tool_surface::compile_tool_selection(
+            mode,
+            &Default::default(),
+            &BTreeMap::new(),
+            &extension_assembly.toolsets,
+        ),
         clarify: ClarifyToolSurface::Disabled,
-        skills: (!options.no_skills).then_some(skill_options),
+        skills: (!options.no_skills)
+            .then(|| SkillRuntime::from_catalog(skill_options, skill_catalog.clone())),
         extension_tools,
         agents: agent_tools,
     });
@@ -423,6 +428,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         selected_capability_roots: options.selected_capability_roots.clone(),
         skill_inputs: options.skill_inputs.clone(),
         mcp_servers: options.mcp_servers.clone(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     };

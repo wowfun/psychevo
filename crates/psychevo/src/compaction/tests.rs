@@ -231,4 +231,60 @@ reserve_tokens = 5000
             3
         );
     }
+
+    #[tokio::test]
+    async fn compacted_context_applies_the_checkpoint_boundary_in_sql() {
+        let store = StateRuntime::open(std::path::Path::new(":memory:"))
+            .await
+            .expect("store");
+        let session = store
+            .create_session(std::path::Path::new("."))
+            .await
+            .expect("session");
+        store
+            .append_message(&session, &user_text_message("already summarized"))
+            .await
+            .expect("old message");
+        store
+            .append_message(&session, &user_text_message("retained"))
+            .await
+            .expect("retained message");
+        store
+            .append_session_compaction(SessionCompactionInput {
+                session_id: session.clone(),
+                reason: "manual".to_string(),
+                summary_text: "summary text".to_string(),
+                first_kept_session_seq: 2,
+                created_after_session_seq: 2,
+                tokens_before: Some(20),
+                tokens_after: Some(10),
+                summary_provider: "mock".to_string(),
+                summary_model: "mock-model".to_string(),
+                instructions: None,
+                metadata: None,
+            })
+            .await
+            .expect("checkpoint");
+        let mut conn = store.acquire_sqlx().await.expect("connection");
+        sqlx::query(
+            "UPDATE messages SET message_json = 'not-json' \
+             WHERE session_id = ?1 AND session_seq < 2",
+        )
+        .bind(&session)
+        .execute(&mut *conn)
+        .await
+        .expect("corrupt compacted-away payload");
+        drop(conn);
+
+        let projected = load_projected_messages(&store, &session, None)
+            .await
+            .expect("projected");
+
+        assert_eq!(projected.len(), 2);
+        assert!(
+            serde_json::to_string(&projected[1])
+                .expect("retained json")
+                .contains("retained")
+        );
+    }
 }

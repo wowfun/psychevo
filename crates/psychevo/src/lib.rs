@@ -99,6 +99,7 @@ pub mod __product {
     }
 
     pub mod runtime {
+        pub use crate::mcp::McpRuntime;
         pub use crate::model_state::*;
         pub use crate::run::*;
         pub use crate::types::*;
@@ -122,7 +123,6 @@ pub mod __product {
 }
 
 mod application;
-pub(crate) mod contribution_projection;
 pub(crate) mod error;
 pub(crate) mod filesystem_identity;
 pub(crate) mod managed_tools;
@@ -144,9 +144,9 @@ pub use application::{
     AgentSessionAdapter, AgentTurnRequest, Application, ApplicationBuilder, Client,
     CompactThreadRequest, ForkThreadRequest, HistoryPage, HistoryReader, InteractionResponse,
     ItemStage, PendingInteraction, PendingTerminalFailure, ShutdownAdapterStatus, ShutdownReport,
-    StartThreadRequest, Thread, ThreadExecutionContext, ThreadItem, ThreadListQuery,
-    ThreadSnapshot, ThreadSummary, TurnControl, TurnEvent, TurnEventSender, TurnEventStream,
-    TurnHandle, TurnOutcome, TurnReceipt, TurnRequest, TurnResult,
+    StartThreadRequest, Thread, ThreadExecutionContext, ThreadItem, ThreadListPage,
+    ThreadListQuery, ThreadSnapshot, ThreadSummary, TurnControl, TurnEvent, TurnEventSender,
+    TurnEventStream, TurnHandle, TurnOutcome, TurnReceipt, TurnRequest, TurnResult,
 };
 pub use compaction::CompactionResult;
 pub use context_usage::ContextSnapshot;

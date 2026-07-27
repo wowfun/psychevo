@@ -452,6 +452,12 @@ pub(crate) async fn reconstruct_last_provider_request(
     summary: &SessionSummary,
     messages: &[ExportMessageRecord],
 ) -> Result<Option<ProviderRequestExport>> {
+    let Some((assistant_index, prompt_session_seq, prompt_metadata)) =
+        last_provider_request_boundary(messages)
+    else {
+        return Ok(None);
+    };
+    let assistant = &messages[assistant_index];
     let metadata = store
         .session_metadata(session_id)
         .await?
@@ -468,83 +474,85 @@ pub(crate) async fn reconstruct_last_provider_request(
     let cwd = PathBuf::from(&summary.cwd);
     let all_tools = reconstructed_tool_declarations(store, summary, &metadata, &cwd, mode);
     let reconstructed_tool_declarations_hash = tool_declarations_hash_from_declarations(&all_tools);
-    let mut current_prompt = None;
-    let mut last_request = None;
-
-    for (index, record) in messages.iter().enumerate() {
-        if matches!(record.message, Message::User { .. }) {
-            current_prompt = Some((record.session_seq, record.metadata.clone()));
-        }
-        if !matches!(record.message, Message::Assistant { .. }) {
-            continue;
-        }
-        let Some((prompt_session_seq, ref prompt_metadata)) = current_prompt else {
-            continue;
-        };
-        let mut request_warnings = warnings.clone();
-        let prompt_prefix_record = matching_prompt_prefix(
-            store,
-            session_id,
-            prompt_metadata,
-            &record.metadata,
-            &mut request_warnings,
-        )
-        .await?;
-        if let Some(prefix) = prompt_prefix_record.as_ref()
-            && prefix.tool_declarations_hash != reconstructed_tool_declarations_hash
-        {
-            request_warnings.push(format!(
-                "current registry tool declarations hash `{}` does not match recorded prompt prefix tool declarations hash `{}`; tool schema reconstruction is approximate",
-                reconstructed_tool_declarations_hash, prefix.tool_declarations_hash
-            ));
-        }
-        let effective_tool_names = effective_tool_names_from_prefix_metadata(
-            prompt_metadata,
-            &record.metadata,
-            prompt_prefix_record.as_ref(),
-            &mut request_warnings,
-        );
-        let tools = filter_tool_declarations(&all_tools, &effective_tool_names);
-        let context = ProviderMessageReconstruction {
-            store,
-            session_id,
-            messages,
-            mode,
-            prompt_prefix: prompt_prefix_record.as_ref(),
-        };
-        let provider_messages = reconstructed_provider_messages(
-            &context,
-            index,
-            prompt_session_seq,
-            prompt_metadata,
-            &record.metadata,
-            &mut request_warnings,
-        )
-        .await?;
-        let request = GenerationRequest {
-            model: ModelTarget {
-                provider: summary.provider.clone(),
-                model: summary.model.clone(),
-            },
-            messages: provider_messages,
-            tools: tools.into_iter().map(Into::into).collect(),
-            metadata: generation_metadata.clone(),
-        };
-        let body = openai_chat_request_body(&request, &base_url);
-        last_request = Some(ProviderRequestExport {
-            prompt_session_seq,
-            assistant_session_seq: record.session_seq,
+    let mut request_warnings = warnings.clone();
+    let prompt_prefix_record = matching_prompt_prefix(
+        store,
+        session_id,
+        &prompt_metadata,
+        &assistant.metadata,
+        &mut request_warnings,
+    )
+    .await?;
+    if let Some(prefix) = prompt_prefix_record.as_ref()
+        && prefix.tool_declarations_hash != reconstructed_tool_declarations_hash
+    {
+        request_warnings.push(format!(
+            "current registry tool declarations hash `{}` does not match recorded prompt prefix tool declarations hash `{}`; tool schema reconstruction is approximate",
+            reconstructed_tool_declarations_hash, prefix.tool_declarations_hash
+        ));
+    }
+    let effective_tool_names = effective_tool_names_from_prefix_metadata(
+        &prompt_metadata,
+        &assistant.metadata,
+        prompt_prefix_record.as_ref(),
+        &mut request_warnings,
+    );
+    let tools = filter_tool_declarations(&all_tools, &effective_tool_names);
+    let context = ProviderMessageReconstruction {
+        store,
+        session_id,
+        messages,
+        mode,
+        prompt_prefix: prompt_prefix_record.as_ref(),
+    };
+    let provider_messages = reconstructed_provider_messages(
+        &context,
+        assistant_index,
+        prompt_session_seq,
+        &prompt_metadata,
+        &assistant.metadata,
+        &mut request_warnings,
+    )
+    .await?;
+    let request = GenerationRequest {
+        model: ModelTarget {
             provider: summary.provider.clone(),
             model: summary.model.clone(),
-            base_url: base_url.clone(),
-            endpoint: endpoint.clone(),
-            reconstructed: true,
-            warnings: request_warnings,
-            body,
-        });
-    }
+        },
+        messages: provider_messages,
+        tools: tools.into_iter().map(Into::into).collect(),
+        metadata: generation_metadata,
+    };
+    let body = openai_chat_request_body(&request, &base_url);
 
-    Ok(last_request)
+    Ok(Some(ProviderRequestExport {
+        prompt_session_seq,
+        assistant_session_seq: assistant.session_seq,
+        provider: summary.provider.clone(),
+        model: summary.model.clone(),
+        base_url,
+        endpoint,
+        reconstructed: true,
+        warnings: request_warnings,
+        body,
+    }))
+}
+
+fn last_provider_request_boundary(
+    messages: &[ExportMessageRecord],
+) -> Option<(usize, i64, Option<Value>)> {
+    let assistant_index = messages
+        .iter()
+        .rposition(|record| matches!(record.message, Message::Assistant { .. }))?;
+    let prompt = messages[..assistant_index]
+        .iter()
+        .rev()
+        .find(|record| matches!(record.message, Message::User { .. }))?;
+    Some((
+        assistant_index,
+        prompt.session_seq,
+        prompt.metadata.clone(),
+    ))
 }
 
 pub(crate) struct ProviderMessageReconstruction<'a> {
@@ -761,4 +769,73 @@ pub(crate) async fn matching_prompt_prefix(
         return Ok(None);
     }
     Ok(Some(prefix))
+}
+
+#[cfg(test)]
+mod tests {
+    use psychevo_agent_core::{AssistantBlock, user_text_message};
+    use psychevo_ai::Outcome;
+
+    use super::*;
+
+    fn record(session_seq: i64, message: Message, metadata: Option<Value>) -> ExportMessageRecord {
+        ExportMessageRecord {
+            session_seq,
+            message,
+            usage: None,
+            metadata,
+        }
+    }
+
+    fn assistant(session_seq: i64) -> ExportMessageRecord {
+        record(
+            session_seq,
+            Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: format!("answer {session_seq}"),
+                }],
+                timestamp_ms: session_seq,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: None,
+                provider: None,
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn last_provider_request_boundary_selects_one_latest_completed_generation() {
+        let messages = vec![
+            record(
+                1,
+                user_text_message("first"),
+                Some(serde_json::json!({"prompt": 1})),
+            ),
+            assistant(2),
+            record(
+                3,
+                user_text_message("second"),
+                Some(serde_json::json!({"prompt": 2})),
+            ),
+            assistant(4),
+            record(
+                5,
+                user_text_message("trailing"),
+                Some(serde_json::json!({"prompt": 3})),
+            ),
+        ];
+
+        let (assistant_index, prompt_session_seq, prompt_metadata) =
+            last_provider_request_boundary(&messages).expect("completed generation");
+
+        assert_eq!(assistant_index, 3);
+        assert_eq!(prompt_session_seq, 3);
+        assert_eq!(prompt_metadata, Some(serde_json::json!({"prompt": 2})));
+    }
+
+    #[test]
+    fn last_provider_request_boundary_requires_a_preceding_user_prompt() {
+        assert!(last_provider_request_boundary(&[assistant(1)]).is_none());
+    }
 }

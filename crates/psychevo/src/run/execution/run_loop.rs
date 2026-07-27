@@ -109,13 +109,14 @@ pub(crate) async fn run_live_internal(
         &resolved.metadata.capabilities,
         &loaded.config.permissions,
     )?;
-    let web_search_selected = crate::tools::effective_tool_names_for_mode_with_config(
+    let tool_selection_intent = crate::tool_surface::compile_tool_selection(
         options.mode,
         &loaded.config.tools,
         &loaded.config.toolsets,
-    )
-    .iter()
-    .any(|name| name == "web_search");
+        &extension_assembly.toolsets,
+    );
+    let web_search_selected =
+        tool_selection_intent.selects_tool("web_search", options.mode);
     let image_generation =
         crate::config::resolve_image_generation_config_from_loaded(&loaded, None, None, None, None)
             .ok();
@@ -523,9 +524,9 @@ pub(crate) async fn run_live_internal(
     let permission_runtime = permission_runtime
         .with_protected_config_paths(loaded.sources.clone())
         .with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
-    let mcp_server_inputs = extension_assembly.registry.mcp_servers();
-    let mut mcp_manager = crate::mcp::McpConnectionManager::default();
-    let mcp_snapshot = mcp_manager
+    let mcp_server_inputs = extension_assembly.mcp_servers.clone();
+    let mcp_runtime = options.mcp_runtime.clone().unwrap_or_default();
+    let (mcp_snapshot, mcp_generation) = mcp_runtime
         .snapshot(&mcp_server_inputs, &cwd, Some(&permission_runtime))
         .await;
     if !mcp_snapshot.required_failures.is_empty() {
@@ -534,7 +535,6 @@ pub(crate) async fn run_live_internal(
             mcp_snapshot.required_failures.join("; ")
         )));
     }
-    let mcp_generation = mcp_manager.generation();
     let mcp_snapshot_hash = mcp_snapshot.snapshot_hash.clone();
     let mcp_catalog_hash = mcp_snapshot.catalog_hash.clone();
     let mcp_accepted_servers = mcp_snapshot.accepted_servers.clone();
@@ -552,7 +552,7 @@ pub(crate) async fn run_live_internal(
             RuntimeTool::with_source(tool, source_id, source_kind)
         })
         .collect::<Vec<_>>();
-    extension_tools.extend(extension_assembly.registry.runtime_tools().iter().cloned());
+    extension_tools.extend(extension_assembly.runtime_tools.iter().cloned());
     emit_warning_events(&mcp_warnings, &events, stream_events.as_ref());
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         cwd: cwd.clone(),
@@ -570,23 +570,19 @@ pub(crate) async fn run_live_internal(
         image_input_enabled,
         image_generation,
         web_search: effective_web_search.clone(),
-        tool_selection: loaded.config.tools.clone(),
-        custom_toolsets: loaded.config.toolsets.clone(),
-        contributed_toolsets: extension_assembly.toolsets.clone(),
+        selection: tool_selection_intent,
         clarify: if options.clarify_enabled {
             ClarifyToolSurface::enabled(clarify_control, stream_events.clone())
         } else {
             ClarifyToolSurface::Disabled
         },
-        skills: (!options.no_skills || !explicit_skill_inputs.is_empty()).then_some(skill_options),
+        skills: (!options.no_skills || !explicit_skill_inputs.is_empty()).then(|| {
+            SkillRuntime::from_catalog(skill_options, skill_catalog.clone())
+        }),
         extension_tools,
         agents: agent_tools,
     });
     emit_warning_events(&tool_surface.warnings, &events, stream_events.as_ref());
-    let mut contribution_projection = extension_assembly.projection.clone();
-    contribution_projection.extend(tool_surface.projection.clone());
-    let _contribution_fact_count = contribution_projection.facts().len();
-    let _accepted_tool_count = tool_surface.accepted_tool_names.len();
     let mut tool_surface_warnings = tool_surface.warnings;
     let hook_config = crate::hooks::hook_runtime_config_from_options(&options, &cwd)?;
     let hook_runtime = build_hook_runtime(

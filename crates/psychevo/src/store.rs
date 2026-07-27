@@ -391,6 +391,24 @@ pub struct SessionListProjection {
     pub runtime_ref: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionListCursor {
+    pub updated_at_ms: i64,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SessionSummaryPage {
+    pub(crate) summaries: Vec<SessionSummary>,
+    pub(crate) next_cursor: Option<SessionListCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionListProjectionPage {
+    pub sessions: Vec<SessionListProjection>,
+    pub next_cursor: Option<SessionListCursor>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionBrowserRequest<'a> {
     pub cwd: Option<&'a str>,

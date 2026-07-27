@@ -370,11 +370,14 @@ pub(crate) fn reconstructed_tool_declarations(
         image_input_enabled: true,
         image_generation: None,
         web_search: Default::default(),
-        tool_selection: Default::default(),
-        custom_toolsets: BTreeMap::new(),
-        contributed_toolsets: Vec::new(),
+        selection: crate::tool_surface::compile_tool_selection(
+            mode,
+            &Default::default(),
+            &BTreeMap::new(),
+            &[],
+        ),
         clarify: ClarifyToolSurface::declaration_only(),
-        skills: Some(SkillDiscoveryOptions {
+        skills: Some(crate::skills::SkillRuntime::new(SkillDiscoveryOptions {
             home: cwd.join(".psychevo"),
             cwd: cwd.to_path_buf(),
             config_path: None,
@@ -382,7 +385,7 @@ pub(crate) fn reconstructed_tool_declarations(
             explicit_inputs: Vec::new(),
             additional_roots: Vec::new(),
             no_skills: false,
-        }),
+        })),
         extension_tools: Vec::new(),
         agents: Some(AgentToolContext {
             provider,

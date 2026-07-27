@@ -8,11 +8,8 @@ use super::records::{all_records, policy_entry};
 use super::types::{
     EnabledPluginManifest, LoadedPluginManifest, PluginInstallRecord, PluginRuntimeAssembly,
 };
-use super::worker::{PluginWorkerTool, worker_tools};
+use super::worker::{PluginWorkerSession, PluginWorkerTool, worker_tools_in_session};
 use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolsetContribution};
-use crate::contribution_projection::{
-    ContributionFact, ContributionProjection, ContributionStatus,
-};
 use crate::hooks::{HookSourceDescriptor, HookWorkerAdapter};
 use crate::types::{McpServerInput, RuntimeTool};
 
@@ -30,36 +27,38 @@ pub(crate) fn load_enabled_plugin_contributions(
         toolsets: Vec::new(),
         runtime_tools: Vec::new(),
         warnings: Vec::new(),
-        projection: ContributionProjection::new(),
     };
     let enabled = enabled_plugin_manifests(home, cwd, policy, &mut assembly.warnings);
     for enabled in enabled {
+        let worker_session = enabled.manifest.worker.as_ref().and_then(|worker| {
+            match PluginWorkerSession::start(&enabled.record, &enabled.manifest, worker, env) {
+                Ok(session) => Some(session),
+                Err(err) => {
+                    assembly.warnings.push(plugin_warning(format!(
+                        "plugin `{}` worker unavailable: {err}",
+                        enabled.record.name
+                    )));
+                    None
+                }
+            }
+        });
         add_static_contributions(
             &mut assembly,
             &enabled.record,
             &enabled.manifest,
             &enabled.policy,
             env,
+            worker_session.clone(),
         );
-        if let Some(worker) = enabled.manifest.worker.clone() {
-            match worker_tools(&enabled.record, &enabled.manifest, &worker, env) {
+        if let Some(session) = worker_session {
+            match worker_tools_in_session(&session) {
                 Ok(tools) => {
                     for tool in tools {
-                        let tool_name = tool.name.clone();
-                        assembly.projection.record(ContributionFact::new(
-                            plugin_source_id(&enabled.record),
-                            "plugin",
-                            "worker_tool",
-                            "tool_surface",
-                            format!("tool:{tool_name}"),
-                            ContributionStatus::Accepted,
-                        ));
                         assembly.runtime_tools.push(RuntimeTool::with_source(
                             Arc::new(PluginWorkerTool {
-                                record: enabled.record.clone(),
-                                spec: worker.clone(),
+                                plugin_name: enabled.record.name.clone(),
+                                session: Arc::clone(&session),
                                 descriptor: tool,
-                                env: env.clone(),
                             }),
                             plugin_source_id(&enabled.record),
                             "plugin",
@@ -67,17 +66,6 @@ pub(crate) fn load_enabled_plugin_contributions(
                     }
                 }
                 Err(err) => {
-                    assembly.projection.record(
-                        ContributionFact::new(
-                            plugin_source_id(&enabled.record),
-                            "plugin",
-                            "worker_tool",
-                            "tool_surface",
-                            "worker".to_string(),
-                            ContributionStatus::Unavailable,
-                        )
-                        .with_reason(err.clone()),
-                    );
                     assembly.warnings.push(plugin_warning(format!(
                         "plugin `{}` worker unavailable: {err}",
                         enabled.record.name
@@ -99,7 +87,13 @@ pub(crate) fn load_enabled_plugin_hook_sources(
     enabled_plugin_manifests(home, cwd, policy, &mut warnings)
         .into_iter()
         .filter_map(|enabled| {
-            hook_source_from_manifest(&enabled.record, &enabled.manifest, &enabled.policy, env)
+            hook_source_from_manifest(
+                &enabled.record,
+                &enabled.manifest,
+                &enabled.policy,
+                env,
+                None,
+            )
         })
         .collect()
 }
@@ -152,54 +146,18 @@ fn add_static_contributions(
     manifest: &LoadedPluginManifest,
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
+    worker_session: Option<Arc<PluginWorkerSession>>,
 ) {
     let source_id = plugin_source_id(record);
-    for diagnostic in &manifest.diagnostics {
-        if diagnostic.kind == "invalid" {
-            assembly.projection.record(
-                ContributionFact::new(
-                    source_id.clone(),
-                    "plugin",
-                    "manifest",
-                    "plugin_runtime",
-                    record.manifest_path.display().to_string(),
-                    ContributionStatus::Invalid,
-                )
-                .with_reason(diagnostic.message.clone()),
-            );
-        }
-    }
     for root in &manifest.skill_roots {
         assembly.skill_inputs.push(root.clone());
-        assembly.projection.record(ContributionFact::new(
-            source_id.clone(),
-            "plugin",
-            "skill_root",
-            "skills",
-            root.display().to_string(),
-            ContributionStatus::Accepted,
-        ));
     }
     for agent in agent_files_from_roots(&manifest.agent_roots) {
-        assembly.projection.record(ContributionFact::new(
-            source_id.clone(),
-            "plugin",
-            "agent_root",
-            "agents",
-            agent.clone(),
-            ContributionStatus::Accepted,
-        ));
         assembly.agent_inputs.push(agent);
     }
-    if let Some(source) = hook_source_from_manifest(record, manifest, policy, env) {
-        assembly.projection.record(ContributionFact::new(
-            source_id.clone(),
-            "plugin",
-            "hook_source",
-            "hook_runtime",
-            source.source_id.clone(),
-            ContributionStatus::Accepted,
-        ));
+    if let Some(source) =
+        hook_source_from_manifest(record, manifest, policy, env, worker_session)
+    {
         assembly.hook_sources.push(source);
     }
     for server in &manifest.mcp_servers {
@@ -212,14 +170,6 @@ fn add_static_contributions(
             )
             .with_policy(server.policy.clone()),
         );
-        assembly.projection.record(ContributionFact::new(
-            source_id.clone(),
-            "plugin",
-            "mcp_server",
-            "mcp",
-            format!("mcp:{}", server.name),
-            ContributionStatus::Accepted,
-        ));
     }
     for (name, config) in &manifest.toolsets {
         assembly.toolsets.push(ToolsetContribution {
@@ -228,27 +178,6 @@ fn add_static_contributions(
             name: name.clone(),
             config: config.clone(),
         });
-        assembly.projection.record(ContributionFact::new(
-            source_id.clone(),
-            "plugin",
-            "toolset",
-            "tool_surface",
-            format!("toolset:{name}"),
-            ContributionStatus::Accepted,
-        ));
-    }
-    for family in inert_descriptor_families(manifest) {
-        assembly.projection.record(
-            ContributionFact::new(
-                source_id.clone(),
-                "plugin",
-                family,
-                "plugin_runtime",
-                family,
-                ContributionStatus::Unsupported,
-            )
-            .with_reason("descriptor recognized but no owning runtime registry is implemented"),
-        );
     }
 }
 
@@ -257,6 +186,7 @@ fn hook_source_from_manifest(
     manifest: &LoadedPluginManifest,
     policy: &PluginPolicyEntry,
     env: &BTreeMap<String, String>,
+    worker_session: Option<Arc<PluginWorkerSession>>,
 ) -> Option<HookSourceDescriptor> {
     if !policy.plugin_enabled() {
         return None;
@@ -280,6 +210,7 @@ fn hook_source_from_manifest(
             command: worker.command,
             args: worker.args,
             env: env.clone(),
+            session: worker_session,
         }),
     })
 }
@@ -316,21 +247,4 @@ fn plugin_warning(message: String) -> crate::types::RunWarning {
 
 fn plugin_source_id(record: &PluginInstallRecord) -> String {
     format!("plugin:{}@{}", record.name, record.source_slug)
-}
-
-fn inert_descriptor_families(manifest: &LoadedPluginManifest) -> Vec<&'static str> {
-    let mut families = Vec::new();
-    if manifest.manifest_resources.contains("apps") {
-        families.push("apps");
-    }
-    if manifest.manifest_resources.contains("interface") {
-        families.push("interface");
-    }
-    if manifest.psychevo_extensions.contains("commands") {
-        families.push("commands");
-    }
-    if manifest.psychevo_extensions.contains("providers") {
-        families.push("providers");
-    }
-    families
 }

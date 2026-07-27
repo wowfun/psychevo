@@ -19,12 +19,14 @@ pub(crate) use crate::paths::canonical_cwd;
 pub(crate) use crate::project_instructions::load_project_instructions;
 pub(crate) use crate::prompt_assembly::runtime_environment_prompt;
 pub(crate) use crate::skills::{
-    SkillDiscoveryOptions, discover_skills, format_skills_for_prompt, resolve_skills_home,
-    skills_visible_for_prompt_with_tools,
+    SkillDiscoveryOptions, SkillRuntime, discover_skills, format_skills_for_prompt,
+    resolve_skills_home, skills_visible_for_prompt_with_tools,
 };
 pub(crate) use crate::state::StateRuntime;
 pub(crate) use crate::tool_surface::tool_declarations;
-pub(crate) use crate::tools::{coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode};
+pub(crate) use crate::tools::{
+    coding_core_tools_for_mode, mode_instruction, skill_tools_for_mode_with_runtime,
+};
 pub(crate) use crate::types::{RunMode, RunOptions};
 
 #[path = "context_usage/snapshot.rs"]

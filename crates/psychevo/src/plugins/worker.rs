@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,6 +14,7 @@ use psychevo_ai::AbortSignal;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+#[cfg(test)]
 use super::manifest::load_plugin_manifest;
 use super::types::{LoadedPluginManifest, PluginInstallRecord, PluginWorkerSpec};
 
@@ -31,10 +32,9 @@ pub(crate) struct WorkerToolDescriptor {
 
 #[derive(Clone)]
 pub(crate) struct PluginWorkerTool {
-    pub(crate) record: PluginInstallRecord,
-    pub(crate) spec: PluginWorkerSpec,
+    pub(crate) plugin_name: String,
+    pub(crate) session: Arc<PluginWorkerSession>,
     pub(crate) descriptor: WorkerToolDescriptor,
-    pub(crate) env: BTreeMap<String, String>,
 }
 
 impl ToolBinding for PluginWorkerTool {
@@ -75,23 +75,18 @@ impl ToolBinding for PluginWorkerTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let record = self.record.clone();
-        let spec = self.spec.clone();
+        let plugin_name = self.plugin_name.clone();
+        let session = Arc::clone(&self.session);
         let descriptor = self.descriptor.clone();
-        let env = self.env.clone();
         Box::pin(async move {
             if abort.aborted() {
                 return ToolOutput::error("plugin worker tool aborted before dispatch");
             }
-            let error_plugin = record.name.clone();
             let error_tool = descriptor.name.clone();
-            let worker_record = record.clone();
             let worker_descriptor = descriptor.clone();
             match tokio::task::spawn_blocking(move || {
-                call_worker_tool(
-                    &worker_record,
-                    &spec,
-                    &env,
+                call_worker_tool_in_session(
+                    &session,
                     &worker_descriptor.name,
                     &tool_call_id,
                     args,
@@ -102,14 +97,244 @@ impl ToolBinding for PluginWorkerTool {
                 Ok(Ok(output)) => output,
                 Ok(Err(err)) => ToolOutput::error(format!(
                     "plugin `{}` tool `{}` failed: {err}",
-                    error_plugin, error_tool
+                    plugin_name, error_tool
                 )),
                 Err(err) => ToolOutput::error(format!(
                     "plugin `{}` tool `{}` worker task failed: {err}",
-                    error_plugin, error_tool
+                    plugin_name, error_tool
                 )),
             }
         })
+    }
+}
+
+pub(crate) struct PluginWorkerSession {
+    process: Mutex<PluginWorkerProcess>,
+}
+
+struct PluginWorkerProcess {
+    child: Child,
+    stdin: Option<std::process::ChildStdin>,
+    responses: mpsc::Receiver<WorkerMessage>,
+    stderr: mpsc::Receiver<String>,
+    next_id: u64,
+    stopped: bool,
+}
+
+enum WorkerMessage {
+    Response {
+        id: u64,
+        result: std::result::Result<Value, String>,
+    },
+    Notification,
+    ProtocolError(String),
+}
+
+impl std::fmt::Debug for PluginWorkerSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PluginWorkerSession(..)")
+    }
+}
+
+impl PluginWorkerSession {
+    pub(crate) fn start(
+        record: &PluginInstallRecord,
+        manifest: &LoadedPluginManifest,
+        spec: &PluginWorkerSpec,
+        env: &BTreeMap<String, String>,
+    ) -> std::result::Result<Arc<Self>, String> {
+        let mut command = Command::new(&spec.command);
+        command
+            .args(&spec.args)
+            .current_dir(&record.package_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        crate::process_env::apply_process_env(
+            &mut command,
+            env,
+            crate::process_env::ProcessEnvOptions::new(&[]),
+        )
+        .map_err(|err| err.to_string())?;
+        command
+            .env("PSYCHEVO_PLUGIN_NAME", &record.name)
+            .env("PSYCHEVO_PLUGIN_ROOT", &record.package_root)
+            .env("PSYCHEVO_PLUGIN_DATA", &record.data_root);
+        let mut child = command
+            .spawn()
+            .map_err(|err| format!("failed to start worker {}: {err}", spec.command.display()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "worker stdin unavailable".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "worker stdout unavailable".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "worker stderr unavailable".to_string())?;
+        let (response_tx, responses) = mpsc::channel();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = response_tx.send(WorkerMessage::ProtocolError(
+                            "worker closed stdout before response".to_string(),
+                        ));
+                        break;
+                    }
+                    Ok(_) => {
+                        let _ = response_tx.send(parse_worker_message(line.trim()));
+                    }
+                    Err(err) => {
+                        let _ =
+                            response_tx.send(WorkerMessage::ProtocolError(err.to_string()));
+                        break;
+                    }
+                }
+            }
+        });
+        let (stderr_tx, stderr_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = BufReader::new(stderr).read_to_end(&mut bytes);
+            let text = crate::process_env::decode_process_output(&bytes);
+            let _ = stderr_tx.send(text);
+        });
+        let session = Arc::new(Self {
+            process: Mutex::new(PluginWorkerProcess {
+                child,
+                stdin: Some(stdin),
+                responses,
+                stderr: stderr_rx,
+                next_id: 1,
+                stopped: false,
+            }),
+        });
+        session.call(
+            "initialize",
+            json!({
+                "plugin": {
+                    "name": record.name,
+                    "version": record.version,
+                    "source": record.source_slug,
+                    "root": record.package_root,
+                    "data_root": record.data_root,
+                },
+                "manifest": {
+                    "path": manifest.manifest_path,
+                    "resources": manifest.manifest_resources.iter().cloned().collect::<Vec<_>>(),
+                    "psychevo_extensions": manifest.psychevo_extensions.iter().cloned().collect::<Vec<_>>(),
+                }
+            }),
+        )?;
+        Ok(session)
+    }
+
+    pub(crate) fn call(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> std::result::Result<Value, String> {
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| "plugin worker session lock poisoned".to_string())?;
+        if process.stopped {
+            return Err("plugin worker session is closed".to_string());
+        }
+        let id = process.next_id;
+        process.next_id = process.next_id.saturating_add(1);
+        let Some(stdin) = process.stdin.as_mut() else {
+            return Err("worker stdin unavailable".to_string());
+        };
+        if let Err(error) = send_json_rpc(stdin, id, method, params) {
+            stop_worker(&mut process);
+            return Err(error);
+        }
+        let started = Instant::now();
+        loop {
+            let Some(remaining) = WORKER_RPC_TIMEOUT.checked_sub(started.elapsed()) else {
+                stop_worker(&mut process);
+                return Err(format!(
+                    "worker timed out waiting for {method} response after {}",
+                    worker_timeout_label()
+                ));
+            };
+            match process.responses.recv_timeout(remaining) {
+                Ok(WorkerMessage::Notification) => continue,
+                Ok(WorkerMessage::Response {
+                    id: response_id,
+                    result,
+                }) if response_id == id => return result,
+                Ok(WorkerMessage::Response {
+                    id: response_id, ..
+                }) => {
+                    stop_worker(&mut process);
+                    return Err(format!(
+                        "worker response id {response_id} does not match request id {id}"
+                    ));
+                }
+                Ok(WorkerMessage::ProtocolError(error)) => {
+                    stop_worker(&mut process);
+                    return Err(format!("worker protocol error: {error}"));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    stop_worker(&mut process);
+                    return Err(format!(
+                        "worker timed out waiting for {method} response after {}",
+                        worker_timeout_label()
+                    ));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    stop_worker(&mut process);
+                    return Err(format!(
+                        "worker stdout reader stopped before {method} response"
+                    ));
+                }
+            }
+        }
+    }
+
+    pub(crate) fn shutdown(&self) -> std::result::Result<(), String> {
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| "plugin worker session lock poisoned".to_string())?;
+        if process.stopped {
+            return Ok(());
+        }
+        let id = process.next_id;
+        if let Some(stdin) = process.stdin.as_mut() {
+            let _ = send_json_rpc(stdin, id, "shutdown", json!({}));
+        }
+        process.stdin.take();
+        let status = wait_worker_exit(&mut process.child)?;
+        process.stopped = true;
+        if status.success() {
+            return Ok(());
+        }
+        let stderr = process
+            .stderr
+            .recv_timeout(Duration::from_millis(100))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if stderr.is_empty() {
+            Err(format!("worker exited with status {status}"))
+        } else {
+            Err(stderr)
+        }
+    }
+}
+
+impl Drop for PluginWorkerSession {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
     }
 }
 
@@ -119,7 +344,18 @@ pub(crate) fn worker_tools(
     spec: &PluginWorkerSpec,
     env: &BTreeMap<String, String>,
 ) -> std::result::Result<Vec<WorkerToolDescriptor>, String> {
-    let result = call_worker_json(record, manifest, spec, env, "contributions/list", json!({}))?;
+    let session = PluginWorkerSession::start(record, manifest, spec, env)?;
+    let result = worker_tools_in_session(&session);
+    let shutdown = session.shutdown();
+    let result = result?;
+    shutdown?;
+    Ok(result)
+}
+
+pub(crate) fn worker_tools_in_session(
+    session: &PluginWorkerSession,
+) -> std::result::Result<Vec<WorkerToolDescriptor>, String> {
+    let result = session.call("contributions/list", json!({}))?;
     let tools = result
         .get("tools")
         .or_else(|| result.pointer("/capabilities/tools"))
@@ -154,6 +390,7 @@ pub(crate) fn worker_tools(
     Ok(out)
 }
 
+#[cfg(test)]
 pub(crate) fn call_worker_tool(
     record: &PluginInstallRecord,
     spec: &PluginWorkerSpec,
@@ -162,11 +399,28 @@ pub(crate) fn call_worker_tool(
     tool_call_id: &str,
     args: Value,
 ) -> std::result::Result<ToolOutput, String> {
-    let result = call_worker_json(
-        record,
-        &load_plugin_manifest(&record.package_root, true).map_err(|err| err.to_string())?,
-        spec,
-        env,
+    let manifest =
+        load_plugin_manifest(&record.package_root, true).map_err(|err| err.to_string())?;
+    let session = PluginWorkerSession::start(record, &manifest, spec, env)?;
+    let result = call_worker_tool_in_session(
+        &session,
+        tool_name,
+        tool_call_id,
+        args,
+    );
+    let shutdown = session.shutdown();
+    let result = result?;
+    shutdown?;
+    Ok(result)
+}
+
+pub(crate) fn call_worker_tool_in_session(
+    session: &PluginWorkerSession,
+    tool_name: &str,
+    tool_call_id: &str,
+    args: Value,
+) -> std::result::Result<ToolOutput, String> {
+    let result = session.call(
         "tools/call",
         json!({
             "name": tool_name,
@@ -208,120 +462,6 @@ pub(crate) fn call_worker_tool(
     }
 }
 
-fn call_worker_json(
-    record: &PluginInstallRecord,
-    manifest: &LoadedPluginManifest,
-    spec: &PluginWorkerSpec,
-    env: &BTreeMap<String, String>,
-    method: &str,
-    params: Value,
-) -> std::result::Result<Value, String> {
-    let mut command = Command::new(&spec.command);
-    command
-        .args(&spec.args)
-        .current_dir(&record.package_root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    crate::process_env::apply_process_env(
-        &mut command,
-        env,
-        crate::process_env::ProcessEnvOptions::new(&[]),
-    )
-    .map_err(|err| err.to_string())?;
-    command
-        .env("PSYCHEVO_PLUGIN_NAME", &record.name)
-        .env("PSYCHEVO_PLUGIN_ROOT", &record.package_root)
-        .env("PSYCHEVO_PLUGIN_DATA", &record.data_root);
-    let mut child = command
-        .spawn()
-        .map_err(|err| format!("failed to start worker {}: {err}", spec.command.display()))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "worker stdin unavailable".to_string())?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "worker stdout unavailable".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "worker stderr unavailable".to_string())?;
-    let (response_tx, response_rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    let _ =
-                        response_tx.send(Err("worker closed stdout before response".to_string()));
-                    break;
-                }
-                Ok(_) => {
-                    let _ = response_tx.send(parse_json_rpc_result(line.trim()));
-                }
-                Err(err) => {
-                    let _ = response_tx.send(Err(err.to_string()));
-                    break;
-                }
-            }
-        }
-    });
-    let (stderr_tx, stderr_rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = BufReader::new(stderr).read_to_end(&mut bytes);
-        let text = crate::process_env::decode_process_output(&bytes);
-        let _ = stderr_tx.send(text);
-    });
-
-    if let Err(err) = send_json_rpc(
-        &mut stdin,
-        1,
-        "initialize",
-        json!({
-            "plugin": {
-                "name": record.name,
-                "version": record.version,
-                "source": record.source_slug,
-                "root": record.package_root,
-                "data_root": record.data_root,
-            },
-            "manifest": {
-                "path": manifest.manifest_path,
-                "resources": manifest.manifest_resources.iter().cloned().collect::<Vec<_>>(),
-                "psychevo_extensions": manifest.psychevo_extensions.iter().cloned().collect::<Vec<_>>(),
-            }
-        }),
-    ) {
-        terminate_worker(&mut child);
-        return Err(err);
-    }
-    read_json_rpc_result_timeout(&response_rx, &mut child, "initialize")?;
-    if let Err(err) = send_json_rpc(&mut stdin, 2, method, params) {
-        terminate_worker(&mut child);
-        return Err(err);
-    }
-    let result = read_json_rpc_result_timeout(&response_rx, &mut child, method)?;
-    let _ = send_json_rpc(&mut stdin, 3, "shutdown", json!({}));
-    drop(stdin);
-    let status = wait_worker_exit(&mut child)?;
-    if !status.success() {
-        let stderr = stderr_rx
-            .recv_timeout(Duration::from_millis(100))
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if stderr.is_empty() {
-            return Err(format!("worker exited with status {status}"));
-        }
-        return Err(stderr);
-    }
-    Ok(result)
-}
-
 fn send_json_rpc(
     stdin: &mut impl Write,
     id: u64,
@@ -338,32 +478,38 @@ fn send_json_rpc(
     stdin.flush().map_err(|err| err.to_string())
 }
 
-fn read_json_rpc_result_timeout(
-    response_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
-    child: &mut Child,
-    phase: &str,
-) -> std::result::Result<Value, String> {
-    match response_rx.recv_timeout(WORKER_RPC_TIMEOUT) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            terminate_worker(child);
-            Err(format!(
-                "worker timed out waiting for {phase} response after {}",
-                worker_timeout_label()
-            ))
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(format!(
-            "worker stdout reader stopped before {phase} response"
-        )),
+fn parse_worker_message(line: &str) -> WorkerMessage {
+    let response: Value = match serde_json::from_str(line) {
+        Ok(response) => response,
+        Err(error) => return WorkerMessage::ProtocolError(error.to_string()),
+    };
+    if response.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+        return WorkerMessage::ProtocolError(
+            "worker message must declare jsonrpc 2.0".to_string(),
+        );
     }
-}
-
-fn parse_json_rpc_result(line: &str) -> std::result::Result<Value, String> {
-    let response: Value = serde_json::from_str(line).map_err(|err| err.to_string())?;
-    if let Some(error) = response.get("error") {
-        return Err(error.to_string());
+    if response.get("method").is_some() {
+        return if response.get("id").is_none() {
+            WorkerMessage::Notification
+        } else {
+            WorkerMessage::ProtocolError(
+                "worker-initiated requests are not supported".to_string(),
+            )
+        };
     }
-    Ok(response.get("result").cloned().unwrap_or(Value::Null))
+    let Some(id) = response.get("id").and_then(Value::as_u64) else {
+        return WorkerMessage::ProtocolError(
+            "worker response must carry a numeric id".to_string(),
+        );
+    };
+    let result = if let Some(error) = response.get("error") {
+        Err(error.to_string())
+    } else if response.get("result").is_some() {
+        Ok(response.get("result").cloned().unwrap_or(Value::Null))
+    } else {
+        Err("worker response must carry result or error".to_string())
+    };
+    WorkerMessage::Response { id, result }
 }
 
 fn wait_worker_exit(child: &mut Child) -> std::result::Result<ExitStatus, String> {
@@ -386,6 +532,15 @@ fn wait_worker_exit(child: &mut Child) -> std::result::Result<ExitStatus, String
 fn terminate_worker(child: &mut Child) {
     crate::process_env::terminate_std_child_tree(child);
     let _ = child.wait();
+}
+
+fn stop_worker(process: &mut PluginWorkerProcess) {
+    if process.stopped {
+        return;
+    }
+    process.stdin.take();
+    terminate_worker(&mut process.child);
+    process.stopped = true;
 }
 
 fn worker_timeout_label() -> String {

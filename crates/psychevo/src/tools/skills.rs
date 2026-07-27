@@ -3,12 +3,12 @@ pub(crate) use super::*;
 use crate::skills::{find_skill, skill_prompt_visible_for_activation};
 #[derive(Clone)]
 pub(crate) struct ListSkillsTool {
-    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) runtime: SkillRuntime,
 }
 
 impl ListSkillsTool {
-    pub(crate) fn new(options: SkillDiscoveryOptions) -> Self {
-        Self { options }
+    pub(crate) fn new(runtime: SkillRuntime) -> Self {
+        Self { runtime }
     }
 }
 
@@ -75,12 +75,12 @@ impl ToolBinding for ListSkillsTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let options = self.options.clone();
+        let runtime = self.runtime.clone();
         Box::pin(async move {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match discover_skills(&options) {
+            match runtime.catalog() {
                 Ok(catalog) => ToolOutput::ok(list_skills_value_with_options(
                     &catalog,
                     &ListSkillsOptions {
@@ -109,12 +109,12 @@ impl ToolBinding for ListSkillsTool {
 
 #[derive(Clone)]
 pub(crate) struct ViewSkillTool {
-    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) runtime: SkillRuntime,
 }
 
 impl ViewSkillTool {
-    pub(crate) fn new(options: SkillDiscoveryOptions) -> Self {
-        Self { options }
+    pub(crate) fn new(runtime: SkillRuntime) -> Self {
+        Self { runtime }
     }
 }
 
@@ -154,12 +154,12 @@ impl ToolBinding for ViewSkillTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let options = self.options.clone();
+        let runtime = self.runtime.clone();
         Box::pin(async move {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match view_skill_tool_impl(&options, args) {
+            match view_skill_tool_impl(&runtime, args) {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -167,8 +167,8 @@ impl ToolBinding for ViewSkillTool {
     }
 }
 
-pub(crate) fn view_skill_tool_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Value> {
-    let catalog = discover_skills(options)?;
+pub(crate) fn view_skill_tool_impl(runtime: &SkillRuntime, args: Value) -> Result<Value> {
+    let catalog = runtime.catalog()?;
     let name = required_string(&args, "name")?;
     let file_path = optional_string(&args, "file_path")?;
     let skill = find_skill(&catalog, name)?;
@@ -182,12 +182,12 @@ pub(crate) fn view_skill_tool_impl(options: &SkillDiscoveryOptions, args: Value)
 
 #[derive(Clone)]
 pub(crate) struct SkillManageTool {
-    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) runtime: SkillRuntime,
 }
 
 impl SkillManageTool {
-    pub(crate) fn new(options: SkillDiscoveryOptions) -> Self {
-        Self { options }
+    pub(crate) fn new(runtime: SkillRuntime) -> Self {
+        Self { runtime }
     }
 }
 
@@ -257,12 +257,12 @@ impl ToolBinding for SkillManageTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let options = self.options.clone();
+        let runtime = self.runtime.clone();
         Box::pin(async move {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match skill_manage_impl(&options, args) {
+            match skill_manage_impl(&runtime, args) {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -270,9 +270,10 @@ impl ToolBinding for SkillManageTool {
     }
 }
 
-pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) -> Result<Value> {
+pub(crate) fn skill_manage_impl(runtime: &SkillRuntime, args: Value) -> Result<Value> {
+    let options = runtime.options();
     let action = required_string(&args, "action")?;
-    match action {
+    let result = match action {
         "create" => {
             let name = required_string(&args, "name")?;
             let description = required_string(&args, "description")?;
@@ -284,13 +285,13 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
                 description,
             )?;
             if let Some(content) = optional_string(&args, "content")? {
-                let catalog = discover_skills(options)?;
+                let catalog = runtime.refresh()?;
                 crate::skills::edit_skill(&catalog, &options.home, &options.cwd, name, content)?;
             }
             Ok(value)
         }
         "edit" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             crate::skills::edit_skill(
                 &catalog,
                 &options.home,
@@ -300,7 +301,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             )
         }
         "patch" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             patch_skill(
                 &catalog,
                 &options.home,
@@ -317,7 +318,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
                     "delete requires an intent or reason".to_string(),
                 ));
             }
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             remove_skill(
                 &catalog,
                 &options.home,
@@ -326,7 +327,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             )
         }
         "write_file" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             crate::skills::write_skill_file(
                 &catalog,
                 &options.home,
@@ -337,7 +338,7 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
             )
         }
         "remove_file" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             crate::skills::remove_skill_file(
                 &catalog,
                 &options.home,
@@ -349,18 +350,22 @@ pub(crate) fn skill_manage_impl(options: &SkillDiscoveryOptions, args: Value) ->
         other => Err(Error::Message(format!(
             "unknown skill_manage action: {other}"
         ))),
+    };
+    if result.is_ok() {
+        runtime.refresh()?;
     }
+    result
 }
 
 #[derive(Clone)]
 pub(crate) struct SkillHubTool {
-    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) runtime: SkillRuntime,
     pub(crate) mode: RunMode,
 }
 
 impl SkillHubTool {
-    pub(crate) fn new(options: SkillDiscoveryOptions, mode: RunMode) -> Self {
-        Self { options, mode }
+    pub(crate) fn new(runtime: SkillRuntime, mode: RunMode) -> Self {
+        Self { runtime, mode }
     }
 }
 
@@ -434,13 +439,13 @@ impl ToolBinding for SkillHubTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let options = self.options.clone();
+        let runtime = self.runtime.clone();
         let mode = self.mode;
         Box::pin(async move {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match skill_hub_impl(&options, mode, args) {
+            match skill_hub_impl(&runtime, mode, args) {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -449,10 +454,11 @@ impl ToolBinding for SkillHubTool {
 }
 
 pub(crate) fn skill_hub_impl(
-    options: &SkillDiscoveryOptions,
+    runtime: &SkillRuntime,
     mode: RunMode,
     args: Value,
 ) -> Result<Value> {
+    let options = runtime.options();
     let action = required_string(&args, "action")?;
     let readonly = matches!(
         action,
@@ -465,7 +471,7 @@ pub(crate) fn skill_hub_impl(
     }
     match action {
         "browse" | "search" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             let query = optional_string(&args, "query")?
                 .unwrap_or_default()
                 .to_lowercase();
@@ -484,14 +490,14 @@ pub(crate) fn skill_hub_impl(
             Ok(json!({"success": true, "action": action, "skills": skills}))
         }
         "inspect" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             let name = optional_string(&args, "identifier")?
                 .or_else(|| optional_string(&args, "name").ok().flatten())
                 .ok_or_else(|| Error::Message("identifier is required".to_string()))?;
             view_skill_value(&catalog, name, None)
         }
         "list" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             Ok(list_skills_value_with_options(
                 &catalog,
                 &ListSkillsOptions {
@@ -510,7 +516,7 @@ pub(crate) fn skill_hub_impl(
                 let scan = crate::skills::scan_skill_path(Path::new(path))?;
                 Ok(json!({"success": true, "scan": scan}))
             } else {
-                let catalog = discover_skills(options)?;
+                let catalog = runtime.catalog()?;
                 let scans = catalog
                     .skills
                     .iter()
@@ -524,7 +530,7 @@ pub(crate) fn skill_hub_impl(
         }
         "install" => {
             let identifier = required_string(&args, "identifier")?.to_string();
-            install_skill(
+            let result = install_skill(
                 &options.home,
                 &options.cwd,
                 InstallOptions {
@@ -534,19 +540,23 @@ pub(crate) fn skill_hub_impl(
                     all: args.get("all").and_then(Value::as_bool).unwrap_or(false),
                     force: false,
                 },
-            )
+            )?;
+            runtime.refresh()?;
+            Ok(result)
         }
         "update" => Ok(
             json!({"success": true, "updated": [], "message": "hub update is not configured for this source"}),
         ),
         "uninstall" => {
-            let catalog = discover_skills(options)?;
-            remove_skill(
+            let catalog = runtime.catalog()?;
+            let result = remove_skill(
                 &catalog,
                 &options.home,
                 &options.cwd,
                 required_string(&args, "name")?,
-            )
+            )?;
+            runtime.refresh()?;
+            Ok(result)
         }
         "publish" => {
             let path = required_string(&args, "path")?;
@@ -569,13 +579,13 @@ pub(crate) fn skill_hub_impl(
 
 #[derive(Clone)]
 pub(crate) struct SkillConfigTool {
-    pub(crate) options: SkillDiscoveryOptions,
+    pub(crate) runtime: SkillRuntime,
     pub(crate) mode: RunMode,
 }
 
 impl SkillConfigTool {
-    pub(crate) fn new(options: SkillDiscoveryOptions, mode: RunMode) -> Self {
-        Self { options, mode }
+    pub(crate) fn new(runtime: SkillRuntime, mode: RunMode) -> Self {
+        Self { runtime, mode }
     }
 }
 
@@ -628,13 +638,13 @@ impl ToolBinding for SkillConfigTool {
         args: Value,
         abort: AbortSignal,
     ) -> BoxFuture<'static, ToolOutput> {
-        let options = self.options.clone();
+        let runtime = self.runtime.clone();
         let mode = self.mode;
         Box::pin(async move {
             if abort.aborted() {
                 return ToolOutput::error("aborted");
             }
-            match skill_config_impl(&options, mode, args) {
+            match skill_config_impl(&runtime, mode, args) {
                 Ok(value) => ToolOutput::ok(value),
                 Err(err) => ToolOutput::error(err.to_string()),
             }
@@ -643,10 +653,11 @@ impl ToolBinding for SkillConfigTool {
 }
 
 pub(crate) fn skill_config_impl(
-    options: &SkillDiscoveryOptions,
+    runtime: &SkillRuntime,
     mode: RunMode,
     args: Value,
 ) -> Result<Value> {
+    let options = runtime.options();
     let action = required_string(&args, "action")?;
     if mode == RunMode::Plan && action != "status" {
         return Err(Error::Message(format!(
@@ -655,7 +666,7 @@ pub(crate) fn skill_config_impl(
     }
     match action {
         "status" => {
-            let catalog = discover_skills(options)?;
+            let catalog = runtime.catalog()?;
             Ok(list_skills_value_with_options(
                 &catalog,
                 &ListSkillsOptions {
@@ -665,31 +676,41 @@ pub(crate) fn skill_config_impl(
                 },
             ))
         }
-        "enable" => set_skill_enabled(
-            &options.home,
-            &options.cwd,
-            target_from_args(&args)?,
-            required_string(&args, "name")?,
-            true,
-        ),
-        "disable" => set_skill_enabled(
-            &options.home,
-            &options.cwd,
-            target_from_args(&args)?,
-            required_string(&args, "name")?,
-            false,
-        ),
+        "enable" => {
+            let result = set_skill_enabled(
+                &options.home,
+                &options.cwd,
+                target_from_args(&args)?,
+                required_string(&args, "name")?,
+                true,
+            )?;
+            runtime.refresh()?;
+            Ok(result)
+        }
+        "disable" => {
+            let result = set_skill_enabled(
+                &options.home,
+                &options.cwd,
+                target_from_args(&args)?,
+                required_string(&args, "name")?,
+                false,
+            )?;
+            runtime.refresh()?;
+            Ok(result)
+        }
         "set" => {
             let value = args.get("value").cloned().ok_or_else(|| {
                 Error::Message("value is required for skill_config set".to_string())
             })?;
-            set_skill_config_value(
+            let result = set_skill_config_value(
                 &options.home,
                 &options.cwd,
                 target_from_args(&args)?,
                 required_string(&args, "key")?,
                 value,
-            )
+            )?;
+            runtime.refresh()?;
+            Ok(result)
         }
         other => Err(Error::Message(format!(
             "unknown skill_config action: {other}"

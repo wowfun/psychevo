@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::{CustomToolsetConfig, PluginPolicyEntry, ToolsetContribution};
-use crate::contribution_projection::ContributionProjection;
 use crate::hooks::HookSourceDescriptor;
 use crate::types::{McpServerInput, RuntimeTool};
 
@@ -296,7 +295,6 @@ pub(crate) struct PluginRuntimeAssembly {
     pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) runtime_tools: Vec<RuntimeTool>,
     pub(crate) warnings: Vec<crate::types::RunWarning>,
-    pub(crate) projection: ContributionProjection,
 }
 
 pub(crate) struct EnabledPluginManifest {

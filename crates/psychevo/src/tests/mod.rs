@@ -98,6 +98,7 @@ pub(crate) async fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
     }
 }
 

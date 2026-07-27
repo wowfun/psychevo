@@ -1,5 +1,4 @@
 use psychevo_agent_core::now_ms;
-use serde_json::Value;
 use sqlx::Row;
 
 use crate::error::{Error, Result};
@@ -69,21 +68,18 @@ impl StateRuntime {
                    tokens_before, tokens_after, summary_provider, summary_model,
                    instructions, metadata_json
             FROM session_compactions
-            WHERE session_id = ?1 AND created_after_session_seq < ?2
+            WHERE session_id = ?1
+              AND created_after_session_seq < ?2
+              AND COALESCE(json_extract(metadata_json, '$.projection_only'), 0) != 1
             ORDER BY created_at_ms DESC, id DESC
+            LIMIT 1
             "#,
             )
             .bind(session_id)
             .bind(boundary)
-            .fetch_all(&mut *conn)
+            .fetch_optional(&mut *conn)
             .await?;
-            for row in rows {
-                let record = compaction_from_row(&row)?;
-                if !compaction_is_projection_only(&record) {
-                    return Ok(Some(record));
-                }
-            }
-            Ok(None)
+            rows.map(|row| compaction_from_row(&row)).transpose()
         })
         .await
     }
@@ -176,22 +172,34 @@ impl StateRuntime {
         &self,
         session_id: &str,
     ) -> Result<Vec<SessionMessageRecord>> {
+        self.load_message_records_from(session_id, None).await
+    }
+
+    pub async fn load_message_records_from(
+        &self,
+        session_id: &str,
+        first_session_seq: Option<i64>,
+    ) -> Result<Vec<SessionMessageRecord>> {
         let boundary = self
             .session_revert_state(session_id)
             .await?
             .map(|revert| revert.start_seq)
             .unwrap_or(i64::MAX);
+        let first_session_seq = first_session_seq.unwrap_or(i64::MIN);
         self.observe_sqlx(async {
             let mut conn = self.acquire_sqlx().await?;
             let rows = sqlx::query(
                 r#"
             SELECT session_seq, message_json
             FROM messages
-            WHERE session_id = ?1 AND session_seq < ?2
+            WHERE session_id = ?1
+              AND session_seq >= ?2
+              AND session_seq < ?3
             ORDER BY session_seq ASC
             "#,
             )
             .bind(session_id)
+            .bind(first_session_seq)
             .bind(boundary)
             .fetch_all(&mut *conn)
             .await?;
@@ -284,15 +292,6 @@ impl StateRuntime {
         })
         .await
     }
-}
-
-fn compaction_is_projection_only(record: &SessionCompactionRecord) -> bool {
-    record
-        .metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("projection_only"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
 }
 
 pub(crate) fn compaction_from_row(

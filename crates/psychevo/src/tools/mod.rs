@@ -23,10 +23,12 @@ pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::prompt_templates;
 pub(crate) use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
 pub(crate) use crate::skills::{
-    InstallOptions, ListSkillsOptions, SkillDiscoveryOptions, SkillTarget, create_skill,
-    discover_skills, install_skill, list_skills_value_with_options, patch_skill, remove_skill,
-    set_skill_config_value, set_skill_enabled, view_skill_value,
+    InstallOptions, ListSkillsOptions, SkillRuntime, SkillTarget, create_skill, install_skill,
+    list_skills_value_with_options, patch_skill, remove_skill, set_skill_config_value,
+    set_skill_enabled, view_skill_value,
 };
+#[cfg(test)]
+pub(crate) use crate::skills::SkillDiscoveryOptions;
 pub(crate) use crate::types::{
     RunMode, RunStreamEvent, RunStreamSink, WorkspaceMutation, WorkspaceMutationSink,
 };
@@ -133,21 +135,29 @@ pub(crate) fn clarify_tool(
     Arc::new(ClarifyTool::new(control, stream))
 }
 
+#[cfg(test)]
 pub(crate) fn skill_tools_for_mode(
     options: SkillDiscoveryOptions,
     mode: RunMode,
 ) -> Vec<Arc<dyn ToolBinding>> {
+    skill_tools_for_mode_with_runtime(SkillRuntime::new(options), mode)
+}
+
+pub(crate) fn skill_tools_for_mode_with_runtime(
+    runtime: SkillRuntime,
+    mode: RunMode,
+) -> Vec<Arc<dyn ToolBinding>> {
     let mut tools: Vec<Arc<dyn ToolBinding>> = vec![
-        Arc::new(ListSkillsTool::new(options.clone())),
-        Arc::new(ViewSkillTool::new(options.clone())),
+        Arc::new(ListSkillsTool::new(runtime.clone())),
+        Arc::new(ViewSkillTool::new(runtime.clone())),
     ];
     if mode == RunMode::Default {
-        tools.push(Arc::new(SkillManageTool::new(options.clone())));
-        tools.push(Arc::new(SkillHubTool::new(options.clone(), mode)));
-        tools.push(Arc::new(SkillConfigTool::new(options, mode)));
+        tools.push(Arc::new(SkillManageTool::new(runtime.clone())));
+        tools.push(Arc::new(SkillHubTool::new(runtime.clone(), mode)));
+        tools.push(Arc::new(SkillConfigTool::new(runtime, mode)));
     } else {
-        tools.push(Arc::new(SkillHubTool::new(options.clone(), mode)));
-        tools.push(Arc::new(SkillConfigTool::new(options, mode)));
+        tools.push(Arc::new(SkillHubTool::new(runtime.clone(), mode)));
+        tools.push(Arc::new(SkillConfigTool::new(runtime, mode)));
     }
     tools
 }

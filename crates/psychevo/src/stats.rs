@@ -1,8 +1,7 @@
-use psychevo_agent_core::{Message, now_ms};
+use psychevo_agent_core::now_ms;
 use serde_json::{Value, json};
 use sqlx::Row;
 
-use crate::accounting::{UsageTotalStatus, effective_usage_total_from_parts};
 use crate::error::Result;
 use crate::paths::canonical_cwd;
 use crate::types::{
@@ -45,147 +44,150 @@ pub async fn usage_stats(options: StatsOptions) -> Result<Value> {
 
 pub async fn session_usage_summary(options: SessionUsageOptions) -> Result<SessionUsageSummary> {
     let store = options.state;
-    let summary = store
-        .session_summary(&options.session_id)
+    let boundary = store
+        .session_revert_state(&options.session_id)
         .await?
-        .ok_or_else(|| {
-            crate::Error::Message(format!("session not found: {}", options.session_id))
-        })?;
-    let messages = store.load_tui_message_summaries(&summary.id).await?;
-    let mut totals = SessionUsageTotals::default();
-    let mut provider = summary.provider;
-    let mut model = summary.model;
-    for message in messages {
-        totals.message_count += 1;
-        let is_assistant = matches!(message.message, Message::Assistant { .. });
-        if is_assistant {
-            totals.assistant_message_count += 1;
-            if let Message::Assistant {
-                provider: message_provider,
-                model: message_model,
-                ..
-            } = &message.message
-            {
-                if let Some(value) = message_provider {
-                    provider = value.clone();
-                }
-                if let Some(value) = message_model {
-                    model = value.clone();
-                }
-            }
-        }
-        let accounting = message.accounting.as_ref();
-        let usage = message.usage.as_ref();
-        let context_input_tokens = usage_u64(
-            accounting,
-            usage,
-            "context_input_tokens",
-            &["input_tokens", "prompt_tokens", "context_input_tokens"],
-        )
-        .unwrap_or(0);
-        let reasoning_tokens =
-            usage_u64(accounting, usage, "reasoning_tokens", &["reasoning_tokens"]).unwrap_or(0);
-        let cache_read_tokens = usage_u64(
-            accounting,
-            usage,
-            "cache_read_tokens",
-            &[
-                "cached_tokens",
-                "cached_input_tokens",
-                "cache_read_tokens",
-                "cache_read_input_tokens",
-            ],
-        )
-        .unwrap_or(0);
-        let cache_write_tokens = usage_u64(
-            accounting,
-            usage,
-            "cache_write_tokens",
-            &["cache_write_tokens", "cache_creation_input_tokens"],
-        )
-        .unwrap_or(0);
-        let output_tokens = usage_u64(
-            accounting,
-            usage,
-            "billable_output_tokens",
-            &["output_tokens", "completion_tokens"],
-        )
-        .unwrap_or(0);
-        totals.context_input_tokens += context_input_tokens;
-        totals.billable_input_tokens += json_u64(accounting, "billable_input_tokens")
-            .unwrap_or_else(|| {
-                context_input_tokens
-                    .saturating_sub(cache_read_tokens)
-                    .saturating_sub(cache_write_tokens)
-            });
-        totals.billable_output_tokens += json_u64(accounting, "billable_output_tokens")
-            .unwrap_or_else(|| output_tokens.saturating_sub(reasoning_tokens));
-        totals.reasoning_tokens += reasoning_tokens;
-        totals.cache_read_tokens += cache_read_tokens;
-        totals.cache_write_tokens += cache_write_tokens;
-        let reported_total = usage_u64(
-            accounting,
-            usage,
-            "reported_total_tokens",
-            &["total_tokens", "reported_total_tokens"],
-        );
-        totals.reported_total_tokens += reported_total.unwrap_or(0);
-        if is_assistant {
-            let usage_input = usage.and_then(|usage| {
-                [
-                    "input_tokens",
-                    "prompt_tokens",
-                    "context_input_tokens",
-                    "inputTokens",
-                ]
-                .iter()
-                .find_map(|key| usage.get(*key).and_then(Value::as_u64))
-            });
-            let usage_output = usage.and_then(|usage| {
-                ["output_tokens", "completion_tokens", "outputTokens"]
-                    .iter()
-                    .find_map(|key| usage.get(*key).and_then(Value::as_u64))
-            });
-            let accounting_output = json_u64(accounting, "billable_output_tokens")
-                .map(|value| value.saturating_add(reasoning_tokens));
-            let total = effective_usage_total_from_parts(
-                reported_total,
-                json_u64(accounting, "context_input_tokens").or(usage_input),
-                usage_output.or(accounting_output),
-            );
-            totals.record_provider_call(total.status, total.tokens);
-            totals.add_cost_status(accounting, total.tokens.is_some());
-        }
-        if let Some(cost) = json_i64(accounting, "estimated_cost_nanodollars") {
-            totals.estimated_cost_nanodollars += cost;
-        }
-    }
-    let cache_read_percent =
-        cache_read_percent(totals.cache_read_tokens, totals.context_input_tokens);
+        .map(|revert| revert.start_seq)
+        .unwrap_or(i64::MAX);
+    let reported_sql = usage_reported_total_sql();
+    let input_sql = usage_context_input_sql();
+    let output_sql = usage_output_sql();
+    let reasoning_sql = usage_reasoning_sql();
+    let cache_read_sql = usage_cache_read_sql();
+    let cache_write_sql = usage_cache_write_sql();
+    let billable_input_sql = format!(
+        "COALESCE(m.billable_input_tokens, MAX(COALESCE(({input_sql}), 0) - COALESCE(({cache_read_sql}), 0) - COALESCE(({cache_write_sql}), 0), 0))"
+    );
+    let billable_output_sql = format!(
+        "COALESCE(m.billable_output_tokens, MAX(COALESCE(({output_sql}), 0) - COALESCE(({reasoning_sql}), 0), 0))"
+    );
+    let complete_sql = format!(
+        "(({reported_sql}) IS NOT NULL OR (({input_sql}) IS NOT NULL AND ({output_sql}) IS NOT NULL))"
+    );
+    let known_sql = format!(
+        "(({reported_sql}) IS NOT NULL OR ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL)"
+    );
+    let effective_sql = format!(
+        "CASE WHEN ({reported_sql}) IS NOT NULL THEN ({reported_sql}) WHEN ({input_sql}) IS NOT NULL OR ({output_sql}) IS NOT NULL THEN COALESCE(({input_sql}), 0) + COALESCE(({output_sql}), 0) ELSE NULL END"
+    );
+    let sql = format!(
+        r#"
+        SELECT
+            COALESCE((
+                SELECT latest.provider
+                FROM messages latest
+                WHERE latest.session_id = s.id
+                  AND latest.session_seq < ?2
+                  AND latest.role = 'assistant'
+                  AND latest.provider IS NOT NULL
+                ORDER BY latest.session_seq DESC
+                LIMIT 1
+            ), s.provider),
+            COALESCE((
+                SELECT latest.model
+                FROM messages latest
+                WHERE latest.session_id = s.id
+                  AND latest.session_seq < ?2
+                  AND latest.role = 'assistant'
+                  AND latest.model IS NOT NULL
+                ORDER BY latest.session_seq DESC
+                LIMIT 1
+            ), s.model),
+            COUNT(m.id),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM({input_sql}), 0),
+            COALESCE(SUM({billable_input_sql}), 0),
+            COALESCE(SUM({billable_output_sql}), 0),
+            COALESCE(SUM({reasoning_sql}), 0),
+            COALESCE(SUM({cache_read_sql}), 0),
+            COALESCE(SUM({cache_write_sql}), 0),
+            COALESCE(SUM({reported_sql}), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN {effective_sql} ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {complete_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND NOT {complete_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND ({reported_sql}) IS NULL
+                      AND {complete_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND NOT {complete_sql}
+                      AND {known_sql} THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(m.estimated_cost_nanodollars), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {known_sql}
+                      AND {cost_status_sql} = 'estimated' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {known_sql}
+                      AND {cost_status_sql} = 'free' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {known_sql}
+                      AND {cost_status_sql} = 'included' THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN m.role = 'assistant' AND {known_sql}
+                      AND {cost_status_sql} = 'unknown' THEN 1 ELSE 0 END), 0)
+        FROM sessions s
+        LEFT JOIN messages m
+          ON m.session_id = s.id
+         AND m.session_seq < ?2
+        WHERE s.id = ?1
+        GROUP BY s.id
+        "#,
+        cost_status_sql = cost_status_sql(),
+    );
+    let session_id = options.session_id;
+    let row = store
+        .observe_sqlx(async {
+            let mut conn = store.acquire_sqlx().await?;
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(&session_id)
+                .bind(boundary)
+                .fetch_optional(&mut *conn)
+                .await?
+                .ok_or_else(|| {
+                    crate::Error::Message(format!("session not found: {session_id}"))
+                })
+        })
+        .await?;
+    let accounted_provider_call_count = row_u64(&row, 12)?;
+    let unaccounted_provider_call_count = row_u64(&row, 13)?;
+    let derived_provider_call_count = row_u64(&row, 14)?;
+    let partial_provider_call_count = row_u64(&row, 15)?;
+    let effective_total_tokens = row_u64(&row, 11)?;
+    let estimated_pricing_count = row_u64(&row, 17)?;
+    let free_pricing_count = row_u64(&row, 18)?;
+    let included_pricing_count = row_u64(&row, 19)?;
+    let unknown_pricing_count = row_u64(&row, 20)?;
+    let context_input_tokens = row_u64(&row, 4)?;
+    let cache_read_tokens = row_u64(&row, 8)?;
     Ok(SessionUsageSummary {
-        session_id: summary.id,
-        provider,
-        model,
-        message_count: totals.message_count,
-        assistant_message_count: totals.assistant_message_count,
-        context_input_tokens: totals.context_input_tokens,
-        billable_input_tokens: totals.billable_input_tokens,
-        billable_output_tokens: totals.billable_output_tokens,
-        reasoning_tokens: totals.reasoning_tokens,
-        cache_read_tokens: totals.cache_read_tokens,
-        cache_write_tokens: totals.cache_write_tokens,
-        effective_total_tokens: totals.effective_total_tokens(),
-        reported_total_tokens: totals.reported_total_tokens,
-        total_status: totals.total_status().to_string(),
-        accounted_provider_call_count: totals.accounted_provider_call_count,
-        unaccounted_provider_call_count: totals.unaccounted_provider_call_count,
-        estimated_cost_nanodollars: totals.estimated_cost_nanodollars,
-        cost_status: totals.cost_status(),
-        estimated_pricing_count: totals.estimated_pricing_count,
-        free_pricing_count: totals.free_pricing_count,
-        included_pricing_count: totals.included_pricing_count,
-        unknown_pricing_count: totals.unknown_pricing_count,
-        cache_read_percent,
+        session_id,
+        provider: row.try_get(0)?,
+        model: row.try_get(1)?,
+        message_count: row_u64(&row, 2)?,
+        assistant_message_count: row_u64(&row, 3)?,
+        context_input_tokens,
+        billable_input_tokens: row_u64(&row, 5)?,
+        billable_output_tokens: row_u64(&row, 6)?,
+        reasoning_tokens: row_u64(&row, 7)?,
+        cache_read_tokens,
+        cache_write_tokens: row_u64(&row, 9)?,
+        effective_total_tokens: (accounted_provider_call_count + partial_provider_call_count > 0)
+            .then_some(effective_total_tokens),
+        reported_total_tokens: row_u64(&row, 10)?,
+        total_status: aggregate_usage_total_status(
+            accounted_provider_call_count,
+            unaccounted_provider_call_count,
+            derived_provider_call_count,
+            partial_provider_call_count,
+        )
+        .to_string(),
+        accounted_provider_call_count,
+        unaccounted_provider_call_count,
+        estimated_cost_nanodollars: row.try_get(16)?,
+        cost_status: aggregate_cost_status(
+            estimated_pricing_count,
+            free_pricing_count,
+            included_pricing_count,
+            unknown_pricing_count,
+        ),
+        estimated_pricing_count,
+        free_pricing_count,
+        included_pricing_count,
+        unknown_pricing_count,
+        cache_read_percent: cache_read_percent(cache_read_tokens, context_input_tokens),
     })
 }
 
@@ -221,115 +223,6 @@ pub async fn usage_read(options: UsageReadOptions) -> Result<UsageReadResult> {
             })
         })
         .await
-}
-
-#[derive(Default)]
-struct SessionUsageTotals {
-    message_count: u64,
-    assistant_message_count: u64,
-    context_input_tokens: u64,
-    billable_input_tokens: u64,
-    billable_output_tokens: u64,
-    reasoning_tokens: u64,
-    cache_read_tokens: u64,
-    cache_write_tokens: u64,
-    effective_total_tokens: u64,
-    reported_total_tokens: u64,
-    reported_provider_call_count: u64,
-    derived_provider_call_count: u64,
-    partial_provider_call_count: u64,
-    accounted_provider_call_count: u64,
-    unaccounted_provider_call_count: u64,
-    estimated_cost_nanodollars: i64,
-    estimated_pricing_count: u64,
-    free_pricing_count: u64,
-    included_pricing_count: u64,
-    unknown_pricing_count: u64,
-}
-
-impl SessionUsageTotals {
-    fn record_provider_call(&mut self, status: UsageTotalStatus, tokens: Option<u64>) {
-        if let Some(tokens) = tokens {
-            self.effective_total_tokens = self.effective_total_tokens.saturating_add(tokens);
-        }
-        match status {
-            UsageTotalStatus::Reported => {
-                self.reported_provider_call_count += 1;
-                self.accounted_provider_call_count += 1;
-            }
-            UsageTotalStatus::Derived => {
-                self.derived_provider_call_count += 1;
-                self.accounted_provider_call_count += 1;
-            }
-            UsageTotalStatus::Partial => {
-                self.partial_provider_call_count += 1;
-                self.unaccounted_provider_call_count += 1;
-            }
-            UsageTotalStatus::Unavailable => self.unaccounted_provider_call_count += 1,
-        }
-    }
-
-    fn effective_total_tokens(&self) -> Option<u64> {
-        (self.reported_provider_call_count
-            + self.derived_provider_call_count
-            + self.partial_provider_call_count
-            > 0)
-        .then_some(self.effective_total_tokens)
-    }
-
-    fn total_status(&self) -> &'static str {
-        if self.unaccounted_provider_call_count > 0 {
-            if self.effective_total_tokens().is_some() {
-                "partial"
-            } else {
-                "unavailable"
-            }
-        } else if self.derived_provider_call_count > 0 {
-            "derived"
-        } else if self.reported_provider_call_count > 0 {
-            "reported"
-        } else {
-            "unavailable"
-        }
-    }
-
-    fn add_cost_status(&mut self, accounting: Option<&Value>, provider_call_has_tokens: bool) {
-        if !provider_call_has_tokens {
-            return;
-        }
-        match cost_status_from_accounting(accounting).as_str() {
-            "estimated" => self.estimated_pricing_count += 1,
-            "free" => self.free_pricing_count += 1,
-            "included" => self.included_pricing_count += 1,
-            _ => self.unknown_pricing_count += 1,
-        }
-    }
-
-    fn cost_status(&self) -> String {
-        aggregate_cost_status(
-            self.estimated_pricing_count,
-            self.free_pricing_count,
-            self.included_pricing_count,
-            self.unknown_pricing_count,
-        )
-    }
-}
-
-fn cost_status_from_accounting(accounting: Option<&Value>) -> String {
-    if let Some(status) = accounting
-        .and_then(|value| value.get("cost_status"))
-        .and_then(Value::as_str)
-    {
-        return match status {
-            "estimated" | "free" | "included" | "unknown" => status.to_string(),
-            _ => "unknown".to_string(),
-        };
-    }
-    match json_i64(accounting, "estimated_cost_nanodollars") {
-        Some(0) => "free".to_string(),
-        Some(_) => "estimated".to_string(),
-        None => "unknown".to_string(),
-    }
 }
 
 fn aggregate_cost_status(
@@ -390,6 +283,18 @@ fn usage_context_input_sql() -> &'static str {
 
 fn usage_output_sql() -> &'static str {
     "COALESCE(json_extract(m.usage_json, '$.output_tokens'), json_extract(m.usage_json, '$.completion_tokens'), json_extract(m.usage_json, '$.outputTokens'), CASE WHEN m.billable_output_tokens IS NOT NULL THEN m.billable_output_tokens + COALESCE(m.reasoning_tokens, 0) END)"
+}
+
+fn usage_reasoning_sql() -> &'static str {
+    "COALESCE(m.reasoning_tokens, json_extract(m.usage_json, '$.reasoning_tokens'))"
+}
+
+fn usage_cache_read_sql() -> &'static str {
+    "COALESCE(m.cache_read_tokens, json_extract(m.usage_json, '$.cached_tokens'), json_extract(m.usage_json, '$.cached_input_tokens'), json_extract(m.usage_json, '$.cache_read_tokens'), json_extract(m.usage_json, '$.cache_read_input_tokens'))"
+}
+
+fn usage_cache_write_sql() -> &'static str {
+    "COALESCE(m.cache_write_tokens, json_extract(m.usage_json, '$.cache_write_tokens'), json_extract(m.usage_json, '$.cache_creation_input_tokens'))"
 }
 
 async fn usage_window_summary(
@@ -682,28 +587,6 @@ fn row_u64(row: &sqlx::sqlite::SqliteRow, index: usize) -> Result<u64> {
     row.try_get::<i64, _>(index)
         .map(|value| value.max(0) as u64)
         .map_err(Into::into)
-}
-
-fn usage_u64(
-    accounting: Option<&Value>,
-    usage: Option<&Value>,
-    accounting_key: &str,
-    usage_keys: &[&str],
-) -> Option<u64> {
-    json_u64(accounting, accounting_key)
-        .or_else(|| usage_keys.iter().find_map(|key| json_u64(usage, key)))
-}
-
-fn json_u64(value: Option<&Value>, key: &str) -> Option<u64> {
-    value?.get(key).and_then(|value| {
-        value
-            .as_u64()
-            .or_else(|| value.as_i64().and_then(|value| u64::try_from(value).ok()))
-    })
-}
-
-fn json_i64(value: Option<&Value>, key: &str) -> Option<i64> {
-    value?.get(key).and_then(Value::as_i64)
 }
 
 pub(crate) struct StatsScope {

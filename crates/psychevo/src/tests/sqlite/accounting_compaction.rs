@@ -408,6 +408,70 @@ pub(crate) async fn session_usage_summary_sums_accounting_and_handles_missing_ac
 }
 
 #[tokio::test]
+pub(crate) async fn session_usage_summary_aggregates_columns_without_loading_message_json() {
+    let temp = tempdir().expect("temp");
+    let db = temp.path().join("state.db");
+    let cwd = canonical_cwd(&temp.path().join("work")).expect("cwd");
+    let store = StateRuntime::open(&db).await.expect("store");
+    let session_id = store
+        .create_session_with_metadata(&cwd, "run", "model", "provider", None)
+        .await
+        .expect("session");
+    store
+        .append_message_with_metrics_and_accounting(
+            &session_id,
+            &Message::Assistant {
+                content: vec![AssistantBlock::Text {
+                    text: "large persisted payload is irrelevant to aggregation".to_string(),
+                }],
+                timestamp_ms: 1,
+                finish_reason: Some("stop".to_string()),
+                outcome: Outcome::Normal,
+                model: Some("latest-model".to_string()),
+                provider: Some("latest-provider".to_string()),
+            },
+            None,
+            None,
+            Some(MessageAccounting {
+                context_input_tokens: Some(80),
+                billable_input_tokens: Some(60),
+                billable_output_tokens: Some(20),
+                reasoning_tokens: None,
+                cache_read_tokens: Some(20),
+                cache_write_tokens: None,
+                reported_total_tokens: Some(100),
+                estimated_cost_nanodollars: Some(7),
+                pricing_source: Some("test".to_string()),
+                pricing_tier: None,
+                cost_status: Some(crate::types::CostStatus::Estimated),
+                pricing_missing_reason: None,
+                pricing_version: None,
+            }),
+        )
+        .await
+        .expect("append");
+    let mut conn = store.acquire_sqlx().await.expect("connection");
+    sqlx::query("UPDATE messages SET message_json = 'not-json' WHERE session_id = ?1")
+        .bind(&session_id)
+        .execute(&mut *conn)
+        .await
+        .expect("corrupt payload outside aggregate columns");
+    drop(conn);
+
+    let summary = session_usage_summary(SessionUsageOptions {
+        state: store,
+        session_id,
+    })
+    .await
+    .expect("summary");
+
+    assert_eq!(summary.provider, "latest-provider");
+    assert_eq!(summary.model, "latest-model");
+    assert_eq!(summary.context_input_tokens, 80);
+    assert_eq!(summary.effective_total_tokens, Some(100));
+}
+
+#[tokio::test]
 pub(crate) async fn effective_usage_total_never_double_counts_token_subcategories() {
     use crate::accounting::{UsageTotalStatus, effective_usage_total};
 

@@ -61,6 +61,8 @@ pub struct RunOptions {
     pub selected_capability_roots: Vec<SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
     pub mcp_servers: Vec<McpServerInput>,
+    #[doc(hidden)]
+    pub mcp_runtime: Option<crate::mcp::McpRuntime>,
     pub workspace_mutations: Option<WorkspaceMutationSink>,
     pub runtime_tools: Vec<RuntimeTool>,
 }

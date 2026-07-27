@@ -46,8 +46,8 @@ async fn default_feature_surface_builds_and_owns_threads() {
         .list_threads(ThreadListQuery::default())
         .await
         .expect("thread summaries");
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, thread.id());
+    assert_eq!(listed.threads.len(), 1);
+    assert_eq!(listed.threads[0].id, thread.id());
 
     application.shutdown().await.expect("shutdown");
 }

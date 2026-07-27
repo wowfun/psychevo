@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -142,12 +142,76 @@ impl McpSourceCatalog {
             hasher.update([0]);
             hasher.update(entry.source_kind.as_bytes());
             hasher.update([0]);
-            hasher.update(mcp_transport_kind(&entry.input.transport).as_bytes());
-            hasher.update([0]);
+            update_mcp_transport_hash(&mut hasher, &entry.input.transport);
             update_mcp_policy_hash(&mut hasher, &entry.input.policy);
         }
         format!("{:x}", hasher.finalize())
     }
+}
+
+fn update_mcp_transport_hash(hasher: &mut Sha256, transport: &McpTransportInput) {
+    match transport {
+        McpTransportInput::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => {
+            hasher.update(b"stdio");
+            update_mcp_hash_value(hasher, &command.to_string_lossy());
+            for arg in args {
+                update_mcp_hash_value(hasher, arg);
+            }
+            hasher.update([0xff]);
+            for (name, value) in env {
+                update_mcp_hash_value(hasher, name);
+                update_mcp_hash_value(hasher, value);
+            }
+            hasher.update([0xff]);
+            if let Some(cwd) = cwd {
+                update_mcp_hash_value(hasher, &cwd.to_string_lossy());
+            }
+        }
+        McpTransportInput::StreamableHttp {
+            url,
+            headers,
+            bearer_token_env_var,
+            scopes,
+            oauth_resource,
+            oauth_client_id,
+        } => {
+            hasher.update(b"streamable_http");
+            update_mcp_hash_value(hasher, url);
+            for (name, value) in headers {
+                update_mcp_hash_value(hasher, name);
+                update_mcp_hash_value(hasher, value);
+            }
+            hasher.update([0xff]);
+            if let Some(env_var) = bearer_token_env_var {
+                update_mcp_hash_value(hasher, env_var);
+            }
+            for scope in scopes {
+                update_mcp_hash_value(hasher, scope);
+            }
+            hasher.update([0xff]);
+            if let Some(resource) = oauth_resource {
+                update_mcp_hash_value(hasher, resource);
+            }
+            if let Some(client_id) = oauth_client_id {
+                update_mcp_hash_value(hasher, client_id);
+            }
+        }
+        McpTransportInput::Unsupported { kind } => {
+            hasher.update(b"unsupported");
+            update_mcp_hash_value(hasher, kind);
+        }
+    }
+    hasher.update([0]);
+}
+
+fn update_mcp_hash_value(hasher: &mut Sha256, value: &str) {
+    hasher.update(value.len().to_le_bytes());
+    hasher.update(value.as_bytes());
 }
 
 fn update_mcp_policy_hash(hasher: &mut Sha256, policy: &McpServerPolicy) {
@@ -246,6 +310,146 @@ pub(crate) struct McpRuntimeSnapshot {
     pub(crate) prompts_available: bool,
     pub(crate) sampling_config: McpSamplingConfig,
     pub(crate) elicitation_policy: McpElicitationPolicy,
+    reusable: bool,
+}
+
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct McpRuntime {
+    owner: McpRuntimeOwner,
+}
+
+#[derive(Clone)]
+enum McpRuntimeOwner {
+    Direct(Arc<Mutex<McpConnectionManager>>),
+    Thread {
+        registry: McpRuntimeRegistry,
+        thread_id: Arc<str>,
+    },
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct McpRuntimeRegistry {
+    managers: Arc<StdMutex<HashMap<String, Arc<Mutex<McpConnectionManager>>>>>,
+}
+
+impl Default for McpRuntime {
+    fn default() -> Self {
+        Self {
+            owner: McpRuntimeOwner::Direct(Arc::new(Mutex::new(
+                McpConnectionManager::default(),
+            ))),
+        }
+    }
+}
+
+impl std::fmt::Debug for McpRuntime {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("McpRuntime(..)")
+    }
+}
+
+impl McpRuntime {
+    pub(crate) fn for_thread(
+        registry: McpRuntimeRegistry,
+        thread_id: impl Into<Arc<str>>,
+    ) -> Self {
+        Self {
+            owner: McpRuntimeOwner::Thread {
+                registry,
+                thread_id: thread_id.into(),
+            },
+        }
+    }
+
+    pub(crate) async fn snapshot(
+        &self,
+        inputs: &[McpServerInput],
+        cwd: &Path,
+        permission_runtime: Option<&PermissionRuntime>,
+    ) -> (McpRuntimeSnapshot, u64) {
+        if inputs.is_empty() && matches!(self.owner, McpRuntimeOwner::Thread { .. }) {
+            return (
+                mcp_runtime_snapshot(inputs, cwd, permission_runtime).await,
+                0,
+            );
+        }
+        let manager = match &self.owner {
+            McpRuntimeOwner::Direct(manager) => Arc::clone(manager),
+            McpRuntimeOwner::Thread {
+                registry,
+                thread_id,
+            } => registry.manager(thread_id),
+        };
+        let mut manager = manager.lock().await;
+        let snapshot = manager.snapshot(inputs, cwd, permission_runtime).await;
+        (snapshot, manager.generation())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn same_instance(&self, other: &Self) -> bool {
+        match (&self.owner, &other.owner) {
+            (McpRuntimeOwner::Direct(left), McpRuntimeOwner::Direct(right)) => {
+                Arc::ptr_eq(left, right)
+            }
+            (
+                McpRuntimeOwner::Thread {
+                    registry: left_registry,
+                    thread_id: left_thread,
+                },
+                McpRuntimeOwner::Thread {
+                    registry: right_registry,
+                    thread_id: right_thread,
+                },
+            ) => {
+                left_registry.same_instance(right_registry) && left_thread == right_thread
+            }
+            _ => false,
+        }
+    }
+}
+
+impl McpRuntimeRegistry {
+    fn manager(&self, thread_id: &str) -> Arc<Mutex<McpConnectionManager>> {
+        Arc::clone(
+            self.managers
+                .lock()
+                .expect("MCP runtime registry poisoned")
+                .entry(thread_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(McpConnectionManager::default()))),
+        )
+    }
+
+    pub(crate) fn runtime(&self, thread_id: &str) -> McpRuntime {
+        McpRuntime::for_thread(self.clone(), Arc::<str>::from(thread_id))
+    }
+
+    pub(crate) fn remove(&self, thread_id: &str) {
+        self.managers
+            .lock()
+            .expect("MCP runtime registry poisoned")
+            .remove(thread_id);
+    }
+
+    pub(crate) fn clear(&self) {
+        self.managers
+            .lock()
+            .expect("MCP runtime registry poisoned")
+            .clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.managers
+            .lock()
+            .expect("MCP runtime registry poisoned")
+            .len()
+    }
+
+    #[cfg(test)]
+    fn same_instance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.managers, &other.managers)
+    }
 }
 
 #[derive(Default)]
@@ -256,7 +460,7 @@ pub(crate) struct McpConnectionManager {
 }
 
 struct McpCachedSnapshot {
-    catalog_hash: String,
+    connection_identity_hash: String,
     cwd: PathBuf,
     snapshot: McpRuntimeSnapshot,
 }
@@ -283,11 +487,12 @@ impl McpConnectionManager {
         cwd: &Path,
         permission_runtime: Option<&PermissionRuntime>,
     ) -> McpRuntimeSnapshot {
-        let catalog_hash = McpSourceCatalog::resolve(inputs).hash();
+        let connection_identity_hash =
+            mcp_connection_identity_hash(inputs, cwd, permission_runtime);
         let cwd = cwd.to_path_buf();
         if self.dirty_servers.is_empty()
             && let Some(cached) = &self.cached
-            && cached.catalog_hash == catalog_hash
+            && cached.connection_identity_hash == connection_identity_hash
             && cached.cwd == cwd
         {
             return cached.snapshot.clone();
@@ -296,13 +501,59 @@ impl McpConnectionManager {
         let snapshot = mcp_runtime_snapshot(inputs, &cwd, permission_runtime).await;
         self.generation = self.generation.saturating_add(1);
         self.dirty_servers.clear();
-        self.cached = Some(McpCachedSnapshot {
-            catalog_hash,
+        self.cached = snapshot.reusable.then(|| McpCachedSnapshot {
+            connection_identity_hash,
             cwd,
             snapshot: snapshot.clone(),
         });
         snapshot
     }
+}
+
+fn mcp_connection_identity_hash(
+    inputs: &[McpServerInput],
+    cwd: &Path,
+    permission_runtime: Option<&PermissionRuntime>,
+) -> String {
+    let catalog = McpSourceCatalog::resolve(inputs);
+    let mut hasher = Sha256::new();
+    hasher.update(catalog.hash().as_bytes());
+    update_mcp_hash_value(&mut hasher, &cwd.to_string_lossy());
+    for entry in &catalog.entries {
+        if let McpTransportInput::StreamableHttp {
+            url,
+            bearer_token_env_var,
+            ..
+        } = &entry.input.transport
+        {
+            let token = resolve_http_bearer_token(
+                &entry.input,
+                bearer_token_env_var.as_deref(),
+                url,
+            );
+            if let Some(token) = token {
+                hasher.update(Sha256::digest(token.as_bytes()));
+            }
+            hasher.update([0]);
+        }
+    }
+    if let Some(runtime) = permission_runtime {
+        let inner = &runtime.inner;
+        update_mcp_hash_value(&mut hasher, &inner.cwd.to_string_lossy());
+        update_mcp_hash_value(&mut hasher, &inner.project_config_dir.to_string_lossy());
+        update_mcp_hash_value(&mut hasher, inner.mode.as_str());
+        update_mcp_hash_value(&mut hasher, &format!("{:?}", inner.config));
+        update_mcp_hash_value(&mut hasher, &format!("{:?}", inner.sandbox_policy));
+        for path in &inner.protected_config_paths {
+            update_mcp_hash_value(&mut hasher, &path.to_string_lossy());
+        }
+        hasher.update([
+            u8::from(inner.approval_handler.is_some()),
+            u8::from(inner.smart_approval_handler.is_some()),
+            u8::from(inner.hook_runtime.is_some()),
+        ]);
+    }
+    format!("{:x}", hasher.finalize())
 }
 
 pub(crate) async fn mcp_runtime_snapshot(
@@ -319,6 +570,7 @@ pub(crate) async fn mcp_runtime_snapshot(
     let mut required_failures = Vec::new();
     let mut resources_available = false;
     let mut prompts_available = false;
+    let mut reusable = true;
     let sampling_config = McpSamplingConfig::bounded_default();
     let elicitation_policy = McpElicitationPolicy::default_form_and_url();
 
@@ -329,6 +581,7 @@ pub(crate) async fn mcp_runtime_snapshot(
             warnings.push(mcp_warning(message.clone()));
             if entry.input.policy.required {
                 required_failures.push(message);
+                reusable = false;
             }
             continue;
         }
@@ -339,6 +592,7 @@ pub(crate) async fn mcp_runtime_snapshot(
         {
             let message = format!("MCP server `{}` startup omitted: {err}", entry.input.name);
             warnings.push(mcp_warning(message.clone()));
+            reusable = false;
             if entry.input.policy.required {
                 required_failures.push(message);
             }
@@ -350,6 +604,7 @@ pub(crate) async fn mcp_runtime_snapshot(
             Err(err) => {
                 let message = format!("MCP server `{}` is unavailable: {err}", entry.input.name);
                 warnings.push(mcp_warning(message.clone()));
+                reusable = false;
                 if entry.input.policy.required {
                     required_failures.push(message);
                 }
@@ -371,6 +626,7 @@ pub(crate) async fn mcp_runtime_snapshot(
                     "MCP server `{}` did not list tools: {err}",
                     entry.input.name
                 )));
+                reusable = false;
                 Vec::new()
             }
         };
@@ -464,6 +720,7 @@ pub(crate) async fn mcp_runtime_snapshot(
         prompts_available,
         sampling_config,
         elicitation_policy,
+        reusable,
     }
 }
 
@@ -1601,6 +1858,129 @@ pub(crate) mod tests {
         assert_ne!(
             McpSourceCatalog::resolve(&[base]).hash(),
             McpSourceCatalog::resolve(&[filtered]).hash()
+        );
+    }
+
+    #[test]
+    fn source_catalog_hash_includes_complete_transport_identity() {
+        let stdio = McpServerInput::with_source(
+            "repo",
+            McpTransportInput::Stdio {
+                command: PathBuf::from("/bin/repo-mcp"),
+                args: vec!["serve".to_string()],
+                env: BTreeMap::from([("MODE".to_string(), "read".to_string())]),
+                cwd: Some(PathBuf::from("/repo/a")),
+            },
+            "profile:mcp:repo",
+            "profile",
+        );
+        let mut changed_stdio = stdio.clone();
+        changed_stdio.transport = McpTransportInput::Stdio {
+            command: PathBuf::from("/bin/repo-mcp-v2"),
+            args: vec!["serve".to_string(), "--fast".to_string()],
+            env: BTreeMap::from([("MODE".to_string(), "write".to_string())]),
+            cwd: Some(PathBuf::from("/repo/b")),
+        };
+        assert_ne!(
+            McpSourceCatalog::resolve(&[stdio]).hash(),
+            McpSourceCatalog::resolve(&[changed_stdio]).hash()
+        );
+
+        let http = McpServerInput::with_source(
+            "remote",
+            McpTransportInput::StreamableHttp {
+                url: "https://one.example/mcp".to_string(),
+                headers: BTreeMap::from([("X-Tenant".to_string(), "one".to_string())]),
+                bearer_token_env_var: Some("MCP_TOKEN_ONE".to_string()),
+                scopes: vec!["read".to_string()],
+                oauth_resource: Some("resource-one".to_string()),
+                oauth_client_id: Some("client-one".to_string()),
+            },
+            "profile:mcp:remote",
+            "profile",
+        );
+        let mut changed_http = http.clone();
+        changed_http.transport = McpTransportInput::StreamableHttp {
+            url: "https://two.example/mcp".to_string(),
+            headers: BTreeMap::from([("X-Tenant".to_string(), "two".to_string())]),
+            bearer_token_env_var: Some("MCP_TOKEN_TWO".to_string()),
+            scopes: vec!["write".to_string()],
+            oauth_resource: Some("resource-two".to_string()),
+            oauth_client_id: Some("client-two".to_string()),
+        };
+        assert_ne!(
+            McpSourceCatalog::resolve(&[http]).hash(),
+            McpSourceCatalog::resolve(&[changed_http]).hash()
+        );
+    }
+
+    #[test]
+    fn connection_identity_hash_includes_permission_environment() {
+        let input = McpServerInput::with_source(
+            "repo",
+            McpTransportInput::Unsupported {
+                kind: "stdio".to_string(),
+            },
+            "profile:mcp:repo",
+            "profile",
+        );
+        let cwd = PathBuf::from("/repo");
+        let default_permissions = PermissionRuntime::new(
+            cwd.clone(),
+            cwd.join(".psychevo"),
+            crate::types::PermissionConfig::default(),
+            crate::types::PermissionMode::Default,
+            crate::types::ApprovalMode::Manual,
+            None,
+            None,
+        );
+        let bypass_permissions = PermissionRuntime::new(
+            cwd.clone(),
+            cwd.join(".psychevo"),
+            crate::types::PermissionConfig::default(),
+            crate::types::PermissionMode::BypassPermissions,
+            crate::types::ApprovalMode::Manual,
+            None,
+            None,
+        );
+
+        assert_ne!(
+            mcp_connection_identity_hash(
+                std::slice::from_ref(&input),
+                &cwd,
+                Some(&default_permissions)
+            ),
+            mcp_connection_identity_hash(&[input], &cwd, Some(&bypass_permissions))
+        );
+    }
+
+    #[tokio::test]
+    async fn connection_manager_does_not_cache_failed_snapshot() {
+        let mut manager = McpConnectionManager::default();
+        let cwd = std::env::temp_dir();
+        let unavailable = McpServerInput::with_source(
+            "repo",
+            McpTransportInput::Unsupported {
+                kind: "temporarily_unavailable".to_string(),
+            },
+            "profile:mcp:repo",
+            "profile",
+        );
+
+        manager
+            .snapshot(std::slice::from_ref(&unavailable), &cwd, None)
+            .await;
+        let first_generation = manager.generation();
+        assert!(
+            manager.cached.is_none(),
+            "startup failure must remain retryable"
+        );
+
+        manager.snapshot(&[unavailable], &cwd, None).await;
+        assert_eq!(
+            manager.generation(),
+            first_generation + 1,
+            "the next safe boundary must retry startup"
         );
     }
 

@@ -3,13 +3,14 @@ pub(crate) use super::*;
 #[cfg(unix)]
 use crate::skills::write_skill_file_after_validation;
 use crate::skills::{
-    InstallOptions, SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillSettings,
-    SkillSource, SkillTarget, delete_skill_bundle, discover_skills, format_skills_for_prompt,
-    install_skill, list_skill_bundles, list_skills_value, save_skill_bundle, scan_skill_path,
-    select_explicit_skills, select_skills_for_prompt, set_skill_config_value, set_skill_enabled,
-    skill_context_fragments, skill_context_messages, skill_source_display_label,
-    skills_visible_for_prompt_with_tools, skills_visible_for_prompt_with_tools_and_toolsets,
-    view_skill_value, view_skill_value_selected, write_skill_file,
+    InstallOptions, SaveSkillBundleOptions, ScanVerdict, SkillDiscoveryOptions, SkillRuntime,
+    SkillSettings, SkillSource, SkillTarget, delete_skill_bundle, discover_skills,
+    format_skills_for_prompt, install_skill, list_skill_bundles, list_skills_value,
+    save_skill_bundle, scan_skill_path, select_explicit_skills, select_skills_for_prompt,
+    set_skill_config_value, set_skill_enabled, skill_context_fragments, skill_context_messages,
+    skill_source_display_label, skills_visible_for_prompt_with_tools,
+    skills_visible_for_prompt_with_tools_and_toolsets, view_skill_value, view_skill_value_selected,
+    write_skill_file,
 };
 use crate::tools::skill_tools_for_mode;
 
@@ -81,6 +82,30 @@ pub(crate) async fn skills_discovery_loads_overlapping_home_agents_root_once() {
     assert_eq!(matches[0].source, SkillSource::Agents);
     assert!(matches[0].collision_group.is_empty());
     assert!(!catalog.collisions.contains_key("shared-home"));
+}
+
+#[test]
+fn skill_runtime_keeps_one_snapshot_until_explicit_refresh() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("psychevo-home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    write_package_skill(&home.join("skills"), "first", "first skill", "first body");
+    let runtime = SkillRuntime::new(skill_options(&temp, &home, &cwd));
+
+    let initial = runtime.catalog().expect("initial catalog");
+    write_package_skill(
+        &home.join("skills"),
+        "second",
+        "second skill",
+        "second body",
+    );
+    let unchanged = runtime.catalog().expect("cached catalog");
+    let refreshed = runtime.refresh().expect("refreshed catalog");
+
+    assert_eq!(initial.skills.len(), 1);
+    assert_eq!(unchanged.skills.len(), 1);
+    assert_eq!(refreshed.skills.len(), 2);
 }
 
 #[tokio::test]

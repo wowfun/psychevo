@@ -78,6 +78,7 @@ pub(crate) async fn run_live_read_tool(provider: &str) {
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
     })
     .await
     .expect("live run");
@@ -174,6 +175,7 @@ async fn live_provider_options_with_temp_home(
             selected_capability_roots: Vec::new(),
             skill_inputs: Vec::new(),
             mcp_servers: Vec::new(),
+            mcp_runtime: None,
         },
         home,
         cwd,

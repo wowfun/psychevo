@@ -11,7 +11,6 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolSelectionConfig};
-use crate::contribution_projection::ContributionStatus;
 use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
 use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
@@ -1098,7 +1097,7 @@ fn scoped_selectors_and_policy_keys_distinguish_duplicate_installations() {
 }
 
 #[test]
-fn enabled_plugin_contributions_materialize_mcp_servers_toolsets_and_projection() {
+fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1158,16 +1157,6 @@ fn enabled_plugin_contributions_materialize_mcp_servers_toolsets_and_projection(
     );
     assert_eq!(assembly.toolsets.len(), 1);
     assert_eq!(assembly.toolsets[0].name, "contrib-tools");
-    assert!(assembly.projection.facts().iter().any(|fact| {
-        fact.status == ContributionStatus::Accepted
-            && fact.declaration_family == "mcp_server"
-            && fact.effect_target == "mcp:stdio"
-    }));
-    assert!(assembly.projection.facts().iter().any(|fact| {
-        fact.status == ContributionStatus::Accepted
-            && fact.declaration_family == "toolset"
-            && fact.effect_target == "toolset:contrib-tools"
-    }));
 }
 
 #[test]
@@ -1239,9 +1228,12 @@ fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
         image_input_enabled: true,
         image_generation: None,
         web_search: Default::default(),
-        tool_selection: ToolSelectionConfig::default(),
-        custom_toolsets: BTreeMap::new(),
-        contributed_toolsets: assembly.toolsets,
+        selection: crate::tool_surface::compile_tool_selection(
+            RunMode::Default,
+            &ToolSelectionConfig::default(),
+            &BTreeMap::new(),
+            &assembly.toolsets,
+        ),
         clarify: ClarifyToolSurface::Disabled,
         skills: None,
         extension_tools: assembly.runtime_tools,
@@ -1374,6 +1366,217 @@ fn worker_tool_executes_through_binding() {
 }
 
 #[test]
+fn one_worker_session_serves_discovery_tools_and_hooks() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "session-probe",
+              "version": "1.0.0",
+              "description": "session probe",
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
+            }"#,
+    );
+    write_worker(
+        &source,
+        r#"#!/usr/bin/env python3
+import json, os, sys
+initialize_count = 0
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        initialize_count += 1
+        result = {"ok": True}
+    elif method == "contributions/list":
+        result = {"tools": [{
+            "name": "session_probe",
+            "description": "probe",
+            "parameters": {"type": "object", "properties": {}}
+        }]}
+    elif method in ("tools/call", "hooks/call"):
+        result = {
+            "pid": os.getpid(),
+            "initialize_count": initialize_count,
+            "method": method
+        }
+    else:
+        result = {"ok": True}
+    print(json.dumps({
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": result
+    }), flush=True)
+"#,
+    );
+    let record = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
+    let spec = manifest.worker.clone().expect("worker");
+    let session =
+        PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new()).expect("session");
+
+    let tools = worker_tools_in_session(&session).expect("discover tools");
+    let tool_result = super::worker::call_worker_tool_in_session(
+        &session,
+        &tools[0].name,
+        "call_1",
+        json!({}),
+    )
+    .expect("tool call");
+    let hook_result = session
+        .call("hooks/call", json!({"hook": {}, "payload": {}}))
+        .expect("hook call");
+    session.shutdown().expect("shutdown");
+
+    assert_eq!(tool_result.json["method"], "tools/call");
+    assert_eq!(hook_result["method"], "hooks/call");
+    assert_eq!(tool_result.json["pid"], hook_result["pid"]);
+    assert_eq!(tool_result.json["initialize_count"], 1);
+    assert_eq!(hook_result["initialize_count"], 1);
+}
+
+#[test]
+fn worker_notifications_do_not_consume_correlated_responses() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "notification-probe",
+              "version": "1.0.0",
+              "description": "notification probe",
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
+            }"#,
+    );
+    write_worker(
+        &source,
+        r#"#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    print(json.dumps({
+        "jsonrpc": "2.0",
+        "method": "worker/status",
+        "params": {"method": request.get("method")}
+    }), flush=True)
+    result = {"ok": True}
+    if request.get("method") == "contributions/list":
+        result = {"tools": [{
+            "name": "notification_probe",
+            "description": "probe",
+            "parameters": {"type": "object", "properties": {}}
+        }]}
+    print(json.dumps({
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": result
+    }), flush=True)
+"#,
+    );
+    let record = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
+    let spec = manifest.worker.clone().expect("worker");
+    let session =
+        PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new()).expect("session");
+
+    let tools = worker_tools_in_session(&session).expect("correlated contribution response");
+
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "notification_probe");
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
+fn worker_mismatched_response_id_is_a_terminal_protocol_error() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "mismatch-probe",
+              "version": "1.0.0",
+              "description": "mismatch probe",
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
+            }"#,
+    );
+    write_worker(
+        &source,
+        r#"#!/usr/bin/env python3
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    print(json.dumps({
+        "jsonrpc": "2.0",
+        "id": request.get("id") + 1,
+        "result": {"wrong": True}
+    }), flush=True)
+    print(json.dumps({
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": {"ok": True}
+    }), flush=True)
+"#,
+    );
+    let record = install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
+    let spec = manifest.worker.clone().expect("worker");
+
+    let error = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
+        .expect_err("mismatched response id");
+
+    assert!(error.contains("response id"), "{error}");
+}
+
+#[test]
 fn worker_contribution_discovery_receives_effective_env() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
@@ -1495,16 +1698,17 @@ async fn worker_tool_call_timeout_returns_tool_error() {
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
+    let session =
+        PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new()).expect("session");
 
     let tool = PluginWorkerTool {
-        record,
-        spec,
+        plugin_name: record.name,
+        session,
         descriptor: WorkerToolDescriptor {
             name: "cleanup_status".to_string(),
             description: "Remote harness vocabulary remains source-owned.".to_string(),
             parameters: json!({"type": "object", "properties": {}}),
         },
-        env: BTreeMap::new(),
     };
     assert_eq!(
         tool.description(),

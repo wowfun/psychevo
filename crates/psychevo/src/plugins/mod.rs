@@ -36,10 +36,15 @@ pub use types::{
 };
 pub use util::external_plugin_fingerprint;
 
+pub(crate) use worker::PluginWorkerSession;
+
 #[cfg(test)]
 pub(crate) use store::PluginStore;
 #[cfg(test)]
-pub(crate) use worker::{PluginWorkerTool, WorkerToolDescriptor, call_worker_tool, worker_tools};
+pub(crate) use worker::{
+    PluginWorkerTool, WorkerToolDescriptor, call_worker_tool, worker_tools,
+    worker_tools_in_session,
+};
 
 #[cfg(test)]
 mod tests;

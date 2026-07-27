@@ -11,14 +11,11 @@ use serde_json::Value;
 
 use crate::agents::{AgentToolContext, agent_tools};
 use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig, ToolsetContribution};
-use crate::contribution_projection::{
-    ContributionFact, ContributionProjection, ContributionStatus,
-};
 use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
-use crate::skills::SkillDiscoveryOptions;
+use crate::skills::SkillRuntime;
 use crate::tools::{
     ToolRuntimeContext, builtin_toolset_description, builtin_toolset_names, builtin_toolset_tools,
-    clarify_tool, default_enabled_toolsets, known_tool_name, skill_tools_for_mode,
+    clarify_tool, default_enabled_toolsets, known_tool_name, skill_tools_for_mode_with_runtime,
     tool_allowed_in_mode, tool_by_name, tool_names_for_mode,
 };
 use crate::types::{
@@ -65,32 +62,79 @@ pub(crate) struct ToolSurfaceAssembly {
     pub(crate) image_input_enabled: bool,
     pub(crate) image_generation: Option<crate::config::ResolvedImageGenerationConfig>,
     pub(crate) web_search: crate::config::WebSearchConfig,
-    pub(crate) tool_selection: ToolSelectionConfig,
-    pub(crate) custom_toolsets: BTreeMap<String, CustomToolsetConfig>,
-    pub(crate) contributed_toolsets: Vec<ToolsetContribution>,
+    pub(crate) selection: ToolSelectionIntent,
     pub(crate) clarify: ClarifyToolSurface,
-    pub(crate) skills: Option<SkillDiscoveryOptions>,
+    pub(crate) skills: Option<SkillRuntime>,
     pub(crate) extension_tools: Vec<RuntimeTool>,
     pub(crate) agents: Option<AgentToolContext>,
 }
 
-pub(crate) struct ToolSurfaceAssemblyResult {
+pub(crate) struct ToolSelectionPlan {
     pub(crate) tools: Vec<Arc<dyn ToolBinding>>,
     pub(crate) warnings: Vec<RunWarning>,
-    pub(crate) accepted_tool_names: Vec<String>,
     pub(crate) accepted_toolset_names: Vec<String>,
-    pub(crate) projection: ContributionProjection,
+}
+
+#[derive(Clone)]
+pub(crate) struct ToolSelectionIntent {
+    definitions: BTreeMap<String, ToolsetDefinition>,
+    selected_toolsets: Vec<String>,
+    disabled_toolsets: BTreeSet<String>,
+    pub(crate) tool_search_enabled: bool,
+}
+
+impl ToolSelectionIntent {
+    pub(crate) fn selects_tool(&self, name: &str, mode: RunMode) -> bool {
+        let mut visiting = BTreeSet::new();
+        self.selected_toolsets
+            .iter()
+            .any(|toolset| self.toolset_selects_tool(toolset, name, mode, &mut visiting))
+    }
+
+    fn toolset_selects_tool(
+        &self,
+        toolset: &str,
+        name: &str,
+        mode: RunMode,
+        visiting: &mut BTreeSet<String>,
+    ) -> bool {
+        if self.disabled_toolsets.contains(toolset) || !visiting.insert(toolset.to_string()) {
+            return false;
+        }
+        let selected = self.definitions.get(toolset).is_some_and(|definition| {
+            (definition.config.tools.iter().any(|tool| tool == name)
+                && (!known_tool_name(name) || tool_allowed_in_mode(name, mode)))
+                || definition
+                    .config
+                    .includes
+                    .iter()
+                    .any(|include| self.toolset_selects_tool(include, name, mode, visiting))
+        });
+        visiting.remove(toolset);
+        selected
+    }
+}
+
+pub(crate) fn compile_tool_selection(
+    mode: RunMode,
+    selection: &ToolSelectionConfig,
+    custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
+    contributed_toolsets: &[ToolsetContribution],
+) -> ToolSelectionIntent {
+    ToolSelectionIntent {
+        definitions: build_toolset_definitions(custom_toolsets, contributed_toolsets),
+        selected_toolsets: selected_toolset_names(mode, selection),
+        disabled_toolsets: disabled_toolset_names(mode, selection),
+        tool_search_enabled: selection.tool_search.enabled,
+    }
 }
 
 pub(crate) fn assemble_tool_surface(input: ToolSurfaceAssembly) -> Vec<Arc<dyn ToolBinding>> {
     assemble_tool_surface_with_warnings(input).tools
 }
 
-pub(crate) fn assemble_tool_surface_with_warnings(
-    input: ToolSurfaceAssembly,
-) -> ToolSurfaceAssemblyResult {
+pub(crate) fn assemble_tool_surface_with_warnings(input: ToolSurfaceAssembly) -> ToolSelectionPlan {
     let mut warnings = Vec::new();
-    let mut projection = ContributionProjection::new();
     let mut available_tools = ToolRegistry::default();
     let runtime_context = ToolRuntimeContext {
         task_id: input.task_id,
@@ -115,14 +159,11 @@ pub(crate) fn assemble_tool_surface_with_warnings(
                 binding,
                 format!("builtin:tool:{name}"),
                 "builtin",
-                "tool",
-                "tool_surface",
             ));
         }
     }
     let mut fallback_entries = Vec::new();
     let mut selected_tools = Vec::new();
-    let mut accepted_tool_names = Vec::new();
     let mut selected_tool_sources = BTreeMap::new();
 
     if let ClarifyToolSurface::Enabled { control, stream } = input.clarify {
@@ -130,22 +171,19 @@ pub(crate) fn assemble_tool_surface_with_warnings(
             clarify_tool(control, stream),
             "builtin:tool:clarify",
             "builtin",
-            "clarify_tool",
-            "tool_surface",
         );
         available_tools.register(entry.clone());
         fallback_entries.push(entry);
     }
-    if let Some(skill_options) = input.skills {
-        for tool in skill_tools_for_mode(skill_options, input.mode) {
-            let entry =
-                AvailableToolEntry::new(tool, "runtime:skills", "runtime", "skill_tool", "skills");
+    if let Some(skill_runtime) = input.skills {
+        for tool in skill_tools_for_mode_with_runtime(skill_runtime, input.mode) {
+            let entry = AvailableToolEntry::new(tool, "runtime:skills", "runtime");
             available_tools.register(entry.clone());
             fallback_entries.push(entry);
         }
     }
     for tool in input.extension_tools {
-        let binding = extension_tool_binding(&tool, input.tool_selection.tool_search.enabled);
+        let binding = extension_tool_binding(&tool, input.selection.tool_search_enabled);
         let source_id = tool
             .source_id()
             .map(str::to_string)
@@ -154,34 +192,23 @@ pub(crate) fn assemble_tool_surface_with_warnings(
             .source_kind()
             .map(str::to_string)
             .unwrap_or_else(|| "runtime".to_string());
-        let entry = AvailableToolEntry::new(
-            binding,
-            source_id,
-            source_kind,
-            "extension_tool",
-            "tool_surface",
-        );
+        let entry = AvailableToolEntry::new(binding, source_id, source_kind);
         available_tools.register(entry.clone());
         fallback_entries.push(entry);
     }
     if let Some(agent_context) = input.agents {
         for tool in agent_tools(agent_context) {
-            let entry =
-                AvailableToolEntry::new(tool, "runtime:agents", "runtime", "agent_tool", "agents");
+            let entry = AvailableToolEntry::new(tool, "runtime:agents", "runtime");
             available_tools.register(entry.clone());
             fallback_entries.push(entry);
         }
     }
 
-    let mut toolsets = build_toolset_definitions(
-        &input.custom_toolsets,
-        &input.contributed_toolsets,
-        &mut projection,
-    );
-    insert_runtime_derived_toolsets(&mut toolsets, &available_tools, &mut projection);
+    let mut toolsets = input.selection.definitions;
+    insert_runtime_derived_toolsets(&mut toolsets, &available_tools);
 
-    let selected_toolsets = selected_toolset_names(input.mode, &input.tool_selection);
-    let disabled_toolsets = disabled_toolset_names(input.mode, &input.tool_selection);
+    let selected_toolsets = input.selection.selected_toolsets;
+    let disabled_toolsets = input.selection.disabled_toolsets;
     let mut accepted_toolset_names = Vec::new();
     let mut accepted_toolsets = BTreeSet::new();
     let mut expansion = ToolsetExpansion {
@@ -191,10 +218,8 @@ pub(crate) fn assemble_tool_surface_with_warnings(
         disabled_toolsets: &disabled_toolsets,
         selected_tools: &mut selected_tools,
         selected_tool_sources: &mut selected_tool_sources,
-        accepted_tool_names: &mut accepted_tool_names,
         accepted_toolset_names: &mut accepted_toolset_names,
         accepted_toolsets: &mut accepted_toolsets,
-        projection: &mut projection,
         warnings: &mut warnings,
         visiting: Vec::new(),
     };
@@ -207,8 +232,6 @@ pub(crate) fn assemble_tool_surface_with_warnings(
             &entry,
             &mut *expansion.selected_tools,
             &mut *expansion.selected_tool_sources,
-            &mut *expansion.accepted_tool_names,
-            &mut *expansion.projection,
             &mut *expansion.warnings,
             true,
         );
@@ -217,17 +240,14 @@ pub(crate) fn assemble_tool_surface_with_warnings(
                 &entry,
                 &mut *expansion.accepted_toolset_names,
                 &mut *expansion.accepted_toolsets,
-                &mut *expansion.projection,
             );
         }
     }
     drop(expansion);
-    ToolSurfaceAssemblyResult {
+    ToolSelectionPlan {
         tools: selected_tools,
         warnings,
-        accepted_tool_names,
         accepted_toolset_names,
-        projection,
     }
 }
 
@@ -331,8 +351,6 @@ struct AvailableToolEntry {
     binding: Arc<dyn ToolBinding>,
     source_id: String,
     source_kind: String,
-    declaration_family: &'static str,
-    owner_module: &'static str,
 }
 
 impl AvailableToolEntry {
@@ -340,8 +358,6 @@ impl AvailableToolEntry {
         binding: Arc<dyn ToolBinding>,
         source_id: impl Into<String>,
         source_kind: impl Into<String>,
-        declaration_family: &'static str,
-        owner_module: &'static str,
     ) -> Self {
         let name = binding.name().to_string();
         Self {
@@ -349,8 +365,6 @@ impl AvailableToolEntry {
             binding,
             source_id: source_id.into(),
             source_kind: source_kind.into(),
-            declaration_family,
-            owner_module,
         }
     }
 }
@@ -358,15 +372,12 @@ impl AvailableToolEntry {
 #[derive(Clone)]
 struct ToolsetDefinition {
     name: String,
-    source_id: String,
-    source_kind: String,
     config: CustomToolsetConfig,
 }
 
 fn build_toolset_definitions(
     custom_toolsets: &BTreeMap<String, CustomToolsetConfig>,
     contributed_toolsets: &[ToolsetContribution],
-    projection: &mut ContributionProjection,
 ) -> BTreeMap<String, ToolsetDefinition> {
     let mut definitions = BTreeMap::new();
     for name in builtin_toolset_names() {
@@ -375,8 +386,6 @@ fn build_toolset_definitions(
                 (*name).to_string(),
                 ToolsetDefinition {
                     name: (*name).to_string(),
-                    source_id: format!("builtin:toolset:{name}"),
-                    source_kind: "builtin".to_string(),
                     config: CustomToolsetConfig {
                         description: builtin_toolset_description(name).map(str::to_string),
                         tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
@@ -391,11 +400,8 @@ fn build_toolset_definitions(
             &mut definitions,
             ToolsetDefinition {
                 name: name.clone(),
-                source_id: format!("config:toolset:{name}"),
-                source_kind: "config".to_string(),
                 config: config.clone(),
             },
-            projection,
         );
     }
     for contribution in contributed_toolsets {
@@ -403,11 +409,8 @@ fn build_toolset_definitions(
             &mut definitions,
             ToolsetDefinition {
                 name: contribution.name.clone(),
-                source_id: contribution.source_id.clone(),
-                source_kind: contribution.source_kind.clone(),
                 config: contribution.config.clone(),
             },
-            projection,
         );
     }
     definitions
@@ -416,23 +419,8 @@ fn build_toolset_definitions(
 fn insert_toolset_definition(
     definitions: &mut BTreeMap<String, ToolsetDefinition>,
     definition: ToolsetDefinition,
-    projection: &mut ContributionProjection,
 ) {
-    if let Some(existing) = definitions.get(&definition.name) {
-        projection.record(
-            ContributionFact::new(
-                definition.source_id,
-                definition.source_kind,
-                "toolset",
-                "tool_surface",
-                format!("toolset:{}", definition.name),
-                ContributionStatus::Conflict,
-            )
-            .with_reason(format!(
-                "toolset name conflicts with declaration from `{}`",
-                existing.source_id
-            )),
-        );
+    if definitions.contains_key(&definition.name) {
         return;
     }
     definitions.insert(definition.name.clone(), definition);
@@ -441,7 +429,6 @@ fn insert_toolset_definition(
 fn insert_runtime_derived_toolsets(
     definitions: &mut BTreeMap<String, ToolsetDefinition>,
     registry: &ToolRegistry,
-    projection: &mut ContributionProjection,
 ) {
     let mut tools_by_source = BTreeMap::<String, BTreeSet<String>>::new();
     for entry in registry.all_entries() {
@@ -468,15 +455,12 @@ fn insert_runtime_derived_toolsets(
             definitions,
             ToolsetDefinition {
                 name: format!("mcp-{server}"),
-                source_id,
-                source_kind: "mcp".to_string(),
                 config: CustomToolsetConfig {
                     description: Some(format!("MCP tools from `{server}`")),
                     tools: tools.into_iter().collect(),
                     includes: Vec::new(),
                 },
             },
-            projection,
         );
     }
 }
@@ -485,7 +469,6 @@ fn record_runtime_derived_toolset_acceptance(
     entry: &AvailableToolEntry,
     accepted_toolset_names: &mut Vec<String>,
     accepted_toolsets: &mut BTreeSet<String>,
-    projection: &mut ContributionProjection,
 ) {
     if entry.source_kind != "mcp" {
         return;
@@ -498,15 +481,7 @@ fn record_runtime_derived_toolset_acceptance(
     }
     let toolset_name = format!("mcp-{server}");
     if accepted_toolsets.insert(toolset_name.clone()) {
-        accepted_toolset_names.push(toolset_name.clone());
-        projection.record(ContributionFact::new(
-            entry.source_id.clone(),
-            entry.source_kind.clone(),
-            "toolset",
-            "tool_surface",
-            format!("toolset:{toolset_name}"),
-            ContributionStatus::Accepted,
-        ));
+        accepted_toolset_names.push(toolset_name);
     }
 }
 
@@ -538,47 +513,22 @@ struct ToolsetExpansion<'a> {
     disabled_toolsets: &'a BTreeSet<String>,
     selected_tools: &'a mut Vec<Arc<dyn ToolBinding>>,
     selected_tool_sources: &'a mut BTreeMap<String, String>,
-    accepted_tool_names: &'a mut Vec<String>,
     accepted_toolset_names: &'a mut Vec<String>,
     accepted_toolsets: &'a mut BTreeSet<String>,
-    projection: &'a mut ContributionProjection,
     warnings: &'a mut Vec<RunWarning>,
     visiting: Vec<String>,
 }
 
 fn expand_toolset(name: &str, state: &mut ToolsetExpansion<'_>) -> bool {
     if state.disabled_toolsets.contains(name) {
-        record_unknown_toolset_fact(
-            name,
-            ContributionStatus::Omitted,
-            "toolset disabled for mode",
-            state.projection,
-        );
         return false;
     }
 
     let Some(definition) = state.definitions.get(name).cloned() else {
-        record_unknown_toolset_fact(
-            name,
-            ContributionStatus::Omitted,
-            "unknown toolset",
-            state.projection,
-        );
         return false;
     };
 
     if state.visiting.iter().any(|visiting| visiting == name) {
-        state.projection.record(
-            ContributionFact::new(
-                definition.source_id,
-                definition.source_kind,
-                "toolset",
-                "tool_surface",
-                format!("toolset:{name}"),
-                ContributionStatus::Omitted,
-            )
-            .with_reason("toolset include cycle detected"),
-        );
         return false;
     }
 
@@ -592,104 +542,40 @@ fn expand_toolset(name: &str, state: &mut ToolsetExpansion<'_>) -> bool {
     }
     state.visiting.pop();
 
-    if accepted_binding {
-        if state.accepted_toolsets.insert(name.to_string()) {
-            state.accepted_toolset_names.push(name.to_string());
-            state.projection.record(ContributionFact::new(
-                definition.source_id,
-                definition.source_kind,
-                "toolset",
-                "tool_surface",
-                format!("toolset:{name}"),
-                ContributionStatus::Accepted,
-            ));
-        }
-    } else {
-        state.projection.record(
-            ContributionFact::new(
-                definition.source_id,
-                definition.source_kind,
-                "toolset",
-                "tool_surface",
-                format!("toolset:{name}"),
-                ContributionStatus::Omitted,
-            )
-            .with_reason("toolset did not resolve any executable tool bindings"),
-        );
+    if accepted_binding && state.accepted_toolsets.insert(name.to_string()) {
+        state.accepted_toolset_names.push(name.to_string());
     }
     accepted_binding
 }
 
 fn select_named_tool(
     name: &str,
-    toolset: &ToolsetDefinition,
+    _toolset: &ToolsetDefinition,
     state: &mut ToolsetExpansion<'_>,
 ) -> bool {
     if known_tool_name(name) && !tool_allowed_in_mode(name, state.mode) {
-        state.projection.record(
-            ContributionFact::new(
-                toolset.source_id.clone(),
-                toolset.source_kind.clone(),
-                "toolset_tool",
-                "tool_surface",
-                format!("tool:{name}"),
-                ContributionStatus::Omitted,
-            )
-            .with_reason("tool is not available in the selected run mode"),
-        );
         return false;
     }
 
     let Some(entries) = state.registry.entries(name) else {
-        state.projection.record(
-            ContributionFact::new(
-                toolset.source_id.clone(),
-                toolset.source_kind.clone(),
-                "toolset_tool",
-                "tool_surface",
-                format!("tool:{name}"),
-                ContributionStatus::Unavailable,
-            )
-            .with_reason("no execution binding is registered for this tool name"),
-        );
         return false;
     };
 
-    let mut accepted = false;
-    for (index, entry) in entries.iter().enumerate() {
-        if index == 0 {
-            accepted |= select_tool_entry(
-                entry,
-                state.selected_tools,
-                state.selected_tool_sources,
-                state.accepted_tool_names,
-                state.projection,
-                state.warnings,
-                false,
-            );
-        } else {
-            state.projection.record(
-                ContributionFact::new(
-                    entry.source_id.clone(),
-                    entry.source_kind.clone(),
-                    entry.declaration_family,
-                    entry.owner_module,
-                    format!("tool:{}", entry.name),
-                    ContributionStatus::Conflict,
-                )
-                .with_reason("visible tool name has another registered execution binding"),
-            );
-        }
-    }
-    accepted
+    entries.first().is_some_and(|entry| {
+        select_tool_entry(
+            entry,
+            state.selected_tools,
+            state.selected_tool_sources,
+            state.warnings,
+            false,
+        )
+    })
 }
 
 fn select_tool_entry(
     entry: &AvailableToolEntry,
     selected_tools: &mut Vec<Arc<dyn ToolBinding>>,
     selected_tool_sources: &mut BTreeMap<String, String>,
-    accepted_tool_names: &mut Vec<String>,
-    projection: &mut ContributionProjection,
     warnings: &mut Vec<RunWarning>,
     warn_on_conflict: bool,
 ) -> bool {
@@ -697,19 +583,6 @@ fn select_tool_entry(
         if existing_source == &entry.source_id {
             return true;
         }
-        projection.record(
-            ContributionFact::new(
-                entry.source_id.clone(),
-                entry.source_kind.clone(),
-                entry.declaration_family,
-                entry.owner_module,
-                format!("tool:{}", entry.name),
-                ContributionStatus::Conflict,
-            )
-            .with_reason(format!(
-                "visible tool name already accepted from `{existing_source}`"
-            )),
-        );
         if warn_on_conflict {
             warnings.push(RunWarning {
                 kind: "capability_conflict".to_string(),
@@ -725,35 +598,7 @@ fn select_tool_entry(
     }
     selected_tool_sources.insert(entry.name.clone(), entry.source_id.clone());
     selected_tools.push(Arc::clone(&entry.binding));
-    accepted_tool_names.push(entry.name.clone());
-    projection.record(ContributionFact::new(
-        entry.source_id.clone(),
-        entry.source_kind.clone(),
-        entry.declaration_family,
-        entry.owner_module,
-        format!("tool:{}", entry.name),
-        ContributionStatus::Accepted,
-    ));
     true
-}
-
-fn record_unknown_toolset_fact(
-    name: &str,
-    status: ContributionStatus,
-    reason: &str,
-    projection: &mut ContributionProjection,
-) {
-    projection.record(
-        ContributionFact::new(
-            format!("toolset:{name}"),
-            "unknown",
-            "toolset",
-            "tool_surface",
-            format!("toolset:{name}"),
-            status,
-        )
-        .with_reason(reason),
-    );
 }
 
 #[cfg(test)]
@@ -835,9 +680,12 @@ mod tests {
             image_input_enabled: true,
             image_generation: None,
             web_search: Default::default(),
-            tool_selection: ToolSelectionConfig::default(),
-            custom_toolsets: BTreeMap::new(),
-            contributed_toolsets: Vec::new(),
+            selection: compile_tool_selection(
+                mode,
+                &ToolSelectionConfig::default(),
+                &BTreeMap::new(),
+                &[],
+            ),
             clarify: ClarifyToolSurface::Disabled,
             skills: None,
             extension_tools: Vec::new(),
@@ -845,17 +693,49 @@ mod tests {
         }
     }
 
+    fn selected_names(plan: &ToolSelectionPlan) -> Vec<&str> {
+        plan.tools.iter().map(|tool| tool.name()).collect()
+    }
+
+    #[test]
+    fn contributed_toolset_selects_hosted_web_search_in_the_canonical_intent() {
+        let mut selection = ToolSelectionConfig::default();
+        selection.modes.insert(
+            "default".to_string(),
+            ToolModeConfig {
+                enabled_toolsets: Some(vec!["plugin-web".to_string()]),
+                disabled_toolsets: Vec::new(),
+            },
+        );
+        let contributed = vec![ToolsetContribution {
+            source_id: "plugin:search@local".to_string(),
+            source_kind: "plugin".to_string(),
+            name: "plugin-web".to_string(),
+            config: CustomToolsetConfig {
+                description: None,
+                tools: vec!["web_search".to_string()],
+                includes: Vec::new(),
+            },
+        }];
+
+        let intent =
+            compile_tool_selection(RunMode::Default, &selection, &BTreeMap::new(), &contributed);
+
+        assert!(intent.selects_tool("web_search", RunMode::Default));
+    }
+
     #[test]
     fn plugin_toolset_accepts_only_registered_tool_bindings() {
         let mut input = base_input(RunMode::Default);
-        input.tool_selection.modes.insert(
+        let mut selection = ToolSelectionConfig::default();
+        selection.modes.insert(
             "default".to_string(),
             ToolModeConfig {
                 enabled_toolsets: Some(vec!["plugin-pack".to_string()]),
                 disabled_toolsets: Vec::new(),
             },
         );
-        input.contributed_toolsets.push(ToolsetContribution {
+        let contributed = vec![ToolsetContribution {
             source_id: "plugin:demo@local".to_string(),
             source_kind: "plugin".to_string(),
             name: "plugin-pack".to_string(),
@@ -864,7 +744,9 @@ mod tests {
                 tools: vec!["plugin_do".to_string(), "missing_plugin_tool".to_string()],
                 includes: vec!["coding-core".to_string()],
             },
-        });
+        }];
+        input.selection =
+            compile_tool_selection(RunMode::Default, &selection, &BTreeMap::new(), &contributed);
         input.extension_tools.push(RuntimeTool::with_source(
             Arc::new(TestTool::new("plugin_do")),
             "plugin:demo@local",
@@ -878,23 +760,15 @@ mod tests {
                 .accepted_toolset_names
                 .contains(&"plugin-pack".to_string())
         );
-        assert!(
-            result
-                .accepted_tool_names
-                .contains(&"plugin_do".to_string())
-        );
+        assert!(selected_names(&result).contains(&"plugin_do"));
         assert_eq!(
-            result
-                .accepted_tool_names
+            selected_names(&result)
                 .iter()
-                .filter(|name| name.as_str() == "plugin_do")
+                .filter(|name| **name == "plugin_do")
                 .count(),
             1
         );
-        assert!(result.projection.facts().iter().any(|fact| {
-            fact.status == ContributionStatus::Unavailable
-                && fact.effect_target == "tool:missing_plugin_tool"
-        }));
+        assert!(!selected_names(&result).contains(&"missing_plugin_tool"));
     }
 
     #[test]
@@ -929,13 +803,16 @@ mod tests {
     #[test]
     fn mcp_runtime_tools_derive_source_toolset_metadata() {
         let mut input = base_input(RunMode::Default);
-        input.tool_selection.modes.insert(
+        let mut selection = ToolSelectionConfig::default();
+        selection.modes.insert(
             "default".to_string(),
             ToolModeConfig {
                 enabled_toolsets: Some(vec!["mcp-repo".to_string()]),
                 disabled_toolsets: Vec::new(),
             },
         );
+        input.selection =
+            compile_tool_selection(RunMode::Default, &selection, &BTreeMap::new(), &[]);
         input.extension_tools.push(RuntimeTool::with_source(
             Arc::new(TestTool::new("mcp__repo__search")),
             "mcp:repo",
@@ -949,16 +826,7 @@ mod tests {
                 .accepted_toolset_names
                 .contains(&"mcp-repo".to_string())
         );
-        assert!(
-            result
-                .accepted_tool_names
-                .contains(&"mcp__repo__search".to_string())
-        );
-        assert!(result.projection.facts().iter().any(|fact| {
-            fact.status == ContributionStatus::Accepted
-                && fact.source_id == "mcp:repo"
-                && fact.effect_target == "toolset:mcp-repo"
-        }));
+        assert!(selected_names(&result).contains(&"mcp__repo__search"));
     }
 
     #[test]
@@ -985,7 +853,7 @@ mod tests {
     #[test]
     fn explicit_tool_search_disable_keeps_plugin_tools_direct() {
         let mut input = base_input(RunMode::Default);
-        input.tool_selection.tool_search.enabled = false;
+        input.selection.tool_search_enabled = false;
         input.extension_tools.push(RuntimeTool::with_source(
             Arc::new(TestTool::new("plugin_lookup")),
             "plugin:demo@local",
@@ -1050,9 +918,10 @@ mod tests {
     }
 
     #[test]
-    fn toolset_projection_records_unknown_cycles_and_plan_omissions() {
+    fn invalid_toolset_inputs_do_not_expose_tools_or_claim_acceptance() {
         let mut input = base_input(RunMode::Plan);
-        input.tool_selection.modes.insert(
+        let mut selection = ToolSelectionConfig::default();
+        selection.modes.insert(
             "plan".to_string(),
             ToolModeConfig {
                 enabled_toolsets: Some(vec![
@@ -1063,7 +932,8 @@ mod tests {
                 disabled_toolsets: Vec::new(),
             },
         );
-        input.custom_toolsets.insert(
+        let mut custom_toolsets = BTreeMap::new();
+        custom_toolsets.insert(
             "writer".to_string(),
             CustomToolsetConfig {
                 description: None,
@@ -1071,7 +941,7 @@ mod tests {
                 includes: Vec::new(),
             },
         );
-        input.custom_toolsets.insert(
+        custom_toolsets.insert(
             "cycle-a".to_string(),
             CustomToolsetConfig {
                 description: None,
@@ -1079,7 +949,7 @@ mod tests {
                 includes: vec!["cycle-b".to_string()],
             },
         );
-        input.custom_toolsets.insert(
+        custom_toolsets.insert(
             "cycle-b".to_string(),
             CustomToolsetConfig {
                 description: None,
@@ -1087,41 +957,25 @@ mod tests {
                 includes: vec!["cycle-a".to_string()],
             },
         );
+        input.selection = compile_tool_selection(RunMode::Plan, &selection, &custom_toolsets, &[]);
 
         let result = assemble_tool_surface_with_warnings(input);
-        let facts = result.projection.facts();
-
-        assert!(facts.iter().any(|fact| {
-            fact.status == ContributionStatus::Omitted
-                && fact.effect_target == "tool:write"
-                && fact
-                    .reason
-                    .as_deref()
-                    .is_some_and(|reason| reason.contains("selected run mode"))
-        }));
-        assert!(facts.iter().any(|fact| {
-            fact.status == ContributionStatus::Unavailable && fact.effect_target == "tool:ghost"
-        }));
-        assert!(facts.iter().any(|fact| {
-            fact.status == ContributionStatus::Omitted
-                && fact.effect_target == "toolset:cycle-a"
-                && fact
-                    .reason
-                    .as_deref()
-                    .is_some_and(|reason| reason.contains("cycle"))
-        }));
-        assert!(facts.iter().any(|fact| {
-            fact.status == ContributionStatus::Omitted
-                && fact.effect_target == "toolset:missing"
-                && fact
-                    .reason
-                    .as_deref()
-                    .is_some_and(|reason| reason.contains("unknown"))
-        }));
+        assert!(!selected_names(&result).contains(&"write"));
+        assert!(!selected_names(&result).contains(&"ghost"));
+        assert!(
+            !result
+                .accepted_toolset_names
+                .contains(&"cycle-a".to_string())
+        );
+        assert!(
+            !result
+                .accepted_toolset_names
+                .contains(&"missing".to_string())
+        );
     }
 
     #[test]
-    fn duplicate_visible_extension_tool_warns_and_projects_conflict() {
+    fn duplicate_visible_extension_tool_warns_and_keeps_one_binding() {
         let mut input = base_input(RunMode::Default);
         input.extension_tools.push(RuntimeTool::with_source(
             Arc::new(TestTool::new("read")),
@@ -1134,10 +988,12 @@ mod tests {
         assert!(result.warnings.iter().any(|warning| {
             warning.kind == "capability_conflict" && warning.message.contains("plugin:shadow@local")
         }));
-        assert!(result.projection.facts().iter().any(|fact| {
-            fact.status == ContributionStatus::Conflict
-                && fact.source_id == "plugin:shadow@local"
-                && fact.effect_target == "tool:read"
-        }));
+        assert_eq!(
+            selected_names(&result)
+                .iter()
+                .filter(|name| **name == "read")
+                .count(),
+            1
+        );
     }
 }

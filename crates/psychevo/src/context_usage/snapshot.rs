@@ -5,12 +5,12 @@ use super::{
     AbortSignal, Arc, BTreeMap, BoxFuture, Deserialize, EffectiveUsageTotal, Error,
     GenerationProvider, GenerationRequest, GenerationStream, Message, ModelTarget, Mutex,
     OpenAiChatTokenCount, PathBuf, PromptInstruction, Result, RunMode, RunOptions, Serialize,
-    SkillDiscoveryOptions, StateRuntime, Value, canonical_cwd, coding_core_tools_for_mode,
-    count_openai_chat_request, discover_skills, effective_usage_total, format_skills_for_prompt,
-    json, load_project_context_instruction_mode, load_project_instructions,
-    load_projected_messages, mode_instruction, resolve_skills_home, runtime_environment_prompt,
-    selected_configured_model, skill_tools_for_mode, skills_visible_for_prompt_with_tools,
-    tool_declarations,
+    SkillDiscoveryOptions, SkillRuntime, StateRuntime, Value, canonical_cwd,
+    coding_core_tools_for_mode, count_openai_chat_request, discover_skills,
+    effective_usage_total, format_skills_for_prompt, json,
+    load_project_context_instruction_mode, load_project_instructions, load_projected_messages,
+    mode_instruction, resolve_skills_home, runtime_environment_prompt, selected_configured_model,
+    skill_tools_for_mode_with_runtime, skills_visible_for_prompt_with_tools, tool_declarations,
 };
 use crate::prompt_templates;
 
@@ -344,6 +344,7 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
@@ -361,7 +362,10 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
     };
     let catalog = discover_skills(&skill_options)?;
     let mut tools = coding_core_tools_for_mode(&cwd, mode);
-    tools.extend(skill_tools_for_mode(skill_options, mode));
+    tools.extend(skill_tools_for_mode_with_runtime(
+        SkillRuntime::from_catalog(skill_options, catalog.clone()),
+        mode,
+    ));
     let effective_tool_names = tools
         .iter()
         .map(|tool| tool.name().to_string())
@@ -812,6 +816,7 @@ pub(crate) fn configured_context_limit(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     };
