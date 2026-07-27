@@ -8,7 +8,7 @@ use serde_json::Value;
 #[derive(Debug, Eq, PartialEq, Serialize)]
 pub(crate) struct ProviderSmokeVerification {
     pub(crate) reasoning_seen: bool,
-    pub(crate) read_tool_seen: bool,
+    pub(crate) file_inspection_seen: bool,
     pub(crate) reused_thread: bool,
     pub(crate) token_seen_in_first: bool,
     pub(crate) token_seen_in_second: bool,
@@ -40,7 +40,7 @@ pub(crate) fn verify_provider_smoke(
         bail!("{provider}: missing reasoning transcript entry");
     }
 
-    let read_tool_seen = first.iter().any(|event| {
+    let file_inspection_seen = first.iter().any(|event| {
         event.get("type").and_then(Value::as_str) == Some("item.completed")
             && blocks(event).any(|block| {
                 let metadata = block.get("metadata");
@@ -53,17 +53,14 @@ pub(crate) fn verify_provider_smoke(
                         .and_then(Value::as_str)
                         == Some("tool_execution_end")
                     && metadata
-                        .and_then(|value| value.get("tool_name"))
-                        .and_then(Value::as_str)
-                        == Some("read")
-                    && metadata
                         .and_then(|value| value.get("outcome"))
                         .and_then(Value::as_str)
                         == Some("normal")
+                    && tool_result_contains(block, token)
             })
     });
-    if !read_tool_seen {
-        bail!("{provider}: first run did not complete read");
+    if !file_inspection_seen {
+        bail!("{provider}: first run did not complete file inspection");
     }
 
     let first_thread = thread_id(&first);
@@ -86,7 +83,7 @@ pub(crate) fn verify_provider_smoke(
 
     Ok(ProviderSmokeVerification {
         reasoning_seen,
-        read_tool_seen,
+        file_inspection_seen,
         reused_thread,
         token_seen_in_first,
         token_seen_in_second,
@@ -99,6 +96,26 @@ fn blocks(event: &Value) -> impl Iterator<Item = &Value> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+}
+
+fn tool_result_contains(block: &Value, expected: &str) -> bool {
+    block
+        .pointer("/metadata/result")
+        .is_some_and(|result| value_contains(result, expected))
+        || ["body", "preview", "detail"].iter().any(|field| {
+            block
+                .get(*field)
+                .is_some_and(|value| value_contains(value, expected))
+        })
+}
+
+fn value_contains(value: &Value, expected: &str) -> bool {
+    match value {
+        Value::String(text) => text.contains(expected),
+        Value::Array(values) => values.iter().any(|value| value_contains(value, expected)),
+        Value::Object(values) => values.values().any(|value| value_contains(value, expected)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
 }
 
 fn load_events(path: &Path) -> Result<Vec<Value>> {
@@ -151,7 +168,7 @@ mod tests {
             &first,
             r#"{"type":"thread.started","threadId":"thread-1"}
 {"type":"item.updated","item":{"blocks":[{"kind":"reasoning","body":"thinking"}]}}
-{"type":"item.completed","item":{"blocks":[{"kind":"file","metadata":{"projection":"tool","type":"tool_execution_end","tool_name":"read","outcome":"normal"}}]}}
+{"type":"item.completed","item":{"blocks":[{"kind":"file","metadata":{"projection":"tool","type":"tool_execution_end","tool_name":"read","outcome":"normal","result":{"content":"token ABC"}}}]}}
 {"type":"turn.completed","finalAnswer":"token ABC"}
 "#,
         )
@@ -169,7 +186,7 @@ mod tests {
             verified,
             ProviderSmokeVerification {
                 reasoning_seen: true,
-                read_tool_seen: true,
+                file_inspection_seen: true,
                 reused_thread: true,
                 token_seen_in_first: true,
                 token_seen_in_second: true,
@@ -179,7 +196,35 @@ mod tests {
     }
 
     #[test]
-    fn verifier_rejects_missing_read_tool() {
+    fn verifier_accepts_successful_exec_command_file_inspection() {
+        let dir = temp_dir("psychevo-xtask-live-verify-exec");
+        fs::create_dir_all(&dir).expect("dir");
+        let first = dir.join("first.ndjson");
+        let second = dir.join("second.ndjson");
+        fs::write(
+            &first,
+            r#"{"type":"thread.started","threadId":"thread-1"}
+{"type":"item.updated","item":{"blocks":[{"kind":"reasoning","body":"thinking"}]}}
+{"type":"item.completed","item":{"blocks":[{"kind":"shell","body":"{\"exit_code\":0,\"output\":\"probe token: ABC\\n\"}","metadata":{"projection":"tool","type":"tool_execution_end","tool_name":"exec_command","outcome":"normal","result":{"exit_code":0,"output":"probe token: ABC\n"}}}]}}
+{"type":"turn.completed","finalAnswer":"token ABC"}
+"#,
+        )
+        .expect("first");
+        fs::write(
+            &second,
+            r#"{"type":"thread.started","threadId":"thread-1"}
+{"type":"turn.completed","finalAnswer":"token ABC"}
+"#,
+        )
+        .expect("second");
+
+        let verified = verify_provider_smoke("demo", "ABC", &first, &second).expect("verified");
+        assert!(verified.file_inspection_seen);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn verifier_rejects_missing_file_inspection() {
         let dir = temp_dir("psychevo-xtask-live-verify-fail");
         fs::create_dir_all(&dir).expect("dir");
         let first = dir.join("first.ndjson");
@@ -200,7 +245,7 @@ mod tests {
         )
         .expect("second");
         let err = verify_provider_smoke("demo", "ABC", &first, &second).expect_err("failure");
-        assert!(err.to_string().contains("did not complete read"));
+        assert!(err.to_string().contains("did not complete file inspection"));
         let _ = fs::remove_dir_all(dir);
     }
 

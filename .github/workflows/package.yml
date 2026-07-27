@@ -21,7 +21,7 @@ jobs:
           - windows-2025
     runs-on: ${{ matrix.os }}
     env:
-      PSYCHEVO_CI_ARTIFACT_ROOT: .local/package-matrix/${{ runner.os }}
+      PSYCHEVO_CI_ARTIFACT_ROOT: .local/package-matrix/${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -92,5 +92,5 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           path: |
-            .local/package-matrix/${{ runner.os }}/package
+            .local/package-matrix/${{ matrix.os }}/package
             apps/desktop/src-tauri/target/release/bundle

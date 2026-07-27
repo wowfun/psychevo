@@ -40,6 +40,7 @@ const RUST_BROAD_STEPS: &[WorkflowStep] = &[
             "-p",
             "psychevo",
             "--no-default-features",
+            "--all-targets",
             "--quiet",
         ]),
         live: false,
