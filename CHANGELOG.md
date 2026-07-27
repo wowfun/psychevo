@@ -17,6 +17,9 @@
   consumer-visible, and resilient to stale capability reads.
 - Hardened artifact delivery, concurrent SQLite bootstrap, bounded MCP and
   Plugin execution, and orderly worker shutdown.
+- Temporarily disabled push-triggered hosted CI and packaging while preserving
+  pull-request validation and manual package dispatch, and required explicit
+  opt-in for local package profile execution.
 
 ## 2026-07-26
 

@@ -94,15 +94,19 @@ cargo xtask ci run --profile rust-broad
   environment mode, and `--live-env` is rejected for non-live profiles.
 - `ci plan --profile package --json` marks the profile as artifact-only CD and
   includes no publish, deploy, upload, tag, or hosted-release step.
+- `ci run --profile package` fails before creating artifacts or starting a
+  profile step unless the caller passes explicit `--package` opt-in; package
+  planning does not require opt-in.
 - No legacy shell entrypoint exists for Rust broad validation; the
   `rust-broad` profile is selected through `cargo xtask ci` directly.
-- Hosted pull-request and `main` checks invoke the existing `rust-broad`,
-  `desktop-rust`, and `web` profiles rather than defining a second test
-  inventory. Generated Gateway protocol verification belongs to `rust-broad`
-  rather than a duplicate hosted-only step. The Linux Rust job installs
-  `libwebkit2gtk-4.1-dev` before the
-  Desktop profile so it validates the same Tauri feature used by production
+- Hosted pull-request checks invoke the existing `rust-broad`, `desktop-rust`,
+  and `web` profiles rather than defining a second test inventory. Generated
+  Gateway protocol verification belongs to `rust-broad` rather than a duplicate
+  hosted-only step. The Linux Rust job installs `libwebkit2gtk-4.1-dev` before
+  the Desktop profile so it validates the same Tauri feature used by production
   builds.
+- Hosted `main` push triggers remain commented with explicit restoration
+  guidance. Pull-request CI and explicit manual package dispatch remain active.
 - Default CI artifact retention keeps the 10 newest numeric run directories
   under `.local/.psychevo-dev/ci/` and ignores non-numeric entries.
 - `ci plan --profile visual --json` exposes the runner-owned `tui-vhs-demo`

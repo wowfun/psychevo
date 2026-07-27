@@ -18,7 +18,8 @@ This topic owns:
 - local artifact root conventions for workflow runs
 - live opt-in enforcement for workflow profiles
 - lower-level helper scripts used by profile steps
-- the required GitHub Actions workflow for pull requests and pushes to `main`
+- the required GitHub Actions workflow for pull requests and explicit hosted
+  package dispatch
 
 Out of scope:
 
@@ -39,6 +40,11 @@ The local runner exposes:
 `list` prints available profiles. `plan` prints the ordered steps without
 executing them. `run` executes the selected profile, reports compact progress,
 and preserves step output in logs.
+
+Artifact-only package execution is an explicit opt-in. `cargo xtask ci run
+--profile package` must fail before creating an artifact root or starting a
+profile step unless the caller also passes `--package`. Planning remains
+available without opt-in through `cargo xtask ci plan --profile package`.
 
 During `run`, normal stdout progress is captured to the step log without being
 mirrored to the terminal. Stdout warning lines are mirrored to terminal
@@ -121,9 +127,9 @@ Initial profiles:
   builds the App Server with no default features, discovers both Python SDK
   test directories, installs the real wheels/sdist into a clean environment,
   runs an installed fake-provider stdio smoke, and writes checksums without
-  publishing or creating hosted release objects. An unavailable required
-  install/smoke prerequisite fails or reports the profile blocked; it is not a
-  successful skip.
+  publishing or creating hosted release objects. Running it requires explicit
+  `--package` opt-in. An unavailable required install/smoke prerequisite fails
+  or reports the profile blocked; it is not a successful skip.
 
 ## Hosted CI
 
@@ -134,19 +140,24 @@ development package required to compile Tauri, and runs
 `packageManager` version with a frozen lockfile and runs
 `cargo xtask ci run --profile web`.
 
-A separate artifact-only workflow runs on pushes to `main` and explicit manual
-dispatch across Linux, macOS, and Windows. Every matrix runner builds the
-Workbench, release CLI and Desktop bundle for that host, builds the real Python
-SDK/App Server/CLI artifacts, installs them into a clean environment, and runs
-the fake-provider stdio smoke through the installed Python Client. A platform
-is release-eligible only after its own runner succeeds; the existence or local
-validation of the workflow does not claim that another operating system
-passed. This workflow never publishes packages, creates a hosted release, or
-uses provider credentials. Its artifact upload explicitly includes hidden
-paths because the Python wheel, sdist, and checksum staging root is `.local`;
-the presence of a non-hidden Desktop bundle cannot mask missing Python
-artifacts. The profile output root and upload path use the same matrix
-operating-system key; runner display names are not filesystem keys.
+Push-triggered hosted CI is temporarily disabled. The `main` push block remains
+commented in the workflow with an explicit restoration note; pull-request
+validation remains enabled.
+
+A separate artifact-only workflow runs only through explicit manual dispatch
+across Linux, macOS, and Windows while its `main` push block is temporarily
+disabled and retained as commented restoration guidance. Every matrix runner
+builds the Workbench, release CLI and Desktop bundle for that host, builds the
+real Python SDK/App Server/CLI artifacts, installs them into a clean
+environment, and runs the fake-provider stdio smoke through the installed
+Python Client. A platform is release-eligible only after its own runner
+succeeds; the existence or local validation of the workflow does not claim that
+another operating system passed. This workflow never publishes packages,
+creates a hosted release, or uses provider credentials. Its artifact upload
+explicitly includes hidden paths because the Python wheel, sdist, and checksum
+staging root is `.local`; the presence of a non-hidden Desktop bundle cannot
+mask missing Python artifacts. The profile output root and upload path use the
+same matrix operating-system key; runner display names are not filesystem keys.
 
 Hosted workflows have no aggregate release job, live provider work, nightly,
 fuzz, or soak work. Full visual and live profiles remain manual, artifact-owned

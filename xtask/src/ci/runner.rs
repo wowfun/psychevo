@@ -22,10 +22,16 @@ use crate::live::{LiveEnvMode, run_ci_single_provider_live};
 
 const FAILURE_TAIL_LINES: usize = 80;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RunOptIns {
+    pub(crate) live: bool,
+    pub(crate) package: bool,
+}
+
 pub(crate) fn execute_profile(
     root: &Path,
     id: &str,
-    allow_live: bool,
+    opt_ins: RunOptIns,
     live_env: Option<LiveEnvMode>,
     artifact_root: Option<PathBuf>,
 ) -> Result<RunOutput> {
@@ -33,8 +39,11 @@ pub(crate) fn execute_profile(
     if live_env.is_some() && !profile.live {
         bail!("--live-env is only valid for live CI/CD profiles");
     }
-    if profile.live && !allow_live {
+    if profile.live && !opt_ins.live {
         bail!("profile '{id}' requires explicit --live opt-in");
+    }
+    if profile.artifact_only && !opt_ins.package {
+        bail!("profile '{id}' requires explicit --package opt-in");
     }
     let live_env = live_env.unwrap_or_default();
 
@@ -57,7 +66,7 @@ pub(crate) fn execute_profile(
 
     let mut steps = Vec::new();
     for (index, step) in profile.steps.iter().enumerate() {
-        if step.live && !allow_live {
+        if step.live && !opt_ins.live {
             bail!("step '{}' requires explicit --live opt-in", step.id);
         }
         println!("ci {}: {} ...", profile.id, step.id);
@@ -408,9 +417,34 @@ mod tests {
     #[test]
     fn live_profile_requires_explicit_opt_in() {
         let temp = std::env::temp_dir().join("psychevo-xtask-live-opt-in-test");
-        let err = execute_profile(Path::new("."), "live", false, None, Some(temp))
-            .expect_err("live profile should be rejected before execution");
+        let err = execute_profile(
+            Path::new("."),
+            "live",
+            RunOptIns::default(),
+            None,
+            Some(temp),
+        )
+        .expect_err("live profile should be rejected before execution");
         assert!(err.to_string().contains("requires explicit --live opt-in"));
+    }
+
+    #[test]
+    fn package_profile_requires_explicit_opt_in_before_creating_artifacts() {
+        let temp = test_log_path("package-opt-in").with_extension("");
+        assert!(!temp.exists());
+        let err = execute_profile(
+            Path::new("."),
+            "package",
+            RunOptIns::default(),
+            None,
+            Some(temp.clone()),
+        )
+        .expect_err("package profile should be rejected before execution");
+        assert!(
+            err.to_string()
+                .contains("requires explicit --package opt-in")
+        );
+        assert!(!temp.exists());
     }
 
     #[test]
@@ -419,7 +453,7 @@ mod tests {
         let err = execute_profile(
             Path::new("."),
             "changed",
-            false,
+            RunOptIns::default(),
             Some(LiveEnvMode::Isolated),
             Some(temp),
         )

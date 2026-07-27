@@ -41,6 +41,8 @@ pub(crate) enum CiCommand {
         json: bool,
         #[arg(long, help = "Explicitly allow live provider or live service steps")]
         live: bool,
+        #[arg(long, help = "Explicitly allow artifact-only package preparation")]
+        package: bool,
         #[arg(long, value_enum)]
         live_env: Option<LiveEnvMode>,
         #[arg(long)]
@@ -80,10 +82,17 @@ pub(crate) fn run(command: CiCommand, root: &Path) -> Result<()> {
             profile,
             json,
             live,
+            package,
             live_env,
             artifact_root,
         } => {
-            let run = runner::execute_profile(root, &profile, live, live_env, artifact_root)?;
+            let run = runner::execute_profile(
+                root,
+                &profile,
+                runner::RunOptIns { live, package },
+                live_env,
+                artifact_root,
+            )?;
             if json {
                 print_json(&run)
             } else {
