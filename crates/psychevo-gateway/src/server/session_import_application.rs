@@ -665,7 +665,14 @@ pub(super) async fn archive_thread(state: &WebState, thread_id: &str) -> psychev
                 .await?;
         }
     }
-    state.inner.state.archive_session(thread_id).await?;
+    state
+        .inner
+        .application
+        .client()
+        .resume_thread(thread_id)
+        .await?
+        .archive()
+        .await?;
     state
         .inner
         .codex_capability_broker
@@ -725,7 +732,14 @@ pub(super) async fn restore_thread(state: &WebState, thread_id: &str) -> psychev
 
 pub(super) async fn delete_thread(state: &WebState, thread_id: &str) -> psychevo::Result<()> {
     let Some(binding) = state.inner.state.gateway_runtime_binding(thread_id).await? else {
-        state.inner.state.delete_session(thread_id).await?;
+        state
+            .inner
+            .application
+            .client()
+            .resume_thread(thread_id)
+            .await?
+            .delete()
+            .await?;
         state
             .inner
             .codex_capability_broker
@@ -734,7 +748,14 @@ pub(super) async fn delete_thread(state: &WebState, thread_id: &str) -> psychevo
         return Ok(());
     };
     if binding.backend_kind.as_deref() != Some("acp") {
-        state.inner.state.delete_session(thread_id).await?;
+        state
+            .inner
+            .application
+            .client()
+            .resume_thread(thread_id)
+            .await?
+            .delete()
+            .await?;
         state
             .inner
             .codex_capability_broker
@@ -805,7 +826,14 @@ pub(super) async fn delete_thread(state: &WebState, thread_id: &str) -> psychevo
             Some(json!({"state": "remoteAcknowledged", "updatedAtMs": gateway_now_ms()})),
         )
         .await?;
-    state.inner.state.delete_session(thread_id).await?;
+    state
+        .inner
+        .application
+        .client()
+        .resume_thread(thread_id)
+        .await?
+        .delete()
+        .await?;
     state
         .inner
         .codex_capability_broker

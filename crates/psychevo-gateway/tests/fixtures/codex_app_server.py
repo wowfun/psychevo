@@ -63,16 +63,18 @@ def private_home(message):
         error(message, -32602, "invalid params")
 
 
-def preflight_missing_method(message):
+def startup_no_probe(message):
     method = message.get("method")
+    params = "absent" if "params" not in message else ("null" if message["params"] is None else "normal")
+    append_log(method + ":" + params + "\n")
     if method == "initialize":
-        initialize(message, "any-originator/0.144.1", None)
+        initialize(message, "codex_cli_rs/0.999.0", None)
     elif method == "initialized":
         pass
-    else:
-        append_log(method + ":" + ("null" if message.get("params") is None else "normal") + "\n")
-        code = -32601 if method == "app/list" else -32602
-        error(message, code, "method not found" if code == -32601 else "invalid params")
+    elif method == "plugin/list":
+        result(message, catalog([]))
+    elif message.get("id") is not None:
+        error(message, -32601, "method not found")
 
 
 def handshake(message):
@@ -546,9 +548,9 @@ handlers = {
     "install_materializes": install_materializes,
     "installed_package": installed_package,
     "inventory_single_flight": inventory_single_flight,
-    "preflight_missing_method": preflight_missing_method,
     "prewarm_inventory": prewarm_inventory,
-    "private_home": private_home
+    "private_home": private_home,
+    "startup_no_probe": startup_no_probe
 }
 
 if scenario == "private_home":

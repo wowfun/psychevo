@@ -9,11 +9,37 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 import psychevo._transport as transport_module
 from psychevo import TransportError
-from psychevo._transport import WebSocketTransport
+from psychevo._transport import StdioTransport, WebSocketTransport
 from websockets.asyncio.server import ServerConnection, serve
 
 
 class WebSocketTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stdio_lines_share_one_bounded_message_size(self) -> None:
+        original_limit = transport_module._MAX_MESSAGE_BYTES
+        transport_module._MAX_MESSAGE_BYTES = 64
+        try:
+            transport = await StdioTransport.start(
+                sys.executable,
+                ("-c", "import sys; sys.stdout.buffer.write(b'x' * 65 + b'\\n')"),
+            )
+            try:
+                with self.assertRaisesRegex(TransportError, "exceeds 64 bytes"):
+                    await transport.receive()
+            finally:
+                await transport.close()
+
+            transport = await StdioTransport.start(
+                sys.executable,
+                ("-c", "import sys; sys.stdin.buffer.readline()"),
+            )
+            try:
+                with self.assertRaisesRegex(TransportError, "exceeds 64 bytes"):
+                    await transport.send({"data": "x" * 80})
+            finally:
+                await transport.close()
+        finally:
+            transport_module._MAX_MESSAGE_BYTES = original_limit
+
     async def test_authenticated_text_json_round_trip(self) -> None:
         authorization = asyncio.Future[str]()
 

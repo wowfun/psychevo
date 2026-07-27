@@ -274,15 +274,38 @@ export const appServerSchemas = {
 },
   AppThreadListParams: {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JsonSafeU64": {
+      "maximum": 9007199254740991.0,
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
   "properties": {
     "archived": {
       "default": false,
       "type": "boolean"
     },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "cwd": {
       "type": [
         "string",
         "null"
+      ]
+    },
+    "limit": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonSafeU64"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "sources": {
@@ -346,6 +369,9 @@ export const appServerSchemas = {
     "threadId": {
       "type": "string"
     },
+    "turnId": {
+      "type": "string"
+    },
     "useRegisteredApprovalHandler": {
       "default": false,
       "type": "boolean"
@@ -357,7 +383,8 @@ export const appServerSchemas = {
   },
   "required": [
     "prompt",
-    "threadId"
+    "threadId",
+    "turnId"
   ],
   "title": "AppTurnStartParams",
   "type": "object"
@@ -1133,6 +1160,12 @@ export const appServerSchemas = {
     }
   },
   "properties": {
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "threads": {
       "items": {
         "$ref": "#/definitions/AppThreadSummary"
@@ -1882,12 +1915,16 @@ export const appServerSchemas = {
     "event": {
       "$ref": "#/definitions/AppTurnEvent"
     },
+    "threadId": {
+      "type": "string"
+    },
     "turnId": {
       "type": "string"
     }
   },
   "required": [
     "event",
+    "threadId",
     "turnId"
   ],
   "title": "AppTurnEventNotification",

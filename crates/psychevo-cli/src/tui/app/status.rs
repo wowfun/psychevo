@@ -37,8 +37,11 @@ impl TuiApp {
                         .iter()
                         .map(|source| (*source).to_string())
                         .collect(),
+                    limit: 1,
+                    ..ThreadListQuery::default()
                 })
                 .await?
+                .threads
                 .into_iter()
                 .next()
         {
@@ -95,6 +98,7 @@ impl TuiApp {
             selected_capability_roots: Vec::new(),
             skill_inputs: self.skill_inputs.clone(),
             mcp_servers: Vec::new(),
+            mcp_runtime: None,
             workspace_mutations: None,
             runtime_tools: Vec::new(),
         }

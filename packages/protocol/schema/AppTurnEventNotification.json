@@ -307,12 +307,16 @@
     "event": {
       "$ref": "#/definitions/AppTurnEvent"
     },
+    "threadId": {
+      "type": "string"
+    },
     "turnId": {
       "type": "string"
     }
   },
   "required": [
     "event",
+    "threadId",
     "turnId"
   ],
   "title": "AppTurnEventNotification",

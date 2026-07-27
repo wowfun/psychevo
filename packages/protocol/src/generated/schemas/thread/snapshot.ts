@@ -903,10 +903,7 @@ export const threadSnapshotSchemas = {
       "items": {
         "$ref": "#/definitions/TurnStartReceipt"
       },
-      "type": [
-        "array",
-        "null"
-      ]
+      "type": "array"
     }
   },
   "required": [
@@ -915,7 +912,8 @@ export const threadSnapshotSchemas = {
     "history",
     "pendingActions",
     "scope",
-    "source"
+    "source",
+    "turnStartReceipts"
   ],
   "title": "ThreadSnapshot",
   "type": "object"

@@ -385,6 +385,12 @@ export const threadResultSchemas = {
     }
   },
   "properties": {
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sessions": {
       "items": {
         "$ref": "#/definitions/SessionSummaryView"

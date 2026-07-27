@@ -48,25 +48,40 @@ class StdioTransport(Transport):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=None,
+            limit=_MAX_MESSAGE_BYTES + 1,
         )
         return cls(process)
 
     async def send(self, value: dict[str, object]) -> None:
-        payload = json.dumps(value, separators=(",", ":")).encode("utf-8") + b"\n"
+        payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        if len(payload) > _MAX_MESSAGE_BYTES:
+            raise TransportError(
+                f"App Server stdio message exceeds {_MAX_MESSAGE_BYTES} bytes"
+            )
         async with self._write_lock:
-            self._stdin.write(payload)
+            self._stdin.write(payload + b"\n")
             try:
                 await self._stdin.drain()
             except (BrokenPipeError, ConnectionResetError) as error:
                 raise TransportError("App Server stdin closed") from error
 
     async def receive(self) -> dict[str, object]:
-        line = await self._stdout.readline()
+        try:
+            line = await self._stdout.readline()
+        except ValueError as error:
+            raise TransportError(
+                f"App Server stdio message exceeds {_MAX_MESSAGE_BYTES} bytes"
+            ) from error
         if not line:
             code = await self._process.wait()
             raise TransportError(f"App Server stdout closed with exit code {code}")
+        payload = line[:-1] if line.endswith(b"\n") else line
+        if len(payload) > _MAX_MESSAGE_BYTES:
+            raise TransportError(
+                f"App Server stdio message exceeds {_MAX_MESSAGE_BYTES} bytes"
+            )
         try:
-            value = json.loads(line)
+            value = json.loads(payload)
         except json.JSONDecodeError as error:
             raise TransportError("App Server emitted invalid JSON") from error
         if not isinstance(value, dict):

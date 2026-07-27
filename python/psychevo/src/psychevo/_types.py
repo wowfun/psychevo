@@ -111,6 +111,12 @@ class ThreadSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ThreadPage:
+    threads: tuple[ThreadSummary, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class ThreadSnapshot(ThreadSummary):
     pending_interactions: tuple[PendingInteraction, ...]
     items: tuple[ThreadItem, ...]

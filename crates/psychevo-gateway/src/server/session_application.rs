@@ -1,5 +1,16 @@
 use super::*;
-use serde::de::DeserializeOwned;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use psychevo::__product::persistence::SessionListCursor;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadListCursor {
+    cwd: Option<String>,
+    archived: bool,
+    position: SessionListCursor,
+}
 
 pub(super) async fn resume(
     state: &WebState,
@@ -79,13 +90,20 @@ pub(super) async fn list(
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
     let cwd = resolve_session_cwd_filter(state, auth, params.cwd)?;
     let cwd = cwd.map(|cwd| cwd.to_string_lossy().into_owned());
+    let archived = params.archived.unwrap_or(false);
+    let cursor = params
+        .cursor
+        .as_deref()
+        .map(|cursor| decode_thread_list_cursor(cursor, cwd.as_deref(), archived))
+        .transpose()?;
     let activity_snapshot = state.inner.gateway.session_activity_snapshot().await?;
-    let sessions = state
+    let page = state
         .inner
         .state
-        .list_human_session_projections(cwd.as_deref(), params.archived.unwrap_or(false), limit)
+        .list_human_session_projections(cwd.as_deref(), archived, cursor.as_ref(), limit)
         .await?;
-    let sessions = sessions
+    let sessions = page
+        .sessions
         .into_iter()
         .map(|projection| {
             let activity = activity_snapshot
@@ -95,7 +113,46 @@ pub(super) async fn list(
             decode_result(session_summary_value(projection, activity), "thread/list")
         })
         .collect::<psychevo::Result<Vec<_>>>()?;
-    Ok(wire::ThreadListResult { sessions })
+    let next_cursor = page
+        .next_cursor
+        .map(|position| encode_thread_list_cursor(cwd, archived, position))
+        .transpose()?;
+    Ok(wire::ThreadListResult {
+        sessions,
+        next_cursor,
+    })
+}
+
+fn encode_thread_list_cursor(
+    cwd: Option<String>,
+    archived: bool,
+    position: SessionListCursor,
+) -> psychevo::Result<String> {
+    Ok(
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&ThreadListCursor {
+            cwd,
+            archived,
+            position,
+        })?),
+    )
+}
+
+fn decode_thread_list_cursor(
+    encoded: &str,
+    cwd: Option<&str>,
+    archived: bool,
+) -> psychevo::Result<SessionListCursor> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| Error::Message("invalid thread list cursor".to_string()))?;
+    let cursor = serde_json::from_slice::<ThreadListCursor>(&bytes)
+        .map_err(|_| Error::Message("invalid thread list cursor".to_string()))?;
+    if cursor.cwd.as_deref() != cwd || cursor.archived != archived {
+        return Err(Error::Message(
+            "thread list cursor does not match the current filters".to_string(),
+        ));
+    }
+    Ok(cursor.position)
 }
 
 pub(super) async fn browse(

@@ -68,7 +68,6 @@ export interface ThreadGatewayEventApplication {
   applied: boolean;
   completed: boolean;
   running: boolean | null;
-  snapshot: ThreadSnapshot | null;
 }
 
 export class ThreadController {
@@ -79,19 +78,30 @@ export class ThreadController {
   private settledBeforeAcceptanceTurnId: string | null = null;
   private settledTurnId: string | null = null;
   private currentSnapshot: ThreadSnapshot | null;
+  private liveEntries: TranscriptEntry[] = [];
   private currentContext: ThreadContextReadResult | null = null;
   private readonly snapshotListeners = new Set<() => void>();
   private snapshotBatchDepth = 0;
   private snapshotNotificationPending = false;
 
   constructor(snapshot: ThreadSnapshot | null = null) {
-    this.currentSnapshot = snapshot;
+    const projection = splitTranscriptSnapshot(snapshot);
+    this.currentSnapshot = projection.snapshot;
+    this.liveEntries = projection.liveEntries;
     this.activeThreadId = snapshot?.thread?.id ?? null;
     this.activeTurnId = snapshot?.activity.activeTurnId ?? null;
   }
 
   snapshot(): ThreadSnapshot | null {
+    return materializeTranscriptSnapshot(this.currentSnapshot, this.liveEntries);
+  }
+
+  committedSnapshot(): ThreadSnapshot | null {
     return this.currentSnapshot;
+  }
+
+  liveTranscriptEntries(): TranscriptEntry[] {
+    return this.liveEntries;
   }
 
   subscribe(listener: () => void): () => void {
@@ -255,7 +265,7 @@ export class ThreadController {
     }
     if (!sameThread) this.settledTurnId = null;
     if (!snapshot?.thread) this.currentContext = null;
-    this.replaceSnapshot(snapshot);
+    this.replaceAllSnapshot(snapshot);
   }
 
   setThreadId(threadId: string | null): void {
@@ -270,7 +280,7 @@ export class ThreadController {
     if (!admission.allowed) {
       throw new Error(admission.reason ?? "This turn is not admitted by Thread Context.");
     }
-    const snapshot = this.currentSnapshot ?? emptyThreadSnapshot(input.scope, input.threadId ?? null);
+    const snapshot = this.snapshot() ?? emptyThreadSnapshot(input.scope, input.threadId ?? null);
     const requestedThreadId = input.threadId ?? snapshot.thread?.id ?? null;
     const clientTurnId = createClientTurnId();
     const prepared = prepareThreadTurn(
@@ -285,7 +295,7 @@ export class ThreadController {
     this.acceptingFirstTurn = !requestedThreadId;
     this.awaitingTurnStartAcceptance = true;
     this.settledBeforeAcceptanceTurnId = null;
-    this.replaceSnapshot(prepared.snapshot);
+    this.replaceAllSnapshot(prepared.snapshot);
     return {
       params: threadTurnStartParams({
         controls: input.controls,
@@ -328,33 +338,34 @@ export class ThreadController {
     this.acceptingFirstTurn = false;
     this.awaitingTurnStartAcceptance = false;
     this.settledBeforeAcceptanceTurnId = null;
-    this.replaceSnapshot(bindThreadSnapshot(
-      this.currentSnapshot ?? accepted.snapshot,
+    this.replaceAllSnapshot(bindThreadSnapshot(
+      this.snapshot() ?? accepted.snapshot,
       accepted.thread
     ));
+    const snapshot = this.snapshot()!;
     return {
       threadId: accepted.threadId,
       thread: accepted.thread,
-      snapshot: this.currentSnapshot!
+      snapshot
     };
   }
 
   rejectTurnStart(prepared: ThreadTurnPreparation): ThreadSnapshot | null {
-    if (!this.awaitingTurnStartAcceptance) return this.currentSnapshot;
+    if (!this.awaitingTurnStartAcceptance) return this.snapshot();
     this.activeThreadId = prepared.previousSnapshot.thread?.id ?? null;
     this.activeTurnId = prepared.previousSnapshot.activity.activeTurnId ?? null;
     this.acceptingFirstTurn = false;
     this.awaitingTurnStartAcceptance = false;
     this.settledBeforeAcceptanceTurnId = null;
-    this.replaceSnapshot(prepared.previousSnapshot);
-    return this.currentSnapshot;
+    this.replaceAllSnapshot(prepared.previousSnapshot);
+    return this.snapshot();
   }
 
   reconcileUncertainTurnStart(
     prepared: ThreadTurnPreparation,
     incoming: ThreadSnapshot
   ): { accepted: boolean; snapshot: ThreadSnapshot } {
-    const accepted = (incoming.turnStartReceipts ?? []).some((receipt) => (
+    const accepted = incoming.turnStartReceipts.some((receipt) => (
       receipt.clientTurnId === prepared.clientTurnId
     ));
     this.activeThreadId = incoming.thread?.id ?? null;
@@ -368,23 +379,32 @@ export class ThreadController {
     const snapshot = accepted
       ? reconcileThreadSnapshot(prepared.snapshot, incoming)
       : incoming;
-    this.replaceSnapshot(snapshot);
+    this.replaceAllSnapshot(snapshot);
     return { accepted, snapshot };
   }
 
-  applyGatewayEvent(event: GatewayEvent): ThreadGatewayEventApplication {
-    if (!this.currentSnapshot) {
-      return { applied: false, completed: false, running: null, snapshot: this.currentSnapshot };
-    }
-    const acceptingDetachedTurn = this.acceptingFirstTurn && hasUnboundOptimisticPrompt(this.currentSnapshot);
-    if (!belongsToActiveThreadTurn(
+  acceptsGatewayEvent(event: GatewayEvent): boolean {
+    const snapshot = this.currentSnapshot;
+    if (!snapshot) return false;
+    const acceptingDetachedTurn = this.acceptingFirstTurn
+      && hasUnboundOptimisticPrompt(this.liveEntries);
+    return belongsToActiveThreadTurn(
       event,
       this.activeThreadId,
       this.activeTurnId,
       acceptingDetachedTurn,
       this.settledTurnId
-    )) {
-      return { applied: false, completed: false, running: null, snapshot: this.currentSnapshot };
+    );
+  }
+
+  applyGatewayEvent(event: GatewayEvent): ThreadGatewayEventApplication {
+    if (!this.currentSnapshot) {
+      return { applied: false, completed: false, running: null };
+    }
+    const acceptingDetachedTurn = this.acceptingFirstTurn
+      && hasUnboundOptimisticPrompt(this.liveEntries);
+    if (!this.acceptsGatewayEvent(event)) {
+      return { applied: false, completed: false, running: null };
     }
     if (event.type === "turnStarted" || event.type === "turnQueued") {
       this.acceptingFirstTurn = false;
@@ -397,7 +417,7 @@ export class ThreadController {
     if (this.awaitingTurnStartAcceptance && !this.activeThreadId && observedThreadId) {
       this.activeThreadId = observedThreadId;
     }
-    this.replaceSnapshot(applyGatewayEventToThreadSnapshot(this.currentSnapshot, event));
+    this.applyEventToProjection(event);
     this.activeThreadId = this.currentSnapshot.thread?.id ?? this.activeThreadId;
     if (event.type === "turnCompleted") {
       if (this.awaitingTurnStartAcceptance) {
@@ -406,20 +426,19 @@ export class ThreadController {
       this.settledTurnId = event.turnId;
       this.acceptingFirstTurn = false;
       this.activeTurnId = null;
-      return { applied: true, completed: true, running: false, snapshot: this.currentSnapshot };
+      return { applied: true, completed: true, running: false };
     }
     if (event.type === "activityChanged") {
       return {
         applied: true,
         completed: false,
-        running: event.activity.running,
-        snapshot: this.currentSnapshot
+        running: event.activity.running
       };
     }
     if (event.type === "turnStarted" || event.type === "turnQueued") {
-      return { applied: true, completed: false, running: true, snapshot: this.currentSnapshot };
+      return { applied: true, completed: false, running: true };
     }
-    return { applied: true, completed: false, running: null, snapshot: this.currentSnapshot };
+    return { applied: true, completed: false, running: null };
   }
 
   applyGatewayEvents(events: GatewayEvent[]): ThreadGatewayEventApplication[] {
@@ -435,15 +454,98 @@ export class ThreadController {
     }
   }
 
-  private replaceSnapshot(snapshot: ThreadSnapshot | null): void {
-    if (this.currentSnapshot === snapshot) return;
-    this.currentSnapshot = snapshot;
+  private applyEventToProjection(event: GatewayEvent): void {
+    if (!this.currentSnapshot) return;
+    if (event.type === "turnCompleted") {
+      this.replaceAllSnapshot(applyGatewayEventToThreadSnapshot(this.snapshot()!, event));
+      return;
+    }
+    if (
+      event.type === "entryStarted"
+      || event.type === "entryUpdated"
+      || event.type === "entryCompleted"
+      || event.type === "turnStarted"
+    ) {
+      const projected = applyGatewayEventToThreadSnapshot({
+        ...this.currentSnapshot,
+        entries: this.liveEntries
+      }, event);
+      this.currentSnapshot = {
+        ...projected,
+        entries: this.currentSnapshot.entries
+      };
+      this.liveEntries = projected.entries;
+      this.notifySnapshotChanged();
+      return;
+    }
+    const projected = applyGatewayEventToThreadSnapshot(this.currentSnapshot, event);
+    if (projected === this.currentSnapshot) return;
+    this.currentSnapshot = projected;
+    this.notifySnapshotChanged();
+  }
+
+  private replaceAllSnapshot(snapshot: ThreadSnapshot | null): void {
+    const projection = splitTranscriptSnapshot(snapshot);
+    if (
+      this.currentSnapshot === projection.snapshot
+      && this.liveEntries === projection.liveEntries
+    ) {
+      return;
+    }
+    this.currentSnapshot = projection.snapshot;
+    this.liveEntries = projection.liveEntries;
+    this.notifySnapshotChanged();
+  }
+
+  private notifySnapshotChanged(): void {
     if (this.snapshotBatchDepth > 0) {
       this.snapshotNotificationPending = true;
       return;
     }
     for (const listener of this.snapshotListeners) listener();
   }
+}
+
+function splitTranscriptSnapshot(snapshot: ThreadSnapshot | null): {
+  liveEntries: TranscriptEntry[];
+  snapshot: ThreadSnapshot | null;
+} {
+  if (!snapshot) {
+    return { liveEntries: [], snapshot: null };
+  }
+  const activeTurnId = snapshot.activity.running
+    ? snapshot.activity.activeTurnId
+    : null;
+  const liveEntries: TranscriptEntry[] = [];
+  const committedEntries: TranscriptEntry[] = [];
+  for (const entry of snapshot.entries) {
+    const optimistic = entry.source === "client.optimistic" && entry.messageSeq === null;
+    if (optimistic || (activeTurnId && entry.turnId === activeTurnId)) {
+      liveEntries.push(entry);
+    } else {
+      committedEntries.push(entry);
+    }
+  }
+  return {
+    liveEntries,
+    snapshot: liveEntries.length === 0
+      ? snapshot
+      : {
+          ...snapshot,
+          entries: committedEntries
+        }
+  };
+}
+
+function materializeTranscriptSnapshot(
+  snapshot: ThreadSnapshot | null,
+  liveEntries: TranscriptEntry[]
+): ThreadSnapshot | null {
+  if (!snapshot || liveEntries.length === 0) return snapshot;
+  return {
+    ...snapshot,
+    entries: [...snapshot.entries, ...liveEntries]
+  };
 }
 
 function admitTurnTarget(
@@ -751,8 +853,8 @@ function isLiveTranscriptObservation(event: GatewayEvent): event is Extract<
     event.type === "entryCompleted";
 }
 
-function hasUnboundOptimisticPrompt(snapshot: ThreadSnapshot): boolean {
-  return Boolean(snapshot.entries.some((entry) => (
+function hasUnboundOptimisticPrompt(entries: TranscriptEntry[]): boolean {
+  return Boolean(entries.some((entry) => (
     entry.role === "user" &&
     !entry.threadId &&
     !entry.turnId &&

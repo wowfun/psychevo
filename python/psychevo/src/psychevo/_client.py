@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ._callbacks import (
     ApprovalDecision,
@@ -21,6 +21,7 @@ from ._callbacks import (
 from ._transport import StdioTransport, Transport, WebSocketTransport
 from ._types import (
     CompactionResult,
+    ThreadPage,
     ThreadSnapshot,
     ThreadSummary,
     TurnEvent,
@@ -47,10 +48,6 @@ class _RpcClient:
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[object]] = {}
         self._turns: dict[str, TurnHandle] = {}
-        self._early_events: dict[str, deque[dict[str, Any]]] = defaultdict(
-            lambda: deque(maxlen=_EVENT_CAPACITY)
-        )
-        self._early_missed: dict[str, int] = defaultdict(int)
         self._reader: asyncio.Task[None] | None = None
         self._callbacks: set[asyncio.Task[None]] = set()
         self._terminal_error: TransportError | None = None
@@ -122,16 +119,14 @@ class _RpcClient:
         await self._send(message)
 
     def register_turn(self, turn: TurnHandle) -> None:
-        self._turns[turn.receipt.turn_id] = turn
-        missed = self._early_missed.pop(turn.receipt.turn_id, 0)
-        if missed:
-            turn._receive_event({"type": "resync_required", "missed": missed})
-        for event in self._early_events.pop(turn.receipt.turn_id, ()):
-            turn._receive_event(event)
-            self._maybe_handle_clarify(turn.receipt.turn_id, event)
-            if _terminal_event(event):
-                self._forget_turn(turn.receipt.turn_id)
-                break
+        turn_id = turn.receipt.turn_id
+        if turn_id in self._turns:
+            raise ProtocolError(-32602, f"Turn event sink is already registered: {turn_id}")
+        self._turns[turn_id] = turn
+
+    def unregister_turn(self, turn: TurnHandle) -> None:
+        if self._turns.get(turn.receipt.turn_id) is turn:
+            self._turns.pop(turn.receipt.turn_id, None)
 
     async def close(self) -> None:
         self._transition_terminal(TransportError("App Server connection closed"))
@@ -198,13 +193,9 @@ class _RpcClient:
             if task is not current_task:
                 task.cancel()
         self._turns.clear()
-        self._early_events.clear()
-        self._early_missed.clear()
 
     def _forget_turn(self, turn_id: str) -> None:
         self._turns.pop(turn_id, None)
-        self._early_events.pop(turn_id, None)
-        self._early_missed.pop(turn_id, None)
 
     def _receive_response(self, message: dict[str, object]) -> None:
         request_id = message.get("id")
@@ -231,24 +222,25 @@ class _RpcClient:
         params = message.get("params")
         if not isinstance(params, dict):
             return
+        thread_id = params.get("threadId")
         turn_id = params.get("turnId")
         event = params.get("event")
-        if not isinstance(turn_id, str) or not isinstance(event, dict):
+        if (
+            not isinstance(thread_id, str)
+            or not isinstance(turn_id, str)
+            or not isinstance(event, dict)
+        ):
             return
         turn = self._turns.get(turn_id)
         if turn is None:
-            early = self._early_events[turn_id]
-            if len(early) == _EVENT_CAPACITY:
-                self._early_missed[turn_id] += 1
-            early.append(event)
-        else:
-            turn._receive_event(event)
-            self._maybe_handle_clarify(turn_id, event)
-            if _terminal_event(event):
-                self._forget_turn(turn_id)
+            return
+        turn._receive_event(event)
+        self._maybe_handle_clarify(thread_id, turn_id, event)
+        if _terminal_event(event):
+            self._forget_turn(turn_id)
 
     def _maybe_handle_clarify(
-        self, turn_id: str, event: Mapping[str, object]
+        self, thread_id: str, turn_id: str, event: Mapping[str, object]
     ) -> None:
         if (
             event.get("type") == "interaction_requested"
@@ -257,10 +249,9 @@ class _RpcClient:
         ):
             interaction_id = event.get("interactionId")
             if isinstance(interaction_id, str):
-                turn = self._turns.get(turn_id)
                 self._spawn_callback(
                     self._handle_clarify(
-                        turn.receipt.thread_id if turn is not None else "",
+                        thread_id,
                         turn_id,
                         interaction_id,
                         event.get("payload"),
@@ -479,7 +470,9 @@ class Client:
         cwd: os.PathLike[str] | str | None = None,
         archived: bool = False,
         sources: Sequence[str] = (),
-    ) -> list[ThreadSummary]:
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> ThreadPage:
         result = _object(
             await self._request(
                 "thread/list",
@@ -487,22 +480,93 @@ class Client:
                     "cwd": None if cwd is None else os.fspath(cwd),
                     "archived": archived,
                     "sources": list(sources),
+                    "cursor": cursor,
+                    "limit": limit,
                 },
             )
         )
         threads = result.get("threads")
         if not isinstance(threads, list):
             raise TransportError("thread/list returned invalid threads")
-        return [ThreadSummary.from_wire(_object(item)) for item in threads]
+        next_cursor = result.get("nextCursor")
+        if next_cursor is not None and not isinstance(next_cursor, str):
+            raise TransportError("thread/list returned an invalid next cursor")
+        return ThreadPage(
+            threads=tuple(ThreadSummary.from_wire(_object(item)) for item in threads),
+            next_cursor=next_cursor,
+        )
+
+    async def iter_threads(
+        self,
+        *,
+        cwd: os.PathLike[str] | str | None = None,
+        archived: bool = False,
+        sources: Sequence[str] = (),
+        page_size: int = 50,
+    ) -> AsyncIterator[ThreadSummary]:
+        cursor: str | None = None
+        while True:
+            page = await self.list_threads(
+                cwd=cwd,
+                archived=archived,
+                sources=sources,
+                cursor=cursor,
+                limit=page_size,
+            )
+            for thread in page.threads:
+                yield thread
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
 
     async def resume_turn(self, turn_id: str) -> TurnHandle:
-        result = await self._request("turn/resume", {"turnId": turn_id})
-        receipt = TurnReceipt.from_wire(_object(result))
-        turn = TurnHandle(self, receipt)
-        if self._rpc is None:
-            raise TransportError("Client disconnected while resuming a Turn")
-        self._rpc.register_turn(turn)
-        return turn
+        return await self._request_turn(
+            "turn/resume",
+            {"turnId": turn_id},
+            thread_id="",
+            turn_id=turn_id,
+            client_turn_id=None,
+        )
+
+    async def _request_turn(
+        self,
+        method: str,
+        params: dict[str, object],
+        *,
+        thread_id: str,
+        turn_id: str,
+        client_turn_id: str | None,
+    ) -> TurnHandle:
+        rpc = self._rpc
+        if rpc is None:
+            raise RuntimeError("Client is not connected; use async with or connect()")
+        turn = TurnHandle(
+            self,
+            TurnReceipt(
+                accepted=True,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                client_turn_id=client_turn_id,
+            ),
+        )
+        rpc.register_turn(turn)
+        try:
+            receipt = TurnReceipt.from_wire(_object(await rpc.request(method, params)))
+            if (
+                not receipt.accepted
+                or receipt.turn_id != turn_id
+                or (thread_id and receipt.thread_id != thread_id)
+            ):
+                raise ProtocolError(
+                    -32603,
+                    f"{method} returned a conflicting Turn receipt",
+                )
+            turn._accept_receipt(receipt)
+            return turn
+        except BaseException:
+            rpc.unregister_turn(turn)
+            turn._close_events()
+            raise
 
     async def _request(self, method: str, params: object) -> object:
         if self._rpc is None:
@@ -536,10 +600,12 @@ class Thread:
         no_skills: bool = False,
         inherited_env: Mapping[str, str] | None = None,
     ) -> TurnHandle:
-        result = await self._client._request(
+        turn_id = str(uuid4())
+        return await self._client._request_turn(
             "turn/start",
             {
                 "threadId": self.id,
+                "turnId": turn_id,
                 "prompt": prompt,
                 "clientTurnId": client_turn_id,
                 "source": source,
@@ -555,13 +621,10 @@ class Thread:
                 "useRegisteredClarifyHandler": self._client._clarify_handler
                 is not None,
             },
+            thread_id=self.id,
+            turn_id=turn_id,
+            client_turn_id=client_turn_id,
         )
-        receipt = TurnReceipt.from_wire(_object(result))
-        turn = TurnHandle(self._client, receipt)
-        if self._client._rpc is None:
-            raise TransportError("Client disconnected while accepting a Turn")
-        self._client._rpc.register_turn(turn)
-        return turn
 
     async def archive(self) -> None:
         await self._client._request("thread/archive", {"threadId": self.id})
@@ -606,6 +669,9 @@ class TurnHandle:
         )
         self._closed = False
         self._missed = 0
+
+    def _accept_receipt(self, receipt: TurnReceipt) -> None:
+        self.receipt = receipt
 
     async def events(self) -> AsyncIterator[TurnEvent]:
         while True:

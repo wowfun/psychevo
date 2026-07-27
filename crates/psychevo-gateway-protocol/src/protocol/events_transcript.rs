@@ -431,9 +431,7 @@ pub struct ThreadSnapshot {
     pub history: ThreadHistoryView,
     pub entries: Vec<TranscriptEntry>,
     pub activity: GatewayActivityView,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub turn_start_receipts: Option<Vec<TurnStartReceipt>>,
+    pub turn_start_receipts: Vec<TurnStartReceipt>,
     pub pending_actions: Vec<PendingActionView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

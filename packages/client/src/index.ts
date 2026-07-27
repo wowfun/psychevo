@@ -394,11 +394,12 @@ export class GatewayClient {
     try {
       const raw = typeof data === "string" ? data : String(data);
       const value = JSON.parse(raw) as unknown;
-      const notification = RpcNotificationSchema.safeParse(value);
-      if (notification.success && !("id" in (value as Record<string, unknown>))) {
+      const record = asRecord(value);
+      if (record && !Object.prototype.hasOwnProperty.call(record, "id")) {
+        const notification = RpcNotificationSchema.parse(value);
         for (const handler of this.handlers) {
           try {
-            handler(notification.data);
+            handler(notification);
           } catch (error) {
             this.emitDiagnostic("notification_handler", errorMessage(error));
           }
@@ -741,7 +742,6 @@ function withThreadSnapshotDefaults(value: unknown): unknown {
     scope: record.scope ?? defaultScopeFromSource(record.source),
     thread: Object.prototype.hasOwnProperty.call(record, "thread") ? record.thread : null,
     activity: withActivityDefaults(record.activity),
-    turnStartReceipts: Array.isArray(record.turnStartReceipts) ? record.turnStartReceipts : [],
     pendingActions: Array.isArray(record.pendingActions) ? record.pendingActions : []
   };
 }

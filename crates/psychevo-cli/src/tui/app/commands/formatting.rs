@@ -204,8 +204,11 @@ impl TuiApp {
                             .iter()
                             .map(|source| (*source).to_string())
                             .collect(),
+                        limit: 1,
+                        ..ThreadListQuery::default()
                     })
                     .await?
+                    .threads
                     .into_iter()
                     .next()
             {

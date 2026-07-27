@@ -58,6 +58,12 @@
     }
   },
   "properties": {
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "threads": {
       "items": {
         "$ref": "#/definitions/AppThreadSummary"

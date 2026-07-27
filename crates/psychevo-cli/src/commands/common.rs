@@ -62,6 +62,7 @@ pub(crate) async fn base_run_options(
         selected_capability_roots: Vec::new(),
         skill_inputs: Vec::new(),
         mcp_servers: Vec::new(),
+        mcp_runtime: None,
         workspace_mutations: None,
         runtime_tools: Vec::new(),
     })

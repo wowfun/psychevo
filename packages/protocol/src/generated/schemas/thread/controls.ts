@@ -685,6 +685,13 @@ export const threadControlSchemas = {
         "null"
       ]
     },
+    "cursor": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "cwd": {
       "default": null,
       "type": [
@@ -3608,10 +3615,7 @@ export const threadControlSchemas = {
           "items": {
             "$ref": "#/definitions/TurnStartReceipt"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         }
       },
       "required": [
@@ -3620,7 +3624,8 @@ export const threadControlSchemas = {
         "history",
         "pendingActions",
         "scope",
-        "source"
+        "source",
+        "turnStartReceipts"
       ],
       "type": "object"
     },
@@ -5712,10 +5717,7 @@ export const threadControlSchemas = {
           "items": {
             "$ref": "#/definitions/TurnStartReceipt"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         }
       },
       "required": [
@@ -5724,7 +5726,8 @@ export const threadControlSchemas = {
         "history",
         "pendingActions",
         "scope",
-        "source"
+        "source",
+        "turnStartReceipts"
       ],
       "type": "object"
     },
@@ -8513,10 +8516,7 @@ export const threadControlSchemas = {
           "items": {
             "$ref": "#/definitions/TurnStartReceipt"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         }
       },
       "required": [
@@ -8525,7 +8525,8 @@ export const threadControlSchemas = {
         "history",
         "pendingActions",
         "scope",
-        "source"
+        "source",
+        "turnStartReceipts"
       ],
       "type": "object"
     },

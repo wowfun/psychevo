@@ -37,6 +37,7 @@ describe("ThreadSession", () => {
     expect(session.getView()).not.toBe(before);
     expect(session.getView()).toEqual({
       context,
+      liveEntries: [],
       threadSnapshot: before.threadSnapshot
     });
   });
@@ -398,6 +399,25 @@ describe("ThreadSession", () => {
 
     expect(session.getSnapshot()?.activity.running).toBe(false);
     expect(session.getSnapshot()?.entries.at(-1)?.blocks[0]?.body).toBe("second");
+    vi.useRealTimers();
+  });
+
+  it("rejects unrelated Thread events before they enter the pacing queue", () => {
+    vi.useFakeTimers();
+    const client = new FakeThreadSessionClient();
+    const session = readySession(client, runningSnapshot());
+    const unrelated = entryEvent("entryUpdated", "other thread");
+    unrelated.turnId = "turn-other";
+    unrelated.entry = {
+      ...unrelated.entry,
+      threadId: "thread-other",
+      turnId: "turn-other"
+    };
+
+    client.notify(gatewayNotification(unrelated));
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(session.getView().liveEntries).toHaveLength(0);
     vi.useRealTimers();
   });
 });

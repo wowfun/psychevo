@@ -96,6 +96,13 @@ pub struct AppThreadListParams {
     pub archived: bool,
     #[serde(default)]
     pub sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "option_json_safe_usize::serialize", deserialize_with = "option_json_safe_usize::deserialize")]
+    #[schemars(with = "Option<JsonSafeU64>")]
+    #[ts(type = "number | null")]
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -103,6 +110,7 @@ pub struct AppThreadListParams {
 #[ts(rename_all = "camelCase")]
 pub struct AppTurnStartParams {
     pub thread_id: String,
+    pub turn_id: String,
     pub prompt: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_turn_id: Option<String>,
@@ -362,6 +370,7 @@ pub struct AppPendingInteraction {
 #[ts(rename_all = "camelCase")]
 pub struct AppThreadListResult {
     pub threads: Vec<AppThreadSummary>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -509,6 +518,7 @@ pub enum AppTurnEvent {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 pub struct AppTurnEventNotification {
+    pub thread_id: String,
     pub turn_id: String,
     pub event: AppTurnEvent,
 }

@@ -111,8 +111,11 @@ pub(crate) async fn run_run_command_inner(args: &RunArgs) -> Result<ExitCode> {
                     cwd: Some(cwd.clone()),
                     archived: false,
                     sources: vec!["run".to_string()],
+                    limit: 1,
+                    ..ThreadListQuery::default()
                 })
                 .await?
+                .threads
                 .into_iter()
                 .next()
             {

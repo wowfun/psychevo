@@ -15,7 +15,8 @@ import {
   type ThreadDraftOpenResult,
   type ThreadInteractionRespondParams,
   type ThreadInteractionRespondResult,
-  type ThreadSnapshot
+  type ThreadSnapshot,
+  type TranscriptEntry
 } from "@psychevo/protocol";
 
 import {
@@ -52,6 +53,7 @@ export interface ThreadSessionOptions {
 
 export interface ThreadSessionView {
   context: ThreadContextReadResult | null;
+  liveEntries: TranscriptEntry[];
   threadSnapshot: ThreadSnapshot | null;
 }
 
@@ -124,7 +126,7 @@ export class ThreadSession {
   private recoveryPromise: Promise<void> | null = null;
   private eventQueue: GatewayEvent[] = [];
   private eventFrame: ScheduledFrame | null = null;
-  private readonly firstAssistantTurns = new Set<string>();
+  private firstAssistantTurnId: string | null = null;
   private controlMutationSequence = 0;
   private historyMutationSequence = 0;
 
@@ -133,7 +135,8 @@ export class ThreadSession {
     this.controller.setContext(options.context ?? null);
     this.view = {
       context: this.controller.context(),
-      threadSnapshot: this.controller.snapshot()
+      liveEntries: this.controller.liveTranscriptEntries(),
+      threadSnapshot: this.controller.committedSnapshot()
     };
     this.controller.subscribe(() => {
       this.publishView();
@@ -164,7 +167,7 @@ export class ThreadSession {
   }
 
   getSnapshot(): ThreadSnapshot | null {
-    return this.view.threadSnapshot;
+    return this.controller.snapshot();
   }
 
   getContext(): ThreadContextReadResult | null {
@@ -430,14 +433,16 @@ export class ThreadSession {
       return;
     }
     const context = this.controller.context();
-    const threadSnapshot = this.controller.snapshot();
+    const liveEntries = this.controller.liveTranscriptEntries();
+    const threadSnapshot = this.controller.committedSnapshot();
     if (
       this.view.context === context
+      && this.view.liveEntries === liveEntries
       && this.view.threadSnapshot === threadSnapshot
     ) {
       return;
     }
-    this.view = { context, threadSnapshot };
+    this.view = { context, liveEntries, threadSnapshot };
     for (const listener of this.listeners) listener();
   }
 
@@ -455,6 +460,9 @@ export class ThreadSession {
 
   private advanceView(reason: "disposed" | "view_changed"): number {
     this.viewEpoch += 1;
+    this.eventQueue = [];
+    this.cancelFrame();
+    this.firstAssistantTurnId = null;
     const pending = this.pendingRecovery;
     this.pendingRecovery = null;
     if (pending) {
@@ -516,6 +524,12 @@ export class ThreadSession {
   }
 
   private enqueueGatewayEvent(event: GatewayEvent): void {
+    if (!this.controller.acceptsGatewayEvent(event)) {
+      return;
+    }
+    if (event.type === "turnStarted" && event.turnId !== this.firstAssistantTurnId) {
+      this.firstAssistantTurnId = null;
+    }
     if (event.type === "turnCompleted") {
       const sameTurn: GatewayEvent[] = [];
       this.eventQueue = this.eventQueue.filter((queued) => {
@@ -526,7 +540,9 @@ export class ThreadSession {
         return true;
       });
       if (this.eventQueue.length === 0) this.cancelFrame();
-      this.firstAssistantTurns.delete(event.turnId);
+      if (this.firstAssistantTurnId === event.turnId) {
+        this.firstAssistantTurnId = null;
+      }
       this.controller.applyGatewayEvents([...sameTurn, event]);
       return;
     }
@@ -564,8 +580,8 @@ export class ThreadSession {
         typeof value === "string" && Boolean(value.trim())
       ))
     ));
-    if (!nonEmpty || this.firstAssistantTurns.has(event.turnId)) return false;
-    this.firstAssistantTurns.add(event.turnId);
+    if (!nonEmpty || this.firstAssistantTurnId === event.turnId) return false;
+    this.firstAssistantTurnId = event.turnId;
     return true;
   }
 

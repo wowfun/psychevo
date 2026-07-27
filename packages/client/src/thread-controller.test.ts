@@ -441,6 +441,39 @@ describe("thread transcript controller helpers", () => {
     expect(controller.snapshot()?.entries[0]?.blocks[0]?.body).toBe("latest");
   });
 
+  it("updates only the active overlay while retaining a large committed prefix", () => {
+    const initial = emptyThreadSnapshot(floatingScope(), "thread-current");
+    initial.entries = Array.from({ length: 5_000 }, (_, index) => entry({
+      body: `committed-${index}`,
+      id: `message:${index + 1}`,
+      messageSeq: index + 1,
+      threadId: "thread-current",
+      turnId: `turn-${index}`,
+      updatedAtMs: index + 1
+    }));
+    initial.activity = { activeTurnId: "turn-current", queuedTurns: 0, running: true };
+    const controller = new ThreadController(initial);
+    const committedPrefix = controller.committedSnapshot()?.entries;
+
+    controller.applyGatewayEvent({
+      entry: entry({
+        body: "streaming",
+        id: "assistant:current",
+        messageSeq: null,
+        status: "running",
+        threadId: "thread-current",
+        turnId: "turn-current",
+        updatedAtMs: 6_000
+      }),
+      turnId: "turn-current",
+      type: "entryUpdated"
+    });
+
+    expect(controller.committedSnapshot()?.entries).toBe(committedPrefix);
+    expect(controller.liveTranscriptEntries()).toHaveLength(1);
+    expect(controller.snapshot()?.entries).toHaveLength(5_001);
+  });
+
   it("does not resurrect a turn settled before the turn/start response", () => {
     const controller = new ThreadController(emptyThreadSnapshot(floatingScope()));
     controller.setContext(threadContext("native", null));

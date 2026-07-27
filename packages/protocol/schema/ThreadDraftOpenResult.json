@@ -1445,10 +1445,7 @@
           "items": {
             "$ref": "#/definitions/TurnStartReceipt"
           },
-          "type": [
-            "array",
-            "null"
-          ]
+          "type": "array"
         }
       },
       "required": [
@@ -1457,7 +1454,8 @@
         "history",
         "pendingActions",
         "scope",
-        "source"
+        "source",
+        "turnStartReceipts"
       ],
       "type": "object"
     },

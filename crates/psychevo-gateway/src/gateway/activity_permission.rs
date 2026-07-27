@@ -360,6 +360,7 @@ impl ThreadTurnIntent {
             prepared_source_key,
             turn_event_observer,
             agent_entrypoint: None,
+            mcp_runtime: None,
         });
         if let Some(turn_id) = self.turn_id {
             request.__set_turn_id(turn_id);

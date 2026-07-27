@@ -88,6 +88,7 @@ describe("parseThreadSnapshot", () => {
       },
       thread: null,
       history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+      turnStartReceipts: [],
       entries: []
     });
 
@@ -95,6 +96,23 @@ describe("parseThreadSnapshot", () => {
     expect(parsed.history).toEqual({ owner: "psychevo", fidelity: "full", cursor: null, hint: null });
     expect(parsed.activity).toEqual({ running: false, activeTurnId: null, queuedTurns: 0 });
     expect(parsed.pendingActions).toEqual([]);
+  });
+
+  it("requires durable turn-start receipts in every snapshot", () => {
+    expect(() => parseThreadSnapshot({
+      source: {
+        kind: "web",
+        rawId: "cwd:abc",
+        lifetime: "persistent",
+        rawIdentity: null,
+        visibleName: "psychevo"
+      },
+      thread: null,
+      history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+      entries: [],
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      pendingActions: []
+    })).toThrow(/turnStartReceipts/);
   });
 
   it("preserves optional activity fields when applying defaults", () => {
@@ -108,6 +126,7 @@ describe("parseThreadSnapshot", () => {
       },
       thread: null,
       history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+      turnStartReceipts: [],
       entries: [],
       activity: {
         running: true,
@@ -150,6 +169,7 @@ describe("parseThreadSnapshot", () => {
         sourceKey: "web:cwd:abc"
       },
       history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
+      turnStartReceipts: [],
       entries: [
         {
           id: "message:1",

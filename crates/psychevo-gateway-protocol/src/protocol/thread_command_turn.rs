@@ -132,6 +132,8 @@ pub struct ThreadListParams {
     #[schemars(with = "Option<JsonSafeU64>")]
     #[ts(type = "number | null")]
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -154,6 +156,7 @@ pub struct ThreadRenameParams {
 #[ts(rename_all = "camelCase")]
 pub struct ThreadListResult {
     pub sessions: Vec<SessionSummaryView>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS)]

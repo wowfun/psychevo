@@ -35,6 +35,9 @@ const PROTOCOL_VERSION: u32 = 1;
 const OUTPUT_CAPACITY: usize = 256;
 const RELAY_TOMBSTONE_CAPACITY: usize = 1_024;
 const CONNECTION_REQUEST_LIMIT: usize = 64;
+const CONNECTION_CONTROL_RESERVE: usize = 1;
+const CONNECTION_ORDINARY_REQUEST_LIMIT: usize =
+    CONNECTION_REQUEST_LIMIT - CONNECTION_CONTROL_RESERVE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConnectionPhase {
@@ -89,7 +92,11 @@ impl RpcError {
         Self {
             code: -32001,
             message: "App Server connection request limit exceeded".to_string(),
-            data: Some(json!({ "limit": CONNECTION_REQUEST_LIMIT })),
+            data: Some(json!({
+                "limit": CONNECTION_REQUEST_LIMIT,
+                "ordinaryLimit": CONNECTION_ORDINARY_REQUEST_LIMIT,
+                "controlReserve": CONNECTION_CONTROL_RESERVE,
+            })),
         }
     }
 
@@ -638,16 +645,22 @@ impl AppServerConnection {
             }
             "thread/list" => {
                 let params = params::<wire::AppThreadListParams>(&request)?;
-                let snapshots = self
+                let page = self
                     .client
                     .list_threads(ThreadListQuery {
                         cwd: params.cwd.map(PathBuf::from),
                         archived: params.archived,
                         sources: params.sources,
+                        cursor: params.cursor,
+                        limit: params.limit.unwrap_or(50).clamp(1, 200),
                     })
                     .await
                     .map_err(RpcError::application)?;
-                serde_json::to_value(json!({ "threads": snapshots })).map_err(json_error)
+                serde_json::to_value(json!({
+                    "threads": page.threads,
+                    "nextCursor": page.next_cursor,
+                }))
+                .map_err(json_error)
             }
             "thread/archive" => {
                 let params = required_params::<wire::AppThreadIdParams>(&request)?;
@@ -699,6 +712,7 @@ impl AppServerConnection {
             }
             "turn/start" => {
                 let params = required_params::<wire::AppTurnStartParams>(&request)?;
+                validate_caller_turn_id(&params.turn_id)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let registrations = self.registrations.read().await.clone();
                 let (context_sender, context_receiver) = watch::channel(None);
@@ -722,6 +736,7 @@ impl AppServerConnection {
                     .with_agent(None, params.no_agents, params.no_skills)
                     .with_environment(params.inherited_env, None, None)
                     .with_approval(None, approval_handler, true);
+                input.__set_turn_id(params.turn_id);
                 for registration in registrations.tools {
                     input = input.tool(Arc::new(RemoteTool {
                         definition: registration.definition,
@@ -893,6 +908,7 @@ impl AppServerConnection {
             while let Some(event) = events.next().await {
                 if output
                     .send(turn_event_notification(
+                        handle.receipt().thread_id.as_str(),
                         handle.receipt().turn_id.as_str(),
                         event,
                     ))
@@ -935,11 +951,12 @@ fn error_response(id: Value, error: RpcError) -> Value {
     })
 }
 
-fn turn_event_notification(turn_id: &str, event: TurnEvent) -> Value {
+fn turn_event_notification(thread_id: &str, turn_id: &str, event: TurnEvent) -> Value {
     json!({
         "jsonrpc": "2.0",
         "method": "turn/event",
         "params": {
+            "threadId": thread_id,
             "turnId": turn_id,
             "event": event,
         }
@@ -1001,6 +1018,29 @@ fn is_durable_mutation(value: &Value) -> bool {
     )
 }
 
+fn is_control_request(value: &Value) -> bool {
+    matches!(
+        value.get("method").and_then(Value::as_str),
+        Some("shutdown" | "turn/interrupt" | "turn/steer" | "interaction/respond")
+    )
+}
+
+fn is_callback_response(value: &Value) -> bool {
+    value.get("method").is_none()
+}
+
+fn request_capacity_available(active_requests: usize, value: &Value) -> bool {
+    if is_callback_response(value) {
+        return true;
+    }
+    let limit = if is_control_request(value) {
+        CONNECTION_REQUEST_LIMIT
+    } else {
+        CONNECTION_ORDINARY_REQUEST_LIMIT
+    };
+    active_requests < limit
+}
+
 async fn send_connection_overload(connection: &AppServerConnection, value: &Value) {
     let id = value.get("id").cloned().unwrap_or(Value::Null);
     let _ = connection
@@ -1059,6 +1099,18 @@ fn validate_registrations(
     Ok(tools)
 }
 
+fn validate_caller_turn_id(turn_id: &str) -> Result<(), RpcError> {
+    if turn_id.is_empty() {
+        return Err(RpcError::invalid_params("Turn id must not be empty"));
+    }
+    if turn_id.trim() != turn_id {
+        return Err(RpcError::invalid_params(
+            "Turn id must not have surrounding whitespace",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn run_stdio(application: Application) -> psychevo::Result<()> {
     run_stdio_streams(application, tokio::io::stdin(), tokio::io::stdout()).await
 }
@@ -1102,11 +1154,15 @@ where
                     connection.handle_line(&line).await;
                     continue;
                 }
-                if requests.len() >= CONNECTION_REQUEST_LIMIT {
-                    if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                        send_connection_overload(&connection, &value).await;
+                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                    if is_callback_response(&value) {
+                        connection.handle_value(value).await;
+                        continue;
                     }
-                    continue;
+                    if !request_capacity_available(requests.len(), &value) {
+                        send_connection_overload(&connection, &value).await;
+                        continue;
+                    }
                 }
                 let connection = connection.clone();
                 requests.spawn(async move {
@@ -1274,7 +1330,12 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
                     connection.handle_value(value).await;
                     continue;
                 }
-                if wait_requests.len() + durable_requests.len() >= CONNECTION_REQUEST_LIMIT {
+                if is_callback_response(&value) {
+                    connection.handle_value(value).await;
+                    continue;
+                }
+                if !request_capacity_available(wait_requests.len() + durable_requests.len(), &value)
+                {
                     send_connection_overload(&connection, &value).await;
                     continue;
                 }
@@ -1553,6 +1614,7 @@ mod tests {
                 "turn/start",
                 json!({
                     "threadId": thread_id,
+                    "turnId": "turn-caller-1",
                     "prompt": "hello",
                     "noAgents": true,
                     "noSkills": true,
@@ -1561,6 +1623,7 @@ mod tests {
             .await
             .expect("turn start");
         let turn_id = receipt["turnId"].as_str().expect("turn id");
+        assert_eq!(turn_id, "turn-caller-1");
         let result = connection
             .dispatch(request(4, "turn/wait", json!({ "turnId": turn_id })))
             .await
@@ -1581,6 +1644,36 @@ mod tests {
             }
         }
         assert!(saw_completed);
+    }
+
+    #[tokio::test]
+    async fn turn_start_rejects_an_empty_caller_turn_id_before_dispatch() {
+        let (temp, connection, _rx) = test_connection().await;
+        initialize(&connection).await;
+        let thread = connection
+            .dispatch(request(
+                2,
+                "thread/start",
+                json!({ "cwd": temp.path(), "source": "python" }),
+            ))
+            .await
+            .expect("thread start");
+
+        let error = connection
+            .dispatch(request(
+                3,
+                "turn/start",
+                json!({
+                    "threadId": thread["id"],
+                    "turnId": "",
+                    "prompt": "must not dispatch",
+                }),
+            ))
+            .await
+            .expect_err("empty Turn id");
+
+        assert_eq!(error.code, -32602);
+        assert_eq!(error.message, "Turn id must not be empty");
     }
 
     #[tokio::test]
@@ -1613,6 +1706,7 @@ mod tests {
                 "turn/start",
                 json!({
                     "threadId": thread["id"],
+                    "turnId": "turn-clarify-1",
                     "prompt": "clarify",
                     "useRegisteredClarifyHandler": false,
                 }),
@@ -1642,7 +1736,11 @@ mod tests {
             .dispatch(request(
                 3,
                 "turn/start",
-                json!({"threadId": thread["id"], "prompt": "once"}),
+                json!({
+                    "threadId": thread["id"],
+                    "turnId": "turn-resume-once",
+                    "prompt": "once",
+                }),
             ))
             .await
             .expect("turn");
@@ -1692,7 +1790,11 @@ mod tests {
             .dispatch(request(
                 3,
                 "turn/start",
-                json!({"threadId": thread["id"], "prompt": "once"}),
+                json!({
+                    "threadId": thread["id"],
+                    "turnId": "turn-relay-cleanup",
+                    "prompt": "once",
+                }),
             ))
             .await
             .expect("turn");
@@ -1761,7 +1863,11 @@ mod tests {
             .dispatch(request(
                 3,
                 "turn/start",
-                json!({"threadId": thread["id"], "prompt": "wait"}),
+                json!({
+                    "threadId": thread["id"],
+                    "turnId": "turn-disconnect-wait",
+                    "prompt": "wait",
+                }),
             ))
             .await
             .expect("turn");
@@ -1789,8 +1895,26 @@ mod tests {
         assert_eq!(error.code, -32001);
         assert_eq!(
             error.data,
-            Some(json!({ "limit": CONNECTION_REQUEST_LIMIT }))
+            Some(json!({
+                "limit": CONNECTION_REQUEST_LIMIT,
+                "ordinaryLimit": CONNECTION_ORDINARY_REQUEST_LIMIT,
+                "controlReserve": CONNECTION_CONTROL_RESERVE,
+            }))
         );
+    }
+
+    #[test]
+    fn callback_response_bypasses_saturated_request_capacity() {
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": "server:callback-1",
+            "result": {"outcome": "allow_once"},
+        });
+
+        assert!(request_capacity_available(
+            CONNECTION_REQUEST_LIMIT,
+            &response
+        ));
     }
 
     #[tokio::test]
@@ -1810,7 +1934,11 @@ mod tests {
             .dispatch(request(
                 3,
                 "turn/start",
-                json!({ "threadId": thread_id, "prompt": "hello" }),
+                json!({
+                    "threadId": thread_id,
+                    "turnId": "turn-reconnect-complete",
+                    "prompt": "hello",
+                }),
             ))
             .await
             .expect("turn start");
@@ -1873,7 +2001,11 @@ mod tests {
             .dispatch(request(
                 3,
                 "turn/start",
-                json!({ "threadId": thread_id, "prompt": "wait" }),
+                json!({
+                    "threadId": thread_id,
+                    "turnId": "turn-reconnect-active",
+                    "prompt": "wait",
+                }),
             ))
             .await
             .expect("turn start");
@@ -2268,7 +2400,11 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "turn/start",
-                "params": {"threadId": thread_id, "prompt": "hello"},
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": "turn-stdio-1",
+                    "prompt": "hello"
+                },
             }),
         )
         .await;
@@ -2310,7 +2446,6 @@ mod tests {
             .build()
             .await
             .expect("application");
-        let client = application.client();
         let (client_stream, server_stream) = tokio::io::duplex(1024 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
@@ -2387,7 +2522,11 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "turn/start",
-                "params": {"threadId": thread_id, "prompt": "block"},
+                "params": {
+                    "threadId": thread_id,
+                    "turnId": "turn-stdio-block",
+                    "prompt": "block"
+                },
             }),
         )
         .await;
@@ -2397,7 +2536,7 @@ mod tests {
             .to_string();
         started.notified().await;
 
-        for offset in 0..=CONNECTION_REQUEST_LIMIT {
+        for offset in 0..=CONNECTION_ORDINARY_REQUEST_LIMIT {
             send(
                 &mut client_write,
                 json!({
@@ -2413,7 +2552,7 @@ mod tests {
             Duration::from_secs(2),
             response(
                 &mut responses,
-                100 + i64::try_from(CONNECTION_REQUEST_LIMIT).expect("limit"),
+                100 + i64::try_from(CONNECTION_ORDINARY_REQUEST_LIMIT).expect("limit"),
             ),
         )
         .await
@@ -2423,13 +2562,29 @@ mod tests {
             overloaded["error"]["data"]["limit"],
             CONNECTION_REQUEST_LIMIT
         );
-
-        let handle = client
-            .resume_turn(turn_id)
-            .await
-            .expect("resume blocked turn");
-        handle.interrupt();
-        for id in 100..100 + i64::try_from(CONNECTION_REQUEST_LIMIT).expect("limit") {
+        assert_eq!(
+            overloaded["error"]["data"]["ordinaryLimit"],
+            CONNECTION_ORDINARY_REQUEST_LIMIT
+        );
+        send(
+            &mut client_write,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 200,
+                "method": "turn/interrupt",
+                "params": {"turnId": turn_id},
+            }),
+        )
+        .await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), response(&mut responses, 200))
+                .await
+                .expect("reserved control request is admitted")["result"]["interrupted"],
+            true
+        );
+        for id in
+            100..100 + i64::try_from(CONNECTION_ORDINARY_REQUEST_LIMIT).expect("ordinary limit")
+        {
             assert_eq!(
                 response(&mut responses, id).await["result"]["outcome"],
                 "interrupted"
@@ -2652,7 +2807,11 @@ mod tests {
                     "jsonrpc": "2.0",
                     "id": 4,
                     "method": "turn/start",
-                    "params": {"threadId": thread_id, "prompt": "hello"},
+                    "params": {
+                        "threadId": thread_id,
+                        "turnId": "turn-websocket-1",
+                        "prompt": "hello"
+                    },
                 }),
             );
             let receipt = response(&mut socket, 4);

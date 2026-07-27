@@ -22,9 +22,9 @@ export type AppThreadForkParams = { threadId: string, beforeSessionSeq?: number 
 
 export type AppThreadCompactParams = { threadId: string, model?: string | null, reasoningEffort?: string | null, instructions?: string | null, force?: boolean, };
 
-export type AppThreadListParams = { cwd?: string | null, archived?: boolean, sources?: Array<string>, };
+export type AppThreadListParams = { cwd?: string | null, archived?: boolean, sources?: Array<string>, cursor?: string | null, limit?: number | null, };
 
-export type AppTurnStartParams = { threadId: string, prompt: string, clientTurnId?: string | null, source?: string | null, model?: string | null, reasoningEffort?: string | null, noAgents?: boolean, noSkills?: boolean, inheritedEnv?: { [key in string]?: string } | null, useRegisteredApprovalHandler?: boolean, useRegisteredClarifyHandler?: boolean, };
+export type AppTurnStartParams = { threadId: string, turnId: string, prompt: string, clientTurnId?: string | null, source?: string | null, model?: string | null, reasoningEffort?: string | null, noAgents?: boolean, noSkills?: boolean, inheritedEnv?: { [key in string]?: string } | null, useRegisteredApprovalHandler?: boolean, useRegisteredClarifyHandler?: boolean, };
 
 export type AppTurnIdParams = { turnId: string, };
 
@@ -58,7 +58,7 @@ export type AppThreadSummary = { id: string, source: string, cwd: string, title?
 
 export type AppThreadSnapshot = { id: string, source: string, cwd: string, title?: string | null, startedAtMs: number, updatedAtMs: number, archived: boolean, messageCount: number, toolCallCount: number, activeTurnId?: string | null, pendingInteractions?: Array<AppPendingInteraction>, items?: Array<AppThreadItem>, };
 
-export type AppThreadListResult = { threads: Array<AppThreadSummary>, };
+export type AppThreadListResult = { threads: Array<AppThreadSummary>, nextCursor?: string | null, };
 
 export type AppTurnReceipt = { accepted: boolean, threadId: string, turnId: string, clientTurnId?: string | null, };
 
@@ -70,7 +70,7 @@ export type AppItemStage = "started" | "updated" | "completed";
 
 export type AppTurnEvent = { "type": "accepted", receipt: AppTurnReceipt, } | { "type": "started", threadId: string, turnId: string, } | { "type": "message", stage: AppItemStage, message: unknown, usage?: unknown | null, metadata?: unknown | null, accounting?: unknown | null, } | { "type": "reasoning_delta", text: string, } | { "type": "reasoning_completed", text: string | null, } | { "type": "tool", stage: AppItemStage, data: unknown, } | { "type": "interaction_requested", interactionId: string, kind: string, payload: unknown, } | { "type": "interaction_resolved", interactionId: string, reason: string, } | { "type": "warning", data: unknown, } | { "type": "completed", threadId: string, turnId: string, outcome: AppTurnOutcome, } | { "type": "failed", threadId: string, turnId: string, message: string, } | { "type": "resync_required", missed: number, };
 
-export type AppTurnEventNotification = { turnId: string, event: AppTurnEvent, };
+export type AppTurnEventNotification = { threadId: string, turnId: string, event: AppTurnEvent, };
 
 export type SourceKey = string;
 
@@ -142,7 +142,7 @@ export type PendingActionView = { actionId: string, kind: GatewayActionKind, tit
 
 export type TurnStartReceipt = { clientTurnId: string, turnId: string, };
 
-export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread?: GatewayThread | null, history: ThreadHistoryView, entries: Array<TranscriptEntry>, activity: GatewayActivityView, turnStartReceipts?: Array<TurnStartReceipt>, pendingActions: Array<PendingActionView>, historyEditing?: ThreadHistoryEditingView, };
+export type ThreadSnapshot = { source: GatewaySource, scope: GatewayRequestScope, thread?: GatewayThread | null, history: ThreadHistoryView, entries: Array<TranscriptEntry>, activity: GatewayActivityView, turnStartReceipts: Array<TurnStartReceipt>, pendingActions: Array<PendingActionView>, historyEditing?: ThreadHistoryEditingView, };
 
 export type ThreadHistoryOwnerView = "psychevo" | "agent" | "process";
 
@@ -176,7 +176,7 @@ export type ThreadTraceParams = { threadId: string, afterSeq?: number | null, li
 
 export type ThreadTraceResult = { threadId: string, available: boolean, events: Array<Record<string, unknown>>, warnings: Array<string>, truncated: boolean, nextAfterSeq?: number | null, };
 
-export type ThreadListParams = { cwd?: string | null, archived?: boolean | null, limit?: number | null, };
+export type ThreadListParams = { cwd?: string | null, archived?: boolean | null, limit?: number | null, cursor?: string | null, };
 
 export type ThreadBrowserParams = { cwd?: string | null, archived?: boolean | null, cursor?: ThreadBrowserCursor | null, includeSessionIds?: Array<string>, recentDays?: number | null, limit?: number | null, };
 
@@ -190,7 +190,7 @@ export type ThreadIdParams = { threadId: string, };
 
 export type ThreadRenameParams = { threadId: string, title: string, };
 
-export type ThreadListResult = { sessions: Array<SessionSummaryView>, };
+export type ThreadListResult = { sessions: Array<SessionSummaryView>, nextCursor?: string | null, };
 
 export type ThreadMutationResult = { session: SessionSummaryView, };
 

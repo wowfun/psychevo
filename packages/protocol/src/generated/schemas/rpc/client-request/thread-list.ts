@@ -18,6 +18,13 @@ export const clientRequestThreadListSchema = {
             "null"
           ]
         },
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cwd": {
           "default": null,
           "type": [

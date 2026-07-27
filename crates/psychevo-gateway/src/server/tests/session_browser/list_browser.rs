@@ -82,6 +82,92 @@ async fn thread_list_returns_global_top_level_sessions_without_source_partition(
 }
 
 #[tokio::test]
+async fn thread_list_uses_stable_keyset_pages_and_filter_scoped_cursors() {
+    let (_temp, state) = web_state().await;
+    let cwd = state.inner.cwd.display().to_string();
+    let store = &state.inner.state;
+    let mut expected = BTreeSet::new();
+    for index in 0..3 {
+        expected.insert(
+            store
+                .create_session_with_metadata(
+                    &state.inner.cwd,
+                    "web",
+                    &format!("model-{index}"),
+                    "provider",
+                    None,
+                )
+                .await
+                .expect("session"),
+        );
+    }
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let first = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(1)),
+            method: "thread/list".to_string(),
+            params: Some(json!({ "cwd": cwd.clone(), "limit": 2 })),
+        },
+    )
+    .await
+    .expect("first page");
+    assert_eq!(first["sessions"].as_array().expect("sessions").len(), 2);
+    let cursor = first["nextCursor"]
+        .as_str()
+        .expect("next cursor")
+        .to_string();
+
+    let second = handle_rpc(
+        state.clone(),
+        AuthContext::Bearer,
+        tx.clone(),
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(2)),
+            method: "thread/list".to_string(),
+            params: Some(json!({ "cwd": cwd, "limit": 2, "cursor": cursor.clone() })),
+        },
+    )
+    .await
+    .expect("second page");
+    assert_eq!(second["sessions"].as_array().expect("sessions").len(), 1);
+    assert!(second["nextCursor"].is_null());
+    let actual = first["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(second["sessions"].as_array().into_iter().flatten())
+        .filter_map(|session| session["id"].as_str())
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(actual, expected);
+
+    let mismatch = handle_rpc(
+        state,
+        AuthContext::Bearer,
+        tx,
+        RpcRequest {
+            jsonrpc: wire::JSONRPC_VERSION.to_string(),
+            id: Some(json!(3)),
+            method: "thread/list".to_string(),
+            params: Some(json!({ "archived": true, "cursor": cursor })),
+        },
+    )
+    .await
+    .expect_err("cursor scope mismatch");
+    assert!(
+        mismatch
+            .to_string()
+            .contains("does not match the current filters")
+    );
+}
+
+#[tokio::test]
 async fn thread_browser_bounds_projection_to_returned_pages_at_large_candidate_counts() {
     let (temp, state) = web_state().await;
     let other_cwd = temp.path().join("large-other-work");

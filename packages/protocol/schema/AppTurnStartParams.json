@@ -48,6 +48,9 @@
     "threadId": {
       "type": "string"
     },
+    "turnId": {
+      "type": "string"
+    },
     "useRegisteredApprovalHandler": {
       "default": false,
       "type": "boolean"
@@ -59,7 +62,8 @@
   },
   "required": [
     "prompt",
-    "threadId"
+    "threadId",
+    "turnId"
   ],
   "title": "AppTurnStartParams",
   "type": "object"

@@ -45,6 +45,7 @@ thread = {
         "accounting": None,
     }],
 }
+thread_two = {**thread, "id": "thread-2", "updatedAtMs": 0}
 registered = False
 callback_answer = "hello"
 
@@ -65,7 +66,10 @@ for line in sys.stdin:
     elif method in {"thread/start", "thread/resume", "thread/read"}:
         result = thread
     elif method == "thread/list":
-        result = {"threads": [thread]}
+        if request["params"].get("cursor") == "page-2":
+            result = {"threads": [thread_two], "nextCursor": None}
+        else:
+            result = {"threads": [thread], "nextCursor": "page-2"}
     elif method == "thread/archive":
         result = {"archived": True, "threadId": "thread-1"}
     elif method == "tool/register":
@@ -76,6 +80,7 @@ for line in sys.stdin:
             "approvalHandler": request["params"]["approvalHandler"],
         }
     elif method == "turn/start":
+        turn_id = request["params"]["turnId"]
         if registered and request["params"]["prompt"] == "callback":
             print(json.dumps({
                 "jsonrpc": "2.0",
@@ -86,7 +91,7 @@ for line in sys.stdin:
                     "toolName": "echo",
                     "arguments": {"text": "from server"},
                     "threadId": "thread-1",
-                    "turnId": "turn-1",
+                    "turnId": turn_id,
                 },
             }), flush=True)
             callback = json.loads(sys.stdin.readline())
@@ -99,7 +104,7 @@ for line in sys.stdin:
                 "params": {
                     "callId": "approval-1",
                     "threadId": "thread-1",
-                    "turnId": "turn-1",
+                    "turnId": turn_id,
                     "toolCallId": "tool-call-1",
                     "toolName": "exec",
                     "summary": "Run a command",
@@ -118,7 +123,8 @@ for line in sys.stdin:
                     "jsonrpc": "2.0",
                     "method": "turn/event",
                     "params": {
-                        "turnId": "turn-1",
+                        "threadId": "thread-1",
+                        "turnId": turn_id,
                         "event": {
                             "type": "warning",
                             "data": {"index": index},
@@ -130,7 +136,8 @@ for line in sys.stdin:
                 "jsonrpc": "2.0",
                 "method": "turn/event",
                 "params": {
-                    "turnId": "turn-1",
+                    "threadId": "thread-1",
+                    "turnId": turn_id,
                     "event": {
                         "type": "interaction_requested",
                         "interactionId": "clarify-1",
@@ -142,14 +149,15 @@ for line in sys.stdin:
         result = {
             "accepted": True,
             "threadId": "thread-1",
-            "turnId": "turn-1",
+            "turnId": turn_id,
             "clientTurnId": request["params"].get("clientTurnId"),
         }
         print(json.dumps({
             "jsonrpc": "2.0",
             "method": "turn/event",
             "params": {
-                "turnId": "turn-1",
+                "threadId": "thread-1",
+                "turnId": turn_id,
                 "event": {
                     "type": "message",
                     "stage": "completed",
@@ -161,15 +169,52 @@ for line in sys.stdin:
             "jsonrpc": "2.0",
             "method": "turn/event",
             "params": {
-                "turnId": "turn-1",
+                "threadId": "thread-1",
+                "turnId": turn_id,
                 "event": {
                     "type": "completed",
                     "threadId": "thread-1",
-                    "turnId": "turn-1",
+                    "turnId": turn_id,
                     "outcome": "completed",
                 },
             },
         }), flush=True)
+    elif method == "turn/resume":
+        if request["params"]["turnId"] == "turn-resume-clarify":
+            print(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "turn/event",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": request["params"]["turnId"],
+                    "event": {
+                        "type": "interaction_requested",
+                        "interactionId": "clarify-resume-1",
+                        "kind": "clarify",
+                        "payload": [{"question": "Resume?"}],
+                    },
+                },
+            }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "turn/event",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": request["params"]["turnId"],
+                "event": {
+                    "type": "completed",
+                    "threadId": "thread-1",
+                    "turnId": request["params"]["turnId"],
+                    "outcome": "completed",
+                },
+            },
+        }), flush=True)
+        result = {
+            "accepted": True,
+            "threadId": "thread-1",
+            "turnId": request["params"]["turnId"],
+            "clientTurnId": None,
+        }
     elif method == "turn/wait":
         result = {
             "threadId": "thread-1",
@@ -217,15 +262,49 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             events = [event async for event in turn.events()]
             self.assertEqual([event.type for event in events], ["message", "completed"])
             result = await turn.wait()
-            self.assertEqual(result.final_answer, "hello")
-            self.assertEqual((await client.list_threads())[0].id, "thread-1")
+            self.assertEqual(
+                (await client.list_threads()).threads[0].id,
+                "thread-1",
+            )
             self.assertEqual((await thread.snapshot()).items[0].session_seq, 1)
+        self.assertEqual(result.final_answer, "hello")
+
+    async def test_resume_registers_its_event_sink_before_the_request(self) -> None:
+        async with Client(executable=self.server) as client:
+            turn = await client.resume_turn("turn-resume")
+            events = [event async for event in turn.events()]
+        self.assertEqual(turn.receipt.turn_id, "turn-resume")
+        self.assertEqual([event.type for event in events], ["completed"])
+
+    async def test_resume_clarify_before_receipt_uses_event_thread_identity(self) -> None:
+        requests = []
+        handled = asyncio.Event()
+
+        async def clarify(request):
+            requests.append(request)
+            handled.set()
+            return [["yes"]]
+
+        async with Client(executable=self.server, clarify_handler=clarify) as client:
+            turn = await client.resume_turn("turn-resume-clarify")
+            await asyncio.wait_for(handled.wait(), timeout=1)
+
+        self.assertEqual(turn.receipt.thread_id, "thread-1")
+        self.assertEqual(requests[0].thread_id, "thread-1")
+        self.assertEqual(requests[0].turn_id, "turn-resume-clarify")
+
+    async def test_iter_threads_fetches_each_bounded_page(self) -> None:
+        async with Client(executable=self.server) as client:
+            self.assertEqual(
+                [thread.id async for thread in client.iter_threads(page_size=1)],
+                ["thread-1", "thread-2"],
+            )
 
     async def test_explicit_remote_requires_token(self) -> None:
         with self.assertRaisesRegex(ValueError, "bearer token"):
             Client(remote_url="ws://127.0.0.1:1234/app-server")
 
-    async def test_events_arriving_before_turn_receipt_report_resync_on_overflow(self) -> None:
+    async def test_pre_registered_turn_sink_reports_resync_on_overflow(self) -> None:
         async with Client(executable=self.server) as client:
             thread = await client.start_thread(cwd=self.temp.name)
             turn = await thread.start_turn("overflow")
@@ -259,9 +338,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             result = await turn.wait()
         self.assertEqual(result.final_answer, "from server")
         self.assertEqual(calls[0].thread_id, "thread-1")
-        self.assertEqual(calls[0].turn_id, "turn-1")
+        self.assertEqual(calls[0].turn_id, turn.receipt.turn_id)
 
-    async def test_early_clarify_event_waits_for_turn_identity_before_callback(self) -> None:
+    async def test_clarify_event_uses_the_pre_registered_turn_identity(self) -> None:
         requests = []
         handled = asyncio.Event()
 
@@ -272,10 +351,10 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
 
         async with Client(executable=self.server, clarify_handler=clarify) as client:
             thread = await client.start_thread(cwd=self.temp.name)
-            await thread.start_turn("clarify")
+            turn = await thread.start_turn("clarify")
             await asyncio.wait_for(handled.wait(), timeout=1)
         self.assertEqual(requests[0].thread_id, "thread-1")
-        self.assertEqual(requests[0].turn_id, "turn-1")
+        self.assertEqual(requests[0].turn_id, turn.receipt.turn_id)
 
     async def test_approval_is_routed_to_async_handler_and_returns_typed_decision(
         self,
@@ -296,7 +375,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.final_answer, "deny")
         self.assertEqual(requests[0].tool_name, "exec")
         self.assertEqual(requests[0].thread_id, "thread-1")
-        self.assertEqual(requests[0].turn_id, "turn-1")
+        self.assertEqual(requests[0].turn_id, turn.receipt.turn_id)
 
     async def test_pending_permission_response_uses_typed_interaction_payload(self) -> None:
         async with Client(executable=self.server) as client:
@@ -474,24 +553,27 @@ class RpcLifecycleTests(unittest.IsolatedAsyncioTestCase):
             client_turn_id=None,
         )
         turn = TurnHandle(None, receipt)  # type: ignore[arg-type]
-        rpc._early_missed[receipt.turn_id] = 2
-        rpc._early_events[receipt.turn_id].append(
+        rpc.register_turn(turn)
+        rpc._receive_notification(
             {
-                "type": "completed",
-                "threadId": receipt.thread_id,
-                "turnId": receipt.turn_id,
-                "outcome": "completed",
+                "method": "turn/event",
+                "params": {
+                    "threadId": receipt.thread_id,
+                    "turnId": receipt.turn_id,
+                    "event": {
+                        "type": "completed",
+                        "threadId": receipt.thread_id,
+                        "turnId": receipt.turn_id,
+                        "outcome": "completed",
+                    },
+                },
             }
         )
 
-        rpc.register_turn(turn)
-
         self.assertNotIn(receipt.turn_id, rpc._turns)
-        self.assertNotIn(receipt.turn_id, rpc._early_events)
-        self.assertNotIn(receipt.turn_id, rpc._early_missed)
         self.assertEqual(
             [event.type async for event in turn.events()],
-            ["resync_required", "completed"],
+            ["completed"],
         )
 
 

@@ -382,6 +382,12 @@
     }
   },
   "properties": {
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sessions": {
       "items": {
         "$ref": "#/definitions/SessionSummaryView"

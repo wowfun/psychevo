@@ -19,24 +19,6 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const ELICITATION_TIMEOUT: Duration = Duration::from_secs(120);
 const ELICITATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(125);
 const RUNTIME_INVENTORY_RETRY_DELAY: Duration = Duration::from_secs(5);
-const REVIEWED_CODEX_VERSION: &str = "0.144.1";
-const REQUIRED_CODEX_METHODS: &[&str] = &[
-    "marketplace/add",
-    "marketplace/remove",
-    "marketplace/upgrade",
-    "plugin/list",
-    "plugin/installed",
-    "plugin/read",
-    "plugin/install",
-    "plugin/uninstall",
-    "app/list",
-    "hooks/list",
-    "mcpServer/oauth/login",
-    "mcpServerStatus/list",
-    "mcpServer/tool/call",
-    "thread/start",
-    "thread/archive",
-];
 const CONNECT_SESSION_TTL: Duration = Duration::from_secs(5 * 60);
 
 fn log_codex_authority_event(event: &str, cwd: &Path, reason: Option<&str>) {
@@ -186,7 +168,6 @@ struct CodexConnectSession {
 #[serde(rename_all = "camelCase")]
 struct CodexTrustRecord {
     fingerprint: String,
-    codex_version: String,
     trusted_at_ms: i64,
 }
 
@@ -434,7 +415,7 @@ impl CodexPluginAuthority {
             "securityNotes": [
                 "Codex runs with a Psychevo-private CODEX_HOME.",
                 "Authentication is linked without reading or copying credential contents.",
-                "Only reviewed Codex CLI 0.144.1 is admitted; version drift is blocked before inventory or execution."
+                "Successful operation responses are validated where their fields are consumed."
             ]
         })
     }
@@ -595,18 +576,8 @@ impl CodexPluginAuthority {
         let fingerprint = codex_detail_fingerprint(identity, detail)?;
         let records = self.load_trust_records()?;
         let record = records.get(&identity.selector());
-        let codex_version = self
-            .negotiated_version
-            .read()
-            .expect("Codex version lock poisoned")
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
         let status = match record {
-            Some(record)
-                if record.fingerprint == fingerprint && record.codex_version == codex_version =>
-            {
-                "trusted"
-            }
+            Some(record) if record.fingerprint == fingerprint => "trusted",
             Some(_) => "modified",
             None => "untrusted",
         };
@@ -615,7 +586,6 @@ impl CodexPluginAuthority {
             "status": status,
             "fingerprint": fingerprint,
             "trustedFingerprint": record.map(|record| record.fingerprint.clone()),
-            "trustedCodexVersion": record.map(|record| record.codex_version.clone()),
             "trustedAtMs": record.map(|record| record.trusted_at_ms),
         }))
     }
@@ -627,19 +597,12 @@ impl CodexPluginAuthority {
         trusted: bool,
     ) -> Result<Value> {
         let fingerprint = codex_detail_fingerprint(identity, detail)?;
-        let codex_version = self
-            .negotiated_version
-            .read()
-            .expect("Codex version lock poisoned")
-            .clone()
-            .ok_or_else(|| Error::Message("Codex version is not negotiated".to_string()))?;
         let mut records = self.load_trust_records()?;
         if trusted {
             records.insert(
                 identity.selector(),
                 CodexTrustRecord {
                     fingerprint: fingerprint.clone(),
-                    codex_version,
                     trusted_at_ms: super::gateway_now_ms(),
                 },
             );
@@ -2692,7 +2655,7 @@ struct CodexNegotiatedProfile {
     version: String,
 }
 
-fn validate_reviewed_profile(
+fn validate_negotiated_profile(
     initialize: &Value,
     expected_home: &Path,
 ) -> Result<CodexNegotiatedProfile> {
@@ -2711,12 +2674,6 @@ fn validate_reviewed_profile(
             psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
         ))
     })?;
-    if version != REVIEWED_CODEX_VERSION {
-        return Err(Error::Message(format!(
-            "Codex plugin compatibility profile `{}` reviewed `{REVIEWED_CODEX_VERSION}` but resolved `{version}`",
-            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
-        )));
-    }
     let reported_home = initialize
         .get("codexHome")
         .and_then(Value::as_str)
@@ -2851,46 +2808,11 @@ impl BrokerProcess {
             )
             .await?;
         if let Some(expected_home) = expected_home {
-            let profile = validate_reviewed_profile(&initialize, expected_home)?;
+            let profile = validate_negotiated_profile(&initialize, expected_home)?;
             process.codex_version = Some(profile.version);
         }
         process.write_message(json!({"jsonrpc":"2.0","method":"initialized"}))?;
-        if expected_home.is_some() {
-            process.probe_required_methods(request_timeout).await?;
-        }
         Ok(process)
-    }
-
-    async fn probe_required_methods(&self, request_timeout: Duration) -> Result<()> {
-        for method in REQUIRED_CODEX_METHODS {
-            match self
-                .request_with_context(method, Value::Null, request_timeout, None)
-                .await
-            {
-                Ok(_) => {
-                    return Err(Error::Message(format!(
-                        "Codex plugin compatibility profile `{}` rejected `{method}` because the invalid-parameter probe unexpectedly succeeded",
-                        psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
-                    )));
-                }
-                Err(err) => {
-                    let message = err.to_string().to_ascii_lowercase();
-                    if required_method_probe_reports_missing(&message) {
-                        return Err(Error::Message(format!(
-                            "Codex plugin compatibility profile `{}` requires method `{method}`",
-                            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
-                        )));
-                    }
-                    if !required_method_probe_recognized(&message) {
-                        return Err(Error::Message(format!(
-                            "Codex plugin compatibility profile `{}` expected `{method}` to recognize the request envelope and reject its null parameters: {err}",
-                            psychevo::__product::capabilities::CODEX_PLUGIN_COMPATIBILITY_PROFILE
-                        )));
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     async fn request_with_context(
@@ -2963,17 +2885,6 @@ impl BrokerProcess {
     async fn kill(&self) {
         let _ = self.child.lock().await.kill().await;
     }
-}
-
-fn required_method_probe_reports_missing(message: &str) -> bool {
-    message.contains("method not found")
-        || message.contains("-32601")
-        || message.contains("unknown variant")
-}
-
-fn required_method_probe_recognized(message: &str) -> bool {
-    message.contains("-32602")
-        || message.contains("-32600") && message.contains("missing field `params`")
 }
 
 fn spawn_broker_writer(mut stdin: ChildStdin, mut receiver: mpsc::UnboundedReceiver<Value>) {
@@ -3164,22 +3075,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn required_method_probe_accepts_typed_envelope_rejection_but_not_unknown_methods() {
-        assert!(required_method_probe_recognized(
-            "Codex broker request failed (-32602): invalid params"
-        ));
-        assert!(required_method_probe_recognized(
-            "Codex broker request failed (-32600): Invalid request: missing field `params`"
-        ));
-        assert!(required_method_probe_reports_missing(
-            "Codex broker request failed (-32600): Invalid request: unknown variant `plugin/nope`"
-        ));
-        assert!(!required_method_probe_recognized(
-            "Codex broker request failed (-32600): Invalid request: unknown variant `plugin/nope`"
-        ));
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn default_off_authority_does_not_spawn_codex() {
@@ -3297,7 +3192,7 @@ mod tests {
     }
 
     #[test]
-    fn reviewed_profile_accepts_arbitrary_originator_and_rejects_version_or_home_drift() {
+    fn negotiated_profile_accepts_semver_originators_and_rejects_home_drift() {
         let temp = tempfile::tempdir().expect("temp");
         let private_home = temp.path().join("codex");
         let other_home = temp.path().join("other");
@@ -3306,33 +3201,36 @@ mod tests {
 
         for user_agent in [
             "codex_cli_rs/0.144.1 (Linux 6.8; x86_64)",
-            "codex_vscode/0.144.1 (extension; originator=desktop)",
-            "third-party-originator 0.144.1",
+            "codex_vscode/0.145.0 (extension; originator=desktop)",
+            "third-party-originator 1.0.0",
         ] {
-            let profile = validate_reviewed_profile(
+            let profile = validate_negotiated_profile(
                 &json!({
                     "userAgent": user_agent,
                     "codexHome": private_home,
                 }),
                 &private_home,
             )
-            .expect("reviewed profile");
-            assert_eq!(profile.version, REVIEWED_CODEX_VERSION);
+            .expect("negotiated profile");
+            assert_eq!(
+                profile.version,
+                extract_semantic_version(user_agent).expect("semantic version")
+            );
         }
 
-        let version = validate_reviewed_profile(
+        let version = validate_negotiated_profile(
             &json!({
-                "userAgent": "codex_cli_rs/0.145.0",
+                "userAgent": "codex_cli_rs/development",
                 "codexHome": private_home,
             }),
             &private_home,
         )
-        .expect_err("unknown version");
-        assert!(version.to_string().contains("reviewed `0.144.1`"));
+        .expect_err("missing semantic version");
+        assert!(version.to_string().contains("could not extract a version"));
 
-        let home = validate_reviewed_profile(
+        let home = validate_negotiated_profile(
             &json!({
-                "userAgent": "codex_cli_rs/0.144.1",
+                "userAgent": "codex_cli_rs/0.145.0",
                 "codexHome": other_home,
             }),
             &private_home,
@@ -3343,10 +3241,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn preflight_rejects_missing_method_without_fetching_catalog() {
+    async fn startup_negotiates_once_without_parameter_error_probes() {
         let temp = tempfile::tempdir().expect("temp");
         let profile_home = temp.path().join("psychevo");
-        let private_home = profile_home.join("codex");
         let cwd = temp.path().join("work");
         let script = temp.path().join("fake-codex.py");
         let log = temp.path().join("calls.log");
@@ -3360,7 +3257,7 @@ mod tests {
             ),
         )
         .expect("config");
-        write_codex_app_server_fixture(&script, "preflight_missing_method", json!({"log": log}));
+        write_codex_app_server_fixture(&script, "startup_no_probe", json!({"log": log}));
         let broker = CodexCapabilityBroker::new(&BTreeMap::from([
             (
                 "PSYCHEVO_HOME".to_string(),
@@ -3372,14 +3269,12 @@ mod tests {
             ),
         ]));
 
-        let error = broker.plugin_list(&cwd).await.expect_err("missing method");
+        broker.plugin_list(&cwd).await.expect("plugin list");
 
-        assert!(error.to_string().contains("requires method `app/list`"));
-        assert_eq!(broker.authority_view()["runtime"], "incompatible");
-        let calls = fs::read_to_string(&log).expect("preflight log");
-        assert!(calls.lines().all(|line| line.ends_with(":null")));
-        assert!(!calls.contains("plugin/list:normal"));
-        assert!(private_home.is_dir());
+        assert_eq!(
+            fs::read_to_string(&log).expect("startup log"),
+            "initialize:normal\ninitialized:absent\nplugin/list:normal\n"
+        );
         broker.stop().await;
     }
 
@@ -3764,8 +3659,8 @@ mod tests {
                 "PATH".to_string(),
                 std::env::var("PATH").unwrap_or_default(),
             )]),
-            Duration::from_secs(1),
-            Duration::from_millis(10),
+            Duration::from_secs(3),
+            Duration::from_millis(250),
         );
 
         assert!(broker.runtime_inventory(&cwd).await.is_err());
@@ -3775,7 +3670,7 @@ mod tests {
             "plugin-installed\n"
         );
 
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(broker.runtime_inventory(&cwd).await.is_err());
         assert_eq!(
             fs::read_to_string(&log).expect("retry log"),
@@ -4066,7 +3961,7 @@ mod tests {
     }
 
     #[test]
-    fn trust_is_bound_to_package_fingerprint_and_reviewed_codex_version() {
+    fn trust_is_bound_to_package_fingerprint_not_codex_patch_version() {
         let temp = tempfile::tempdir().expect("temp");
         let home = temp.path().join("home");
         let package = temp.path().join("review");
@@ -4083,7 +3978,7 @@ mod tests {
         *broker
             .negotiated_version
             .write()
-            .expect("Codex version lock") = Some(REVIEWED_CODEX_VERSION.to_string());
+            .expect("Codex version lock") = Some("0.144.1".to_string());
         let identity = CodexPluginIdentity {
             plugin: "review".to_string(),
             marketplace: "openai".to_string(),
@@ -4118,7 +4013,7 @@ mod tests {
             broker
                 .trust_value(&identity, &detail)
                 .expect("version drift")["status"],
-            "modified"
+            "trusted"
         );
     }
 

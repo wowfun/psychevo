@@ -224,8 +224,7 @@ mod thread_application_contract_tests {
         assert_eq!(
             snapshot
                 .turn_start_receipts
-                .as_deref()
-                .and_then(|receipts| receipts.first())
+                .first()
                 .map(|receipt| (receipt.client_turn_id.as_str(), receipt.turn_id.as_str())),
             Some(("client-turn-1", "turn-1"))
         );
