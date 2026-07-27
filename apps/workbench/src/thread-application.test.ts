@@ -97,6 +97,7 @@ function snapshot(entries: TranscriptEntry[]): ThreadSnapshot {
     history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries,
     activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+    turnStartReceipts: [],
     pendingActions: []
   };
 }

@@ -42,6 +42,16 @@ export function transcriptMayContainWorkspaceFile(entries: ThreadSnapshot["entri
   return false;
 }
 
+export function transcriptProjectionMayContainWorkspaceFile(
+  committedEntries: ThreadSnapshot["entries"],
+  liveEntries: ThreadSnapshot["entries"],
+  terminalEntries: ThreadSnapshot["entries"] = []
+): boolean {
+  return transcriptMayContainWorkspaceFile(committedEntries)
+    || transcriptMayContainWorkspaceFile(liveEntries)
+    || transcriptMayContainWorkspaceFile(terminalEntries);
+}
+
 function completedToolMayReferenceWorkspaceFile(entries: ThreadSnapshot["entries"]): boolean {
   for (const entry of entries) {
     for (const block of entry.blocks) {

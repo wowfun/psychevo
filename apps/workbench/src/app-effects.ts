@@ -22,7 +22,10 @@ import {
   normalizeSnapshot,
   startupDraftScope
 } from "./session-utils";
-import { transcriptMayContainWorkspaceFile } from "./search-model";
+import {
+  transcriptMayContainWorkspaceFile,
+  transcriptProjectionMayContainWorkspaceFile
+} from "./search-model";
 import type { WorkbenchRuntime, WorkbenchRuntimeFactory } from "./runtime";
 import {
   PINNED_SESSIONS_KEY,
@@ -527,10 +530,12 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
             if (scope) {
               const epoch = params.viewEpochRef.current;
               const filesVisible = params.rightWorkspaceOpen && params.activeRightTabKind === "files";
-              const transcriptNeedsFiles = transcriptMayContainWorkspaceFile([
-                ...params.snapshot.entries,
-                ...event.committedEntries
-              ]);
+              const sessionView = params.threadSession.getView();
+              const transcriptNeedsFiles = transcriptProjectionMayContainWorkspaceFile(
+                sessionView.threadSnapshot?.entries ?? params.snapshot.entries,
+                sessionView.liveEntries,
+                event.committedEntries
+              );
               if (filesVisible || transcriptNeedsFiles) {
                 void params.refreshWorkspaceFiles(runtimeClient, scope, epoch);
               }
@@ -680,6 +685,7 @@ export function useWorkbenchEffects(params: AppEffectsParams) {
           history: params.snapshot.history,
           entries: [],
           activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+          turnStartReceipts: [],
           pendingActions: []
         }));
         params.setDraftSession(createHistoryDraftSession(startupEpoch, startupScope.cwd));

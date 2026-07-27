@@ -1,6 +1,9 @@
 import type { ThreadSnapshot } from "@psychevo/protocol";
 import { describe, expect, it } from "vitest";
-import { transcriptMayContainWorkspaceFile } from "./search-model";
+import {
+  transcriptMayContainWorkspaceFile,
+  transcriptProjectionMayContainWorkspaceFile
+} from "./search-model";
 
 function assistantEntries(body: string): ThreadSnapshot["entries"] {
   return [{
@@ -49,6 +52,14 @@ describe("transcript workspace-file demand", () => {
 
   it("loads the inventory for an extensionless completed file-tool path", () => {
     expect(transcriptMayContainWorkspaceFile(completedToolEntry("read", "Dockerfile"))).toBe(true);
+  });
+
+  it("retains terminal file demand from a live overlay when committed entries are empty", () => {
+    expect(transcriptProjectionMayContainWorkspaceFile(
+      [],
+      assistantEntries("Created `reports/live-result.html`."),
+      []
+    )).toBe(true);
   });
 
   it.each([

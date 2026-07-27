@@ -167,6 +167,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     threadSessionViewStore.getSnapshot
   );
   const snapshot = threadSessionView.threadSnapshot ?? EMPTY_SNAPSHOT;
+  const liveTranscriptEntries = threadSessionView.liveEntries;
   const runtimeContext = useMemo(
     () => threadSessionView.context
       ? parseThreadContext(threadSessionView.context)
@@ -285,8 +286,11 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
   const activity = normalizeActivity(snapshot.activity);
   const transcriptEntries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
   const workspaceFileLinkDemand = useMemo(
-    () => transcriptMayContainWorkspaceFile(transcriptEntries),
-    [transcriptEntries]
+    () => (
+      transcriptMayContainWorkspaceFile(transcriptEntries)
+      || transcriptMayContainWorkspaceFile(liveTranscriptEntries)
+    ),
+    [liveTranscriptEntries, transcriptEntries]
   );
   const pendingActions = Array.isArray(snapshot.pendingActions) ? snapshot.pendingActions : [];
   const pendingClarifyActions = pendingActions.filter((action) => action.kind === "clarify");
@@ -1286,7 +1290,8 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     if (!voiceAutoSpeak || running || !client) {
       return;
     }
-    const text = latestAssistantTranscriptText(transcriptEntries);
+    const text = latestAssistantTranscriptText(liveTranscriptEntries)
+      ?? latestAssistantTranscriptText(transcriptEntries);
     if (!text) {
       return;
     }
@@ -1296,7 +1301,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
     }
     voiceAutoSpeakKeyRef.current = spokenKey;
     void runAction(async () => synthesizeVoiceText(text));
-  }, [client, currentThreadId, running, transcriptEntries, voiceAutoSpeak]);
+  }, [client, currentThreadId, liveTranscriptEntries, running, transcriptEntries, voiceAutoSpeak]);
 
   useEffect(() => {
     if (voiceRealtimeSessionId) {
@@ -1428,6 +1433,7 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
         handleAttachmentFiles,
         init,
         latestGatewayEvent,
+        liveTranscriptEntries,
         loadOlderHistory,
         onComposerRetry: retryComposerStartup,
         onGatewayRetry: () => void client?.reconnectNow(),

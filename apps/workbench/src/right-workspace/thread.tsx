@@ -66,15 +66,16 @@ export function ThreadPanel({
     () => new ThreadSession({ client: adaptThreadSessionClient(client), snapshot: null }),
     [threadId]
   );
-  const snapshotStore = useMemo(() => ({
-    getSnapshot: () => threadSession.getSnapshot(),
+  const sessionStore = useMemo(() => ({
+    getSnapshot: () => threadSession.getView(),
     subscribe: (listener: () => void) => threadSession.subscribe(listener)
   }), [threadSession]);
-  const snapshot = useSyncExternalStore(
-    snapshotStore.subscribe,
-    snapshotStore.getSnapshot,
-    snapshotStore.getSnapshot
+  const sessionView = useSyncExternalStore(
+    sessionStore.subscribe,
+    sessionStore.getSnapshot,
+    sessionStore.getSnapshot
   );
+  const snapshot = sessionView.threadSnapshot;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [threadContext, setThreadContext] = useState<ReturnType<typeof parseThreadContext> | null>(null);
@@ -94,7 +95,8 @@ export function ThreadPanel({
   const snapshotMatchesThread = (snapshot?.thread?.id ?? null) === threadId;
   const visibleSnapshot = snapshotMatchesThread ? snapshot : null;
   const activity = normalizeSnapshot(visibleSnapshot ?? emptyThreadSnapshot(threadId)).activity;
-  const entries = visibleSnapshot?.entries ?? [];
+  const committedEntries = visibleSnapshot?.entries ?? [];
+  const liveEntries = snapshotMatchesThread ? sessionView.liveEntries : [];
   const running = activity.running;
   const writable = kind === "sideConversation" || access === "readWrite";
   const readOnly = kind === "agentSession" && access === "readOnly";
@@ -365,7 +367,8 @@ export function ThreadPanel({
       <div className="threadPanelTranscript">
         <TranscriptPanel
           activity={activity}
-          entries={entries}
+          entries={committedEntries}
+          liveEntries={liveEntries}
           onCopyText={onCopyText}
           onOpenAgentSession={onOpenAgentSession}
           threadId={threadId}
@@ -408,6 +411,7 @@ function emptyThreadSnapshot(threadId: string | null): ThreadSnapshot {
     history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
     entries: [],
     activity: idleActivity(),
+    turnStartReceipts: [],
     pendingActions: []
   };
 }

@@ -17,7 +17,7 @@ export function useGatewayLiveEvents(params: GatewayLiveEventsParams) {
 
   useEffect(() => params.threadSession.subscribe(() => {
     params.selectedThreadIdRef.current =
-      params.threadSession.getSnapshot()?.thread?.id ?? null;
+      params.threadSession.getView().threadSnapshot?.thread?.id ?? null;
   }), [params.threadSession, params.selectedThreadIdRef]);
 
   function applyGatewayEvent(event: GatewayEvent) {

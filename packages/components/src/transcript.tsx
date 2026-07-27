@@ -29,6 +29,7 @@ export interface TranscriptPanelProps {
   activity?: GatewayActivity;
   entries: TranscriptEntry[];
   history?: TranscriptHistoryView | null | undefined;
+  liveEntries?: TranscriptEntry[] | undefined;
   onCopyText?: ((text: string) => void | Promise<void>) | undefined;
   onForkUserMessage?: ((entry: TranscriptEntry, draft: ThreadEditableDraft) => void | Promise<void>) | undefined;
   onLoadOlderHistory?: (() => void | Promise<void>) | undefined;
@@ -55,6 +56,7 @@ const TRANSCRIPT_SCROLL_MEMORY_LIMIT = 64;
 const TRANSCRIPT_VIRTUAL_ESTIMATE_PX = 132;
 const TRANSCRIPT_VIRTUAL_MIN_ENTRIES = 40;
 const TRANSCRIPT_VIRTUAL_OVERSCAN_PX = 720;
+const EMPTY_TRANSCRIPT_ENTRIES: TranscriptEntry[] = [];
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 type TranscriptScrollMemory = {
@@ -62,7 +64,7 @@ type TranscriptScrollMemory = {
   top: number;
 };
 
-export function TranscriptPanel({ activity, entries, history, onCopyText, onForkUserMessage, onLoadOlderHistory, onOpenAgentSession, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, olderHistoryLoading = false, threadId, workspaceFileLinks }: TranscriptPanelProps) {
+export function TranscriptPanel({ activity, entries, history, liveEntries = EMPTY_TRANSCRIPT_ENTRIES, onCopyText, onForkUserMessage, onLoadOlderHistory, onOpenAgentSession, onReadAloudText, onReadUserMessageDraft, onUpdateUserMessage, olderHistoryLoading = false, threadId, workspaceFileLinks }: TranscriptPanelProps) {
   const [followingBottom, setFollowingBottom] = useState(true);
   const [scrolling, setScrolling] = useState(false);
   const [activityTick, setActivityTick] = useState(0);
@@ -70,14 +72,44 @@ export function TranscriptPanel({ activity, entries, history, onCopyText, onFork
   const scrollIdleTimer = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const scrollMemoryRef = useRef<Map<string, TranscriptScrollMemory>>(new Map());
   const activeThreadKeyRef = useRef<string | null>(null);
-  const orderedEntries = useMemo(() => orderTranscriptEntries(entries), [entries]);
-  const visibleEntries = useMemo(() => visibleTranscriptEntries(orderedEntries), [orderedEntries]);
-  const threadKey = useMemo(() => transcriptThreadKey(threadId, visibleEntries), [threadId, visibleEntries]);
-  const virtualTranscript = useVirtualTranscript(visibleEntries, scrollRef);
-  const hasRunningActivityBlock = useMemo(
-    () => visibleEntries.some((entry) => visibleBlocks(entry).some(isRunningActivityBlock)),
-    [visibleEntries]
+  const committedProjection = useMemo(
+    () => visibleTranscriptEntries(orderTranscriptEntries(entries)),
+    [entries]
   );
+  const liveProjection = useMemo(
+    () => visibleTranscriptEntries(
+      orderTranscriptEntries(liveEntries),
+      committedProjection.lastGeneratedImage
+    ),
+    [committedProjection, liveEntries]
+  );
+  const visibleEntries = useMemo(
+    () => new JoinedTranscriptEntries(
+      committedProjection.entries,
+      liveProjection.entries
+    ),
+    [committedProjection.entries, liveProjection.entries]
+  );
+  const threadKey = useMemo(() => transcriptThreadKey(threadId, visibleEntries), [threadId, visibleEntries]);
+  const virtualTranscript = useVirtualTranscript(
+    committedProjection.entries,
+    liveProjection.entries,
+    scrollRef
+  );
+  const committedHasRunningActivityBlock = useMemo(
+    () => committedProjection.entries.some(
+      (entry) => visibleBlocks(entry).some(isRunningActivityBlock)
+    ),
+    [committedProjection.entries]
+  );
+  const liveHasRunningActivityBlock = useMemo(
+    () => liveProjection.entries.some(
+      (entry) => visibleBlocks(entry).some(isRunningActivityBlock)
+    ),
+    [liveProjection.entries]
+  );
+  const hasRunningActivityBlock =
+    committedHasRunningActivityBlock || liveHasRunningActivityBlock;
   const threadItemsClass = `pevo-threadItems ${scrolling ? "is-scrolling" : ""}`.trim();
 
   function updateFollowingBottom(value: boolean) {
@@ -218,25 +250,30 @@ type VirtualTranscriptWindow = {
 };
 
 function useVirtualTranscript(
-  entries: TranscriptEntry[],
+  committedEntries: TranscriptEntry[],
+  liveEntries: TranscriptEntry[],
   scrollRef: RefObject<HTMLDivElement | null>
 ): VirtualTranscriptWindow {
   const heightsRef = useRef(new Map<string, number>());
   const previousLayoutRef = useRef<{
-    entryIds: string[];
-    offsets: number[];
+    layout: VirtualTranscriptLayout;
     scrollTop: number;
   } | null>(null);
-  const [revision, setRevision] = useState(0);
+  const [committedHeightRevision, setCommittedHeightRevision] = useState(0);
+  const [liveHeightRevision, setLiveHeightRevision] = useState(0);
   const [viewport, setViewport] = useState({ height: 0, top: 0 });
-  const entryIds = entries.map((entry) => entry.id);
-  const offsets = [0];
-  for (const entryId of entryIds) {
-    offsets.push(
-      (offsets[offsets.length - 1] ?? 0)
-      + (heightsRef.current.get(entryId) ?? TRANSCRIPT_VIRTUAL_ESTIMATE_PX)
-    );
-  }
+  const committedLayout = useMemo(
+    () => virtualTranscriptSegment(committedEntries, heightsRef.current),
+    [committedEntries, committedHeightRevision]
+  );
+  const liveLayout = useMemo(
+    () => virtualTranscriptSegment(liveEntries, heightsRef.current),
+    [liveEntries, liveHeightRevision]
+  );
+  const layout = useMemo(
+    () => new VirtualTranscriptLayout(committedLayout, liveLayout),
+    [committedLayout, liveLayout]
+  );
 
   const syncViewport = useMemo(() => (scroller: HTMLElement) => {
     const next = {
@@ -261,13 +298,13 @@ function useVirtualTranscript(
   useIsomorphicLayoutEffect(() => {
     const scroller = scrollRef.current;
     const previous = previousLayoutRef.current;
-    if (scroller && previous && previous.entryIds.length > 0 && entryIds.length > 0) {
-      const previousAnchorIndex = virtualIndexAtOffset(previous.offsets, previous.scrollTop);
-      const anchorId = previous.entryIds[previousAnchorIndex];
-      const nextAnchorIndex = anchorId ? entryIds.indexOf(anchorId) : -1;
+    if (scroller && previous && previous.layout.length > 0 && layout.length > 0) {
+      const previousAnchorIndex = previous.layout.indexAtOffset(previous.scrollTop);
+      const anchorId = previous.layout.entryIdAt(previousAnchorIndex);
+      const nextAnchorIndex = anchorId ? layout.indexOf(anchorId) : -1;
       if (nextAnchorIndex >= 0) {
-        const previousAnchorOffset = previous.offsets[previousAnchorIndex] ?? 0;
-        const nextAnchorOffset = offsets[nextAnchorIndex] ?? 0;
+        const previousAnchorOffset = previous.layout.offsetAt(previousAnchorIndex);
+        const nextAnchorOffset = layout.offsetAt(nextAnchorIndex);
         const delta = nextAnchorOffset - previousAnchorOffset;
         if (delta !== 0) {
           scroller.scrollTop += delta;
@@ -276,11 +313,10 @@ function useVirtualTranscript(
       }
     }
     previousLayoutRef.current = {
-      entryIds,
-      offsets,
+      layout,
       scrollTop: scroller?.scrollTop ?? viewport.top
     };
-  }, [entryIds.join("\u0000"), offsets[offsets.length - 1], revision, scrollRef, syncViewport]);
+  }, [layout, scrollRef, syncViewport]);
 
   const measureEntry = useMemo(() => (entryId: string, height: number) => {
     if (!Number.isFinite(height) || height <= 0) return;
@@ -288,15 +324,19 @@ function useVirtualTranscript(
     if (Math.abs(previousHeight - height) < 0.5) return;
     const scroller = scrollRef.current;
     heightsRef.current.set(entryId, height);
-    setRevision((value) => value + 1);
+    if (committedLayout.indexById.has(entryId)) {
+      setCommittedHeightRevision((value) => value + 1);
+    } else {
+      setLiveHeightRevision((value) => value + 1);
+    }
     if (scroller) syncViewport(scroller);
-  }, [scrollRef, syncViewport]);
+  }, [committedLayout.indexById, scrollRef, syncViewport]);
 
-  const virtualized = entries.length >= TRANSCRIPT_VIRTUAL_MIN_ENTRIES && viewport.height > 0;
+  const virtualized = layout.length >= TRANSCRIPT_VIRTUAL_MIN_ENTRIES && viewport.height > 0;
   if (!virtualized) {
     return {
       bottomSpacerPx: 0,
-      endIndex: entries.length,
+      endIndex: layout.length,
       measureEntry,
       startIndex: 0,
       syncViewport,
@@ -307,31 +347,115 @@ function useVirtualTranscript(
 
   const rangeStart = Math.max(0, viewport.top - TRANSCRIPT_VIRTUAL_OVERSCAN_PX);
   const rangeEnd = viewport.top + viewport.height + TRANSCRIPT_VIRTUAL_OVERSCAN_PX;
-  let startIndex = virtualIndexAtOffset(offsets, rangeStart);
-  let endIndex = Math.min(entries.length, virtualIndexAtOffset(offsets, rangeEnd) + 1);
+  let startIndex = layout.indexAtOffset(rangeStart);
+  let endIndex = Math.min(layout.length, layout.indexAtOffset(rangeEnd) + 1);
   const focusedEntry = typeof document === "undefined"
     ? null
     : document.activeElement?.closest<HTMLElement>("[data-transcript-entry-id]")
       ?.dataset.transcriptEntryId ?? null;
   if (focusedEntry) {
-    const focusedIndex = entryIds.indexOf(focusedEntry);
+    const focusedIndex = layout.indexOf(focusedEntry);
     if (focusedIndex >= 0) {
       startIndex = Math.min(startIndex, focusedIndex);
       endIndex = Math.max(endIndex, focusedIndex + 1);
     }
   }
   return {
-    bottomSpacerPx: Math.max(0, (offsets[entries.length] ?? 0) - (offsets[endIndex] ?? 0)),
+    bottomSpacerPx: Math.max(0, layout.totalHeight - layout.offsetAt(endIndex)),
     endIndex,
     measureEntry,
     startIndex,
     syncViewport,
-    topSpacerPx: offsets[startIndex] ?? 0,
+    topSpacerPx: layout.offsetAt(startIndex),
     virtualized: true
   };
 }
 
-function virtualIndexAtOffset(offsets: number[], target: number): number {
+type VirtualTranscriptSegment = {
+  entryIds: string[];
+  indexById: Map<string, number>;
+  offsets: number[];
+  totalHeight: number;
+};
+
+function virtualTranscriptSegment(
+  entries: TranscriptEntry[],
+  heights: Map<string, number>
+): VirtualTranscriptSegment {
+  const entryIds = entries.map((entry) => entry.id);
+  const indexById = new Map(entryIds.map((id, index) => [id, index]));
+  const offsets = [0];
+  for (const entryId of entryIds) {
+    offsets.push(
+      (offsets[offsets.length - 1] ?? 0)
+      + (heights.get(entryId) ?? TRANSCRIPT_VIRTUAL_ESTIMATE_PX)
+    );
+  }
+  return {
+    entryIds,
+    indexById,
+    offsets,
+    totalHeight: offsets[offsets.length - 1] ?? 0
+  };
+}
+
+class VirtualTranscriptLayout {
+  readonly length: number;
+  readonly totalHeight: number;
+
+  constructor(
+    private readonly committed: VirtualTranscriptSegment,
+    private readonly live: VirtualTranscriptSegment
+  ) {
+    this.length = committed.entryIds.length + live.entryIds.length;
+    this.totalHeight = committed.totalHeight + live.totalHeight;
+  }
+
+  entryIdAt(index: number): string | undefined {
+    return index < this.committed.entryIds.length
+      ? this.committed.entryIds[index]
+      : this.live.entryIds[index - this.committed.entryIds.length];
+  }
+
+  indexOf(entryId: string): number {
+    const committedIndex = this.committed.indexById.get(entryId);
+    if (committedIndex !== undefined) return committedIndex;
+    const liveIndex = this.live.indexById.get(entryId);
+    return liveIndex === undefined ? -1 : this.committed.entryIds.length + liveIndex;
+  }
+
+  offsetAt(index: number): number {
+    if (index <= this.committed.entryIds.length) {
+      return this.committed.offsets[index] ?? this.committed.totalHeight;
+    }
+    const liveIndex = Math.min(
+      this.live.entryIds.length,
+      index - this.committed.entryIds.length
+    );
+    return this.committed.totalHeight
+      + (this.live.offsets[liveIndex] ?? this.live.totalHeight);
+  }
+
+  indexAtOffset(target: number): number {
+    if (this.length === 0) return 0;
+    if (
+      this.committed.entryIds.length > 0
+      && (target < this.committed.totalHeight || this.live.entryIds.length === 0)
+    ) {
+      return virtualSegmentIndexAtOffset(this.committed.offsets, target);
+    }
+    if (this.live.entryIds.length === 0) {
+      return this.committed.entryIds.length - 1;
+    }
+    return this.committed.entryIds.length
+      + virtualSegmentIndexAtOffset(
+        this.live.offsets,
+        Math.max(0, target - this.committed.totalHeight)
+      );
+  }
+}
+
+function virtualSegmentIndexAtOffset(offsets: number[], target: number): number {
   let low = 0;
   let high = Math.max(0, offsets.length - 2);
   while (low < high) {
@@ -421,7 +545,10 @@ function historyFidelityNotice(history: TranscriptHistoryView | null | undefined
   );
 }
 
-function transcriptThreadKey(threadId: string | null | undefined, entries: TranscriptEntry[]): string | null {
+function transcriptThreadKey(
+  threadId: string | null | undefined,
+  entries: Iterable<TranscriptEntry>
+): string | null {
   const explicit = threadId?.trim();
   if (explicit) {
     return explicit;
@@ -519,7 +646,7 @@ function visibleBlocks(entry: TranscriptEntry): TranscriptBlock[] {
   if (isHiddenTranscriptEntry(entry)) {
     return [];
   }
-  return transcriptBlocks(entry)
+  return [...transcriptBlocks(entry)]
     .sort((left, right) => {
       if (left.order !== right.order) {
         return left.order - right.order;
@@ -532,9 +659,17 @@ function visibleBlocks(entry: TranscriptEntry): TranscriptBlock[] {
     .filter((block) => !isHiddenTranscriptBlock(entry, block));
 }
 
-function visibleTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
+type VisibleTranscriptProjection = {
+  entries: TranscriptEntry[];
+  lastGeneratedImage: GeneratedImageArtifact | null;
+};
+
+function visibleTranscriptEntries(
+  entries: TranscriptEntry[],
+  initialGeneratedImage: GeneratedImageArtifact | null = null
+): VisibleTranscriptProjection {
   const visibleEntries: TranscriptEntry[] = [];
-  let previousGeneratedImage: GeneratedImageArtifact | null = null;
+  let previousGeneratedImage = initialGeneratedImage;
   for (const entry of entries) {
     const blocks = visibleBlocks(entry);
     const nextBlocks: TranscriptBlock[] = [];
@@ -554,7 +689,43 @@ function visibleTranscriptEntries(entries: TranscriptEntry[]): TranscriptEntry[]
       visibleEntries.push(nextBlocks.length === entry.blocks.length ? entry : { ...entry, blocks: nextBlocks });
     }
   }
-  return visibleEntries;
+  return {
+    entries: visibleEntries,
+    lastGeneratedImage: previousGeneratedImage
+  };
+}
+
+class JoinedTranscriptEntries implements Iterable<TranscriptEntry> {
+  readonly length: number;
+
+  constructor(
+    private readonly committed: TranscriptEntry[],
+    private readonly live: TranscriptEntry[]
+  ) {
+    this.length = committed.length + live.length;
+  }
+
+  *[Symbol.iterator](): Iterator<TranscriptEntry> {
+    yield* this.committed;
+    yield* this.live;
+  }
+
+  slice(start: number, end: number): TranscriptEntry[] {
+    if (end <= this.committed.length) {
+      return this.committed.slice(start, end);
+    }
+    if (start >= this.committed.length) {
+      return this.live.slice(start - this.committed.length, end - this.committed.length);
+    }
+    return [
+      ...this.committed.slice(start),
+      ...this.live.slice(0, end - this.committed.length)
+    ];
+  }
+
+  some(predicate: (entry: TranscriptEntry) => boolean): boolean {
+    return this.committed.some(predicate) || this.live.some(predicate);
+  }
 }
 
 function isHiddenTranscriptBlock(entry: TranscriptEntry, block: TranscriptBlock): boolean {

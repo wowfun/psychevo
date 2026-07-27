@@ -4,7 +4,10 @@ import { act, renderHook } from "@testing-library/react";
 import { ThreadSession, emptyThreadSnapshot } from "@psychevo/client";
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayEvent } from "@psychevo/protocol";
-import { EMPTY_GATEWAY_EVENT_FEED } from "./gateway-event-feed";
+import {
+  EMPTY_GATEWAY_EVENT_FEED,
+  gatewayEventsForThread
+} from "./gateway-event-feed";
 import { useGatewayLiveEvents } from "./app-live-events";
 
 describe("useGatewayLiveEvents", () => {
@@ -31,7 +34,9 @@ describe("useGatewayLiveEvents", () => {
     const update = setLatestGatewayEvent.mock.calls[0]?.[0] as (
       current: typeof EMPTY_GATEWAY_EVENT_FEED
     ) => typeof EMPTY_GATEWAY_EVENT_FEED;
-    expect(update(EMPTY_GATEWAY_EVENT_FEED).byThread["thread-shared"]?.[0]?.event).toEqual(event);
+    expect(
+      gatewayEventsForThread(update(EMPTY_GATEWAY_EVENT_FEED), "thread-shared")[0]?.event
+    ).toEqual(event);
     expect(session.getSnapshot()?.thread?.id).toBe("thread-shared");
   });
 
@@ -45,6 +50,25 @@ describe("useGatewayLiveEvents", () => {
       setLatestGatewayEvent: vi.fn(),
       threadSession: session
     }));
+
+    act(() => session.reset(emptyThreadSnapshot(scope(), "thread-b")));
+
+    expect(selectedThreadIdRef.current).toBe("thread-b");
+  });
+
+  it("projects identity without materializing the committed transcript and live overlay", () => {
+    const session = new ThreadSession({
+      snapshot: emptyThreadSnapshot(scope(), "thread-a")
+    });
+    const selectedThreadIdRef = { current: "thread-a" as string | null };
+    renderHook(() => useGatewayLiveEvents({
+      selectedThreadIdRef,
+      setLatestGatewayEvent: vi.fn(),
+      threadSession: session
+    }));
+    vi.spyOn(session, "getSnapshot").mockImplementation(() => {
+      throw new Error("identity projection must not materialize the transcript");
+    });
 
     act(() => session.reset(emptyThreadSnapshot(scope(), "thread-b")));
 

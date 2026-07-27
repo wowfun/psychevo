@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, Play, RefreshCw, Send, Square, Users } from "lucide-react";
 import type { GatewayClient } from "@psychevo/client";
 import type { TranscriptAgentSession } from "@psychevo/components";
 import type { AgentRunView, GatewayRequestScope, TeamMemberView, TeamStatusResult } from "@psychevo/protocol";
+import { teamLifecycleRevision, type GatewayThreadEventFeed } from "../gateway-event-feed";
 import type { RightWorkspaceTab } from "../types";
 
 type TeamPanelProps = {
   client: GatewayClient | null;
   disabled: boolean;
-  latestGatewayEvent: unknown;
+  latestGatewayEvent: GatewayThreadEventFeed;
   nativeActivities: RightWorkspaceTab[];
   scope: GatewayRequestScope | null;
   threadId: string | null;
@@ -28,27 +29,54 @@ export function TeamPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [controlBusy, setControlBusy] = useState<string | null>(null);
+  const refreshFlightRef = useRef<Promise<void> | null>(null);
+  const refreshTrailingRef = useRef(false);
+  const refreshTarget = useMemo(() => ({ client, scope, threadId }), [client, scope, threadId]);
+  const refreshTargetRef = useRef(refreshTarget);
+  refreshTargetRef.current = refreshTarget;
+  const lifecycleRevision = teamLifecycleRevision(latestGatewayEvent, threadId);
 
-  const refresh = useCallback(async () => {
-    if (!client || !threadId) {
-      setResult(null);
-      setError(null);
-      return;
+  const refresh = useCallback((): Promise<void> => {
+    refreshTrailingRef.current = true;
+    if (refreshFlightRef.current) {
+      return refreshFlightRef.current;
     }
-    setLoading(true);
-    setError(null);
-    try {
-      setResult(await client.request("team/status", { scope, threadId }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
+    const flight = (async () => {
+      setLoading(true);
+      while (refreshTrailingRef.current) {
+        refreshTrailingRef.current = false;
+        const target = refreshTargetRef.current;
+        if (!target.client || !target.threadId) {
+          setResult(null);
+          setError(null);
+          continue;
+        }
+        setError(null);
+        try {
+          const next = await target.client.request("team/status", {
+            scope: target.scope,
+            threadId: target.threadId
+          });
+          if (target === refreshTargetRef.current) {
+            setResult(next);
+          }
+        } catch (err) {
+          if (target === refreshTargetRef.current) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        }
+      }
+    })().finally(() => {
+      refreshFlightRef.current = null;
       setLoading(false);
-    }
-  }, [client, scope, threadId]);
+    });
+    refreshFlightRef.current = flight;
+    return flight;
+  }, []);
 
   useEffect(() => {
     void refresh();
-  }, [refresh, latestGatewayEvent]);
+  }, [lifecycleRevision, refresh, refreshTarget]);
 
   const groupedAgents = useMemo(() => groupAgentsByMember(result?.agents ?? []), [result?.agents]);
   const team = result?.team ?? null;

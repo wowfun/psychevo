@@ -9,5 +9,6 @@ export const EMPTY_SNAPSHOT: ThreadSnapshot = {
   history: { owner: "psychevo", fidelity: "full", cursor: null, hint: null },
   entries: [],
   activity: idleActivity(),
+  turnStartReceipts: [],
   pendingActions: []
 };

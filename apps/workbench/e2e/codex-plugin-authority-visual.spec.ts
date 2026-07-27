@@ -17,7 +17,7 @@ interface CodexFixtureState {
 }
 
 test.describe("Codex plugin authority visual contract", () => {
-  test("shows isolated authority lifecycle, repair, and compatibility states", async ({ page, isMobile }, testInfo) => {
+  test("shows isolated authority lifecycle, repair, and negotiated version upgrades", async ({ page, isMobile }, testInfo) => {
     test.skip(isMobile, "Codex authority state matrix is captured once on desktop");
     await page.setViewportSize({ width: 1440, height: 960 });
     const artifactRoot = process.env.PSYCHEVO_PLAYWRIGHT_SCREENSHOTS ?? testInfo.outputDir;
@@ -95,9 +95,9 @@ test.describe("Codex plugin authority visual contract", () => {
       writeState(statePath, { failReadAfterInstall: false, installed: false, version: "0.145.0" });
       await refreshAuthority(card);
       await refreshCapabilities(capabilities);
-      await expect(card).toContainText("incompatible · unavailable");
-      await expect(card).toContainText(/reviewed `0\.144\.1`|resolved `0\.145\.0`/);
-      await captureAuthority(page, testInfo, "codex-plugin-authority-incompatible");
+      await expect(card).toContainText("ready · unavailable");
+      await expect(card).toContainText("0.145.0");
+      await captureAuthority(page, testInfo, "codex-plugin-authority-version-upgrade");
     } finally {
       await server.stop();
       rmSync(fixtureRoot, { force: true, recursive: true });

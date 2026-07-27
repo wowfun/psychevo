@@ -128,6 +128,7 @@ export type ThreadViewModel = {
   handleAttachmentFiles: AppActions["handleAttachmentFiles"];
   init: InitializeResult | null;
   latestGatewayEvent: GatewayThreadEventFeed;
+  liveTranscriptEntries: ThreadSnapshot["entries"];
   loadOlderHistory(): Promise<void>;
   onComposerRetry(): void | Promise<void>;
   onGatewayRetry(): void | Promise<void>;
@@ -356,6 +357,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
     init,
     leftCollapsed,
     latestGatewayEvent,
+    liveTranscriptEntries,
     loadOlderHistory,
     loadingOlderCwd,
     loadChannelSources,
@@ -857,6 +859,7 @@ export function WorkbenchLayout(props: WorkbenchLayoutProps) {
                   activity={activity}
                   entries={transcriptEntries}
                   history={snapshot.history}
+                  liveEntries={liveTranscriptEntries}
                   onLoadOlderHistory={() => void runAction(loadOlderHistory)}
                   onCopyText={copyText}
                   {...(historyEditAvailable && pointForkAvailable ? {

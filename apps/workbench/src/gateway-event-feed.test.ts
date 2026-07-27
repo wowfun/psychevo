@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { GatewayEvent, PendingActionView } from "@psychevo/protocol";
 import {
-  EMPTY_GATEWAY_EVENT_FEED,
-  appendGatewayEventFeed,
+    EMPTY_GATEWAY_EVENT_FEED,
+    GatewayEventJournal,
+    appendGatewayEventFeed,
   confirmedSteerTurnId,
   gatewayEventsForThread
 } from "./gateway-event-feed";
@@ -116,6 +117,52 @@ describe("Gateway thread event feed", () => {
   it("uses the snapshot active turn as a reload fallback before lifecycle events arrive", () => {
     expect(confirmedSteerTurnId(EMPTY_GATEWAY_EVENT_FEED, "thread-1", "turn-reloaded"))
       .toBe("turn-reloaded");
+  });
+
+  it("keeps O(1) bounded global and per-thread rings", () => {
+    let feed = EMPTY_GATEWAY_EVENT_FEED;
+    for (let index = 0; index < 2_100; index += 1) {
+      feed = appendGatewayEventFeed(feed, {
+        type: "titleChanged",
+        threadId: `thread-${index % 3}`,
+        title: `Title ${index}`,
+        displayTitle: `Title ${index}`
+      });
+    }
+
+    expect(feed.journal?.eventsThrough(feed.latestSeq)).toHaveLength(2_000);
+    expect(gatewayEventsForThread(feed, "thread-0")).toHaveLength(500);
+    expect(gatewayEventsForThread(feed, "thread-1")).toHaveLength(500);
+    expect(gatewayEventsForThread(feed, "thread-2")).toHaveLength(500);
+  });
+
+  it("notifies only matching thread and event-family subscribers", () => {
+    const journal = new GatewayEventJournal();
+    const seen: number[] = [];
+    journal.subscribe(({ seq }) => seen.push(seq), {
+      eventTypes: ["titleChanged"],
+      threadId: "thread-1"
+    });
+
+    journal.append({
+      type: "activityChanged",
+      threadId: "thread-1",
+      activity: { running: false, activeTurnId: null, queuedTurns: 0 }
+    });
+    journal.append({
+      type: "titleChanged",
+      threadId: "thread-2",
+      title: "Other",
+      displayTitle: "Other"
+    });
+    journal.append({
+      type: "titleChanged",
+      threadId: "thread-1",
+      title: "Match",
+      displayTitle: "Match"
+    });
+
+    expect(seen).toEqual([3]);
   });
 });
 

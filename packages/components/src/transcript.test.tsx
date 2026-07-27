@@ -1178,6 +1178,52 @@ describe("TranscriptPanel session scroll behavior", () => {
     });
   });
 
+  it("reuses committed virtual layout when only the live overlay changes", async () => {
+    let committedIdReads = 0;
+    const entries = Array.from({ length: 500 }, (_, index) => {
+      const value = {
+        ...scrollEntry("thread-a", `committed-${index + 1}`),
+        messageSeq: index + 1
+      };
+      Object.defineProperty(value, "id", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          committedIdReads += 1;
+          return `committed-${index + 1}`;
+        }
+      });
+      return value;
+    });
+    const live = {
+      ...scrollEntry("thread-a", "live-turn"),
+      messageSeq: null,
+      status: "running" as const,
+      turnId: "turn-live"
+    };
+    const { container, rerender } = render(
+      <TranscriptPanel entries={entries} liveEntries={[live]} threadId="thread-a" />
+    );
+    await waitFor(() => {
+      expect(container.querySelector(".pevo-virtualTranscript")?.getAttribute("data-virtualized"))
+        .toBe("true");
+    });
+    committedIdReads = 0;
+
+    rerender(
+      <TranscriptPanel
+        entries={entries}
+        liveEntries={[{
+          ...live,
+          blocks: live.blocks.map((block) => ({ ...block, body: "next token" }))
+        }]}
+        threadId="thread-a"
+      />
+    );
+
+    expect(committedIdReads).toBeLessThan(100);
+  });
+
   it("compensates an above-viewport row resize exactly once", async () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const originalRect = HTMLElement.prototype.getBoundingClientRect;

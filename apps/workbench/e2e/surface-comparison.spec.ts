@@ -826,7 +826,7 @@ function gatewayTurnBreakdown(
   ));
   if (turnStarted.length !== 1) {
     throw new Error(
-      `Gateway turn ${entered.turnId} must emit exactly one public turnStarted event`
+      `Gateway turn ${admitted.turnId} must emit exactly one public turnStarted event`
     );
   }
   const reviewScans = turn.filter((record) => (
@@ -834,7 +834,7 @@ function gatewayTurnBreakdown(
     || record.event === "workspace_review_capture_finished"
   ));
   if (reviewScans.length !== 0) {
-    throw new Error(`Gateway turn ${entered.turnId} performed a synchronous workspace review scan`);
+    throw new Error(`Gateway turn ${admitted.turnId} performed a synchronous workspace review scan`);
   }
   const promptProjected = turn.find((record) => (
     record.event === "gateway_event_emitted"
@@ -846,7 +846,7 @@ function gatewayTurnBreakdown(
   ));
   const completed = requireGatewayMark(turn, "gateway_turn_completed");
   if (!promptProjected || !firstAssistant) {
-    throw new Error(`Gateway turn ${entered.turnId} has an incomplete prompt/output projection`);
+    throw new Error(`Gateway turn ${admitted.turnId} has an incomplete prompt/output projection`);
   }
   assertOneClockDomain([
     received,

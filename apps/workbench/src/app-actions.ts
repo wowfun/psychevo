@@ -193,6 +193,7 @@ export function createAppActions(params: AppActionsParams) {
       history: params.snapshot.history,
       entries: [],
       activity: { running: false, activeTurnId: null, queuedTurns: 0 },
+      turnStartReceipts: [],
       pendingActions: []
     });
     params.selectedThreadIdRef.current = null;

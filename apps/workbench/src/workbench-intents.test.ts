@@ -187,6 +187,7 @@ function snapshot(): ThreadSnapshot {
       activeTurnId: null,
       queuedTurns: 0
     },
+    turnStartReceipts: [],
     pendingActions: []
   };
 }
