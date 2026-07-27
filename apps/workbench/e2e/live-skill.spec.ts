@@ -97,6 +97,7 @@ test.describe("pevo Web live skill validation", () => {
       while (Date.now() < deadline) {
         await page.waitForTimeout(intervalMs);
         await approvePendingPermissionOnce(page);
+        await submitDefaultClarifyOnce(page);
         await captureAndAssert(page, testInfo, server.dbPath, screenshotDir, sample++, "sample");
         if (await liveSkillCompleted(page)) {
           completed = true;
@@ -118,6 +119,21 @@ async function approvePendingPermissionOnce(page: Page) {
     if (await button.isVisible()) {
       await button.click();
       process.stdout.write("[live-skill] approved pending permission scope=once\n");
+      return;
+    }
+  }
+}
+
+async function submitDefaultClarifyOnce(page: Page) {
+  const requests = page.locator(".composerRequest").filter({
+    has: page.getByText("Clarify", { exact: true })
+  });
+  for (let index = await requests.count() - 1; index >= 0; index -= 1) {
+    const request = requests.nth(index);
+    const submit = request.getByRole("button", { name: "Submit", exact: true });
+    if (await request.isVisible() && await submit.isEnabled()) {
+      await submit.click();
+      process.stdout.write("[live-skill] submitted rendered default clarification answer\n");
       return;
     }
   }

@@ -219,6 +219,8 @@ export function gatewayEventThreadId(event: GatewayEvent): string | null {
     case "entryUpdated":
     case "entryCompleted":
       return event.entry.threadId || null;
+    case "entryBlockTextDelta":
+      return event.threadId || null;
     case "activityChanged":
     case "titleChanged":
       return event.threadId || null;

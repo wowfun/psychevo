@@ -108,7 +108,7 @@ async fn doctor_plugins(
     cwd: &std::path::Path,
 ) -> Result<()> {
     let options = base_run_options(env_map, home, cwd).await?;
-    let value = plugin_doctor_value(&options, args.selector.as_deref())?;
+    let value = plugin_doctor_value(&options, args.selector.as_deref()).await?;
     print_plugin_value(&value, args.json)
 }
 

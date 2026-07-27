@@ -296,6 +296,13 @@ fn json_turn_event(receipt: &psychevo::TurnReceipt, event: TurnEvent) -> Option<
             entry.accounting = accounting;
             typed_item_event(receipt, stage, entry)
         }
+        TurnEvent::MessageDelta { text } => {
+            let entry = projected_entry(
+                &receipt.turn_id,
+                psychevo::__product::runtime::RunStreamEvent::AssistantTextDelta { text },
+            )?;
+            typed_item_event(receipt, psychevo::ItemStage::Updated, entry)
+        }
         TurnEvent::Tool { stage, data } => {
             let entry = projected_entry(
                 &receipt.turn_id,
@@ -646,6 +653,25 @@ mod json_transcript_tests {
         assert_eq!(completed["item"]["usage"]["inputTokens"], 2);
         assert_eq!(completed["item"]["accounting"]["reportedTotalTokens"], 3);
         assert!(completed["item"].get("value").is_none());
+    }
+
+    #[test]
+    fn assistant_delta_is_an_append_only_typed_update() {
+        let projected = json_turn_event(
+            &receipt(),
+            TurnEvent::MessageDelta {
+                text: "hello".to_string(),
+            },
+        )
+        .expect("assistant delta");
+
+        assert_eq!(projected["type"], "item.updated");
+        assert_eq!(projected["item"]["id"], "live:turn-1:assistant");
+        assert_eq!(projected["item"]["blocks"][0]["body"], "hello");
+        assert_eq!(
+            projected["item"]["blocks"][0]["metadata"]["projection"],
+            "assistant_text_delta"
+        );
     }
 
     #[test]

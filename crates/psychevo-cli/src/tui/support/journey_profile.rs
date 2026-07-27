@@ -286,6 +286,7 @@ impl LiveEventProfileKind {
         let first_assistant = match event {
             RunStreamEvent::Event(value) => runtime_value_has_nonempty_assistant_text(value),
             RunStreamEvent::Scoped { event, .. } => Self::from_runtime_event(event).first_assistant,
+            RunStreamEvent::AssistantTextDelta { text } => !text.trim().is_empty(),
             RunStreamEvent::ReasoningDelta { .. }
             | RunStreamEvent::ReasoningEnd
             | RunStreamEvent::ClarifyRequest(_)

@@ -43,7 +43,7 @@ import {
 
 type LiveTranscriptObservationEvent = Extract<
   GatewayEvent,
-  { type: "entryStarted" | "entryUpdated" | "entryCompleted" }
+  { type: "entryStarted" | "entryUpdated" | "entryBlockTextDelta" | "entryCompleted" }
 >;
 
 export function applyLiveTranscriptEvent(
@@ -55,6 +55,36 @@ export function applyLiveTranscriptEvent(
   }
 
   switch (event.type) {
+    case "entryBlockTextDelta": {
+      const entryIndex = snapshot.entries.findIndex((entry) => (
+        entry.id === event.entryId && entry.turnId === event.turnId
+      ));
+      if (entryIndex < 0) {
+        return snapshot;
+      }
+      const entry = snapshot.entries[entryIndex]!;
+      const blockIndex = entry.blocks.findIndex((block) => block.id === event.blockId);
+      if (blockIndex < 0) {
+        return snapshot;
+      }
+      const block = entry.blocks[blockIndex]!;
+      const blocks = entry.blocks.slice();
+      blocks[blockIndex] = {
+        ...block,
+        body: `${block.body ?? ""}${event.text}`,
+        updatedAtMs: event.updatedAtMs
+      };
+      const entries = snapshot.entries.slice();
+      entries[entryIndex] = {
+        ...entry,
+        blocks,
+        updatedAtMs: event.updatedAtMs
+      };
+      return {
+        ...snapshot,
+        entries
+      };
+    }
     case "entryStarted":
     case "entryUpdated":
     case "entryCompleted": {
@@ -287,6 +317,7 @@ function isOlderSameEntryLiveUpdate(entries: TranscriptEntry[], next: Transcript
 function isLiveTranscriptObservation(event: GatewayEvent): event is LiveTranscriptObservationEvent {
   return event.type === "entryStarted" ||
     event.type === "entryUpdated" ||
+    event.type === "entryBlockTextDelta" ||
     event.type === "entryCompleted";
 }
 
@@ -306,6 +337,8 @@ function eventThreadIdForEvent(event: GatewayEvent): string | null {
     case "entryUpdated":
     case "entryCompleted":
       return event.entry.threadId || null;
+    case "entryBlockTextDelta":
+      return event.threadId || null;
     case "activityChanged":
       return event.threadId || null;
     case "actionRequested":

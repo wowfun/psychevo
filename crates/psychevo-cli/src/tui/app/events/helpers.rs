@@ -59,6 +59,36 @@ pub(crate) fn buffer_session_live_event(
         .session_live_event_backlog
         .entry(session_id.to_string())
         .or_default();
+    if let (
+        TuiLiveEvent::Gateway(current),
+        Some(TuiLiveEvent::Gateway(previous)),
+    ) = (&event, backlog.last_mut())
+        && let (
+            GatewayEvent::EntryBlockTextDelta {
+                turn_id,
+                entry_id,
+                block_id,
+                text,
+                updated_at_ms,
+                ..
+            },
+            GatewayEvent::EntryBlockTextDelta {
+                turn_id: previous_turn_id,
+                entry_id: previous_entry_id,
+                block_id: previous_block_id,
+                text: previous_text,
+                updated_at_ms: previous_updated_at_ms,
+                ..
+            },
+        ) = (current.as_ref(), previous.as_mut())
+        && turn_id == previous_turn_id
+        && entry_id == previous_entry_id
+        && block_id == previous_block_id
+    {
+        previous_text.push_str(text);
+        *previous_updated_at_ms = *updated_at_ms;
+        return;
+    }
     backlog.push(event);
     pub(crate) const MAX_SESSION_LIVE_BACKLOG_EVENTS: usize = 500;
     if backlog.len() > MAX_SESSION_LIVE_BACKLOG_EVENTS {

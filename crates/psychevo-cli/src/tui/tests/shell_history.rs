@@ -730,6 +730,32 @@ pub(crate) async fn tool_only_thinking_message_does_not_create_turn_meta() {
 }
 
 #[tokio::test]
+pub(crate) async fn assistant_text_deltas_append_to_one_live_answer_row() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let mut ui = FullscreenUi::new(&app);
+    ui.start_assistant();
+
+    for text in ["hello", " world"] {
+        assert!(!ui.apply_stream_event(
+            RunStreamEvent::AssistantTextDelta {
+                text: text.to_string(),
+            },
+            true,
+            false,
+        ));
+    }
+
+    let answers = ui
+        .transcript
+        .iter()
+        .filter(|row| row.kind == TranscriptKind::Answer)
+        .collect::<Vec<_>>();
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0].text, "hello world");
+}
+
+#[tokio::test]
 pub(crate) async fn tool_failure_without_answer_keeps_failure_meta() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;

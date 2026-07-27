@@ -781,6 +781,9 @@ describe("Workbench public Thread Application interactions", () => {
 
     render(<App />);
     await waitForDraftContext();
+    const contextReadsBeforeSend = gatewayMock.requestLog.filter((entry) => (
+      entry.method === "thread/context/read"
+    )).length;
     fireEvent.change(screen.getByPlaceholderText("Ask Psychevo..."), {
       target: { value: "first turn" }
     });
@@ -790,6 +793,8 @@ describe("Workbench public Thread Application interactions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(gatewayMock.requestLog.filter((entry) => entry.method === "thread/context/read"))
+      .toHaveLength(contextReadsBeforeSend);
     emit("gateway/event", {
       selectedSkills: [],
       threadId: null,

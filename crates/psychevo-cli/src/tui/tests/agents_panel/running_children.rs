@@ -963,3 +963,31 @@ pub(crate) async fn parent_agent_preview_coalesces_streamed_reasoning_chunks() {
     assert_eq!(text.matches("Thinking:").count(), 1, "{text}");
     assert!(!text.contains("more lines"), "{text}");
 }
+
+#[tokio::test]
+pub(crate) async fn parent_agent_preview_coalesces_streamed_assistant_chunks() {
+    let temp = tempdir().expect("temp");
+    let app = test_app(&temp).await;
+    let child = "child-session".to_string();
+    let mut ui = FullscreenUi::new(&app);
+    let mut row = TranscriptRow::with_title(
+        TranscriptKind::Status,
+        "translate(Translate user message to Chinese)",
+        "Running (0 tool uses)",
+    );
+    row.tool_name = Some("spawn_agent".to_string());
+    row.agent_target = Some(child.clone());
+    row.tool_started = Some(Instant::now());
+    ui.transcript.push(row);
+
+    for text in ["hello", " world"] {
+        assert!(ui.apply_agent_child_preview_event(
+            &child,
+            &RunStreamEvent::AssistantTextDelta {
+                text: text.to_string(),
+            },
+        ));
+    }
+
+    assert!(ui.transcript[0].text.contains("Response: hello world"));
+}

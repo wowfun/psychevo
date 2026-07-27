@@ -561,6 +561,21 @@ export class ThreadSession {
         return;
       }
     }
+    if (event.type === "entryBlockTextDelta") {
+      const latest = this.eventQueue.at(-1);
+      if (
+        latest?.type === "entryBlockTextDelta"
+        && latest.turnId === event.turnId
+        && latest.entryId === event.entryId
+        && latest.blockId === event.blockId
+      ) {
+        this.eventQueue[this.eventQueue.length - 1] = {
+          ...event,
+          text: `${latest.text}${event.text}`
+        };
+        return;
+      }
+    }
     this.eventQueue.push(event);
     this.scheduleFrame();
   }
@@ -617,5 +632,6 @@ export class ThreadSession {
 function pacedGatewayEvent(event: GatewayEvent): boolean {
   return event.type === "entryStarted"
     || event.type === "entryUpdated"
+    || event.type === "entryBlockTextDelta"
     || event.type === "entryCompleted";
 }

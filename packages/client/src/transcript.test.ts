@@ -2,6 +2,56 @@ import { describe, expect, it } from "vitest";
 import type { ThreadSnapshot, TranscriptBlock, TranscriptEntry } from "@psychevo/protocol";
 import { appendOptimisticPrompt, applyLiveTranscriptEvent, reconcileThreadSnapshot } from "./transcript";
 
+describe("applyLiveTranscriptEvent block text deltas", () => {
+  it("appends only to a known live block and preserves stable identity", () => {
+    const current: ThreadSnapshot = {
+      ...threadSnapshot(),
+      entries: [
+        entry({
+          id: "live:turn-1:assistant:0",
+          threadId: "thread-1",
+          turnId: "turn-1",
+          role: "assistant",
+          source: "runtime.stream",
+          blocks: [
+            block({
+              id: "live:turn-1:assistant:0:text:0",
+              body: "first",
+              source: "runtime.stream",
+              status: "running"
+            })
+          ]
+        })
+      ]
+    };
+    const next = applyLiveTranscriptEvent(current, {
+      type: "entryBlockTextDelta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      entryId: "live:turn-1:assistant:0",
+      blockId: "live:turn-1:assistant:0:text:0",
+      text: " second",
+      updatedAtMs: 42
+    });
+
+    expect(next.entries[0]?.id).toBe(current.entries[0]?.id);
+    expect(next.entries[0]?.blocks[0]?.body).toBe("first second");
+    expect(next.entries[0]?.blocks[0]?.updatedAtMs).toBe(42);
+    expect(next.entries[0]?.updatedAtMs).toBe(42);
+
+    const unknown = applyLiveTranscriptEvent(next, {
+      type: "entryBlockTextDelta",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      entryId: "missing",
+      blockId: "missing",
+      text: "ignored",
+      updatedAtMs: 43
+    });
+    expect(unknown).toBe(next);
+  });
+});
+
 describe("applyLiveTranscriptEvent detached drafts", () => {
   it("ignores a stale completed turn for an empty detached draft", () => {
     const current = detachedSnapshot();

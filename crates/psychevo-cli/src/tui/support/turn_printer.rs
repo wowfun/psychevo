@@ -41,6 +41,9 @@ impl TurnPrinter {
         out: &mut impl Write,
     ) -> io::Result<()> {
         match event {
+            RunStreamEvent::AssistantTextDelta { text } => {
+                self.last_assistant_text.push_str(text);
+            }
             RunStreamEvent::ReasoningDelta { text } => {
                 if self.thinking_enabled {
                     if !self.reasoning_active {

@@ -57,6 +57,25 @@ pub(crate) async fn turn_printer_shows_reasoning_when_enabled() {
 }
 
 #[tokio::test]
+pub(crate) async fn turn_printer_accumulates_assistant_deltas_without_duplicate_output() {
+    let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
+    let mut output = Vec::new();
+    for text in ["hello", " world"] {
+        printer
+            .render_event(
+                &RunStreamEvent::AssistantTextDelta {
+                    text: text.to_string(),
+                },
+                &mut output,
+            )
+            .expect("assistant delta");
+    }
+
+    assert_eq!(printer.last_assistant_text, "hello world");
+    assert!(output.is_empty());
+}
+
+#[tokio::test]
 pub(crate) async fn turn_printer_renders_project_instruction_warning() {
     let mut printer = TurnPrinter::new(TuiRenderer::new(false), false, false);
     let mut output = Vec::new();

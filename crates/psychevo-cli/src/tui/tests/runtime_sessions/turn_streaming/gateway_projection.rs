@@ -95,6 +95,48 @@ pub(crate) async fn pending_write_tool_input_defers_later_completion_events() {
 }
 
 #[tokio::test]
+pub(crate) async fn typed_gateway_block_text_delta_appends_to_existing_row() {
+    let temp = tempdir().expect("temp");
+    let mut app = test_app(&temp).await;
+    app.current_session = Some("session-1".to_string());
+    let mut ui = FullscreenUi::new(&app);
+
+    assert!(app.apply_gateway_event(
+        &mut ui,
+        Some("session-1"),
+        GatewayEvent::EntryStarted {
+            turn_id: "turn-1".to_string(),
+            entry: gateway_test_entry(
+                "live:turn-1:assistant:0",
+                TranscriptBlockKind::Text,
+                TranscriptBlockStatus::Running,
+                None,
+                "first",
+            ),
+        },
+    ));
+    assert!(app.apply_gateway_event(
+        &mut ui,
+        Some("session-1"),
+        GatewayEvent::EntryBlockTextDelta {
+            thread_id: Some("session-1".to_string()),
+            turn_id: "turn-1".to_string(),
+            entry_id: "live:turn-1:assistant:0".to_string(),
+            block_id: "live:turn-1:assistant:0:block".to_string(),
+            text: " second".to_string(),
+            updated_at_ms: 2,
+        },
+    ));
+
+    let answer = ui
+        .transcript
+        .iter()
+        .find(|row| row.transcript_block_id.as_deref() == Some("live:turn-1:assistant:0:block"))
+        .expect("assistant row");
+    assert_eq!(answer.text, "first second");
+}
+
+#[tokio::test]
 pub(crate) async fn fullscreen_write_preview_opens_once_and_preserves_manual_collapse() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;

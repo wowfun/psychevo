@@ -44,6 +44,7 @@ type MutationOptions = {
 };
 type AgentDefinitionState = "active" | "shadowed" | "disabled";
 type AgentsSegment = "definitions" | "teams" | "runtimes" | "backends";
+type CatalogCapabilityTab = "plugins" | "mcp" | "tools";
 
 type AgentDefinitionRow = {
   id: string;
@@ -244,18 +245,6 @@ export function CapabilitiesPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [createPanel, setCreatePanel] = useState<CapabilityTab | null>(null);
   const [skillInstall, setSkillInstall] = useState<SkillInstallDraft>({ source: "", name: "", target: "profile", force: false });
-  const [pluginInstall, setPluginInstall] = useState<PluginInstallDraft>({ source: "", kind: "local", npmVersion: "", npmRegistry: "", force: false, inspection: null });
-  const [toolDraft, setToolDraft] = useState({ name: "", description: "", tools: "", includes: "", force: false });
-  const [mcpDraft, setMcpDraft] = useState({
-    name: "",
-    transport: "stdio",
-    command: "",
-    url: "",
-    bearerTokenEnvVar: "",
-    oauthClientId: ""
-  });
-  const [toolPolicyDraft, setToolPolicyDraft] = useState({ enabledTools: "", disabledTools: "" });
-  const [pluginDetail, setPluginDetail] = useState<{ id: string; loading: boolean; value: JsonObject | null; error: string | null } | null>(null);
   const [pluginOperation, setPluginOperation] = useState<JsonObject | null>(null);
   const receipts = useActionReceipts();
 
@@ -264,8 +253,8 @@ export function CapabilitiesPage({
   const client = gatewayClient ? application : null;
   const applicationSnapshot = useSyncExternalStore(
     (listener) => application.subscribe(listener),
-    () => application.getSnapshot(requestScope),
-    () => application.getSnapshot(requestScope)
+    () => application.getSnapshot(),
+    () => application.getSnapshot()
   );
   const data = applicationSnapshot.data as Readonly<Record<CapabilityTab, JsonObject | null>>;
   const selected = applicationSnapshot.selection;
@@ -282,22 +271,21 @@ export function CapabilitiesPage({
   useEffect(() => () => application.dispose(), [application]);
 
   useEffect(() => {
+    application.activate(requestScope);
+  }, [
+    application,
+    requestScope?.cwd,
+    requestScope?.source.kind,
+    requestScope?.source.lifetime,
+    requestScope?.source.rawId,
+    requestScope?.source.rawIdentity
+  ]);
+
+  useEffect(() => {
     if (!client || !requestScope) return;
-    const activeScope = requestScope;
-    void application.refresh(activeScope, activeTab).catch(() => undefined);
+    void application.refresh(activeTab).catch(() => undefined);
   }, [activeTab, application, client, requestScope?.cwd]);
 
-  const rows = useMemo(() => {
-    const source = data[activeTab];
-    const all = rowsForTab(activeTab, source);
-    const needle = query.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter((row) => `${row.name} ${row.description}`.toLowerCase().includes(needle));
-  }, [activeTab, data, query]);
-
-  const selectedId = selected[activeTab] ?? rows[0]?.id ?? null;
-  const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
-  const listEntries = capabilityListEntries(activeTab, rows);
   const visibleBackends = useMemo(
     () => backends.length > 0
       ? backends
@@ -307,26 +295,11 @@ export function CapabilitiesPage({
     [backends, data.agents]
   );
 
-  useEffect(() => {
-    if (!client || !requestScope || activeTab !== "plugins" || !selectedRow) {
-      setPluginDetail(null);
-      return;
-    }
-    let cancelled = false;
-    setPluginDetail({ id: selectedRow.id, loading: true, value: null, error: null });
-    void client.request("plugin/read", { selector: pluginSelector(selectedRow), scope: requestScope }).then((value) => {
-      if (!cancelled) setPluginDetail({ id: selectedRow.id, loading: false, value: objectValue(value), error: null });
-    }).catch((err) => {
-      if (!cancelled) setPluginDetail({ id: selectedRow.id, loading: false, value: null, error: errorMessage(err) });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, applicationSnapshot.revision, client, requestScope?.cwd, selectedRow?.id]);
-
   async function mutate(action: () => Promise<unknown>, options: MutationOptions = {}): Promise<boolean> {
     if (!client || !requestScope) return false;
-    application.clearError(requestScope);
+    const operationScope = application.captureScope();
+    if (!operationScope) return false;
+    application.clearError();
     setPluginOperation(null);
     try {
       const result = await action();
@@ -345,7 +318,7 @@ export function CapabilitiesPage({
       }
       return true;
     } catch (err) {
-      application.reportError(requestScope, err);
+      application.reportError(err, operationScope);
       return false;
     }
   }
@@ -364,7 +337,7 @@ export function CapabilitiesPage({
           icon={<RefreshCw size={15} />}
           label="Refresh"
           onClick={() => {
-            if (requestScope) void application.refresh(requestScope, activeTab);
+            if (requestScope) void application.refresh(activeTab);
           }}
         />
       </header>
@@ -462,93 +435,190 @@ export function CapabilitiesPage({
           skillInstall={skillInstall}
           onCloseCreate={() => setCreatePanel(null)}
           onSelect={(id) => {
-            if (requestScope) application.select(requestScope, "skills", id);
+            if (requestScope) application.select("skills", id);
           }}
         />
       ) : (
-        <>
-          <CapabilityForms
-            busy={busy}
-            client={client}
-            scope={requestScope}
-            tab={activeTab}
-            pluginInstall={pluginInstall}
-            setPluginInstall={setPluginInstall}
-            toolDraft={toolDraft}
-            setToolDraft={setToolDraft}
-            mcpDraft={mcpDraft}
-            setMcpDraft={setMcpDraft}
-            mutate={mutate}
-            open={createPanel === activeTab}
-            onClose={() => setCreatePanel(null)}
-          />
-          {activeTab === "plugins" && (
-            <CodexAuthorityCard
-              authority={objectField(data.plugins, "codex_authority")}
-              busy={busy}
-              client={client}
-              key={stringField(objectField(data.plugins, "codex_authority"), "resolvedBinary") || "codex"}
-              mutate={mutate}
-              scope={requestScope}
-            />
-          )}
+        <CatalogCapabilityPanel
+          application={application}
+          busy={busy}
+          client={client}
+          createOpen={createPanel === activeTab}
+          data={data[activeTab]}
+          loading={loading}
+          mutate={mutate}
+          onCloseCreate={() => setCreatePanel(null)}
+          query={query}
+          refreshToken={applicationSnapshot.revision}
+          scope={requestScope}
+          selectedId={selected[activeTab]}
+          tab={activeTab}
+        />
+      )}
+    </section>
+  );
+}
 
-          <div className="capabilitiesGrid">
-            <div className="capabilityList" role="list">
-              {loading && <div className="capabilityEmpty">Loading</div>}
-              {!loading && rows.length === 0 && <div className="capabilityEmpty">No matches</div>}
-              {listEntries.map((entry) => {
-                if (entry.kind === "section") {
-                  return (
-                    <div className="capabilityRowMain" key={`section:${entry.label}`} role="heading" aria-level={3}>
-                      <strong>{entry.label}</strong>
-                      {entry.description && <span>{entry.description}</span>}
-                    </div>
-                  );
-                }
-                const row = entry.row;
-                const selectedClass = row.id === selectedRow?.id ? " is-selected" : "";
-                if (hasCapabilityRowSwitch(activeTab)) {
-                  return (
-                    <div className={`capabilityRow capabilityRowWithSwitch${selectedClass}`} key={row.id} role="listitem">
-                      <button
-                        aria-label={`${rowKindLabel(activeTab)} ${row.name}`}
-                        className="capabilityRowSelect"
-                        onClick={() => {
-                          if (requestScope) application.select(requestScope, activeTab, row.id);
-                        }}
-                        type="button"
-                      >
-                        <span className="capabilityRowMain">
-                          <strong>{row.name}</strong>
-                          <RowDescription fallback={row.status} value={row.description} />
-                        </span>
-                        <CapabilityBadges row={row} />
-                      </button>
-                      <Switch
-                        checked={row.enabled}
-                        className="capabilityRowSwitch"
-                        disabled={busy || (activeTab === "plugins" && !pluginEnablementMutable(row))}
-                        label={`${row.name} enabled`}
-                        onCheckedChange={(enabled) => void mutate(
-                          () => setCapabilityEnabled(client, requestScope, activeTab, row, enabled),
-                          {
-                            notice: `${row.name} ${enabled ? "enabled" : "disabled"}.`,
-                            undo: async () => { await mutate(() => setCapabilityEnabled(client, requestScope, activeTab, row, !enabled), { notice: `${row.name} restored.` }); }
-                          }
-                        )}
-                        showLabel={false}
-                        size="compact"
-                      />
-                    </div>
-                  );
-                }
-                return (
+function CatalogCapabilityPanel({
+  application,
+  busy,
+  client,
+  createOpen,
+  data,
+  loading,
+  mutate,
+  onCloseCreate,
+  query,
+  refreshToken,
+  scope,
+  selectedId,
+  tab
+}: {
+  application: CapabilitiesApplication;
+  busy: boolean;
+  client: CapabilitiesClient | null;
+  createOpen: boolean;
+  data: JsonObject | null;
+  loading: boolean;
+  mutate(action: () => Promise<unknown>, options?: MutationOptions): Promise<boolean>;
+  onCloseCreate(): void;
+  query: string;
+  refreshToken: number;
+  scope: GatewayRequestScope | null;
+  selectedId: string | null;
+  tab: CatalogCapabilityTab;
+}) {
+  const [pluginInstall, setPluginInstall] = useState<PluginInstallDraft>({
+    source: "",
+    kind: "local",
+    npmVersion: "",
+    npmRegistry: "",
+    force: false,
+    inspection: null
+  });
+  const [toolDraft, setToolDraft] = useState({
+    name: "",
+    description: "",
+    tools: "",
+    includes: "",
+    force: false
+  });
+  const [mcpDraft, setMcpDraft] = useState({
+    name: "",
+    transport: "stdio",
+    command: "",
+    url: "",
+    bearerTokenEnvVar: "",
+    oauthClientId: ""
+  });
+  const [toolPolicyDraft, setToolPolicyDraft] = useState({
+    enabledTools: "",
+    disabledTools: ""
+  });
+  const [pluginDetail, setPluginDetail] = useState<{
+    id: string;
+    loading: boolean;
+    value: JsonObject | null;
+    error: string | null;
+  } | null>(null);
+
+  const rows = useMemo(() => {
+    const all = rowsForTab(tab, data);
+    const needle = query.trim().toLowerCase();
+    if (!needle) return all;
+    return all.filter((row) => (
+      `${row.name} ${row.description}`.toLowerCase().includes(needle)
+    ));
+  }, [data, query, tab]);
+  const activeId = selectedId ?? rows[0]?.id ?? null;
+  const selectedRow = rows.find((row) => row.id === activeId) ?? rows[0] ?? null;
+  const listEntries = capabilityListEntries(tab, rows);
+
+  useEffect(() => {
+    if (!client || !scope || tab !== "plugins" || !selectedRow) {
+      setPluginDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setPluginDetail({ id: selectedRow.id, loading: true, value: null, error: null });
+    void client.request("plugin/read", {
+      selector: pluginSelector(selectedRow),
+      scope
+    }).then((value) => {
+      if (!cancelled) {
+        setPluginDetail({
+          id: selectedRow.id,
+          loading: false,
+          value: objectValue(value),
+          error: null
+        });
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        setPluginDetail({
+          id: selectedRow.id,
+          loading: false,
+          value: null,
+          error: errorMessage(error)
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, refreshToken, scope?.cwd, selectedRow?.id, tab]);
+
+  return (
+    <>
+      <CapabilityForms
+        busy={busy}
+        client={client}
+        scope={scope}
+        tab={tab}
+        pluginInstall={pluginInstall}
+        setPluginInstall={setPluginInstall}
+        toolDraft={toolDraft}
+        setToolDraft={setToolDraft}
+        mcpDraft={mcpDraft}
+        setMcpDraft={setMcpDraft}
+        mutate={mutate}
+        open={createOpen}
+        onClose={onCloseCreate}
+      />
+      {tab === "plugins" && (
+        <CodexAuthorityCard
+          authority={objectField(data, "codex_authority")}
+          busy={busy}
+          client={client}
+          key={stringField(objectField(data, "codex_authority"), "resolvedBinary") || "codex"}
+          mutate={mutate}
+          scope={scope}
+        />
+      )}
+
+      <div className="capabilitiesGrid">
+        <div className="capabilityList" role="list">
+          {loading && <div className="capabilityEmpty">Loading</div>}
+          {!loading && rows.length === 0 && <div className="capabilityEmpty">No matches</div>}
+          {listEntries.map((entry) => {
+            if (entry.kind === "section") {
+              return (
+                <div className="capabilityRowMain" key={`section:${entry.label}`} role="heading" aria-level={3}>
+                  <strong>{entry.label}</strong>
+                  {entry.description && <span>{entry.description}</span>}
+                </div>
+              );
+            }
+            const row = entry.row;
+            const selectedClass = row.id === selectedRow?.id ? " is-selected" : "";
+            if (hasCapabilityRowSwitch(tab)) {
+              return (
+                <div className={`capabilityRow capabilityRowWithSwitch${selectedClass}`} key={row.id} role="listitem">
                   <button
-                    className={`capabilityRow${selectedClass}`}
-                    key={row.id}
+                    aria-label={`${rowKindLabel(tab)} ${row.name}`}
+                    className="capabilityRowSelect"
                     onClick={() => {
-                      if (requestScope) application.select(requestScope, activeTab, row.id);
+                      if (scope) application.select(tab, row.id);
                     }}
                     type="button"
                   >
@@ -556,59 +626,99 @@ export function CapabilitiesPage({
                       <strong>{row.name}</strong>
                       <RowDescription fallback={row.status} value={row.description} />
                     </span>
-                    <span className="capabilityRowMeta">
-                      <span className={row.enabled ? "capabilityChip is-on" : "capabilityChip"}>{row.enabled ? "On" : "Off"}</span>
-                      {row.badges.slice(0, 2).map((badge) => <span className="capabilityChip" key={badge}>{badge}</span>)}
-                    </span>
+                    <CapabilityBadges row={row} />
                   </button>
-                );
-              })}
-            </div>
-
-            <aside className="capabilityDetail" aria-label={`${tabLabel(activeTab)} detail`}>
-              {selectedRow ? (
-                <>
-                  <div className="capabilityDetailHeader">
-                    <div>
-                      <h3>{selectedRow.name}</h3>
-                      <span>{selectedRow.status}</span>
-                    </div>
-                  </div>
-                  <CapabilityActions
-                    busy={busy}
-                    client={client}
-                    row={selectedRow}
-                    scope={requestScope}
-                    tab={activeTab}
-                    toolPolicyDraft={toolPolicyDraft}
-                    setToolPolicyDraft={setToolPolicyDraft}
-                    mutate={mutate}
-                    onOAuthSession={(sessionId) => {
-                      if (sessionId && requestScope) application.watchMcpOAuth(requestScope, sessionId);
-                    }}
-                    onPluginConnectSession={(sessionId) => {
-                      if (sessionId && requestScope) {
-                        application.watchPluginConnect(requestScope, sessionId);
+                  <Switch
+                    checked={row.enabled}
+                    className="capabilityRowSwitch"
+                    disabled={busy || (tab === "plugins" && !pluginEnablementMutable(row))}
+                    label={`${row.name} enabled`}
+                    onCheckedChange={(enabled) => void mutate(
+                      () => setCapabilityEnabled(client, scope, tab, row, enabled),
+                      {
+                        notice: `${row.name} ${enabled ? "enabled" : "disabled"}.`,
+                        undo: async () => {
+                          await mutate(
+                            () => setCapabilityEnabled(client, scope, tab, row, !enabled),
+                            { notice: `${row.name} restored.` }
+                          );
+                        }
                       }
-                    }}
-                    pluginDetail={pluginDetail?.id === selectedRow.id ? pluginDetail.value : null}
+                    )}
+                    showLabel={false}
+                    size="compact"
                   />
-                  {activeTab === "plugins" && (
-                    <PluginComponentStatuses
-                      detail={pluginDetail?.id === selectedRow.id ? pluginDetail : null}
-                      row={selectedRow}
-                    />
-                  )}
-                  <KeyValueView value={selectedRow.raw} />
-                </>
-              ) : (
-                <div className="capabilityEmpty">Select an item</div>
+                </div>
+              );
+            }
+            return (
+              <button
+                className={`capabilityRow${selectedClass}`}
+                key={row.id}
+                onClick={() => {
+                  if (scope) application.select(tab, row.id);
+                }}
+                type="button"
+              >
+                <span className="capabilityRowMain">
+                  <strong>{row.name}</strong>
+                  <RowDescription fallback={row.status} value={row.description} />
+                </span>
+                <span className="capabilityRowMeta">
+                  <span className={row.enabled ? "capabilityChip is-on" : "capabilityChip"}>
+                    {row.enabled ? "On" : "Off"}
+                  </span>
+                  {row.badges.slice(0, 2).map((badge) => (
+                    <span className="capabilityChip" key={badge}>{badge}</span>
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <aside className="capabilityDetail" aria-label={`${tabLabel(tab)} detail`}>
+          {selectedRow ? (
+            <>
+              <div className="capabilityDetailHeader">
+                <div>
+                  <h3>{selectedRow.name}</h3>
+                  <span>{selectedRow.status}</span>
+                </div>
+              </div>
+              <CapabilityActions
+                busy={busy}
+                client={client}
+                row={selectedRow}
+                scope={scope}
+                tab={tab}
+                toolPolicyDraft={toolPolicyDraft}
+                setToolPolicyDraft={setToolPolicyDraft}
+                mutate={mutate}
+                onOAuthSession={(sessionId) => {
+                  if (sessionId && scope) application.watchMcpOAuth(sessionId);
+                }}
+                onPluginConnectSession={(sessionId) => {
+                  if (sessionId && scope) application.watchPluginConnect(sessionId);
+                }}
+                pluginDetail={
+                  pluginDetail?.id === selectedRow.id ? pluginDetail.value : null
+                }
+              />
+              {tab === "plugins" && (
+                <PluginComponentStatuses
+                  detail={pluginDetail?.id === selectedRow.id ? pluginDetail : null}
+                  row={selectedRow}
+                />
               )}
-            </aside>
-          </div>
-        </>
-      )}
-    </section>
+              <KeyValueView value={selectedRow.raw} />
+            </>
+          ) : (
+            <div className="capabilityEmpty">Select an item</div>
+          )}
+        </aside>
+      </div>
+    </>
   );
 }
 

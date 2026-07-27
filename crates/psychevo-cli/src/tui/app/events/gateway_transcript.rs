@@ -1,3 +1,11 @@
+struct GatewayTranscriptTextDelta<'a> {
+    thread_id: Option<&'a str>,
+    turn_id: &'a str,
+    entry_id: &'a str,
+    block_id: &'a str,
+    text: &'a str,
+}
+
 impl TuiApp {
     pub(crate) fn apply_gateway_event(
         &mut self,
@@ -94,6 +102,24 @@ impl TuiApp {
             | GatewayEvent::EntryCompleted { entry, .. } => {
                 self.apply_gateway_transcript_entry(ui, owner_session, entry)
             }
+            GatewayEvent::EntryBlockTextDelta {
+                thread_id,
+                turn_id,
+                entry_id,
+                block_id,
+                text,
+                ..
+            } => self.apply_gateway_transcript_text_delta(
+                ui,
+                owner_session,
+                GatewayTranscriptTextDelta {
+                    thread_id: thread_id.as_deref(),
+                    turn_id: &turn_id,
+                    entry_id: &entry_id,
+                    block_id: &block_id,
+                    text: &text,
+                },
+            ),
             GatewayEvent::ActionRequested { action }
                 if action.kind == GatewayActionKind::Permission =>
             {
@@ -279,6 +305,58 @@ impl TuiApp {
             active |= self.apply_gateway_transcript_block(ui, owner_session, meta, block);
         }
         active
+    }
+
+    fn apply_gateway_transcript_text_delta(
+        &mut self,
+        ui: &mut FullscreenUi<'_>,
+        owner_session: Option<&str>,
+        delta: GatewayTranscriptTextDelta<'_>,
+    ) -> bool {
+        let GatewayTranscriptTextDelta {
+            thread_id,
+            turn_id,
+            entry_id,
+            block_id,
+            text,
+        } = delta;
+        if text.is_empty() {
+            return false;
+        }
+        let event_session = thread_id.or(owner_session);
+        if event_session.is_some_and(|session_id| {
+            self.current_session
+                .as_deref()
+                .is_some_and(|current| current != session_id)
+        }) {
+            return false;
+        }
+        let Some(index) = gateway_block_row_index(ui, block_id) else {
+            return false;
+        };
+        let Some(row) = ui.transcript.get_mut(index) else {
+            return false;
+        };
+        if row.transcript_turn_id.as_deref() != Some(turn_id)
+            || row.transcript_entry_id.as_deref() != Some(entry_id)
+        {
+            return false;
+        }
+        match row.kind {
+            TranscriptKind::Answer => row.text.push_str(text),
+            TranscriptKind::Thinking => {
+                if let Some(full_text) = row.full_text.as_mut() {
+                    full_text.push_str(text);
+                } else {
+                    row.text.push_str(text);
+                    row.apply_default_evidence_collapse();
+                }
+                ui.turn_had_reasoning = true;
+            }
+            _ => return false,
+        }
+        ui.remove_turn_meta();
+        true
     }
 
     pub(crate) fn apply_committed_turn_entries(

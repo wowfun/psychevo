@@ -20,14 +20,15 @@ describe("CapabilitiesApplication", () => {
       method === "skill/list" ? pending.promise : Promise.reject(new Error(`unexpected ${method}`))
     ));
     const application = new CapabilitiesApplication(client);
+    application.activate(scope("/repo"));
 
-    const first = application.refresh(scope("/repo"), "skills");
-    const second = application.refresh(scope("/repo"), "skills");
+    const first = application.refresh("skills");
+    const second = application.refresh("skills");
 
     expect(client.calls.filter(([method]) => method === "skill/list")).toHaveLength(1);
     pending.resolve({ skills: [{ name: "review" }] });
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
-    expect(application.getSnapshot(scope("/repo")).data.skills).toEqual({
+    expect(application.getSnapshot().data.skills).toEqual({
       skills: [{ name: "review" }]
     });
   });
@@ -44,7 +45,8 @@ describe("CapabilitiesApplication", () => {
     });
     const application = new CapabilitiesApplication(client);
     const activeScope = scope("/repo");
-    await application.refresh(activeScope, "skills");
+    application.activate(activeScope);
+    await application.refresh("skills");
 
     await application.request("skill/setEnabled", {
       enabled: true,
@@ -52,7 +54,7 @@ describe("CapabilitiesApplication", () => {
       scope: activeScope
     });
 
-    const snapshot = application.getSnapshot(activeScope);
+    const snapshot = application.getSnapshot();
     expect(snapshot.data.skills).toEqual({
       skills: [{ enabled: true, name: "review" }]
     });
@@ -74,18 +76,19 @@ describe("CapabilitiesApplication", () => {
     const application = new CapabilitiesApplication(client);
     const oldScope = scope("/old");
     const newScope = scope("/new");
-    const pending = application.refresh(oldScope, "tools");
-    await application.refresh(newScope, "tools");
+    application.activate(oldScope);
+    const pending = application.refresh("tools");
+    application.activate(newScope);
+    await application.refresh("tools");
 
     oldRead.resolve({ toolsets: [{ name: "old" }] });
     await pending;
 
-    expect(application.getSnapshot(newScope).data.tools).toEqual({
+    expect(application.getSnapshot().data.tools).toEqual({
       toolsets: [{ name: "new" }]
     });
-    expect(application.getSnapshot(oldScope).data.tools).toEqual({
-      toolsets: [{ name: "old" }]
-    });
+    application.activate(oldScope);
+    expect(application.getSnapshot().data.tools).toBeNull();
   });
 
   it("reactivates the same owner without applying reads from the disposed generation", async () => {
@@ -100,17 +103,58 @@ describe("CapabilitiesApplication", () => {
     });
     const application = new CapabilitiesApplication(client);
     const activeScope = scope("/repo");
-    const stale = application.refresh(activeScope, "skills");
+    application.activate(activeScope);
+    const stale = application.refresh("skills");
 
     application.dispose();
     application.attachClient(client);
-    await application.refresh(activeScope, "skills");
+    await application.refresh("skills");
     staleRead.resolve({ skills: [{ name: "stale" }] });
     await stale;
 
-    expect(application.getSnapshot(activeScope).data.skills).toEqual({
+    expect(application.getSnapshot().data.skills).toEqual({
       skills: [{ name: "current" }]
     });
+  });
+
+  it("does not refresh or publish a mutation that completes after its scope is abandoned", async () => {
+    const mutation = deferred<unknown>();
+    const client = fakeClient(async (method) => {
+      if (method === "skill/setEnabled") return mutation.promise;
+      if (method === "skill/list") return { skills: [{ name: "unexpected" }] };
+      throw new Error(`unexpected ${method}`);
+    });
+    const application = new CapabilitiesApplication(client);
+    const oldScope = scope("/old");
+    application.activate(oldScope);
+    const pending = application.request("skill/setEnabled", {
+      enabled: true,
+      name: "review",
+      scope: oldScope
+    });
+
+    application.activate(scope("/new"));
+    mutation.resolve({ enabled: true });
+    await pending;
+
+    expect(client.calls.filter(([method]) => method === "skill/list")).toHaveLength(0);
+    expect(application.getSnapshot().mutation).toBeNull();
+    expect(application.getSnapshot().receipt).toBeNull();
+  });
+
+  it("does not report an abandoned mutation error into a later scope epoch", () => {
+    const application = new CapabilitiesApplication();
+    const oldScope = scope("/old");
+    application.activate(oldScope);
+    const operation = application.captureScope();
+
+    application.activate(scope("/new"));
+    application.activate(oldScope);
+    application.reportError(new Error("stale failure"), operation);
+
+    expect(application.getSnapshot().error).toBeNull();
+    application.activate(null);
+    expect(() => application.reportError(new Error("stale failure"), operation)).not.toThrow();
   });
 
   it("owns OAuth polling and refreshes MCP state after success", async () => {
@@ -126,17 +170,18 @@ describe("CapabilitiesApplication", () => {
     });
     const application = new CapabilitiesApplication(client);
     const activeScope = scope("/repo");
+    application.activate(activeScope);
 
-    application.watchMcpOAuth(activeScope, "oauth-1");
+    application.watchMcpOAuth("oauth-1");
     await vi.runAllTimersAsync();
 
-    expect(application.getSnapshot(activeScope).poll).toEqual({
+    expect(application.getSnapshot().poll).toEqual({
       kind: "mcpOAuth",
       message: "OAuth login saved. Changes apply to the next run/session.",
       sessionId: "oauth-1",
       status: "succeeded"
     });
-    expect(application.getSnapshot(activeScope).data.mcp).toEqual({
+    expect(application.getSnapshot().data.mcp).toEqual({
       servers: [{ name: "docs" }]
     });
   });

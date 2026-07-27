@@ -149,6 +149,7 @@ fn gateway_event_session_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::EntryCompleted { entry, .. } => {
             (!entry.thread_id.is_empty()).then_some(entry.thread_id.as_str())
         }
+        GatewayEvent::EntryBlockTextDelta { thread_id, .. } => thread_id.as_deref(),
         GatewayEvent::ActivityChanged { thread_id, .. } => thread_id.as_deref(),
         GatewayEvent::TitleChanged { thread_id, .. } => Some(thread_id.as_str()),
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {

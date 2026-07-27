@@ -1112,11 +1112,14 @@ function WorkbenchApp({ runtimeFactory }: { runtimeFactory: WorkbenchRuntimeFact
       ? snapshot
       : normalizeSnapshot(parseThreadSnapshot(await client.request("thread/read", { threadId })));
     const targetScope = targetSnapshot.scope;
-    const targetContext = parseThreadContext(await client.request("thread/context/read", {
-      threadId,
-      target: null,
-      scope: targetScope
-    }));
+    const selectedContext = selectedAtStart ? threadSession.getContext() : null;
+    const targetContext = selectedContext
+      ? selectedContext
+      : parseThreadContext(await client.request("thread/context/read", {
+        threadId,
+        target: null,
+        scope: targetScope
+      }));
     const targetSession = selectedAtStart
       ? threadSession
       : new ThreadSession({ client, snapshot: targetSnapshot });

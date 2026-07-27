@@ -8,6 +8,26 @@ impl<'a> FullscreenUi<'a> {
         debug: bool,
     ) -> bool {
         match event {
+            RunStreamEvent::AssistantTextDelta { text } => {
+                if text.is_empty() {
+                    return false;
+                }
+                if let Some(idx) = self.reasoning_row.take() {
+                    self.finish_thinking_row(idx);
+                }
+                let idx = self.assistant_row.unwrap_or_else(|| {
+                    let idx = self.insert_answer_row(TranscriptRow::with_title(
+                        TranscriptKind::Answer,
+                        "",
+                        String::new(),
+                    ));
+                    self.assistant_row = Some(idx);
+                    idx
+                });
+                self.transcript[idx].text.push_str(&text);
+                self.remove_turn_meta();
+                false
+            }
             RunStreamEvent::ReasoningDelta { text } => {
                 if !text.trim().is_empty() {
                     self.turn_had_reasoning = true;

@@ -463,6 +463,7 @@ export class ThreadController {
     if (
       event.type === "entryStarted"
       || event.type === "entryUpdated"
+      || event.type === "entryBlockTextDelta"
       || event.type === "entryCompleted"
       || event.type === "turnStarted"
     ) {
@@ -815,6 +816,8 @@ function eventThreadIdForEvent(event: GatewayEvent): string | null {
     case "entryUpdated":
     case "entryCompleted":
       return event.entry.threadId || null;
+    case "entryBlockTextDelta":
+      return event.threadId || null;
     case "actionRequested":
     case "actionUpdated":
       return event.action.threadId || null;
@@ -830,6 +833,7 @@ function eventTurnIdForEvent(event: GatewayEvent): string | null {
     case "turnCompleted":
     case "entryStarted":
     case "entryUpdated":
+    case "entryBlockTextDelta":
     case "entryCompleted":
       return event.turnId;
     case "actionRequested":
@@ -846,10 +850,11 @@ function firstEntryThreadId(entries: Array<{ threadId?: string | null }>): strin
 
 function isLiveTranscriptObservation(event: GatewayEvent): event is Extract<
   GatewayEvent,
-  { type: "entryStarted" | "entryUpdated" | "entryCompleted" }
+  { type: "entryStarted" | "entryUpdated" | "entryBlockTextDelta" | "entryCompleted" }
 > {
   return event.type === "entryStarted" ||
     event.type === "entryUpdated" ||
+    event.type === "entryBlockTextDelta" ||
     event.type === "entryCompleted";
 }
 

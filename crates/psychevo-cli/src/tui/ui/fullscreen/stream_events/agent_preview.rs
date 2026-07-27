@@ -60,6 +60,13 @@ impl<'a> FullscreenUi<'a> {
         };
         let mut changed = false;
         match event {
+            RunStreamEvent::AssistantTextDelta { text } => {
+                changed |= append_agent_child_live_fragment(
+                    &mut row.agent_child_live_text,
+                    "Response",
+                    text,
+                );
+            }
             RunStreamEvent::ReasoningDelta { text } => {
                 if append_agent_child_live_fragment(
                     &mut row.agent_child_live_text,
