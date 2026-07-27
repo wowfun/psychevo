@@ -137,6 +137,7 @@ pub(crate) fn gateway_profile_event_fields(event: &GatewayEvent) -> GatewayProfi
     let event_type = match event {
         GatewayEvent::EntryStarted { .. } => "entryStarted",
         GatewayEvent::EntryUpdated { .. } => "entryUpdated",
+        GatewayEvent::EntryBlockTextDelta { .. } => "entryBlockTextDelta",
         GatewayEvent::EntryCompleted { .. } => "entryCompleted",
         GatewayEvent::TurnStarted { .. } => "turnStarted",
         GatewayEvent::TurnCompleted { .. } => "turnCompleted",

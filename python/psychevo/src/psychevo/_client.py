@@ -676,6 +676,13 @@ class TurnHandle:
     async def events(self) -> AsyncIterator[TurnEvent]:
         while True:
             event = await self._events.get()
+            if self._missed:
+                missed = self._missed
+                self._missed = 0
+                yield TurnEvent(
+                    type="resync_required",
+                    data={"type": "resync_required", "missed": missed},
+                )
             if event is _EVENT_END:
                 return
             if isinstance(event, TurnEvent):
@@ -740,21 +747,6 @@ class TurnHandle:
                 self._missed += 1
             except asyncio.QueueEmpty:
                 pass
-        if self._missed:
-            resync = TurnEvent(
-                type="resync_required",
-                data={"type": "resync_required", "missed": self._missed},
-            )
-            try:
-                self._events.put_nowait(resync)
-                self._missed = 0
-            except asyncio.QueueFull:
-                pass
-        if self._events.full():
-            try:
-                self._events.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
         self._events.put_nowait(event)
         if event.type in {"completed", "failed"}:
             self._close_events()
@@ -766,6 +758,7 @@ class TurnHandle:
         if self._events.full():
             try:
                 self._events.get_nowait()
+                self._missed += 1
             except asyncio.QueueEmpty:
                 pass
         self._events.put_nowait(_EVENT_END)

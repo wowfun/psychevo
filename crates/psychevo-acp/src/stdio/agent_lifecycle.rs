@@ -451,15 +451,16 @@ impl PsychevoAcpAgent {
                     &mut projection,
                 );
             }
+            projection
         };
-        let (result, ()) = tokio::join!(handle.wait(), event_task);
+        let (result, projection) = tokio::join!(handle.wait(), event_task);
         match result {
             Ok(result) => {
-                if !result.final_answer.trim().is_empty() {
+                if let Some(final_text) = projection.remaining_final_text(&result.final_answer) {
                     send_session_update(
                         &cx,
                         session_id.clone(),
-                        agent_message_update(&session_id, result.final_answer),
+                        agent_message_update(&session_id, final_text),
                     );
                 }
                 if let Ok(mut usage) = usage.lock() {

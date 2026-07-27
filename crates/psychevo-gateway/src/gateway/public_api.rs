@@ -34,7 +34,7 @@ impl Gateway {
         local_session_id: String,
         native_session_id: String,
     ) -> psychevo::Result<acp_peer::AcpSessionLoadOutput> {
-        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
+        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options).await?;
         self.agent_sessions
             .attach(CapturedAgentSessionTarget::invocation(
                 format!("session-import:{local_session_id}"),
@@ -73,7 +73,7 @@ impl Gateway {
                 binding.thread_id
             ))
         })?;
-        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
+        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options).await?;
         self.agent_sessions
             .attach(CapturedAgentSessionTarget::bound(
                 &binding,
@@ -104,7 +104,7 @@ impl Gateway {
                 binding.thread_id
             ))
         })?;
-        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
+        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options).await?;
         self.agent_sessions
             .attach(CapturedAgentSessionTarget::bound(
                 &binding,
@@ -303,7 +303,7 @@ impl Gateway {
         target_id: String,
         agent_ref: Option<String>,
     ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
-        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
+        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options).await?;
         let (profile, _, _) = resolve_gateway_runtime_profile(&options).await?;
         self.agent_sessions
             .prepare(
@@ -359,7 +359,7 @@ impl Gateway {
         control_id: String,
         value: Value,
     ) -> psychevo::Result<acp_peer::AcpSessionSnapshot> {
-        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options)?;
+        let mcp_servers = acp_peer::resolve_peer_mcp_server_handoffs(&peer, &options).await?;
         let (profile, _, _) = resolve_gateway_runtime_profile(&options).await?;
         let binding = self
             .state

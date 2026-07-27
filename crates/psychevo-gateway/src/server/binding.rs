@@ -377,7 +377,7 @@ struct WebStateInner {
     realtime_sessions: Mutex<HashMap<String, RealtimeSessionState>>,
     runnable_target_catalog_generation: std::sync::atomic::AtomicU64,
     runnable_target_catalogs:
-        Mutex<HashMap<PathBuf, (u64, Arc<runtime_profiles::RunnableTargetCatalog>)>>,
+        Mutex<BTreeMap<PathBuf, (u64, Arc<runtime_profiles::RunnableTargetCatalog>)>>,
     agent_session_imports: Mutex<AgentSessionImportRegistry>,
     channel_runtime: channel_runtime::ChannelRuntimeState,
     codex_capability_broker: codex_capability_broker::CodexCapabilityBroker,
@@ -571,7 +571,7 @@ impl WebState {
                 voice_policies: Mutex::new(HashMap::new()),
                 realtime_sessions: Mutex::new(HashMap::new()),
                 runnable_target_catalog_generation: std::sync::atomic::AtomicU64::new(1),
-                runnable_target_catalogs: Mutex::new(HashMap::new()),
+                runnable_target_catalogs: Mutex::new(BTreeMap::new()),
                 agent_session_imports: Mutex::new(AgentSessionImportRegistry::default()),
                 channel_runtime,
                 codex_capability_broker,

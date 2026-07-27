@@ -389,10 +389,10 @@ impl Gateway {
                 .await;
         }
 
-        let Ok(event_value) = serde_json::to_value(event) else {
-            return result;
-        };
         if should_append_gateway_live_event(activity, event) {
+            let Ok(event_value) = serde_json::to_value(event) else {
+                return result;
+            };
             let _ = self.state.append_gateway_live_event(
                 Some(&activity.activity_id),
                 Some(&activity.owner_id),
@@ -411,9 +411,11 @@ impl Gateway {
                     .or(default_turn_id)
                     .or(activity.turn_id.as_deref()),
                 entry,
-                event_value,
+                event.clone(),
             )
             .await;
+        } else if matches!(event, GatewayEvent::EntryBlockTextDelta { .. }) {
+            self.retain_gateway_live_text_delta(activity, event).await;
         }
         result
     }
@@ -424,7 +426,7 @@ impl Gateway {
         event_kind: &'static str,
         turn_id: Option<&str>,
         entry: &TranscriptEntry,
-        event: Value,
+        event: GatewayEvent,
     ) {
         let Some(turn_id) = turn_id else {
             return;
@@ -449,7 +451,7 @@ impl Gateway {
                         thread_id: Some(entry.thread_id.clone()),
                         turn_id: Some(turn_id.to_string()),
                         event_kind: event_kind.to_string(),
-                        event: Value::Null,
+                        event: event.clone(),
                         last_flush_ms: 0,
                         dirty: false,
                     });
@@ -459,6 +461,66 @@ impl Gateway {
             snapshot.turn_id = Some(turn_id.to_string());
             snapshot.event_kind = event_kind.to_string();
             snapshot.event = event;
+            snapshot.dirty = true;
+            if snapshot.last_flush_ms == 0
+                || now.saturating_sub(snapshot.last_flush_ms) >= GATEWAY_LIVE_SNAPSHOT_FLUSH_MS
+            {
+                snapshot.last_flush_ms = now;
+                snapshot.dirty = false;
+                Some(snapshot.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.flush_gateway_live_snapshot(&snapshot).await;
+        }
+    }
+
+    async fn retain_gateway_live_text_delta(
+        &self,
+        activity: &DurableGatewayActivity,
+        event: &GatewayEvent,
+    ) {
+        let GatewayEvent::EntryBlockTextDelta {
+            thread_id,
+            turn_id,
+            entry_id,
+            block_id,
+            text,
+            updated_at_ms,
+        } = event
+        else {
+            return;
+        };
+        if text.is_empty() || turn_id.is_empty() || entry_id.is_empty() || block_id.is_empty() {
+            return;
+        }
+        let snapshot_key = format!("{}:{turn_id}:{entry_id}", activity.activity_id);
+        let now = gateway_now_ms();
+        let snapshot = {
+            let mut pending = self
+                .live_snapshots
+                .lock()
+                .expect("gateway live snapshot map poisoned");
+            let Some(snapshot) = pending.get_mut(&snapshot_key) else {
+                return;
+            };
+            if thread_id.as_deref().is_some_and(|thread_id| {
+                snapshot.thread_id.as_deref() != Some(thread_id)
+            }) {
+                return;
+            }
+            if !apply_gateway_live_text_delta(
+                &mut snapshot.event,
+                turn_id,
+                entry_id,
+                block_id,
+                text,
+                *updated_at_ms,
+            ) {
+                return;
+            }
             snapshot.dirty = true;
             if snapshot.last_flush_ms == 0
                 || now.saturating_sub(snapshot.last_flush_ms) >= GATEWAY_LIVE_SNAPSHOT_FLUSH_MS
@@ -500,6 +562,9 @@ impl Gateway {
     }
 
     async fn flush_gateway_live_snapshot(&self, snapshot: &PendingGatewayLiveSnapshot) {
+        let Ok(event) = serde_json::to_value(&snapshot.event) else {
+            return;
+        };
         let _ = self
             .state
 
@@ -510,7 +575,7 @@ impl Gateway {
                 thread_id: snapshot.thread_id.as_deref(),
                 turn_id: snapshot.turn_id.as_deref(),
                 event_kind: &snapshot.event_kind,
-                event: snapshot.event.clone(),
+                event,
             })
             .await;
     }
@@ -860,6 +925,7 @@ fn gateway_event_thread_id(event: &GatewayEvent) -> Option<String> {
                 Some(entry.thread_id.clone())
             }
         }
+        GatewayEvent::EntryBlockTextDelta { thread_id, .. } => thread_id.clone(),
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
             action.thread_id.clone()
         }
@@ -875,6 +941,7 @@ fn gateway_event_turn_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::TurnCompleted { turn_id, .. }
         | GatewayEvent::EntryStarted { turn_id, .. }
         | GatewayEvent::EntryUpdated { turn_id, .. }
+        | GatewayEvent::EntryBlockTextDelta { turn_id, .. }
         | GatewayEvent::EntryCompleted { turn_id, .. } => Some(turn_id.as_str()),
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
             action.turn_id.as_deref()
@@ -919,6 +986,38 @@ fn gateway_live_snapshot_entry(event: &GatewayEvent) -> Option<(&'static str, &T
     }
 }
 
+fn gateway_live_snapshot_entry_mut(event: &mut GatewayEvent) -> Option<&mut TranscriptEntry> {
+    match event {
+        GatewayEvent::EntryStarted { entry, .. }
+        | GatewayEvent::EntryUpdated { entry, .. }
+        | GatewayEvent::EntryCompleted { entry, .. } => Some(entry),
+        _ => None,
+    }
+}
+
+fn apply_gateway_live_text_delta(
+    event: &mut GatewayEvent,
+    turn_id: &str,
+    entry_id: &str,
+    block_id: &str,
+    text: &str,
+    updated_at_ms: i64,
+) -> bool {
+    let Some(entry) = gateway_live_snapshot_entry_mut(event) else {
+        return false;
+    };
+    if entry.id != entry_id || entry.turn_id.as_deref() != Some(turn_id) {
+        return false;
+    }
+    let Some(block) = entry.blocks.iter_mut().find(|block| block.id == block_id) else {
+        return false;
+    };
+    block.body.get_or_insert_default().push_str(text);
+    block.updated_at_ms = updated_at_ms;
+    entry.updated_at_ms = updated_at_ms;
+    true
+}
+
 fn permission_decision_label(decision: &PermissionApprovalDecision) -> &'static str {
     match decision.outcome {
         PermissionApprovalOutcome::AllowOnce => "allow_once",
@@ -937,6 +1036,45 @@ mod event_ingress_tests {
     use psychevo::__product::persistence::StateRuntime;
 
     use super::*;
+
+    #[test]
+    fn retained_live_snapshot_accumulates_typed_text_delta() {
+        let mut projector = GatewayLiveProjector::new(Some("thread-1".to_string()));
+        let snapshot = projector
+            .project(
+                "turn-1",
+                &RunStreamEvent::AssistantTextDelta {
+                    text: "first".to_string(),
+                },
+            )
+            .expect("initial snapshot");
+        let mut pending = PendingGatewayLiveSnapshot {
+            snapshot_key: "activity:turn-1:live:turn-1:assistant:0".to_string(),
+            activity_id: Some("activity".to_string()),
+            owner_id: Some("owner".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            turn_id: Some("turn-1".to_string()),
+            event_kind: "entry_started".to_string(),
+            event: snapshot,
+            last_flush_ms: 0,
+            dirty: false,
+        };
+
+        assert!(apply_gateway_live_text_delta(
+            &mut pending.event,
+            "turn-1",
+            "live:turn-1:assistant:0",
+            "live:turn-1:assistant:0:text:0",
+            " second",
+            42,
+        ));
+        let entry = gateway_live_snapshot_entry(&pending.event)
+            .expect("retained entry")
+            .1;
+        assert_eq!(entry.blocks[0].body.as_deref(), Some("first second"));
+        assert_eq!(entry.blocks[0].updated_at_ms, 42);
+        assert_eq!(entry.updated_at_ms, 42);
+    }
 
     #[tokio::test]
     async fn local_delivery_precedes_bounded_durability_and_survives_closed_ingress() {

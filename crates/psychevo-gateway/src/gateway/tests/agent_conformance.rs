@@ -885,12 +885,13 @@ async fn conformance_shared_agent_session_transact_seam(runtime: AgentConformanc
     } else {
         None
     };
-    let mcp_servers = peer
-        .as_ref()
-        .map(|peer| acp_peer::resolve_peer_mcp_server_handoffs(peer, &options))
-        .transpose()
-        .expect("transact MCP handoff")
-        .unwrap_or_default();
+    let mcp_servers = if let Some(peer) = peer.as_ref() {
+        acp_peer::resolve_peer_mcp_server_handoffs(peer, &options)
+            .await
+            .expect("transact MCP handoff")
+    } else {
+        Vec::new()
+    };
     let target = CapturedAgentSessionTarget::bound(&binding, profile, peer)
         .expect("capture bound Agent session target");
     let session = AgentSessionRef {

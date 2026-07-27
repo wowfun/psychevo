@@ -309,7 +309,9 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             thread = await client.start_thread(cwd=self.temp.name)
             turn = await thread.start_turn("overflow")
             events = [event async for event in turn.events()]
-        self.assertIn("resync_required", [event.type for event in events])
+        resync = [event for event in events if event.type == "resync_required"]
+        self.assertEqual(len(resync), 1)
+        self.assertGreater(resync[0].data["missed"], 0)
 
     async def test_custom_tool_is_registered_and_routed_to_async_handler(self) -> None:
         calls = []

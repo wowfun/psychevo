@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as SyncMutex};
 use std::time::Duration;
 
 use axum::Router;
@@ -26,7 +26,7 @@ use psychevo_gateway_protocol as wire;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
@@ -38,6 +38,7 @@ const CONNECTION_REQUEST_LIMIT: usize = 64;
 const CONNECTION_CONTROL_RESERVE: usize = 1;
 const CONNECTION_ORDINARY_REQUEST_LIMIT: usize =
     CONNECTION_REQUEST_LIMIT - CONNECTION_CONTROL_RESERVE;
+const APP_SERVER_FRAME_LIMIT: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConnectionPhase {
@@ -46,14 +47,184 @@ enum ConnectionPhase {
     Ready,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AppMethod {
+    Initialize,
+    Initialized,
+    ThreadStart,
+    ThreadResume,
+    ThreadRead,
+    ThreadList,
+    ThreadArchive,
+    ThreadCompact,
+    ThreadFork,
+    ToolRegister,
+    TurnStart,
+    TurnWait,
+    TurnResume,
+    TurnInterrupt,
+    TurnSteer,
+    InteractionRespond,
+    Shutdown,
+    Unknown(String),
+}
+
+impl AppMethod {
+    fn parse(method: String) -> Self {
+        match method.as_str() {
+            "initialize" => Self::Initialize,
+            "initialized" => Self::Initialized,
+            "thread/start" => Self::ThreadStart,
+            "thread/resume" => Self::ThreadResume,
+            "thread/read" => Self::ThreadRead,
+            "thread/list" => Self::ThreadList,
+            "thread/archive" => Self::ThreadArchive,
+            "thread/compact" => Self::ThreadCompact,
+            "thread/fork" => Self::ThreadFork,
+            "tool/register" => Self::ToolRegister,
+            "turn/start" => Self::TurnStart,
+            "turn/wait" => Self::TurnWait,
+            "turn/resume" => Self::TurnResume,
+            "turn/interrupt" => Self::TurnInterrupt,
+            "turn/steer" => Self::TurnSteer,
+            "interaction/respond" => Self::InteractionRespond,
+            "shutdown" => Self::Shutdown,
+            _ => Self::Unknown(method),
+        }
+    }
+
+    fn policy(&self) -> MethodPolicy {
+        MethodPolicy {
+            receive_order: matches!(
+                self,
+                Self::Initialize | Self::Initialized | Self::ToolRegister
+            ),
+            durable: matches!(
+                self,
+                Self::ThreadStart
+                    | Self::ThreadArchive
+                    | Self::ThreadCompact
+                    | Self::ThreadFork
+                    | Self::TurnStart
+                    | Self::InteractionRespond
+                    | Self::Shutdown
+            ),
+            control: matches!(
+                self,
+                Self::TurnInterrupt | Self::TurnSteer | Self::InteractionRespond | Self::Shutdown
+            ),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AppMethod {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        String::deserialize(deserializer).map(Self::parse)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MethodPolicy {
+    receive_order: bool,
+    durable: bool,
+    control: bool,
+}
+
+struct ConnectionTaskOwner {
+    waits: JoinSet<()>,
+    durable: JoinSet<()>,
+}
+
+impl ConnectionTaskOwner {
+    fn new() -> Self {
+        Self {
+            waits: JoinSet::new(),
+            durable: JoinSet::new(),
+        }
+    }
+
+    fn active_len(&self) -> usize {
+        self.waits.len() + self.durable.len()
+    }
+
+    fn spawn<F>(&mut self, durable: bool, task: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        if durable {
+            self.durable.spawn(task);
+        } else {
+            self.waits.spawn(task);
+        }
+    }
+
+    async fn disconnect(mut self, await_durable: bool) {
+        self.waits.abort_all();
+        while self.waits.join_next().await.is_some() {}
+        if await_durable {
+            while self.durable.join_next().await.is_some() {}
+        } else if !self.durable.is_empty() {
+            tokio::spawn(async move { while self.durable.join_next().await.is_some() {} });
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RpcRequest {
     jsonrpc: String,
     #[serde(default)]
     id: Option<Value>,
-    method: String,
+    method: AppMethod,
     #[serde(default)]
     params: Option<Value>,
+}
+
+#[derive(Debug)]
+enum ParsedIngress {
+    Callback(Value),
+    Request(RpcRequest),
+}
+
+impl ParsedIngress {
+    fn parse(text: &str) -> Result<Self, RpcError> {
+        if text.len() > APP_SERVER_FRAME_LIMIT {
+            return Err(RpcError::invalid_request(format!(
+                "App Server frame exceeds {APP_SERVER_FRAME_LIMIT} bytes"
+            )));
+        }
+        let value = serde_json::from_str::<Value>(text).map_err(|error| RpcError {
+            code: -32700,
+            message: format!("parse error: {error}"),
+            data: None,
+        })?;
+        Self::from_value(value)
+    }
+
+    fn from_value(value: Value) -> Result<Self, RpcError> {
+        if value.get("method").is_none() {
+            return Ok(Self::Callback(value));
+        }
+        serde_json::from_value::<RpcRequest>(value)
+            .map(Self::Request)
+            .map_err(|error| RpcError::invalid_request(error.to_string()))
+    }
+
+    fn policy(&self) -> Option<MethodPolicy> {
+        match self {
+            Self::Callback(_) => None,
+            Self::Request(request) => Some(request.method.policy()),
+        }
+    }
+
+    fn response_id(&self) -> Value {
+        match self {
+            Self::Callback(value) => value.get("id").cloned().unwrap_or(Value::Null),
+            Self::Request(request) => request.id.clone().unwrap_or(Value::Null),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -138,7 +309,21 @@ struct CallbackBroker {
     pending: PendingCallbacks,
 }
 
-type PendingCallbacks = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, RpcError>>>>>;
+type PendingCallbacks = Arc<SyncMutex<HashMap<String, oneshot::Sender<Result<Value, RpcError>>>>>;
+
+struct PendingCallbackGuard {
+    id: String,
+    pending: PendingCallbacks,
+}
+
+impl Drop for PendingCallbackGuard {
+    fn drop(&mut self) {
+        self.pending
+            .lock()
+            .expect("App Server callback registry poisoned")
+            .remove(&self.id);
+    }
+}
 
 impl CallbackBroker {
     async fn call(
@@ -149,33 +334,32 @@ impl CallbackBroker {
     ) -> Result<Value, RpcError> {
         let id = format!("server:{}", uuid::Uuid::now_v7());
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().await.insert(id.clone(), sender);
-        if let Err(error) = self
-            .output
+        self.pending
+            .lock()
+            .expect("App Server callback registry poisoned")
+            .insert(id.clone(), sender);
+        let _registration = PendingCallbackGuard {
+            id: id.clone(),
+            pending: Arc::clone(&self.pending),
+        };
+        self.output
             .send(json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "method": method,
                 "params": params,
             }))
-            .await
-        {
-            self.pending.lock().await.remove(&id);
-            return Err(error);
-        }
+            .await?;
         match tokio::time::timeout(timeout, receiver).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(RpcError::protocol(
                 format!("{method} callback connection closed"),
                 None,
             )),
-            Err(_) => {
-                self.pending.lock().await.remove(&id);
-                Err(RpcError::protocol(
-                    format!("{method} callback timed out"),
-                    None,
-                ))
-            }
+            Err(_) => Err(RpcError::protocol(
+                format!("{method} callback timed out"),
+                None,
+            )),
         }
     }
 
@@ -183,7 +367,12 @@ impl CallbackBroker {
         let Some(id) = value.get("id").and_then(Value::as_str) else {
             return;
         };
-        let Some(sender) = self.pending.lock().await.remove(id) else {
+        let Some(sender) = self
+            .pending
+            .lock()
+            .expect("App Server callback registry poisoned")
+            .remove(id)
+        else {
             return;
         };
         let result = match value.get("error") {
@@ -209,7 +398,12 @@ impl CallbackBroker {
     }
 
     async fn disconnect(&self) {
-        let pending = std::mem::take(&mut *self.pending.lock().await);
+        let pending = std::mem::take(
+            &mut *self
+                .pending
+                .lock()
+                .expect("App Server callback registry poisoned"),
+        );
         for (_, sender) in pending {
             let _ = sender.send(Err(RpcError::protocol(
                 "client callback connection closed",
@@ -500,7 +694,7 @@ impl AppServerConnection {
         let output = Output { sender };
         let callbacks = CallbackBroker {
             output: output.clone(),
-            pending: Arc::new(Mutex::new(HashMap::new())),
+            pending: Arc::new(SyncMutex::new(HashMap::new())),
         };
         Self {
             client: application.client(),
@@ -517,45 +711,23 @@ impl AppServerConnection {
         }
     }
 
-    async fn handle_line(&self, line: &str) {
-        let parsed = serde_json::from_str::<Value>(line);
-        let value = match parsed {
-            Ok(value) => value,
+    #[cfg(test)]
+    async fn handle_value(&self, value: Value) {
+        match ParsedIngress::from_value(value) {
+            Ok(ingress) => self.handle_ingress(ingress).await,
             Err(error) => {
-                let _ = self
-                    .output
-                    .send(error_response(
-                        Value::Null,
-                        RpcError {
-                            code: -32700,
-                            message: format!("parse error: {error}"),
-                            data: None,
-                        },
-                    ))
-                    .await;
-                return;
+                let _ = self.output.send(error_response(Value::Null, error)).await;
             }
-        };
-        self.handle_value(value).await;
+        }
     }
 
-    async fn handle_value(&self, value: Value) {
-        if value.get("method").is_none() {
-            self.callbacks.resolve(value).await;
-            return;
-        }
-        let request = match serde_json::from_value::<RpcRequest>(value) {
-            Ok(request) => request,
-            Err(error) => {
-                let _ = self
-                    .output
-                    .send(error_response(
-                        Value::Null,
-                        RpcError::invalid_request(error.to_string()),
-                    ))
-                    .await;
+    async fn handle_ingress(&self, ingress: ParsedIngress) {
+        let request = match ingress {
+            ParsedIngress::Callback(value) => {
+                self.callbacks.resolve(value).await;
                 return;
             }
+            ParsedIngress::Request(request) => request,
         };
         let id = request.id.clone();
         let response = self.dispatch(request).await;
@@ -585,10 +757,10 @@ impl AppServerConnection {
         if request.jsonrpc != "2.0" {
             return Err(RpcError::invalid_request("jsonrpc must be exactly \"2.0\""));
         }
-        if request.method == "initialize" {
+        if request.method == AppMethod::Initialize {
             return self.initialize(request).await;
         }
-        if request.method == "initialized" {
+        if request.method == AppMethod::Initialized {
             if request.id.is_some() {
                 return Err(RpcError::invalid_request(
                     "initialized must be a notification without an id",
@@ -611,9 +783,9 @@ impl AppServerConnection {
             ));
         }
 
-        match request.method.as_str() {
-            "thread/start" => {
-                let params = required_params::<wire::AppThreadStartParams>(&request)?;
+        match request.method {
+            AppMethod::ThreadStart => {
+                let params = required_params::<wire::AppThreadStartParams>(request.params)?;
                 let mut start = StartThreadRequest::new(params.cwd);
                 if let Some(source) = params.source {
                     start.source = source;
@@ -627,8 +799,8 @@ impl AppServerConnection {
                 let snapshot = thread.snapshot().await.map_err(RpcError::application)?;
                 serde_json::to_value(snapshot).map_err(json_error)
             }
-            "thread/resume" => {
-                let params = required_params::<wire::AppThreadIdParams>(&request)?;
+            AppMethod::ThreadResume => {
+                let params = required_params::<wire::AppThreadIdParams>(request.params)?;
                 let thread = self
                     .client
                     .resume_thread(params.thread_id)
@@ -637,14 +809,14 @@ impl AppServerConnection {
                 let snapshot = thread.snapshot().await.map_err(RpcError::application)?;
                 serde_json::to_value(snapshot).map_err(json_error)
             }
-            "thread/read" => {
-                let params = required_params::<wire::AppThreadIdParams>(&request)?;
+            AppMethod::ThreadRead => {
+                let params = required_params::<wire::AppThreadIdParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 serde_json::to_value(thread.snapshot().await.map_err(RpcError::application)?)
                     .map_err(json_error)
             }
-            "thread/list" => {
-                let params = params::<wire::AppThreadListParams>(&request)?;
+            AppMethod::ThreadList => {
+                let params = params::<wire::AppThreadListParams>(request.params)?;
                 let page = self
                     .client
                     .list_threads(ThreadListQuery {
@@ -662,14 +834,14 @@ impl AppServerConnection {
                 }))
                 .map_err(json_error)
             }
-            "thread/archive" => {
-                let params = required_params::<wire::AppThreadIdParams>(&request)?;
+            AppMethod::ThreadArchive => {
+                let params = required_params::<wire::AppThreadIdParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 thread.archive().await.map_err(RpcError::application)?;
                 Ok(json!({ "archived": true, "threadId": params.thread_id }))
             }
-            "thread/compact" => {
-                let params = required_params::<wire::AppThreadCompactParams>(&request)?;
+            AppMethod::ThreadCompact => {
+                let params = required_params::<wire::AppThreadCompactParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let result = thread
                     .compact(CompactThreadRequest {
@@ -683,8 +855,8 @@ impl AppServerConnection {
                     .map_err(RpcError::application)?;
                 serde_json::to_value(result).map_err(json_error)
             }
-            "thread/fork" => {
-                let params = required_params::<wire::AppThreadForkParams>(&request)?;
+            AppMethod::ThreadFork => {
+                let params = required_params::<wire::AppThreadForkParams>(request.params)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let fork = thread
                     .fork(ForkThreadRequest {
@@ -695,8 +867,8 @@ impl AppServerConnection {
                 let snapshot = fork.snapshot().await.map_err(RpcError::application)?;
                 serde_json::to_value(snapshot).map_err(json_error)
             }
-            "tool/register" => {
-                let params = params::<wire::AppToolRegisterParams>(&request)?;
+            AppMethod::ToolRegister => {
+                let params = params::<wire::AppToolRegisterParams>(request.params)?;
                 let tools = validate_registrations(&params)?;
                 let count = params.tools.len();
                 *self.registrations.write().await = ConnectionRegistrations {
@@ -710,8 +882,8 @@ impl AppServerConnection {
                     "clarifyHandler": params.clarify_handler,
                 }))
             }
-            "turn/start" => {
-                let params = required_params::<wire::AppTurnStartParams>(&request)?;
+            AppMethod::TurnStart => {
+                let params = required_params::<wire::AppTurnStartParams>(request.params)?;
                 validate_caller_turn_id(&params.turn_id)?;
                 let thread = self.thread(&params.thread_id).await?;
                 let registrations = self.registrations.read().await.clone();
@@ -759,16 +931,16 @@ impl AppServerConnection {
                 self.ensure_event_relay(handle).await;
                 serde_json::to_value(receipt).map_err(json_error)
             }
-            "turn/wait" => {
-                let params = required_params::<wire::AppTurnIdParams>(&request)?;
+            AppMethod::TurnWait => {
+                let params = required_params::<wire::AppTurnIdParams>(request.params)?;
                 let handle = self.turn(&params.turn_id).await?;
                 let result = handle.wait().await;
                 self.turns.write().await.remove(&params.turn_id);
                 let result = result.map_err(RpcError::application)?;
                 serde_json::to_value(result).map_err(json_error)
             }
-            "turn/resume" => {
-                let params = required_params::<wire::AppTurnIdParams>(&request)?;
+            AppMethod::TurnResume => {
+                let params = required_params::<wire::AppTurnIdParams>(request.params)?;
                 let handle = self.turn(&params.turn_id).await?;
                 let receipt = handle.receipt().clone();
                 self.turns
@@ -778,18 +950,18 @@ impl AppServerConnection {
                 self.ensure_event_relay(handle).await;
                 serde_json::to_value(receipt).map_err(json_error)
             }
-            "turn/interrupt" => {
-                let params = required_params::<wire::AppTurnIdParams>(&request)?;
+            AppMethod::TurnInterrupt => {
+                let params = required_params::<wire::AppTurnIdParams>(request.params)?;
                 self.turn(&params.turn_id).await?.interrupt();
                 Ok(json!({ "interrupted": true, "turnId": params.turn_id }))
             }
-            "turn/steer" => {
-                let params = required_params::<wire::AppTurnSteerParams>(&request)?;
+            AppMethod::TurnSteer => {
+                let params = required_params::<wire::AppTurnSteerParams>(request.params)?;
                 let accepted = self.turn(&params.turn_id).await?.steer(params.input);
                 Ok(json!({ "accepted": accepted, "turnId": params.turn_id }))
             }
-            "interaction/respond" => {
-                let params = required_params::<wire::AppInteractionRespondParams>(&request)?;
+            AppMethod::InteractionRespond => {
+                let params = required_params::<wire::AppInteractionRespondParams>(request.params)?;
                 let response = match params.response {
                     wire::AppInteractionResponse::Permission {
                         outcome,
@@ -816,7 +988,7 @@ impl AppServerConnection {
                     "interactionId": params.interaction_id,
                 }))
             }
-            "shutdown" => {
+            AppMethod::Shutdown => {
                 let report = self
                     .application
                     .shutdown()
@@ -824,7 +996,10 @@ impl AppServerConnection {
                     .map_err(RpcError::application)?;
                 Ok(json!({ "shutdown": true, "report": report }))
             }
-            method => Err(RpcError::method_not_found(method)),
+            AppMethod::Unknown(method) => Err(RpcError::method_not_found(&method)),
+            AppMethod::Initialize | AppMethod::Initialized => {
+                unreachable!("App Server handshake methods are handled before normal dispatch")
+            }
         }
     }
 
@@ -834,7 +1009,7 @@ impl AppServerConnection {
                 "initialize must be a request with an id",
             ));
         }
-        let params = required_params::<wire::AppInitializeParams>(&request)?;
+        let params = required_params::<wire::AppInitializeParams>(request.params)?;
         let mut phase = self.phase.lock().await;
         if *phase != ConnectionPhase::New {
             return Err(RpcError::protocol("initialize may be sent only once", None));
@@ -971,69 +1146,24 @@ fn json_error(error: serde_json::Error) -> RpcError {
     }
 }
 
-fn params<T: DeserializeOwned + Default>(request: &RpcRequest) -> Result<T, RpcError> {
-    request
-        .params
-        .clone()
+fn params<T: DeserializeOwned + Default>(value: Option<Value>) -> Result<T, RpcError> {
+    value
         .map(serde_json::from_value)
         .transpose()
         .map_err(|error| RpcError::invalid_params(error.to_string()))
         .map(|value| value.unwrap_or_default())
 }
 
-fn required_params<T: DeserializeOwned>(request: &RpcRequest) -> Result<T, RpcError> {
-    let value = request
-        .params
-        .clone()
-        .ok_or_else(|| RpcError::invalid_params("params are required"))?;
+fn required_params<T: DeserializeOwned>(value: Option<Value>) -> Result<T, RpcError> {
+    let value = value.ok_or_else(|| RpcError::invalid_params("params are required"))?;
     serde_json::from_value(value).map_err(|error| RpcError::invalid_params(error.to_string()))
 }
 
-fn requires_receive_order(value: &Value) -> bool {
-    matches!(
-        value.get("method").and_then(Value::as_str),
-        Some("initialize" | "initialized" | "tool/register")
-    )
-}
-
-fn line_requires_receive_order(line: &str) -> bool {
-    serde_json::from_str::<Value>(line)
-        .ok()
-        .as_ref()
-        .is_some_and(requires_receive_order)
-}
-
-fn is_durable_mutation(value: &Value) -> bool {
-    matches!(
-        value.get("method").and_then(Value::as_str),
-        Some(
-            "thread/start"
-                | "thread/fork"
-                | "thread/archive"
-                | "thread/compact"
-                | "turn/start"
-                | "interaction/respond"
-                | "shutdown"
-        )
-    )
-}
-
-fn is_control_request(value: &Value) -> bool {
-    matches!(
-        value.get("method").and_then(Value::as_str),
-        Some("shutdown" | "turn/interrupt" | "turn/steer" | "interaction/respond")
-    )
-}
-
-fn is_callback_response(value: &Value) -> bool {
-    value.get("method").is_none()
-}
-
-fn request_capacity_available(active_requests: usize, value: &Value) -> bool {
-    if is_callback_response(value) {
+fn request_capacity_available(active_requests: usize, ingress: &ParsedIngress) -> bool {
+    let Some(policy) = ingress.policy() else {
         return true;
-    }
-    let limit = if is_control_request(value) {
+    };
+    let limit = if policy.control {
         CONNECTION_REQUEST_LIMIT
     } else {
         CONNECTION_ORDINARY_REQUEST_LIMIT
@@ -1041,12 +1171,50 @@ fn request_capacity_available(active_requests: usize, value: &Value) -> bool {
     active_requests < limit
 }
 
-async fn send_connection_overload(connection: &AppServerConnection, value: &Value) {
-    let id = value.get("id").cloned().unwrap_or(Value::Null);
+async fn send_connection_overload(connection: &AppServerConnection, ingress: &ParsedIngress) {
+    let id = ingress.response_id();
     let _ = connection
         .output
         .send(error_response(id, RpcError::overloaded()))
         .await;
+}
+
+async fn read_bounded_json_line<R>(reader: &mut R) -> std::io::Result<Option<String>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut bytes = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let take = newline.unwrap_or(available.len());
+        if bytes.len().saturating_add(take) > APP_SERVER_FRAME_LIMIT {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("App Server frame exceeds {APP_SERVER_FRAME_LIMIT} bytes"),
+            ));
+        }
+        bytes.extend_from_slice(&available[..take]);
+        reader.consume(take + usize::from(newline.is_some()));
+        if newline.is_some() {
+            break;
+        }
+    }
+    if bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    String::from_utf8(bytes).map(Some).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("App Server frame is not valid UTF-8: {error}"),
+        )
+    })
 }
 
 fn validate_registrations(
@@ -1136,42 +1304,53 @@ where
         }
         Ok::<(), std::io::Error>(())
     });
-    let mut lines = BufReader::new(input).lines();
-    let mut requests = JoinSet::new();
+    let mut input = BufReader::new(input);
+    let mut tasks = ConnectionTaskOwner::new();
     loop {
         tokio::select! {
-            completed = requests.join_next(), if !requests.is_empty() => {
+            completed = tasks.waits.join_next(), if !tasks.waits.is_empty() => {
                 let _ = completed;
             }
-            line = lines.next_line() => {
+            completed = tasks.durable.join_next(), if !tasks.durable.is_empty() => {
+                let _ = completed;
+            }
+            line = read_bounded_json_line(&mut input) => {
                 let Some(line) = line? else {
                     break;
                 };
                 if line.trim().is_empty() {
                     continue;
                 }
-                if line_requires_receive_order(&line) {
-                    connection.handle_line(&line).await;
+                let ingress = match ParsedIngress::parse(&line) {
+                    Ok(ingress) => ingress,
+                    Err(error) => {
+                        let _ = connection
+                            .output
+                            .send(error_response(Value::Null, error))
+                            .await;
+                        continue;
+                    }
+                };
+                if ingress.policy().is_none()
+                    || ingress.policy().is_some_and(|policy| policy.receive_order)
+                {
+                    connection.handle_ingress(ingress).await;
                     continue;
                 }
-                if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if is_callback_response(&value) {
-                        connection.handle_value(value).await;
-                        continue;
-                    }
-                    if !request_capacity_available(requests.len(), &value) {
-                        send_connection_overload(&connection, &value).await;
-                        continue;
-                    }
+                if !request_capacity_available(tasks.active_len(), &ingress) {
+                    send_connection_overload(&connection, &ingress).await;
+                    continue;
                 }
+                let durable = ingress.policy().is_some_and(|policy| policy.durable);
                 let connection = connection.clone();
-                requests.spawn(async move {
-                    connection.handle_line(&line).await;
+                tasks.spawn(durable, async move {
+                    connection.handle_ingress(ingress).await;
                 });
             }
         }
     }
-    while requests.join_next().await.is_some() {}
+    connection.disconnect().await;
+    tasks.disconnect(true).await;
     application.shutdown().await?.require_clean()?;
     drop(connection);
     writer
@@ -1290,15 +1469,14 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
             }
         }
     });
-    let mut wait_requests = JoinSet::new();
-    let mut durable_requests = JoinSet::new();
+    let mut tasks = ConnectionTaskOwner::new();
     loop {
         let message = tokio::select! {
-            completed = wait_requests.join_next(), if !wait_requests.is_empty() => {
+            completed = tasks.waits.join_next(), if !tasks.waits.is_empty() => {
                 let _ = completed;
                 continue;
             }
-            completed = durable_requests.join_next(), if !durable_requests.is_empty() => {
+            completed = tasks.durable.join_next(), if !tasks.durable.is_empty() => {
                 let _ = completed;
                 continue;
             }
@@ -1309,46 +1487,44 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
         };
         match message {
             Ok(WebSocketMessage::Text(text)) => {
-                let value = match serde_json::from_str::<Value>(&text) {
-                    Ok(value) => value,
+                if text.len() > APP_SERVER_FRAME_LIMIT {
+                    let _ = connection
+                        .output
+                        .send(error_response(
+                            Value::Null,
+                            RpcError::invalid_request(format!(
+                                "App Server frame exceeds {APP_SERVER_FRAME_LIMIT} bytes"
+                            )),
+                        ))
+                        .await;
+                    break;
+                }
+                let ingress = match ParsedIngress::parse(&text) {
+                    Ok(ingress) => ingress,
                     Err(error) => {
                         let _ = connection
                             .output
-                            .send(error_response(
-                                Value::Null,
-                                RpcError {
-                                    code: -32700,
-                                    message: format!("parse error: {error}"),
-                                    data: None,
-                                },
-                            ))
+                            .send(error_response(Value::Null, error))
                             .await;
                         continue;
                     }
                 };
-                if requires_receive_order(&value) {
-                    connection.handle_value(value).await;
-                    continue;
-                }
-                if is_callback_response(&value) {
-                    connection.handle_value(value).await;
-                    continue;
-                }
-                if !request_capacity_available(wait_requests.len() + durable_requests.len(), &value)
+                if ingress.policy().is_none()
+                    || ingress.policy().is_some_and(|policy| policy.receive_order)
                 {
-                    send_connection_overload(&connection, &value).await;
+                    connection.handle_ingress(ingress).await;
                     continue;
                 }
-                let durable = is_durable_mutation(&value);
+                if !request_capacity_available(tasks.active_len(), &ingress) {
+                    send_connection_overload(&connection, &ingress).await;
+                    continue;
+                }
+                let durable = ingress.policy().is_some_and(|policy| policy.durable);
                 let connection = connection.clone();
                 let request = async move {
-                    connection.handle_value(value).await;
+                    connection.handle_ingress(ingress).await;
                 };
-                if durable {
-                    durable_requests.spawn(request);
-                } else {
-                    wait_requests.spawn(request);
-                }
+                tasks.spawn(durable, request);
             }
             Ok(WebSocketMessage::Close(_)) | Err(_) => break,
             Ok(WebSocketMessage::Binary(_)) => {
@@ -1366,11 +1542,7 @@ async fn run_websocket_connection(socket: WebSocket, application: Application) {
         }
     }
     connection.disconnect().await;
-    wait_requests.abort_all();
-    while wait_requests.join_next().await.is_some() {}
-    if !durable_requests.is_empty() {
-        tokio::spawn(async move { while durable_requests.join_next().await.is_some() {} });
-    }
+    tasks.disconnect(false).await;
     drop(connection);
     writer.abort();
     let _ = writer.await;
@@ -1506,7 +1678,7 @@ mod tests {
         RpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(json!(id)),
-            method: method.to_string(),
+            method: AppMethod::parse(method.to_string()),
             params: Some(params),
         }
     }
@@ -1529,7 +1701,7 @@ mod tests {
             .dispatch(RpcRequest {
                 jsonrpc: "2.0".to_string(),
                 id: None,
-                method: "initialized".to_string(),
+                method: AppMethod::Initialized,
                 params: Some(json!({})),
             })
             .await
@@ -1911,10 +2083,54 @@ mod tests {
             "result": {"outcome": "allow_once"},
         });
 
+        let ingress = ParsedIngress::from_value(response).expect("callback response");
         assert!(request_capacity_available(
             CONNECTION_REQUEST_LIMIT,
-            &response
+            &ingress
         ));
+    }
+
+    #[tokio::test]
+    async fn cancelled_callback_registration_is_removed_immediately() {
+        let (_temp, connection, mut rx) = test_connection().await;
+        let callbacks = connection.callbacks.clone();
+        let pending = Arc::clone(&callbacks.pending);
+        let task = tokio::spawn(async move {
+            callbacks
+                .call("tool/call", json!({}), Duration::from_secs(60))
+                .await
+        });
+        let _ = rx.recv().await.expect("callback request");
+        assert_eq!(pending.lock().expect("callback registry").len(), 1);
+        task.abort();
+        let _ = task.await;
+        tokio::task::yield_now().await;
+        assert!(pending.lock().expect("callback registry").is_empty());
+    }
+
+    #[test]
+    fn app_server_frame_limit_is_shared_by_all_text_transports() {
+        let exact = format!("\"{}\"", "x".repeat(APP_SERVER_FRAME_LIMIT - 2));
+        assert!(ParsedIngress::parse(&exact).is_ok());
+        let oversized = format!("\"{}\"", "x".repeat(APP_SERVER_FRAME_LIMIT - 1));
+        let error = ParsedIngress::parse(&oversized).expect_err("oversized frame");
+        assert_eq!(error.code, -32600);
+    }
+
+    #[tokio::test]
+    async fn connection_owner_aborts_waits_and_finishes_durable_work() {
+        let mut owner = ConnectionTaskOwner::new();
+        owner.spawn(false, std::future::pending());
+        let completed = Arc::new(AtomicBool::new(false));
+        let task_completed = Arc::clone(&completed);
+        owner.spawn(true, async move {
+            tokio::task::yield_now().await;
+            task_completed.store(true, Ordering::SeqCst);
+        });
+        tokio::time::timeout(Duration::from_millis(250), owner.disconnect(true))
+            .await
+            .expect("connection cleanup is bounded");
+        assert!(completed.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

@@ -103,6 +103,7 @@ fn channel_event_public_thread_id(event: &GatewayEvent) -> Option<&str> {
         | GatewayEvent::EntryCompleted { entry, .. } => {
             (!entry.thread_id.trim().is_empty()).then_some(entry.thread_id.as_str())
         }
+        GatewayEvent::EntryBlockTextDelta { thread_id, .. } => thread_id.as_deref(),
         GatewayEvent::ActionRequested { action } | GatewayEvent::ActionUpdated { action } => {
             action.thread_id.as_deref()
         }

@@ -424,7 +424,9 @@ fn framework_lifecycle_owns_run_stream_interaction(event: &RunStreamEvent) -> bo
         RunStreamEvent::Scoped { event, .. } => {
             framework_lifecycle_owns_run_stream_interaction(event)
         }
-        RunStreamEvent::ReasoningDelta { .. } | RunStreamEvent::ReasoningEnd => false,
+        RunStreamEvent::AssistantTextDelta { .. }
+        | RunStreamEvent::ReasoningDelta { .. }
+        | RunStreamEvent::ReasoningEnd => false,
     }
 }
 

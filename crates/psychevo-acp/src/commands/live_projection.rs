@@ -1,5 +1,7 @@
 #[derive(Debug, Default)]
 pub(crate) struct AcpTurnProjection {
+    assistant_text: String,
+    assistant_projection_invalid: bool,
     terminal_output: bool,
     terminal_commands: HashMap<String, String>,
     terminal_offsets: HashMap<String, usize>,
@@ -11,6 +13,34 @@ impl AcpTurnProjection {
             terminal_output,
             ..Self::default()
         }
+    }
+
+    fn assistant_message_update(
+        &mut self,
+        session_id: &SessionId,
+        text: String,
+    ) -> Option<SessionUpdate> {
+        if text.is_empty() {
+            return None;
+        }
+        self.assistant_text.push_str(&text);
+        Some(agent_message_update(session_id, text))
+    }
+
+    pub(crate) fn remaining_final_text<'a>(&self, final_text: &'a str) -> Option<&'a str> {
+        if self.assistant_projection_invalid {
+            return (!final_text.is_empty()).then_some(final_text);
+        }
+        if self.assistant_text.is_empty() {
+            return (!final_text.is_empty()).then_some(final_text);
+        }
+        final_text
+            .strip_prefix(&self.assistant_text)
+            .filter(|suffix| !suffix.is_empty())
+    }
+
+    fn mark_resync_required(&mut self) {
+        self.assistant_projection_invalid = true;
     }
 
     fn runtime_tool_update(&mut self, data: &Value) -> Option<SessionUpdate> {
@@ -142,6 +172,11 @@ pub(crate) fn send_turn_event_update(
     projection: &mut AcpTurnProjection,
 ) {
     match event {
+        TurnEvent::MessageDelta { text } => {
+            if let Some(update) = projection.assistant_message_update(session_id, text) {
+                send_session_update(cx, session_id.clone(), update);
+            }
+        }
         TurnEvent::ReasoningDelta { text } if !text.is_empty() => {
             send_session_update(
                 cx,
@@ -187,6 +222,7 @@ pub(crate) fn send_turn_event_update(
             }
         }
         TurnEvent::Message { .. } => {}
+        TurnEvent::ResyncRequired { .. } => projection.mark_resync_required(),
         TurnEvent::Accepted { .. }
         | TurnEvent::Started { .. }
         | TurnEvent::ReasoningDelta { .. }
@@ -194,8 +230,7 @@ pub(crate) fn send_turn_event_update(
         | TurnEvent::InteractionRequested { .. }
         | TurnEvent::InteractionResolved { .. }
         | TurnEvent::Completed { .. }
-        | TurnEvent::Failed { .. }
-        | TurnEvent::ResyncRequired { .. } => {}
+        | TurnEvent::Failed { .. } => {}
     }
 }
 
@@ -218,6 +253,43 @@ mod live_projection_tests {
         };
         assert_eq!(update.tool_call_id.0.as_ref(), "call-1");
         assert_eq!(update.status.value(), Some(&ToolCallStatus::InProgress));
+    }
+
+    #[test]
+    fn assistant_deltas_leave_only_the_missing_final_suffix() {
+        let session_id = SessionId::new("session-1");
+        let mut projection = AcpTurnProjection::new(false);
+
+        assert!(
+            projection
+                .assistant_message_update(&session_id, "hello".to_string())
+                .is_some()
+        );
+        assert!(
+            projection
+                .assistant_message_update(&session_id, " world".to_string())
+                .is_some()
+        );
+        assert_eq!(projection.remaining_final_text("hello world"), None);
+        assert_eq!(
+            projection.remaining_final_text("hello world!"),
+            Some("!")
+        );
+    }
+
+    #[test]
+    fn resync_restores_the_complete_authoritative_final_text() {
+        let session_id = SessionId::new("session-1");
+        let mut projection = AcpTurnProjection::new(false);
+
+        projection.assistant_message_update(&session_id, "prefix ".to_string());
+        projection.mark_resync_required();
+        projection.assistant_message_update(&session_id, "tail".to_string());
+
+        assert_eq!(
+            projection.remaining_final_text("prefix missing tail"),
+            Some("prefix missing tail")
+        );
     }
 
     #[test]

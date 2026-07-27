@@ -305,6 +305,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn text_deltas_are_not_replaced_in_the_connection_outbox() {
+        let (sender, mut receiver) = connection_outbox();
+        for text in ["first", " second"] {
+            let event = GatewayEvent::EntryBlockTextDelta {
+                thread_id: Some("thread".to_string()),
+                turn_id: "turn".to_string(),
+                entry_id: "entry".to_string(),
+                block_id: "block".to_string(),
+                text: text.to_string(),
+                updated_at_ms: 1,
+            };
+            sender
+                .send_gateway_event(GatewayBroadcastFrame::from_event(&event).unwrap())
+                .expect("delta");
+        }
+
+        let first = receiver.recv().await;
+        let second = receiver.recv().await;
+        assert!(matches!(first, OutboxReceive::Frame(text) if text.contains("\"text\":\"first\"")));
+        assert!(
+            matches!(second, OutboxReceive::Frame(text) if text.contains("\"text\":\" second\""))
+        );
+    }
+
+    #[tokio::test]
     async fn capacity_failure_closes_only_the_slow_connection() {
         let (sender, mut receiver) = connection_outbox();
         for index in 0..CONNECTION_OUTBOX_FRAMES {

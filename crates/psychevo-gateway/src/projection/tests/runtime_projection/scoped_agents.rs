@@ -87,10 +87,17 @@ fn live_projector_routes_scoped_child_entries_to_child_thread() {
         )
         .expect("child reasoning update");
     match child_updated {
-        GatewayEvent::EntryUpdated { entry, .. } => {
-            assert_eq!(entry.thread_id, "child-thread");
-            assert_eq!(entry.id, "live:turn-child:assistant:0");
-            assert_eq!(entry.blocks[0].body.as_deref(), Some("child work"));
+        GatewayEvent::EntryBlockTextDelta {
+            thread_id,
+            entry_id,
+            block_id,
+            text,
+            ..
+        } => {
+            assert_eq!(thread_id.as_deref(), Some("child-thread"));
+            assert_eq!(entry_id, "live:turn-child:assistant:0");
+            assert_eq!(block_id, "live:turn-child:assistant:0:reasoning");
+            assert_eq!(text, "work");
         }
         other => panic!("unexpected child updated event: {other:?}"),
     }
@@ -134,6 +141,70 @@ fn live_projector_routes_scoped_child_entries_to_child_thread() {
         }
         other => panic!("unexpected parent event: {other:?}"),
     }
+}
+
+#[test]
+fn live_projector_text_delta_wire_volume_is_linear_and_terminal_is_authoritative() {
+    fn projected_bytes(chunks: usize) -> usize {
+        let mut projector = GatewayLiveProjector::new(Some("thread-1".to_string()));
+        (0..chunks)
+            .map(|index| {
+                let event = projector
+                    .project(
+                        "turn-1",
+                        &RunStreamEvent::AssistantTextDelta {
+                            text: "x".to_string(),
+                        },
+                    )
+                    .expect("text delta");
+                if index == 0 {
+                    assert!(matches!(event, GatewayEvent::EntryStarted { .. }));
+                } else {
+                    assert!(matches!(
+                        event,
+                        GatewayEvent::EntryBlockTextDelta { ref text, .. } if text == "x"
+                    ));
+                }
+                serde_json::to_vec(&event).expect("serialize event").len()
+            })
+            .sum()
+    }
+
+    let bytes_128 = projected_bytes(128);
+    let bytes_256 = projected_bytes(256);
+    assert!(
+        bytes_256 < bytes_128 * 3,
+        "doubling one-byte deltas must remain linear: {bytes_128} -> {bytes_256}"
+    );
+
+    let mut projector = GatewayLiveProjector::new(Some("thread-1".to_string()));
+    for _ in 0..256 {
+        let _ = projector.project(
+            "turn-1",
+            &RunStreamEvent::AssistantTextDelta {
+                text: "x".to_string(),
+            },
+        );
+    }
+    let terminal = projector
+        .project(
+            "turn-1",
+            &RunStreamEvent::value(json!({
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "x".repeat(256)}],
+                    "finish_reason": "stop",
+                    "outcome": "normal"
+                }
+            })),
+        )
+        .expect("terminal message");
+    let GatewayEvent::EntryCompleted { entry, .. } = terminal else {
+        panic!("terminal projection must materialize the entry");
+    };
+    let expected = "x".repeat(256);
+    assert_eq!(entry.blocks[0].body.as_deref(), Some(expected.as_str()));
 }
 
 #[test]

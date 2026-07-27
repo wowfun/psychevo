@@ -6,7 +6,7 @@ struct PendingGatewayLiveSnapshot {
     thread_id: Option<String>,
     turn_id: Option<String>,
     event_kind: String,
-    event: Value,
+    event: GatewayEvent,
     last_flush_ms: i64,
     dirty: bool,
 }

@@ -1,32 +1,50 @@
 impl GatewayLiveProjector {
+    fn project_assistant_text_delta(
+        &mut self,
+        turn_id: &str,
+        text: &str,
+    ) -> Option<GatewayEvent> {
+        if text.is_empty() {
+            return None;
+        }
+        let segment = self.assistant_segment;
+        let block_id = live_text_block_id(turn_id, segment, 0);
+        let block = live_block(
+            block_id,
+            TranscriptBlockKind::Text,
+            TranscriptBlockStatus::Running,
+            DEFAULT_TEXT_ORDER,
+            None,
+            Some(String::new()),
+            Some(json!({
+                "projection": "assistant_text_delta",
+                "origin": "run_stream",
+                "liveOrder": DEFAULT_TEXT_ORDER,
+            })),
+        );
+        Some(self.append_block_text(turn_id, segment, block, text))
+    }
+
     fn project_reasoning_delta(&mut self, turn_id: &str, text: &str) -> Option<GatewayEvent> {
         if text.is_empty() {
             return None;
         }
         let segment = self.assistant_segment;
         let block_id = live_reasoning_block_id(turn_id, segment);
-        let current = self
-            .entries
-            .get(&segment)
-            .and_then(|state| state.blocks.get(&block_id))
-            .and_then(|block| block.body.as_deref())
-            .unwrap_or_default();
-        let body = format!("{current}{text}");
         let block = live_block(
             block_id,
             TranscriptBlockKind::Reasoning,
             TranscriptBlockStatus::Running,
             DEFAULT_REASONING_ORDER,
             Some("Thinking".to_string()),
-            Some(body),
+            Some(String::new()),
             Some(json!({
                 "projection": "reasoning",
                 "origin": "run_stream_reasoning",
                 "liveOrder": DEFAULT_REASONING_ORDER,
             })),
         );
-        self.upsert_block(segment, block);
-        Some(self.emit_entry_event(turn_id, segment, false, false))
+        Some(self.append_block_text(turn_id, segment, block, text))
     }
 
     fn project_reasoning_end(&mut self, turn_id: &str) -> Option<GatewayEvent> {

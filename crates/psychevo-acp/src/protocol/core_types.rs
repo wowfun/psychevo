@@ -343,7 +343,8 @@ impl AcpUsageAccumulator {
         match event {
             RunStreamEvent::Event(value) => self.record_runtime_value(value.as_value()),
             RunStreamEvent::Scoped { event, .. } => self.record_stream_event(event),
-            RunStreamEvent::ReasoningDelta { .. }
+            RunStreamEvent::AssistantTextDelta { .. }
+            | RunStreamEvent::ReasoningDelta { .. }
             | RunStreamEvent::ReasoningEnd
             | RunStreamEvent::ClarifyRequest(_)
             | RunStreamEvent::ClarifyResolved(_) => {}

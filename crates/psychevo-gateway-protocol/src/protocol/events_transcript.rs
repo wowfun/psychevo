@@ -43,6 +43,22 @@ pub enum GatewayEvent {
         turn_id: String,
         entry: TranscriptEntry,
     },
+    EntryBlockTextDelta {
+        #[serde(rename = "threadId")]
+        thread_id: Option<String>,
+        #[serde(rename = "turnId")]
+        turn_id: String,
+        #[serde(rename = "entryId")]
+        entry_id: String,
+        #[serde(rename = "blockId")]
+        block_id: String,
+        text: String,
+        #[serde(rename = "updatedAtMs")]
+        #[serde(serialize_with = "json_safe_i64::serialize", deserialize_with = "json_safe_i64::deserialize")]
+        #[schemars(with = "JsonSafeI64")]
+        #[ts(type = "number")]
+        updated_at_ms: i64,
+    },
     EntryCompleted {
         #[serde(rename = "turnId")]
         turn_id: String,

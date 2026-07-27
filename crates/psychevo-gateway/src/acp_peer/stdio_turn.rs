@@ -30,21 +30,23 @@ type AcpBeforePromptCallback = Arc<
         + Sync,
 >;
 
-pub(crate) fn resolve_peer_mcp_server_handoffs(
+pub(crate) async fn resolve_peer_mcp_server_handoffs(
     peer: &ResolvedPeerTurn,
     options: &psychevo::__product::runtime::RunOptions,
 ) -> psychevo::Result<Vec<psychevo::__product::runtime::ResolvedMcpServerInput>> {
     let names = mcp_handoff::requested_peer_mcp_server_names(peer)?;
-    resolve_mcp_server_handoffs(options, &names).map_err(|error| {
-        crate::agent_session_error(
-            "acp_mcp_configuration_invalid",
-            crate::AgentErrorStage::Binding,
-            "user_action",
-            "not_delivered",
-            error.to_string(),
-            Some(format!("acp-mcp:{}", peer.backend.id)),
-        )
-    })
+    resolve_mcp_server_handoffs(options, &names)
+        .await
+        .map_err(|error| {
+            crate::agent_session_error(
+                "acp_mcp_configuration_invalid",
+                crate::AgentErrorStage::Binding,
+                "user_action",
+                "not_delivered",
+                error.to_string(),
+                Some(format!("acp-mcp:{}", peer.backend.id)),
+            )
+        })
 }
 
 async fn run_acp_stdio_turn(

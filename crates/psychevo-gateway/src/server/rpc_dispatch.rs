@@ -693,7 +693,11 @@ where
                 }));
             }
             let options = plugin_runtime_options(&state, scope.cwd);
-            plugin_doctor_value(&options, params.selector.as_deref())
+            Box::pin(plugin_doctor_value(
+                &options,
+                params.selector.as_deref(),
+            ))
+            .await
         }
         "plugin/import/inspect" => {
             let params = request.required_params::<wire::PluginInspectParams>()?;

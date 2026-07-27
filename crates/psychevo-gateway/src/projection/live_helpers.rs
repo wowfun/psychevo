@@ -437,6 +437,10 @@ fn event_thread_id(event: &GatewayEvent) -> Option<String> {
         {
             Some(entry.thread_id.clone())
         }
+        GatewayEvent::EntryBlockTextDelta {
+            thread_id: Some(thread_id),
+            ..
+        } => Some(thread_id.clone()),
         _ => None,
     }
 }

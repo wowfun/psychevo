@@ -411,7 +411,7 @@ pub(crate) async fn run_acp_peer_turn(
         .list_gateway_turn_terminals_for_thread(&session_id)
         .await?
         .is_empty();
-    let mcp_servers = resolve_peer_mcp_server_handoffs(&peer, &options)?;
+    let mcp_servers = resolve_peer_mcp_server_handoffs(&peer, &options).await?;
     let (peer_model, peer_reasoning_effort, peer_runtime_options) =
         acp_peer_turn_controls(&options, profile, is_new_native_session);
     let native_session_slot = Arc::new(std::sync::Mutex::new(existing_native_id.clone()));

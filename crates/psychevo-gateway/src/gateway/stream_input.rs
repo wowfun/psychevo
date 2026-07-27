@@ -41,6 +41,9 @@ fn wrap_stream(
                             | GatewayEvent::EntryCompleted { entry, .. } => {
                                 Some(entry.thread_id.as_str())
                             }
+                            GatewayEvent::EntryBlockTextDelta { thread_id, .. } => {
+                                thread_id.as_deref()
+                            }
                             _ => None,
                         },
                         fields,

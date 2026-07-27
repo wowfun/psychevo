@@ -802,6 +802,46 @@ export const gatewayEventSchemas = {
     },
     {
       "properties": {
+        "blockId": {
+          "type": "string"
+        },
+        "entryId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "entryBlockTextDelta"
+          ],
+          "type": "string"
+        },
+        "updatedAtMs": {
+          "$ref": "#/definitions/JsonSafeI64"
+        }
+      },
+      "required": [
+        "blockId",
+        "entryId",
+        "text",
+        "turnId",
+        "type",
+        "updatedAtMs"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
         "entry": {
           "$ref": "#/definitions/TranscriptEntry"
         },

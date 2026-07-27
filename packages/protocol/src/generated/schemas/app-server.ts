@@ -1418,6 +1418,24 @@ export const appServerSchemas = {
         },
         "type": {
           "enum": [
+            "message_delta"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
             "reasoning_delta"
           ],
           "type": "string"
@@ -1678,6 +1696,24 @@ export const appServerSchemas = {
           "required": [
             "message",
             "stage",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
             "type"
           ],
           "type": "object"

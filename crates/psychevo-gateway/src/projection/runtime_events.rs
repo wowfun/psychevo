@@ -3,6 +3,22 @@ pub fn gateway_event_from_run_stream(
     event: &RunStreamEvent,
 ) -> Option<GatewayEvent> {
     Some(match event {
+        RunStreamEvent::AssistantTextDelta { text } => GatewayEvent::EntryUpdated {
+            turn_id: turn_id.to_string(),
+            entry: live_entry(
+                turn_id,
+                "assistant",
+                TranscriptEntryRole::Assistant,
+                TranscriptBlockKind::Text,
+                TranscriptBlockStatus::Running,
+                None,
+                Some(text.clone()),
+                Some(json!({
+                    "projection": "assistant_text_delta",
+                    "origin": "run_stream",
+                })),
+            ),
+        },
         RunStreamEvent::ReasoningDelta { text } => GatewayEvent::EntryUpdated {
             turn_id: turn_id.to_string(),
             entry: live_entry(

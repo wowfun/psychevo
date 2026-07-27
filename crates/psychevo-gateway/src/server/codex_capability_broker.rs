@@ -11,8 +11,9 @@ use psychevo::__ai::AbortSignal;
 use psychevo::{Error, Result};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex, MutexGuard, Notify, mpsc, oneshot};
+use tokio::process::{Child, ChildStdin, Command};
+use tokio::sync::{Mutex, MutexGuard, Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::timeout;
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -20,6 +21,25 @@ const ELICITATION_TIMEOUT: Duration = Duration::from_secs(120);
 const ELICITATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(125);
 const RUNTIME_INVENTORY_RETRY_DELAY: Duration = Duration::from_secs(5);
 const CONNECT_SESSION_TTL: Duration = Duration::from_secs(5 * 60);
+const BROKER_COMMAND_CAPACITY: usize = 64;
+const RUNTIME_INVENTORY_CACHE_CAPACITY: usize = 32;
+
+fn runtime_inventory_entry(
+    inventories: &mut BTreeMap<PathBuf, Arc<Mutex<CachedCodexRuntimeInventory>>>,
+    key: PathBuf,
+) -> Arc<Mutex<CachedCodexRuntimeInventory>> {
+    if let Some(entry) = inventories.get(&key) {
+        return entry.clone();
+    }
+    if inventories.len() == RUNTIME_INVENTORY_CACHE_CAPACITY
+        && let Some(evicted) = inventories.keys().next().cloned()
+    {
+        inventories.remove(&evicted);
+    }
+    let entry = Arc::new(Mutex::new(CachedCodexRuntimeInventory::default()));
+    inventories.insert(key, entry.clone());
+    entry
+}
 
 fn log_codex_authority_event(event: &str, cwd: &Path, reason: Option<&str>) {
     eprintln!(
@@ -1126,10 +1146,7 @@ impl CodexPluginAuthority {
             .unwrap_or_else(|_| cwd.to_path_buf());
         let entry_cell = {
             let mut inventories = self.runtime_inventories.lock().await;
-            inventories
-                .entry(key.clone())
-                .or_insert_with(|| Arc::new(Mutex::new(CachedCodexRuntimeInventory::default())))
-                .clone()
+            runtime_inventory_entry(&mut inventories, key.clone())
         };
         let mut entry = entry_cell.lock().await;
         if let Some(inventory) = entry.inventory.as_ref() {
@@ -1159,7 +1176,14 @@ impl CodexPluginAuthority {
                     retry_after: Instant::now() + self.runtime_inventory_retry_delay,
                 });
                 let mut inventories = self.runtime_inventories.lock().await;
-                inventories.entry(key).or_insert(entry_cell.clone());
+                if !inventories.contains_key(&key) {
+                    if inventories.len() == RUNTIME_INVENTORY_CACHE_CAPACITY
+                        && let Some(evicted) = inventories.keys().next().cloned()
+                    {
+                        inventories.remove(&evicted);
+                    }
+                    inventories.insert(key, entry_cell.clone());
+                }
                 Err(Error::Message(message))
             }
         }
@@ -2726,12 +2750,35 @@ fn extract_semantic_version(user_agent: &str) -> Option<String> {
 
 struct BrokerProcess {
     child: Mutex<Child>,
-    writer: mpsc::UnboundedSender<Value>,
-    pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Value>>>>,
-    elicitation_contexts: Arc<Mutex<BTreeMap<String, CodexElicitationContext>>>,
+    commands: mpsc::Sender<BrokerDriverCommand>,
+    driver: Mutex<Option<JoinHandle<()>>>,
+    request_capacity: Arc<Semaphore>,
     next_id: std::sync::atomic::AtomicU64,
     effective_plugins_changed: Arc<AtomicBool>,
     codex_version: Option<String>,
+}
+
+enum BrokerDriverCommand {
+    Request {
+        id: u64,
+        method: String,
+        params: Value,
+        context_key: Option<String>,
+        context: Option<CodexElicitationContext>,
+        permit: OwnedSemaphorePermit,
+        response: oneshot::Sender<std::result::Result<Value, String>>,
+    },
+    Cancel {
+        id: u64,
+    },
+    Notification(Value),
+}
+
+struct PendingBrokerRequest {
+    method: String,
+    _permit: OwnedSemaphorePermit,
+    response: oneshot::Sender<std::result::Result<Value, String>>,
+    context_key: Option<String>,
 }
 
 impl BrokerProcess {
@@ -2764,27 +2811,24 @@ impl BrokerProcess {
             .stdout
             .take()
             .ok_or_else(|| Error::Message("Codex broker stdout unavailable".to_string()))?;
-        let stderr = child.stderr.take();
-        let (writer, writer_rx) = mpsc::unbounded_channel();
-        let pending = Arc::new(Mutex::new(BTreeMap::new()));
-        let elicitation_contexts = Arc::new(Mutex::new(BTreeMap::new()));
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| Error::Message("Codex broker stderr unavailable".to_string()))?;
+        let (commands, command_rx) = mpsc::channel(BROKER_COMMAND_CAPACITY);
         let effective_plugins_changed = Arc::new(AtomicBool::new(false));
-        spawn_broker_writer(stdin, writer_rx);
-        spawn_broker_reader(
+        let driver = tokio::spawn(run_broker_driver(
+            stdin,
             stdout,
-            writer.clone(),
-            pending.clone(),
-            elicitation_contexts.clone(),
+            stderr,
+            command_rx,
             effective_plugins_changed.clone(),
-        );
-        if let Some(stderr) = stderr {
-            spawn_broker_stderr(stderr);
-        }
+        ));
         let mut process = Self {
             child: Mutex::new(child),
-            writer,
-            pending,
-            elicitation_contexts,
+            commands,
+            driver: Mutex::new(Some(driver)),
+            request_capacity: Arc::new(Semaphore::new(BROKER_COMMAND_CAPACITY)),
             next_id: std::sync::atomic::AtomicU64::new(1),
             effective_plugins_changed,
             codex_version: None,
@@ -2811,7 +2855,9 @@ impl BrokerProcess {
             let profile = validate_negotiated_profile(&initialize, expected_home)?;
             process.codex_version = Some(profile.version);
         }
-        process.write_message(json!({"jsonrpc":"2.0","method":"initialized"}))?;
+        process
+            .write_message(json!({"jsonrpc":"2.0","method":"initialized"}))
+            .await?;
         Ok(process)
     }
 
@@ -2824,40 +2870,45 @@ impl BrokerProcess {
     ) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::AcqRel);
         let context_key = context.and_then(|_| elicitation_key(&params));
-        if let (Some(key), Some(context)) = (context_key.as_ref(), context) {
-            self.elicitation_contexts
-                .lock()
-                .await
-                .insert(key.clone(), context.clone());
-        }
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().await.insert(id, sender);
-        if let Err(err) = self.write_message(json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        })) {
-            self.pending.lock().await.remove(&id);
-            if let Some(key) = context_key {
-                self.elicitation_contexts.lock().await.remove(&key);
-            }
-            return Err(err);
-        }
-        let response = timeout(request_timeout, receiver).await;
-        self.pending.lock().await.remove(&id);
-        if let Some(key) = context_key {
-            self.elicitation_contexts.lock().await.remove(&key);
+        let request = async {
+            let permit = self
+                .request_capacity
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| {
+                    Error::Message("Codex capability broker is unavailable".to_string())
+                })?;
+            self.commands
+                .send(BrokerDriverCommand::Request {
+                    id,
+                    method: method.to_string(),
+                    params,
+                    context_key,
+                    context: context.cloned(),
+                    permit,
+                    response: sender,
+                })
+                .await
+                .map_err(|_| {
+                    Error::Message("Codex capability broker driver is unavailable".to_string())
+                })?;
+            receiver.await.map_err(|_| {
+                Error::Message("Codex capability broker exited unexpectedly".to_string())
+            })
+        };
+        let response = timeout(request_timeout, request).await;
+        if response.is_err() {
+            enqueue_broker_cancel(&self.commands, id);
         }
         let message = response
             .map_err(|_| {
                 Error::Message(format!(
                     "Codex capability broker request `{method}` timed out"
                 ))
-            })?
-            .map_err(|_| {
-                Error::Message("Codex capability broker exited unexpectedly".to_string())
-            })?;
+            })??
+            .map_err(Error::Message)?;
         if let Some(error) = message.get("error") {
             let code = error.get("code").and_then(Value::as_i64);
             return Err(Error::Message(format!(
@@ -2876,90 +2927,178 @@ impl BrokerProcess {
         self.effective_plugins_changed.swap(false, Ordering::AcqRel)
     }
 
-    fn write_message(&self, message: Value) -> Result<()> {
-        self.writer.send(message).map_err(|_| {
-            Error::Message("Codex capability broker writer is unavailable".to_string())
-        })
+    async fn write_message(&self, message: Value) -> Result<()> {
+        self.commands
+            .send(BrokerDriverCommand::Notification(message))
+            .await
+            .map_err(|_| {
+                Error::Message("Codex capability broker writer is unavailable".to_string())
+            })
     }
 
     async fn kill(&self) {
-        let _ = self.child.lock().await.kill().await;
+        let mut child = self.child.lock().await;
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        drop(child);
+        if let Some(mut driver) = self.driver.lock().await.take()
+            && timeout(Duration::from_secs(1), &mut driver).await.is_err()
+        {
+            driver.abort();
+        }
     }
 }
 
-fn spawn_broker_writer(mut stdin: ChildStdin, mut receiver: mpsc::UnboundedReceiver<Value>) {
-    tokio::spawn(async move {
-        while let Some(message) = receiver.recv().await {
-            let Ok(mut bytes) = serde_json::to_vec(&message) else {
-                continue;
-            };
-            bytes.push(b'\n');
-            if stdin.write_all(&bytes).await.is_err() || stdin.flush().await.is_err() {
-                break;
-            }
+impl Drop for BrokerProcess {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.try_lock() {
+            let _ = child.start_kill();
         }
-    });
+        if let Ok(mut driver) = self.driver.try_lock()
+            && let Some(driver) = driver.take()
+        {
+            driver.abort();
+        }
+    }
 }
 
-fn spawn_broker_reader(
-    stdout: ChildStdout,
-    writer: mpsc::UnboundedSender<Value>,
-    pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Value>>>>,
-    elicitation_contexts: Arc<Mutex<BTreeMap<String, CodexElicitationContext>>>,
+fn enqueue_broker_cancel(commands: &mpsc::Sender<BrokerDriverCommand>, id: u64) {
+    let _ = commands.try_send(BrokerDriverCommand::Cancel { id });
+}
+
+async fn run_broker_driver(
+    mut stdin: ChildStdin,
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+    mut commands: mpsc::Receiver<BrokerDriverCommand>,
     effective_plugins_changed: Arc<AtomicBool>,
 ) {
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let Ok(message) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            if message.get("method").is_some() && message.get("id").is_some() {
-                let writer = writer.clone();
-                let contexts = elicitation_contexts.clone();
-                tokio::spawn(async move {
-                    respond_to_broker_server_request(message, writer, contexts).await;
-                });
-                continue;
+    let mut stdout = BufReader::new(stdout).lines();
+    let mut stderr = BufReader::new(stderr).lines();
+    let mut stderr_open = true;
+    let mut pending = BTreeMap::<u64, PendingBrokerRequest>::new();
+    let mut contexts = BTreeMap::<String, CodexElicitationContext>::new();
+    let mut callbacks = JoinSet::<Value>::new();
+    let terminal_error = loop {
+        tokio::select! {
+            biased;
+            completed = callbacks.join_next(), if !callbacks.is_empty() => {
+                if let Some(Ok(response)) = completed
+                    && let Err(error) = write_broker_message(&mut stdin, &response).await
+                {
+                    break error;
+                }
             }
-            if message.get("method").and_then(Value::as_str) == Some("account/updated") {
-                effective_plugins_changed.store(true, Ordering::Release);
-                continue;
+            line = stdout.next_line() => {
+                let line = match line {
+                    Ok(Some(line)) => line,
+                    Ok(None) => break "Codex capability broker closed stdout".to_string(),
+                    Err(error) => break format!("Codex capability broker stdout failed: {error}"),
+                };
+                let message = match serde_json::from_str::<Value>(&line) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        break format!("Codex capability broker returned invalid JSON: {error}")
+                    }
+                };
+                if message.get("method").is_some() && message.get("id").is_some() {
+                    let context = broker_elicitation_context(&message, &contexts);
+                    callbacks.spawn(respond_to_broker_server_request(message, context));
+                    continue;
+                }
+                if message.get("method").and_then(Value::as_str) == Some("account/updated") {
+                    effective_plugins_changed.store(true, Ordering::Release);
+                    continue;
+                }
+                let Some(id) = message.get("id").and_then(Value::as_u64) else {
+                    continue;
+                };
+                if let Some(request) = pending.remove(&id) {
+                    if let Some(key) = request.context_key {
+                        contexts.remove(&key);
+                    }
+                    let _ = request.response.send(Ok(message));
+                }
             }
-            let Some(id) = message.get("id").and_then(Value::as_u64) else {
-                continue;
-            };
-            if let Some(sender) = pending.lock().await.remove(&id) {
-                let _ = sender.send(message);
+            line = stderr.next_line(), if stderr_open => {
+                match line {
+                    Ok(Some(line)) => log_broker_stderr(&line),
+                    Ok(None) => stderr_open = false,
+                    Err(error) => {
+                        log_broker_stderr(&format!("stderr read failed: {error}"));
+                        stderr_open = false;
+                    }
+                }
+            }
+            command = commands.recv() => {
+                let Some(command) = command else {
+                    break "Codex capability broker command channel closed".to_string();
+                };
+                match command {
+                    BrokerDriverCommand::Request {
+                        id,
+                        method,
+                        params,
+                        context_key,
+                        context,
+                        permit,
+                        response,
+                    } => {
+                        if let (Some(key), Some(context)) = (&context_key, context) {
+                            contexts.insert(key.clone(), context);
+                        }
+                        pending.insert(id, PendingBrokerRequest {
+                            method: method.clone(),
+                            _permit: permit,
+                            response,
+                            context_key,
+                        });
+                        let message = json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "method": method,
+                            "params": params,
+                        });
+                        if let Err(error) = write_broker_message(&mut stdin, &message).await {
+                            break error;
+                        }
+                    }
+                    BrokerDriverCommand::Cancel { id } => {
+                        if let Some(request) = pending.remove(&id)
+                            && let Some(key) = request.context_key
+                        {
+                            contexts.remove(&key);
+                        }
+                    }
+                    BrokerDriverCommand::Notification(message) => {
+                        if let Err(error) = write_broker_message(&mut stdin, &message).await {
+                            break error;
+                        }
+                    }
+                }
             }
         }
-        pending.lock().await.clear();
-    });
+    };
+    callbacks.abort_all();
+    while callbacks.join_next().await.is_some() {}
+    for (_, request) in pending {
+        let _ = request.response.send(Err(format!(
+            "{terminal_error}; request `{}` was not completed",
+            request.method
+        )));
+    }
 }
 
 async fn respond_to_broker_server_request(
     message: Value,
-    writer: mpsc::UnboundedSender<Value>,
-    contexts: Arc<Mutex<BTreeMap<String, CodexElicitationContext>>>,
-) {
+    context: Option<CodexElicitationContext>,
+) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
     let method = message
         .get("method")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let response = if method == "mcpServer/elicitation/request" {
-        let key = message.get("params").and_then(elicitation_key);
-        let context = {
-            let contexts = contexts.lock().await;
-            key.as_ref()
-                .and_then(|key| contexts.get(key))
-                .cloned()
-                .or_else(|| {
-                    (contexts.len() == 1)
-                        .then(|| contexts.values().next().cloned())
-                        .flatten()
-                })
-        };
+    if method == "mcpServer/elicitation/request" {
         let result = if let Some(context) = context {
             context.route(&message).await
         } else {
@@ -2972,8 +3111,36 @@ async fn respond_to_broker_server_request(
             "id": id,
             "error": {"code":-32601,"message":format!("unsupported broker callback: {method}")},
         })
-    };
-    let _ = writer.send(response);
+    }
+}
+
+fn broker_elicitation_context(
+    message: &Value,
+    contexts: &BTreeMap<String, CodexElicitationContext>,
+) -> Option<CodexElicitationContext> {
+    message
+        .get("params")
+        .and_then(elicitation_key)
+        .and_then(|key| contexts.get(&key))
+        .cloned()
+        .or_else(|| {
+            (contexts.len() == 1)
+                .then(|| contexts.values().next().cloned())
+                .flatten()
+        })
+}
+
+async fn write_broker_message(
+    stdin: &mut ChildStdin,
+    message: &Value,
+) -> std::result::Result<(), String> {
+    let mut bytes = serde_json::to_vec(message).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    stdin
+        .write_all(&bytes)
+        .await
+        .map_err(|error| error.to_string())?;
+    stdin.flush().await.map_err(|error| error.to_string())
 }
 
 fn elicitation_key(params: &Value) -> Option<String> {
@@ -2985,37 +3152,27 @@ fn elicitation_key(params: &Value) -> Option<String> {
     Some(format!("{thread_id}\u{0}{turn_id}"))
 }
 
-fn spawn_broker_stderr(stderr: tokio::process::ChildStderr) {
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        let mut emitted = 0usize;
-        while let Ok(Some(line)) = lines.next_line().await {
-            if emitted >= 256 {
-                continue;
-            }
-            emitted += 1;
-            let lower = line.to_ascii_lowercase();
-            let classification = if ["token", "secret", "authorization", "credential"]
-                .iter()
-                .any(|needle| lower.contains(needle))
-            {
-                "sensitive"
-            } else {
-                "diagnostic"
-            };
-            eprintln!(
-                "{}",
-                json!({
-                    "target": "psychevo.codex_plugins",
-                    "event": "broker_stderr",
-                    "classification": classification,
-                    "bytes": line.len().min(2_048),
-                    "truncated": line.len() > 2_048,
-                    "redacted": true,
-                })
-            );
-        }
-    });
+fn log_broker_stderr(line: &str) {
+    let lower = line.to_ascii_lowercase();
+    let classification = if ["token", "secret", "authorization", "credential"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        "sensitive"
+    } else {
+        "diagnostic"
+    };
+    eprintln!(
+        "{}",
+        json!({
+            "target": "psychevo.codex_plugins",
+            "event": "broker_stderr",
+            "classification": classification,
+            "bytes": line.len().min(2_048),
+            "truncated": line.len() > 2_048,
+            "redacted": true,
+        })
+    );
 }
 
 #[cfg(test)]
@@ -3024,6 +3181,33 @@ mod tests {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn runtime_inventory_cache_stays_bounded() {
+        let mut inventories = BTreeMap::new();
+        for index in 0..=RUNTIME_INVENTORY_CACHE_CAPACITY {
+            runtime_inventory_entry(
+                &mut inventories,
+                PathBuf::from(format!("/workspace/{index:02}")),
+            );
+        }
+        assert_eq!(inventories.len(), RUNTIME_INVENTORY_CACHE_CAPACITY);
+        assert!(!inventories.contains_key(Path::new("/workspace/00")));
+        assert!(inventories.contains_key(Path::new("/workspace/32")));
+    }
+
+    #[test]
+    fn timed_out_request_cancel_does_not_wait_for_command_capacity() {
+        let (commands, _receiver) = mpsc::channel(1);
+        commands
+            .try_send(BrokerDriverCommand::Notification(json!({
+                "jsonrpc": "2.0",
+                "method": "occupied"
+            })))
+            .expect("fill command queue");
+
+        enqueue_broker_cancel(&commands, 42);
+    }
 
     #[cfg(unix)]
     const CODEX_APP_SERVER_FIXTURE: &str = include_str!(concat!(

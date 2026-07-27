@@ -45,6 +45,49 @@ impl GatewayLiveProjector {
         }
     }
 
+    fn append_block_text(
+        &mut self,
+        turn_id: &str,
+        segment: usize,
+        block: TranscriptBlock,
+        text: &str,
+    ) -> GatewayEvent {
+        let block_id = block.id.clone();
+        let (entry_started, block_exists) = self
+            .entries
+            .get(&segment)
+            .map(|state| (state.started, state.blocks.contains_key(&block_id)))
+            .unwrap_or_default();
+        if !block_exists {
+            self.upsert_block(segment, block);
+        }
+
+        let updated_at_ms = crate::gateway_now_ms();
+        let state = self.entry_state_mut(segment);
+        state.updated_at_ms = updated_at_ms;
+        let live_block = state
+            .blocks
+            .get_mut(&block_id)
+            .expect("live text block must exist after initialization");
+        live_block.updated_at_ms = updated_at_ms;
+        live_block
+            .body
+            .get_or_insert_default()
+            .push_str(text);
+
+        if !entry_started || !block_exists {
+            return self.emit_entry_event(turn_id, segment, false, true);
+        }
+        GatewayEvent::EntryBlockTextDelta {
+            thread_id: self.thread_id.clone(),
+            turn_id: turn_id.to_string(),
+            entry_id: live_assistant_entry_id(turn_id, segment),
+            block_id,
+            text: text.to_string(),
+            updated_at_ms,
+        }
+    }
+
     fn advance_assistant_segment(&mut self) {
         self.assistant_segment += 1;
     }
@@ -86,6 +129,14 @@ impl GatewayLiveProjector {
             | GatewayEvent::EntryCompleted { entry, .. } => {
                 if entry.thread_id.is_empty() {
                     entry.thread_id = thread_id.to_string();
+                }
+            }
+            GatewayEvent::EntryBlockTextDelta {
+                thread_id: event_thread_id,
+                ..
+            } => {
+                if event_thread_id.is_none() {
+                    *event_thread_id = Some(thread_id.to_string());
                 }
             }
             GatewayEvent::TurnStarted {
@@ -133,6 +184,12 @@ fn force_event_thread_id(event: &mut GatewayEvent, thread_id: &str) {
         | GatewayEvent::EntryUpdated { entry, .. }
         | GatewayEvent::EntryCompleted { entry, .. } => {
             entry.thread_id = thread_id.to_string();
+        }
+        GatewayEvent::EntryBlockTextDelta {
+            thread_id: event_thread_id,
+            ..
+        } => {
+            *event_thread_id = Some(thread_id.to_string());
         }
         GatewayEvent::TurnStarted {
             thread_id: event_thread_id,

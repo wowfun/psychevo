@@ -13,6 +13,21 @@ pub(super) struct RunnableTargetCatalog {
     target_revisions: BTreeMap<String, String>,
 }
 
+fn cache_runnable_target_catalog(
+    catalogs: &mut BTreeMap<PathBuf, (u64, Arc<RunnableTargetCatalog>)>,
+    cwd: PathBuf,
+    generation: u64,
+    catalog: Arc<RunnableTargetCatalog>,
+) {
+    if !catalogs.contains_key(&cwd)
+        && catalogs.len() == RunnableTargetCatalog::CACHE_CAPACITY
+        && let Some(evicted) = catalogs.keys().next().cloned()
+    {
+        catalogs.remove(&evicted);
+    }
+    catalogs.insert(cwd, (generation, catalog));
+}
+
 pub(super) struct ThreadDraftPrepareWork {
     pub(super) target_catalog: Arc<RunnableTargetCatalog>,
     pub(super) target: wire::RunnableTargetView,
@@ -83,6 +98,8 @@ pub(super) struct ValidatedRunnableTarget {
 }
 
 impl RunnableTargetCatalog {
+    const CACHE_CAPACITY: usize = 32;
+
     pub(super) fn load(state: &WebState, scope: &ResolvedScope) -> psychevo::Result<Arc<Self>> {
         let generation = state
             .inner
@@ -104,12 +121,17 @@ impl RunnableTargetCatalog {
             .runnable_target_catalog_generation
             .load(std::sync::atomic::Ordering::Acquire);
         if current_generation == generation {
-            state
+            let mut catalogs = state
                 .inner
                 .runnable_target_catalogs
                 .lock()
-                .expect("runnable target catalogs poisoned")
-                .insert(scope.cwd.clone(), (generation, catalog.clone()));
+                .expect("runnable target catalogs poisoned");
+            cache_runnable_target_catalog(
+                &mut catalogs,
+                scope.cwd.clone(),
+                generation,
+                catalog.clone(),
+            );
         }
         Ok(catalog)
     }
@@ -4235,6 +4257,28 @@ mod runtime_session_ownership_tests {
         state.invalidate_runnable_target_catalog();
         let refreshed = RunnableTargetCatalog::load(&state, &scope).expect("refreshed catalog");
         assert!(!Arc::ptr_eq(&first, &refreshed));
+    }
+
+    #[test]
+    fn runnable_target_catalog_cache_stays_bounded() {
+        let catalog = Arc::new(RunnableTargetCatalog {
+            profile_records: BTreeMap::new(),
+            profile_views: Vec::new(),
+            compatible_targets: Vec::new(),
+            target_revisions: BTreeMap::new(),
+        });
+        let mut catalogs = BTreeMap::new();
+        for index in 0..=RunnableTargetCatalog::CACHE_CAPACITY {
+            cache_runnable_target_catalog(
+                &mut catalogs,
+                PathBuf::from(format!("/workspace/{index:02}")),
+                1,
+                catalog.clone(),
+            );
+        }
+        assert_eq!(catalogs.len(), RunnableTargetCatalog::CACHE_CAPACITY);
+        assert!(!catalogs.contains_key(Path::new("/workspace/00")));
+        assert!(catalogs.contains_key(Path::new("/workspace/32")));
     }
 
     #[tokio::test]

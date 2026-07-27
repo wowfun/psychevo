@@ -31,6 +31,9 @@ impl GatewayLiveProjector {
         }
         self.prepare_turn(turn_id);
         let mut event = match event {
+            RunStreamEvent::AssistantTextDelta { text } => {
+                self.project_assistant_text_delta(turn_id, text)?
+            }
             RunStreamEvent::ReasoningDelta { text } => {
                 self.project_reasoning_delta(turn_id, text)?
             }

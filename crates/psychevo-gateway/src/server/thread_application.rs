@@ -1367,7 +1367,7 @@ pub(super) async fn run_routed_action(
             if native {
                 fork_native_thread(state, scope, &params.thread_id, None).await
             } else {
-                fork_acp_thread(state, scope, &params.thread_id, &context).await
+                Box::pin(fork_acp_thread(state, scope, &params.thread_id, &context)).await
             }
         }
         wire::ThreadActionInput::ForkBefore { message_id } => {

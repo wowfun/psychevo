@@ -467,6 +467,9 @@ pub enum AppTurnEvent {
         #[ts(optional)]
         accounting: Option<Value>,
     },
+    MessageDelta {
+        text: String,
+    },
     ReasoningDelta {
         text: String,
     },
@@ -585,6 +588,12 @@ mod app_server_contract_tests {
                 usage: Some(serde_json::json!({"inputTokens": 1})),
                 metadata: Some(serde_json::json!({"provider": "fake"})),
                 accounting: Some(serde_json::json!({"reportedTotalTokens": 1})),
+            },
+        );
+        assert_serialized_variant_matches_schema(
+            "type",
+            AppTurnEvent::MessageDelta {
+                text: "hello".to_string(),
             },
         );
         assert_serialized_variant_matches_schema(

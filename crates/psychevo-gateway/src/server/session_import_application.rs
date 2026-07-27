@@ -513,17 +513,17 @@ pub(super) async fn fork_acp_thread(
                 )
                 .await?;
         }
-        let snapshot = state
-            .inner
-            .gateway
-            .fork_bound_agent_session(
-                binding.clone(),
-                bound.profile.clone(),
-                peer,
-                options.clone(),
-                thread_id.clone(),
-            )
-            .await?;
+        // Extension discovery is async and can make this composed future large.
+        // Keep it behind one heap boundary and release it before projection work.
+        let mut fork = Box::pin(state.inner.gateway.fork_bound_agent_session(
+            binding.clone(),
+            bound.profile.clone(),
+            peer,
+            options.clone(),
+            thread_id.clone(),
+        ));
+        let snapshot = fork.as_mut().await?;
+        drop(fork);
         let agent = resolve_gateway_agent_binding_snapshot(
             &options,
             &bound.profile,
