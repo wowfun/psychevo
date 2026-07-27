@@ -180,6 +180,11 @@ Tool runtime JSON is projected into role, status, source, typed blocks,
 metadata, usage, and accounting; it is never placed under a generic `value`
 escape hatch.
 
+An assistant-text `item.updated` entry whose metadata projection is
+`assistant_text_delta` carries append-only block text. It avoids rebuilding the
+complete assistant entry for every provider chunk; the later
+`item.completed` entry remains the authoritative full value.
+
 Every emitted block title and preview is capped at 512 Unicode scalar values.
 Body, detail, and Tool-result content are capped at 8,192 Unicode scalar
 values. Arbitrary metadata, raw input, raw output, usage, and accounting values

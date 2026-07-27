@@ -208,6 +208,11 @@ and detached Turn execution: the Turn shell persists and emits one failed
 `TurnCompleted`, unless a terminal for that Turn already exists, in which case
 it emits no duplicate terminal.
 
+High-frequency durable live text uses a typed in-memory entry accumulator.
+Applying a delta mutates only that entry; serialization of the growing snapshot
+occurs at the bounded flush boundary or terminal, never once per delta while
+holding the shared snapshot mutex.
+
 Workspace Review is observation-based. A typed internal mutation sink accepts
 exact UTF-8 before/after deltas from owned write/edit paths and opaque
 invalidations from mutation-capable paths that cannot prove their file effects.
@@ -863,6 +868,10 @@ started/updated/completed observations, interaction requests and resolutions,
 status, warnings, and terminal outcomes. Ordinary events do not include raw
 runtime or ACP fallbacks. Raw or unclassified observations are ignored unless
 another spec assigns them explicit typed semantics.
+
+A Codex capability-broker request deadline is final for its caller. Enqueuing a
+best-effort worker cancellation after that deadline must be non-blocking even
+when the ordinary driver command channel is full or the child is stalled.
 
 Gateway events are live observations, not durable evidence. Durable records
 remain owned by runtime and storage specs. [035 Event

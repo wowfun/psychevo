@@ -107,7 +107,9 @@ Server-side resource resolution must not depend on client fs callbacks.
 
 Gateway transcript observation maps to ACP session updates:
 
-- assistant text progress becomes agent message chunks
+- assistant text progress becomes agent message chunks; the completed result
+  contributes only a missing suffix or a non-streamed fallback, never a
+  duplicate copy of text already delivered as chunks
 - reasoning progress becomes agent thought chunks; ACP only exposes reasoning
   already projected by runtime or Gateway and must not mine provider-private
   raw reasoning fields

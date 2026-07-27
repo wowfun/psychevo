@@ -34,15 +34,18 @@ not add a repository family, read pool, actor, second database, or compatibility
 facade.
 
 File-backed pools use at most five connections. In-memory test databases use
-one connection so every operation observes the same database. Every connection
-enables foreign keys, WAL journal mode, NORMAL synchronous mode, and a
-five-second busy timeout. Compound semantic writes acquire an explicit
-`BEGIN IMMEDIATE` transaction and commit or roll back atomically. WAL
-maintenance uses SQLite's connection-native PASSIVE auto-checkpoint mechanism;
-the bundled SQLite build enables it at its default threshold of 1000 WAL pages
-for every new connection. Psychevo does not layer a write-count scheduler or a
-manual `PRAGMA wal_checkpoint` await onto semantic writes, Turn terminals, or
-caller receipts.
+one connection so every operation observes the same database. File-backed
+database initialization establishes SQLite's persistent WAL journal mode once,
+before pool creation, with bounded retry and backoff for the exclusive
+journal-mode transition. Pool connections do not repeat that database-level
+transition; they enable foreign keys, NORMAL synchronous mode, and a
+five-second busy timeout while observing the persistent WAL mode. Compound
+semantic writes acquire an explicit `BEGIN IMMEDIATE` transaction and commit or
+roll back atomically. WAL maintenance uses SQLite's connection-native PASSIVE
+auto-checkpoint mechanism; the bundled SQLite build enables it at its default
+threshold of 1000 WAL pages for every new connection. Psychevo does not layer a
+write-count scheduler or a manual `PRAGMA wal_checkpoint` await onto semantic
+writes, Turn terminals, or caller receipts.
 
 Opening and closing `StateRuntime` are asynchronous. Every database-backed
 semantic operation is asynchronous; purely in-memory filesystem-grant state may
@@ -66,9 +69,12 @@ nonzero version other than v29 is rejected with explicit reset/new-database
 guidance before ordinary queries.
 
 Concurrent first open is serialized by SQLite and must produce one valid
-migration history. Production runtime code does not retain a rusqlite execution
-path. Test fixtures may use a rusqlite version linked against the same
-`libsqlite3-sys` generation, but they cannot become a second production
+migration history. Because SQLite's busy handler does not wait for the
+exclusive lock needed by a journal-mode transition, concurrent WAL bootstrap
+retries that transition with bounded backoff before migration enters its
+`BEGIN IMMEDIATE` gate. Production runtime code does not retain a rusqlite
+execution path. Test fixtures may use a rusqlite version linked against the
+same `libsqlite3-sys` generation, but they cannot become a second production
 implementation.
 
 ## Schema Shape
@@ -539,10 +545,11 @@ SQLite persistence should perform periodic WAL checkpoint work when supported by
 
 Storage failures that affect session or message persistence must be observable to runtime or caller-facing layers that depend on persistence.
 
-The current implementation uses `PRAGMA user_version = 29`, WAL, foreign keys,
-short busy timeouts, `BEGIN IMMEDIATE`, bounded jitter retry, and SQLite's
-connection-native PASSIVE auto-checkpoint. Semantic write completion never
-starts a second Psychevo-owned checkpoint scheduler.
+The current implementation uses `PRAGMA user_version = 29`, a bounded-backoff
+persistent-WAL bootstrap, foreign keys, short busy timeouts,
+`BEGIN IMMEDIATE`, and SQLite's connection-native PASSIVE auto-checkpoint.
+Semantic write completion never starts a second Psychevo-owned checkpoint
+scheduler.
 The supported `:memory:` mode owns exactly one pool connection and disables
 idle timeout and maximum connection lifetime for that pool. The connection
 must remain alive for the full `StateRuntime` lifetime so recycling cannot

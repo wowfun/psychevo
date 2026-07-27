@@ -385,16 +385,21 @@ variable names may echo the variable name but never the resolved secret value.
 
 ## Client Application Module
 
-Workbench consumes those domain RPCs through one scope-keyed
-`CapabilitiesApplication` Module. Its Interface exposes immutable snapshots,
-subscription, explicit refresh, and typed capability commands. Each snapshot
-has a monotonic local revision and contains the effective rows, detail state,
-loading or mutation state, operation receipt, and current selection for one
-canonical scope.
+Workbench consumes those domain RPCs through one
+`CapabilitiesApplication` Module with exactly one active scope and epoch. Its
+Interface exposes immutable typed snapshots, subscription,
+`activate(scope)`, explicit refresh, and `mutate(domain, command)`. Each
+snapshot has a monotonic local revision and contains the effective rows, detail
+state, loading or mutation state, operation receipt, and current selection for
+the active canonical scope. The Module does not retain a map of abandoned
+scope state.
 
-The Module deduplicates concurrent reads for the same scope, owns OAuth and
-plugin-connect polling, ignores stale results from an abandoned scope, and
-performs the authoritative post-mutation refresh before committing a receipt.
+The Module deduplicates concurrent reads for the active scope, owns OAuth and
+plugin-connect polling, ignores results from an older scope epoch, and performs
+the authoritative post-mutation refresh before committing a receipt.
+Page-owned mutation presentation captures the initiating scope. A rejection
+from an abandoned scope neither writes into the replacement scope nor throws
+because the active scope was cleared.
 Host lifecycle replay may dispose and reattach the same Module owner; a later
 attachment reactivates reads and subscriptions while results from the disposed
 generation remain stale.
@@ -405,6 +410,22 @@ receipts, or post-write selection repair.
 This client Module uses the existing domain RPCs. It does not introduce a
 Gateway capability aggregate, dynamic registry, process-global singleton, or
 new product feature gate.
+
+Precise Gateway results continue to come from concrete Rust wire types and
+generated TypeScript schemas. Capability methods that still aggregate
+authority-specific open metadata remain explicitly marked `opaque` in the
+generated method registry; an object boundary must not be described as
+semantic validation. Removing that debt is a protocol migration, not a
+page-local parser or cast.
+
+The page splits only where state ownership differs: Agents owns definitions,
+teams, runtimes, and backend management; Skills owns discovery, Markdown, and
+supporting-file state; Plugins, MCP, and Tools use one shared catalog panel
+because they have the same selection/list/detail state machine. Three
+domain-named forwarding wrappers are forbidden. The Workbench layout remains a
+pure shell receiving named rendered slots plus geometry/mobile state; History,
+Thread, Management, and Inspector own their focused snapshot and intent inputs.
+No new controller hierarchy or second state store is introduced.
 
 ## Runtime Profiles And Thread Application
 

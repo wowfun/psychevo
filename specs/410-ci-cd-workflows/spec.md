@@ -145,7 +145,8 @@ passed. This workflow never publishes packages, creates a hosted release, or
 uses provider credentials. Its artifact upload explicitly includes hidden
 paths because the Python wheel, sdist, and checksum staging root is `.local`;
 the presence of a non-hidden Desktop bundle cannot mask missing Python
-artifacts.
+artifacts. The profile output root and upload path use the same matrix
+operating-system key; runner display names are not filesystem keys.
 
 Hosted workflows have no aggregate release job, live provider work, nightly,
 fuzz, or soak work. Full visual and live profiles remain manual, artifact-owned
@@ -177,13 +178,14 @@ valid terminal SSE event appear to be missing.
 Registered live checks:
 
 - `provider-smoke`: native `xtask` provider smoke with two `pevo run --format
-  json --include-reasoning` turns, `read` tool verification, `--continue`
-  thread reuse verification, and token final-answer verification. Its verifier
-  consumes the current public item lifecycle: non-empty
-  `item.updated(reasoning)` proves streamed reasoning and a completed
-  `tool_execution_end` with `tool_name=read` and `outcome=normal` proves tool
-  execution. It must not silently keep accepting a retired
-  `entry.completed.blocks` output shape.
+  json --include-reasoning` turns, successful file-inspection tool verification,
+  `--continue` thread reuse verification, and token final-answer verification.
+  Its verifier consumes the current public item lifecycle: non-empty
+  `item.updated(reasoning)` proves streamed reasoning, while a completed normal
+  tool result that contains the file's probe token proves inspection. The
+  verifier must not require a particular equivalent non-mutating tool choice
+  such as `read` versus `exec_command cat`, and it must not silently keep
+  accepting a retired `entry.completed.blocks` output shape.
 - `pevo-doctor-live`: `pevo doctor --live --json`.
 - `runtime-provider-read`: runtime ignored live provider read-tool check.
 - `runtime-model-fetch`: runtime ignored Xiaomi `/models` fetch/cache check.
@@ -257,6 +259,10 @@ Registered live checks:
   If the real skill reaches a Permission interaction, the check may answer only
   through the rendered GUI and must choose the least-persistent `Once` action;
   it must not seed, mutate, or persist trust policy to bypass the interaction.
+  If the provider reaches a Clarify interaction, the check may submit only a
+  valid default answer already selected by the rendered GUI. It must not
+  synthesize an answer, choose `Other`, or call the interaction RPC behind the
+  UI.
   Completion checks for live skill flows must scope running/streaming DOM state
   to the active Transcript region so shell, sidebar, or history running
   affordances cannot mask a completed assistant response.

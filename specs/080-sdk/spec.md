@@ -296,6 +296,12 @@ state mutation before a later normal request is dispatched. After that ordered
 prefix, independent ordinary requests and reverse-callback responses may run
 concurrently. Stdio and WebSocket use the same rule.
 
+Each inbound text frame or stdio line is decoded exactly once into either a
+callback response or a typed request. Capacity classification, receive-order
+handling, method policy, and dispatch consume that parsed value; they do not
+parse the raw JSON again or clone request parameters. Both transports reject a
+frame larger than the same 16 MiB maximum used by the Python transport.
+
 Each connection admits at most 64 concurrent requests. Ordinary data, read, and
 start requests may occupy at most 63 slots; shutdown, interrupt, steer, and
 interaction-response control requests may use the reserved final slot. This
@@ -317,6 +323,9 @@ remove a currently active relay.
 The App Server exposes typed Thread, Turn, snapshot, event subscription,
 interaction response, custom-tool registration, and shutdown operations. HTTP,
 WebSocket, and stdio projections must not implement a second Application.
+Its public Turn-event union includes incremental `message_delta` observations
+with their text payload. The Rust wire enum, generated TypeScript union, and
+JSON Schema are one contract and must expose the same variant.
 
 Generated JSON Schema validates the same camelCase object fields that serde
 places on the wire, including fields inside tagged-enum variants. Generation
@@ -370,6 +379,11 @@ Custom-tool registration compiles the supplied JSON Schema once and rejects an
 invalid or unsupported schema. Every execution validates the complete argument
 value against that compiled schema before sending a reverse callback. Validation
 failure is a typed Tool invocation error and never invokes client code.
+
+Registering a reverse callback returns a private cancellation guard. Resolving
+the callback disarms the guard; dropping the request future for abort,
+disconnect, timeout, or task cancellation removes its pending correlation
+immediately. Cleanup never waits for a late client response.
 
 Approval and clarify facts are always durable pending interactions. A live
 handler is only a convenience responder. Disconnect, timeout, or handler error

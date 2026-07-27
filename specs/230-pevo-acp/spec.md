@@ -138,6 +138,12 @@ Framework completed-message events preserve top-level provider `usage`,
 top-level fields at `message_end`; it must not look for accounting inside the
 message body or discard it while converting Framework events.
 
+Framework event-log overflow invalidates ACP's accumulated assistant-text
+prefix for that Turn. ACP may continue projecting later observations, but at
+terminal completion it sends the complete Framework-authoritative final answer
+instead of attempting a suffix against the invalid prefix. Without overflow,
+terminal projection may send only the missing suffix.
+
 `psychevo-acp` sends ACP command availability after the client receives or can
 apply the ACP session id. It also handles supported slash-command prompts
 locally before invoking the model-backed runtime path.

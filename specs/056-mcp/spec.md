@@ -96,6 +96,26 @@ source precedence, replacement, disabled sources, and compact diagnostics. The
 connection manager owns startup, capability listing, call dispatch, connection
 reuse, per-server policy, and dirty-state tracking.
 
+Preparation starts at most eight accepted servers concurrently. Each server
+has one effective startup deadline spanning authorization, transport connect,
+initialize, and initial tool discovery. Results are merged in resolved catalog
+order rather than completion order. Runtime calls initial `tools/list` only
+when the negotiated peer capabilities advertise tools; resource and prompt
+availability comes from those negotiated capabilities and does not require
+eagerly paging their complete catalogs.
+
+An omitted policy timeout is not unbounded: it resolves internally to 30
+seconds for startup and 300 seconds for ordinary requests. Explicit policy
+values override those defaults. Resource, prompt, and tool requests all use one
+small cancellation helper that selects the caller abort signal, effective
+request timeout, and remote result. Cross-server utility lists use the same
+eight-way bound and stable catalog-order merge.
+
+The startup deadline also owns startup authorization. If it expires after a
+durable permission interaction has been published, runtime cancels that exact
+interaction through the approval broker before returning the startup failure;
+it does not leave a pending request whose waiter has already been dropped.
+
 The Thread runtime reuses server connections while the resolved catalog and
 available environment identity are unchanged. The connection reuse key includes
 the complete resolved transport identity: stdio command, arguments, explicit

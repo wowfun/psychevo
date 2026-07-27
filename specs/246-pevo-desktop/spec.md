@@ -164,12 +164,12 @@ The renderer transport distinguishes reconnectable `close()` from terminal
 generation and permits a later connect. `dispose()` is idempotent, unregisters
 all Tauri listeners, requests generation-scoped native disconnect, awaits
 bridge cleanup, and permanently rejects later connect/send calls.
-`GatewayClient.dispose()` awaits this terminal transport cleanup. Window
-destruction and application shutdown use `dispose`; transient Gateway loss
-uses the reconnectable close path. The Desktop connection wrapper closes the
-`GatewayClient` before disposing its transport so pending RPCs reject
-immediately and connection subscribers observe the terminal state before
-native listeners are removed.
+The Desktop connection resource owns both `GatewayClient` and transport.
+Its terminal `dispose()` first closes the Client and then awaits transport
+disposal so pending RPCs reject immediately and connection subscribers observe
+the terminal state before native listeners are removed. Window destruction and
+application shutdown dispose that resource; transient Gateway loss uses the
+transport's reconnectable close path.
 
 Floating is a Desktop-specialized small window, not a second chat
 implementation. Desktop must wire Floating and Workbench to shared

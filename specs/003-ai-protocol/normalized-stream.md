@@ -38,6 +38,23 @@ The normalized stream supports:
 The provider boundary is internal. Concrete Rust names may evolve with later
 attachments, but the first implementation should keep this semantic shape.
 
+The agent-facing normalized stream preserves those deltas instead of replacing
+them with a complete partially assembled Message on every chunk. Its public
+assistant delta family has stable identity and append/upsert semantics for:
+
+- text append
+- reasoning append
+- tool-call start
+- tool-argument append
+- provider-tool upsert
+- source addition
+
+Message start and terminal message end carry the complete authoritative
+Message. An incremental accumulator owns `<think>` parsing across chunk
+boundaries and final Message assembly. Each input byte is processed a constant
+number of times; consumers must not rescan the full accumulated text or clone
+the full Message per delta.
+
 ## Tool-Call Assembly
 
 Streamed tool-call deltas are assembled by:

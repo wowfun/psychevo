@@ -9,18 +9,29 @@ projections with the smallest owner that preserves existing features and UX.
 
 ## Runtime Ownership
 
-`Application` remains the public Framework facade. Its implementation is split
-only at three existing semantic owners:
+`Application` remains the public Framework facade. `application.rs` declares
+that facade and the small public vocabulary that callers learn. Implementations
+are split at the existing semantic owners:
 
 - the application runtime owns accepted task supervision, per-Thread operation
   serialization, active Turn slots, pending terminal retries, and shutdown;
 - the interaction broker owns durable request/response ordering and waiter
   rendezvous;
 - the event log owns one bounded Turn event journal and lag/resync behavior.
+- the application lifecycle module owns construction, admission, graceful and
+  forced shutdown, and the cloneable Client entrypoint;
+- the Thread module owns Thread commands, snapshots, bounded history reads, and
+  Thread-list cursor semantics;
+- the Turn module owns Turn preparation, accepted execution, receipts,
+  completion, control, event delivery, and terminal persistence;
+- the Agent Session module owns the injected execution port and its Native
+  adapter.
 
-These modules are private. Public Thread, Turn, result, event, request, and
-adapter types stay in `application.rs`; the split must not add a second facade,
-controller hierarchy, actor system, or item-level re-export layer.
+These implementation modules are private and operate on the public vocabulary
+declared by the facade. Tests exercise the public Framework Interface rather
+than module-private helpers. The split must not add a second facade, controller
+hierarchy, actor system, pass-through repository family, or public item-level
+re-export layer.
 
 ## Bounded Work
 
@@ -40,8 +51,25 @@ connection capacity rather than total process lifetime.
   for shutdown, interrupt, steer, and interaction response control traffic.
   Reverse-callback responses are correlation traffic rather than requests and
   never consume or wait behind that request capacity.
+- App Server stdio and WebSocket parse each inbound frame once and delegate
+  request lifetime to the same connection owner. Callback registration is
+  cancellation-safe: dropping an aborted callback removes its pending
+  correlation immediately.
 - Python stdio accepts at most one 16 MiB JSON line and configures the
   subprocess stream reader for that same boundary.
+- Plugin worker stdout accepts at most one 16 MiB JSON line. Worker stderr is
+  drained continuously and retains only the final 64 KiB for diagnostics.
+- MCP prepares at most eight servers concurrently, preserves resolved catalog
+  order in the resulting snapshot, and applies one effective startup deadline
+  across authorization, connection, and initial tool discovery. Absent policy
+  values resolve internally to 30 seconds for startup and 300 seconds for
+  requests.
+- The Codex capability broker owns one driver with at most 64 ordinary
+  in-flight requests and a separate bounded reverse-response lane. Reverse
+  elicitation responses remain deliverable while ordinary capacity is full.
+- Process-lifetime cwd inventories retain at most 32 entries and evict one
+  deterministic key when full. Eviction drops only the cache reference; active
+  snapshots remain usable.
 - Browser event journals use bounded O(1) global and per-Thread rings. A
   subscription receives only the scope it requested.
 
@@ -97,6 +125,15 @@ Workbench transcript state is a committed prefix plus an invocation-bounded
 `liveEntries` overlay. Streaming updates mutate only the overlay. Terminal
 reconciliation replaces the overlay with the committed result without cloning
 or sorting the entire transcript per token.
+
+Agent streaming uses append/upsert deltas keyed by stable block or call
+identity. The hot path never reparses accumulated text or rebuilds the complete
+assistant Message for every provider chunk. `MessageStart` and terminal
+`MessageEnd` remain full authoritative values for recovery.
+
+For the selected Thread, Workbench starts a Turn from the context already owned
+by `ThreadSession`; it does not insert a serial `thread/context/read` before
+`turn/start`. Non-selected Thread operations still read their context.
 
 Team status refreshes only for Team/mission/subagent lifecycle events. Refresh
 is single-flight with exactly one trailing refresh when relevant facts arrive

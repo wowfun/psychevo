@@ -194,6 +194,22 @@ carry raw runtime JSON fallback payloads. Public projection events must use
 stable names and stable identities for turns, entries, blocks, tools, actions,
 warnings, activity, title, and terminal outcomes.
 
+Live assistant projection uses typed append/upsert deltas rather than a full
+Message replacement for every token. Gateway, SDK, TUI, CLI, Workbench, and
+Desktop accumulate those deltas under stable entry/block/call identities.
+Terminal full-message projection remains authoritative, so reconnect and
+resync never require replaying every delta.
+
+Gateway emits `entryBlockTextDelta` only after the matching live entry and block
+have been introduced by an `entryStarted` or `entryUpdated` snapshot. The delta
+carries `threadId`, `turnId`, `entryId`, `blockId`, `text`, and `updatedAtMs`;
+it appends `text` to that exact block and cannot create an unknown identity.
+If projection has no prior live identity, it emits the small initial entry
+snapshot instead. Delivery may losslessly concatenate adjacent deltas for the
+same block while preserving order, but it may not replace one delta with another
+because each carries new content. The terminal `entryCompleted` snapshot remains
+the authoritative materialization and repairs any missing preview after reconnect.
+
 Within Application, Adapter and lifecycle observations enter one bounded typed
 `TurnEventStream`. A synchronous observer callback is not a parallel delivery
 seam. A slow or failed subscriber cannot block or unwind Turn execution. When a

@@ -51,7 +51,9 @@ Managed state lives under `$PSYCHEVO_HOME/gateway/`:
   exclusively from the first state read through launch or shutdown completion,
   while `status` holds a shared lock
 - `instance.lock`: the managed `serve` instance lease, held exclusively by the
-  child from before binding until process exit
+  child from before binding until process exit; releasing its owning handle
+  explicitly unlocks before closing the file so concurrent process creation
+  cannot extend the lease through a transient inherited descriptor
 - `server.log`: appended stdout/stderr from the background server
 
 The directory is owner-only. `server.json` must not contain the token.

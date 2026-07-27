@@ -265,6 +265,21 @@ shutdown sends `shutdown` once and then reaps the child. Runtime does not spawn
 a fresh worker for each contribution list, tool call, or hook call, and does
 not pool workers across independent invocations.
 
+The invocation assembly explicitly retains every started worker session and
+awaits its asynchronous shutdown on both success and failure after tools and
+hooks stop using it. Process `Drop` is only an abnormal best-effort kill
+fallback; it is not the normal production teardown owner.
+
+Worker startup, calls, contribution discovery, hook dispatch, and shutdown are
+asynchronous. One owner holds the Tokio child, stdin, bounded stdout decoder,
+and stderr drain. A call selects among its matching response, the existing
+10-second deadline, and the invocation abort signal. Timeout, abort, malformed
+JSON, a mismatched response id, or an oversized response kills and reaps the
+worker before returning. Stdout accepts at most one 16 MiB JSON line; stderr is
+drained concurrently and only the final 64 KiB is retained for diagnostics.
+Drop never sleeps or waits synchronously; it performs only best-effort
+`start_kill` when it can acquire the process immediately.
+
 The first executable worker declaration is a tool. Worker tool descriptors
 become `ToolBinding` adapters and enter `ToolSurfaceAssembly.extension_tools`.
 Worker-provided hook handlers are candidate hook declarations for the hook

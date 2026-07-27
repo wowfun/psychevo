@@ -11,6 +11,12 @@
 - Hardened caller-owned App Server Turn identity and SDK event registration,
   atomic Turn admission, and Plugin, Skill, MCP, and Codex process lifetimes
   without compatibility shims.
+- Deepened private ownership across the Framework Application, runtime workers,
+  brokers, caches, and capability UI without changing public capabilities.
+- Made assistant, ACP, App Server, and SDK streaming and recovery linear, typed,
+  consumer-visible, and resilient to stale capability reads.
+- Hardened artifact delivery, concurrent SQLite bootstrap, bounded MCP and
+  Plugin execution, and orderly worker shutdown.
 
 ## 2026-07-26
 

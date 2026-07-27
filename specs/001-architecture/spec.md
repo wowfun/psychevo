@@ -82,11 +82,13 @@ pruning, and built-in tool assembly remain internal Framework modules.
 helpers, and transaction helpers remain implementation details; no public store
 handle, repository family, or pass-through state facade is added.
 
-`application.rs` retains the public Framework vocabulary and facade. Private
-accepted-work supervision and Thread serialization, interaction rendezvous,
-and bounded event journaling live in semantic submodules as defined by
-[Runtime Scalability And Ownership](runtime-scalability.md). This is an
-ownership split, not a second Application interface.
+`application.rs` declares the public Framework vocabulary and facade. Private
+modules own Application lifecycle, Thread operations, Turn execution, Agent
+Session adaptation, accepted-work supervision and serialization, interaction
+rendezvous, and bounded event journaling as defined by
+[Runtime Scalability And Ownership](runtime-scalability.md). Implementations
+move behind those seams; callers still learn one Framework Interface. This is
+an ownership split, not a second Application interface.
 
 The production `StateRuntime` Interface is asynchronous and backed by one
 runtime-owned SQLite connection pool. Callers await semantic state operations;
