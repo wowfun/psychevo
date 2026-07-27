@@ -1,9 +1,14 @@
 ---
 name: 0002. Runtime Extension Registry
-status: proposed
+status: superseded
 date: 2026-06-30
 psychevo_self_edit: deny
+superseded_by: 0005. Direct Runtime Assembly
 ---
+
+> Superseded on 2026-07-26. The implementation had no independent mutable
+> registry or extension-data consumers; ADR 0005 replaces this predicted
+> abstraction with direct invocation assembly.
 
 ## Context
 

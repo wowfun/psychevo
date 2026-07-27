@@ -76,7 +76,13 @@ declarations. Project-local declarations remain valid config input, but
 Workbench capability management writes to the active profile unless a future
 surface explicitly selects a project-local scope.
 
-## Runtime Snapshot
+## Thread Runtime And Snapshot
+
+One materialized Framework Thread lazily owns one `McpRuntime` when its accepted
+inputs contain MCP declarations. The runtime owns the resolved catalog,
+connection manager, and generation-safe snapshots. Turns on that Thread reuse
+the same accepted server connections. Archive, delete, or Application shutdown
+closes them. A process-wide MCP pool is not used.
 
 Runtime creates an MCP runtime snapshot at a generation-safe boundary. The
 snapshot contains the resolved catalog, connected servers, discovered
@@ -90,14 +96,25 @@ source precedence, replacement, disabled sources, and compact diagnostics. The
 connection manager owns startup, capability listing, call dispatch, connection
 reuse, per-server policy, and dirty-state tracking.
 
-Runtime may reuse server connections when the resolved catalog and available
-environment identity are unchanged. `tools/list_changed` or equivalent runtime
-signals may mark one or more servers dirty, but runtime must not silently
-mutate model-visible MCP declarations in the middle of a generation request. A
-dirty server may refresh only at a generation-safe boundary, such as before the
-next generation request or after an explicit reload command. If a later request
-reconstructs a prompt prefix with a different MCP snapshot hash or tool
-declaration hash, the reconstruction must be labeled approximate.
+The Thread runtime reuses server connections while the resolved catalog and
+available environment identity are unchanged. The connection reuse key includes
+the complete resolved transport identity: stdio command, arguments, explicit
+environment, and effective cwd; or HTTP URL, headers, resolved bearer/OAuth
+credential digest, scopes, resource, and client identity. It also includes
+source, policy, and the effective MCP-startup permission environment. Secret
+values contribute only through a digest and never enter diagnostics.
+
+Only a snapshot whose enabled servers completed startup is cacheable. Required
+failures, permission/startup failures, and optional connection failures remain
+observable for that Turn but are retried at the next generation-safe boundary.
+The accepted catalog for an active Turn is immutable. `tools/list_changed` or
+equivalent runtime signals may mark one or more servers dirty, but runtime must
+not silently mutate model-visible MCP declarations in the middle of a
+generation request. A dirty server may refresh only at a generation-safe
+boundary, such as before the next generation request or after an explicit
+reload command. If a later request reconstructs a prompt prefix with a
+different MCP snapshot hash or tool declaration hash, the reconstruction must
+be labeled approximate.
 
 ## Transports
 

@@ -30,7 +30,11 @@ Out of scope:
 
 A tool surface is the runtime-selected set of tool candidates, tool declarations, and execution bindings available to one accepted agent invocation.
 
-A model-visible tool declaration snapshot is the subset and provider-neutral shape of tool declarations supplied to one generation request. This snapshot may be refreshed between generation requests inside the same agent invocation when runtime observes changed registry state, availability, or toolset expansion facts.
+A model-visible tool declaration snapshot is the subset and provider-neutral
+shape of tool declarations supplied to one generation request. It may change
+between generation requests only through invocation-owned deferred-tool
+activation. Source discovery and accepted bindings stay frozen for the
+invocation.
 
 A tool declaration is a model-visible semantic capability promise. It describes a tool the model may request. This spec does not define declaration fields, input schemas, provider-specific encoding, or prompt text.
 
@@ -58,7 +62,11 @@ is a provider-executed generation declaration, not a runtime tool-surface entry,
 and has no execution binding. When local and hosted variants share a provider-
 visible name, runtime selects exactly one variant for each generation.
 
-Runtime selects the agent-invocation scoped tool surface from available inputs. Capability extensions may declare tool candidates or toolset candidates, but [050 Capability Extensions](../050-capability-extensions/spec.md) owns source, declaration, activation, availability, conflict, and registry boundaries. This spec does not define source discovery, selection precedence, or plugin mechanics.
+Runtime selects the agent-invocation scoped tool surface from available inputs.
+Capability extensions may declare tool candidates or toolset candidates, but
+[050 Capability Extensions](../050-capability-extensions/spec.md) owns source,
+declaration, activation, availability, and source conflicts. This spec does not
+define source discovery, selection precedence, or plugin mechanics.
 
 When an agent definition is selected, runtime applies that definition's tool
 policy as an additional invocation-scoped constraint. Agent policy may narrow
@@ -72,28 +80,31 @@ The AI generation request may include a refreshable tool snapshot from the agent
 Prompt-prefix metadata may retain the effective canonical tool identities,
 provider fallback names, declaration hash, and MCP runtime snapshot hash used
 for request reconstruction. The full declaration payload is reconstructable
-from the current registry by default; if the reconstructed payload or runtime
+from direct invocation assembly by default; if the reconstructed payload or runtime
 snapshot does not match the recorded hashes, the request reconstruction must be
 labeled approximate.
 
 Tool surface facts may contribute to durable evidence for agent-invocation inspection. These facts may include selected toolsets, expanded tool names, declaration hashes, refresh facts, omitted unavailable tools, execution bindings, tool requests, execution outcomes, and tool-result relationships. [005 Durable Evidence](../005-durable-evidence/spec.md) defines which relationships must be representable. Ordinary durable evidence does not require persisting a full capability snapshot or full model-visible tool declaration payload.
 
-The runtime tool surface is assembled through a source-aware tool registry. Each
-tool entry records source identity, source family, tool name, execution binding,
-exposure state, optional owning toolsets, and conflict or omission reason. The
-registry must preserve existing effective tool order for unchanged inputs while
-making source-qualified acceptance facts available internally.
+The runtime tool surface is compiled once into a source-aware
+`ToolSelectionPlan`. Each selected entry records source identity, source
+family, canonical identity, provider-visible name, execution binding, exposure
+state, optional owning toolsets, and conflict or omission reason. The plan
+preserves existing effective tool order for unchanged inputs and is the sole
+input to router construction and provider-hosted tool selection.
 
-Built-in tools, clarify tools, skill tools, MCP tools, plugin worker tools, and
-agent tools enter the same registry interface. A contributed tool name becomes
+Built-in tools, clarify tools, skill tools, MCP tools, plugin worker tools,
+hosted provider tools, and agent tools enter the same plan. A contributed tool name becomes
 model-visible only when its execution binding is registered for the accepted
 invocation and the current mode permits it. Building the invocation
 `ToolRouter` is fallible. Duplicate canonical identities or duplicate
 provider-visible/display names are source-qualified conflicts and reject the
 ambiguous router before generation; insertion order never selects a winner.
 Source discovery may omit a declaration under an explicit precedence policy
-before router construction, but a router that was constructed successfully
-has a one-to-one canonical/display lookup and requires no fallback dispatch.
+before plan compilation, but a router that was constructed successfully has a
+one-to-one canonical/display lookup and requires no fallback dispatch. Runtime
+must not maintain a parallel accepted-tool-name vector or compile hosted tools
+from raw configuration before contributed bindings are known.
 
 ## Toolsets
 
@@ -101,7 +112,11 @@ A toolset is a named grouping of tools or other toolsets used during runtime sel
 
 Toolset names are selection and configuration concepts. A toolset is not itself model-visible and is not a tool the model may request.
 
-Toolset expansion resolves selected toolsets into a finite set of tool declarations and execution bindings during accepted agent-invocation assembly. Runtime may recompute expansion before a later generation request when registry, availability, or runtime-managed selection facts change. Only expanded tool declarations may enter a model-visible tool declaration snapshot.
+Toolset expansion resolves selected toolsets into a finite set of tool
+declarations and execution bindings during accepted agent-invocation assembly.
+Only deferred activation may alter a later generation-request snapshot; the
+accepted expansion itself is not recomputed during the invocation. Only
+expanded tool declarations may enter a model-visible tool declaration snapshot.
 
 A toolset may include other toolsets. Expansion must detect unknown includes, unavailable includes, and cycles. Those conditions must become observable as unavailable, degraded, omitted, or rejected selection facts; they must not be silently ignored.
 

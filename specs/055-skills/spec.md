@@ -144,6 +144,13 @@ Discovery facts that affect agent-invocation assembly are capability extension
 facts. Runtime owns their acceptance into an invocation and should expose
 diagnostics through CLI/TUI observation surfaces when practical.
 
+One agent invocation owns one `SkillRuntime`. It canonicalizes and scans the
+accepted roots once, serves the compact index, explicit selection, `list_skills`,
+and `view_skill` from that snapshot, and preprocesses each selected body once.
+An explicit skill install/enable/disable/write mutation invalidates and
+refreshes the invocation runtime; ordinary tool calls and generation requests
+must not rescan every root.
+
 ## Model Visibility
 
 Runtime appends a compact skill index to system instructions when at least one

@@ -140,7 +140,7 @@ Hooks participate in the extension system but do not replace it.
 
 Hook declarations may come from plugin packages, profiles, projects, selected
 agents, managed policy, or future runtime sources. Those sources still enter
-through package policy, profile/project policy, or the `ExtensionRegistry`.
+through package policy, profile/project policy, or direct host assembly.
 
 Context effects enter context assembly. Tool effects enter tool dispatch and
 permission flow. Approval decisions answer only one approval request. Provider

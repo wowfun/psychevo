@@ -82,6 +82,12 @@ pruning, and built-in tool assembly remain internal Framework modules.
 helpers, and transaction helpers remain implementation details; no public store
 handle, repository family, or pass-through state facade is added.
 
+`application.rs` retains the public Framework vocabulary and facade. Private
+accepted-work supervision and Thread serialization, interaction rendezvous,
+and bounded event journaling live in semantic submodules as defined by
+[Runtime Scalability And Ownership](runtime-scalability.md). This is an
+ownership split, not a second Application interface.
+
 The production `StateRuntime` Interface is asynchronous and backed by one
 runtime-owned SQLite connection pool. Callers await semantic state operations;
 they never borrow a connection, hold a database lock, select a pool member, or
@@ -140,7 +146,7 @@ Owns:
 - built-in runtime capability modules specified by capability specs
 - resource surface wiring
 - agent-invocation scoped tool surface assembly
-- capability-extension declaration acceptance and runtime extension registry assembly
+- direct capability-extension declaration assembly into owning runtime modules
 - model context assembly
 - durable execution records, persistence, replay wiring, and canonical
   Thread/Turn projection
@@ -268,7 +274,7 @@ Allowed direct interaction rules:
   agent-invocation scoped tool surface bindings, and Framework-owned durable
   records.
 - `psychevo` may accept capability-extension declarations and assemble
-  the runtime extension registry for an invocation.
+  direct owning-module assembly for an invocation.
 - `psychevo` may implement and assemble built-in capability modules, such as
   capability specs that explicitly place their implementation in Framework.
   Concrete capability behavior remains owned by those capability specs.

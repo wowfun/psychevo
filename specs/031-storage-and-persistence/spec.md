@@ -11,7 +11,7 @@ Define Psychevo's storage and persistence boundary for durable semantic facts.
 - persistence substrate for durable evidence
 - optional persistence boundary for session continuity
 - optional persistence boundary for memory
-- optional persistence boundary for exceptional extension registry facts that affect agent-invocation inspection
+- optional persistence boundary for exceptional capability-source facts that affect agent-invocation inspection
 - optional persistence boundary for Framework source-to-Thread bindings
 - optional persistence boundary for local product automation definitions and
   run coordination
@@ -54,7 +54,7 @@ Session continuity facts from [008 Session Continuity](../008-session-continuity
 
 Memory facts from [010 Memory System](../010-memory-system/spec.md) may be persisted when optional memory is enabled. Memory persistence must not replace durable evidence or session continuity as execution truth.
 
-Extension registry facts from [050 Capability Extensions](../050-capability-extensions/spec.md) are reconstructable by default from runtime assembly inputs, prompt-prefix metadata, message metadata, context evidence, and current source discovery. Implementations may persist exceptional registry facts only when another spec requires inspection of a non-default decision such as conflict, rejection, unavailability, or degradation. Persistence must not turn storage into the source of extension semantics or require a full durable registry snapshot for ordinary request reconstruction.
+Capability-extension facts from [050 Capability Extensions](../050-capability-extensions/spec.md) are reconstructable by default from direct runtime assembly inputs, prompt-prefix metadata, message metadata, context evidence, and current source discovery. Implementations may persist exceptional owning-module facts only when another spec requires inspection of a non-default decision such as conflict, rejection, unavailability, or degradation. Persistence must not turn storage into the source of extension semantics or require a full durable assembly snapshot for ordinary request reconstruction.
 
 Framework source-to-Thread bindings from
 [080 Framework and SDK](../080-sdk/spec.md) may be persisted when a
@@ -140,7 +140,7 @@ This spec does not define version fields, migration algorithms, compatibility ma
   source-to-Thread continuity and the private state Module.
 - [030 State and Data Model](../030-state-and-data-model/spec.md) defines semantic state relationships and recoverability classes.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
-  extension registry facts that may affect runtime assembly and evidence
+  capability-source facts that may affect runtime assembly and evidence
   inspection.
 - [060 Automation](../060-automation/spec.md) defines local product automation
   definitions and run coordination semantics.

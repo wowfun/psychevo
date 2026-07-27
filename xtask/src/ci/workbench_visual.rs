@@ -27,7 +27,7 @@ const REQUIRED_RUNTIME_PROFILE_PROOFS: &[&str] = &[
     "codex-plugin-authority-needs-auth-chromium-desktop.png",
     "codex-plugin-authority-needs-trust-chromium-desktop.png",
     "codex-plugin-authority-partial-chromium-desktop.png",
-    "codex-plugin-authority-incompatible-chromium-desktop.png",
+    "codex-plugin-authority-version-upgrade-chromium-desktop.png",
     "agent-runtime-selector-native-acp-chromium-desktop.png",
     "agent-runtime-selector-native-acp-chromium-mobile.png",
     "codex-acp-common-controls-chromium-desktop.png",

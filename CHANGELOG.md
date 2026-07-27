@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-27
+
+- Made the Framework the sole owner of direct runtime extension assembly,
+  eliminating shadow registries and duplicate tool-selection paths while
+  preserving Plugin, Skill, MCP, Agent, and Tool capabilities.
+- Split application responsibilities by runtime supervision, durable interaction
+  rendezvous, and event delivery; bounded Store, Thread, App Server, Workbench,
+  and transcript work at their cost-owning boundaries.
+- Hardened caller-owned App Server Turn identity and SDK event registration,
+  atomic Turn admission, and Plugin, Skill, MCP, and Codex process lifetimes
+  without compatibility shims.
+
 ## 2026-07-26
 
 - Made the Framework the authority for Thread lifecycle, supervision,

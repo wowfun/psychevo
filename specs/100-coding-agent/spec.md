@@ -45,7 +45,7 @@ Runtime resolves the `coding-agent` capability target during agent-invocation as
 
 `coding-agent` may contribute instruction context, attached context candidates, or summary context candidates to context assembly. [006 Context Assembly](../006-context-assembly/spec.md) owns whether those candidates become model-visible.
 
-Instruction-file discovery, context-file discovery, skills, and memory are not part of the minimum coding-agent contract. Optional skill support may feed skill indexes, explicit skill content, and skill adjunct tools through context, tool, or extension registry boundaries owned by [006 Context Assembly](../006-context-assembly/spec.md), [050 Capability Extensions](../050-capability-extensions/spec.md), and [055 Skills](../055-skills/spec.md). Memory remains owned by [010 Memory System](../010-memory-system/spec.md).
+Instruction-file discovery, context-file discovery, skills, and memory are not part of the minimum coding-agent contract. Optional skill support may feed skill indexes, explicit skill content, and skill adjunct tools through context, tool, or direct extension-assembly boundaries owned by [006 Context Assembly](../006-context-assembly/spec.md), [050 Capability Extensions](../050-capability-extensions/spec.md), and [055 Skills](../055-skills/spec.md). Memory remains owned by [010 Memory System](../010-memory-system/spec.md).
 
 Optional agent definitions may specialize the coding-agent invocation. A
 selected agent can add instructions, model preference, hooks, skills, MCP scope,

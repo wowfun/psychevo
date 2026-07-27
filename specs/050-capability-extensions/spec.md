@@ -12,9 +12,8 @@ runtime assembly without receiving direct runtime authority.
 - source identity for provenance, conflict handling, and observability
 - discovery, activation, availability, and invocation-scoped acceptance
 - conflict boundaries before declarations enter runtime assembly
-- mapping from accepted declarations into typed contributors or owning runtime
-  modules
-- evidence relationship for extension registry facts that affect invocation
+- mapping from accepted declarations into owning runtime modules
+- evidence relationship for accepted source facts that affect invocation
   assembly
 
 Out of scope:
@@ -59,8 +58,8 @@ or healthcheck protocol.
 
 An accepted declaration is activated, available or degraded, conflict-resolved,
 and admitted by the owning runtime module for one invocation or session scope.
-Only accepted declarations may become typed contributors, hook declarations,
-tool bindings, MCP inputs, context candidates, or other runtime-owned effects.
+Only accepted declarations may become hook declarations, tool bindings, MCP
+inputs, context candidates, or other runtime-owned effects.
 
 If a selected capability source contains a recognized package manifest, that
 manifest is the source boundary. A malformed recognized manifest must fail
@@ -81,28 +80,24 @@ materialized directory. Local roots omit the default local authority field.
 The locator may be read for one frozen thread snapshot but is never copied into
 or mutated through the Psychevo plugin store.
 
-## Registry Relationship
+## Direct Assembly Relationship
 
-The runtime extension registry is the primary runtime interface for extension
-effects. Accepted declarations are mapped by Psychevo host code into typed
-contributors or into owning runtime modules that themselves feed the registry.
+Psychevo host code builds one immutable, invocation-scoped extension assembly
+from effective configuration, selected sources, plugin policy, interface
+inputs, and current runtime facts. The assembly contains source-qualified
+accepted inputs for tools, MCP, skills, hooks, agents, and other existing owning
+modules. It has no generic contributor slots and is not mutable after
+acceptance.
 
-The registry interface is defined in the
-[Runtime Extension Registry](runtime-extension-registry.md) attachment. This
-spec owns the broader source and declaration vocabulary; the attachment owns
-`ExtensionRegistry`, `ExtensionData`, typed contributor slots, frozen registry
-views, and compact registry evidence.
+Sources do not mutate assembly or owning modules directly. A plugin package,
+MCP server declaration, selected agent, skill root, profile setting, project
+setting, managed policy, or interface input may supply candidates only through
+host-owned mapping code.
 
-Sources must not mutate the registry directly. A plugin package, MCP server
-declaration, selected agent, skill root, profile setting, project setting,
-managed policy, or interface input may cause contributors to be installed only
-through Psychevo host code.
-
-Runtime may build an internal contribution projection while assembling an
-invocation. The projection records compact source, declaration, acceptance,
-owner, effect, and reason facts used by tests and owning diagnostics surfaces.
-It is not a second runtime and does not decide domain
-semantics. Owning modules still accept or omit declarations.
+Runtime does not construct a generic contribution projection alongside the
+assembly. Owning diagnostics retain the source, declaration, conflict, and
+reason facts they actually expose. There is no second acceptance inventory that
+must be synchronized with those owners.
 
 MCP server declarations feed a source-aware MCP catalog before they produce
 tools or adjacent MCP utility surfaces. The MCP catalog is owned by
@@ -114,10 +109,10 @@ normalization before anything becomes model-visible or executable.
 An exported Psychevo MCP server is not an MCP server declaration in this sense.
 It is an interface adapter that lets external MCP clients start or continue
 Psychevo turns through normal runtime entrypoints. Exported MCP server tools
-must not be registered back into `ExtensionRegistry`, selected toolsets, or the
+must not be added to invocation assembly, selected toolsets, or the
 agent-invocation tool surface.
 
-Projection acceptance status values are:
+Owning diagnostics may use these acceptance status values:
 
 - `accepted`
 - `omitted`
@@ -128,12 +123,12 @@ Projection acceptance status values are:
 - `hidden`
 - `invalid`
 
-The projection must stay source-qualified and payload-light. It may identify a
+Diagnostics must stay source-qualified and payload-light. They may identify a
 declaration family, owner module, effect target, and short reason, but it must
 not persist skill bodies, agent instructions, provider secrets, raw provider
 payloads, full prompt context, or full tool declaration payloads by default.
-Projection facts may feed owning surfaces such as plugin diagnostics, hook
-listing, and tool status. Runtime must not add a public `contributions inspect`
+These facts may feed owning surfaces such as plugin diagnostics, hook listing,
+and tool status. Runtime must not add a public `contributions inspect`
 command or inject contribution diagnostics into normal prompts.
 
 ## Declaration Families
@@ -195,12 +190,13 @@ preserve the intended semantics:
   their owning specs and runtime modules whenever their semantics are more
   specific than the generic capability-extension vocabulary.
 
-When multiple placements are possible, contributors should prefer the placement
+When multiple placements are possible, source authors should prefer the placement
 that needs the fewest new user concepts and the least runtime authority. A
 plugin package should not be introduced only to ship one local skill, agent, or
 hook unless distribution, package policy, or shared install lifecycle is part of
-the requirement. A registry or contributor abstraction should be added only
-when at least two existing owning surfaces need the same host-owned interface.
+the requirement. A generic assembly abstraction should be added only when at
+least two existing owning surfaces need the same host-owned interface and
+lifetime.
 
 ## Conflicts
 
@@ -208,7 +204,7 @@ A conflict exists when multiple sources or declarations cannot all be accepted
 while preserving the relevant owning semantics.
 
 Conflicts must be resolved before a declaration affects an accepted invocation.
-Unresolved conflicts must not enter the runtime extension registry, the tool
+Unresolved conflicts must not enter direct runtime assembly, the tool
 surface, context assembly, hook execution, provider resolution, or any other
 owning module.
 
@@ -224,10 +220,10 @@ become expanded tool surface facts.
 
 ## Evidence Relationship
 
-Extension registry facts that affect invocation assembly should be observable.
-These facts may include selected contributors, omitted unavailable contributors,
-degraded contributors that changed assembly, conflicts that caused omission or
-resolution, visibility decisions, and source identity for accepted effects.
+Accepted source facts that affect invocation assembly should be observable.
+These facts may include selected inputs, omitted unavailable inputs, degraded
+sources that changed assembly, conflicts that caused omission or resolution,
+visibility decisions, and source identity for accepted effects.
 
 Durable evidence and persistence remain owned by adjacent specs. [005 Durable
 Evidence](../005-durable-evidence/spec.md) defines durable evidence semantics
@@ -276,8 +272,8 @@ are not a separate durable truth source.
 Conflicts, unavailable sources, rejected declarations, degraded sources, or
 deferred activation outcomes may be surfaced as current-run warnings or future
 explicit evidence records when another spec requires durable inspection. The
-current slice does not persist a canonical registry snapshot, ordered
-acceptance event list, or full selected contributor inventory.
+current slice does not persist a canonical assembly snapshot, ordered
+acceptance event list, or full selected input inventory.
 
 Capability summaries must avoid storing payloads that already belong to
 adjacent evidence surfaces. Skill bodies, agent instructions, provider secrets,
@@ -288,9 +284,8 @@ context evidence.
 
 ## Attachments
 
-- [Runtime Extension Registry](runtime-extension-registry.md) defines
-  `ExtensionRegistry`, `ExtensionData`, typed contributor slots, frozen
-  registry views, and compact registry evidence.
+- [Direct Runtime Assembly](runtime-extension-assembly.md) defines the current
+  host-owned assembly value and lifetime.
 
 ## Related Topics
 

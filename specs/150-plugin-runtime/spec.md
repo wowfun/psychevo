@@ -169,15 +169,15 @@ variables. Profile configuration selects an optional binary path and otherwise
 uses `codex` from `PATH`. Psychevo never reads or imports inherited
 `CODEX_HOME`, and feature-off operation spawns no Codex process.
 
-The reviewed compatibility profile `codex-plugin/8604689e` initially accepts
-exactly `codex-cli 0.144.1`. Negotiation extracts a semantic version from any
-originator-shaped `userAgent`, verifies canonical `codexHome`, and uses requests
-that must fail during parameter validation to prove required methods exist
-without performing a normal `plugin/list` or network-backed catalog request.
-Fixed app-server fixtures validate every successful response shape. A binary
-missing required methods, returning an unknown version or shape, or reporting a
-different home remains diagnosable but cannot serve catalog, mutation, auth, or
-execution operations.
+The reviewed compatibility profile `codex-plugin/8604689e` describes the
+package semantics and response shapes Psychevo consumes. Negotiation extracts a
+semantic version from any originator-shaped `userAgent` and verifies canonical
+`codexHome`, but it does not require one exact Codex CLI patch version and does
+not send parameter-error probes for every possible method at startup. Each
+operation validates its successful response shape when called. A binary
+returning an incompatible shape or reporting a different home remains
+diagnosable; an unsupported operation affects that operation rather than
+globally disabling unrelated local package components.
 
 The authority creates a Unix symlink from private `auth.json` to the user's
 `~/.codex/auth.json`; Windows uses a hardlink only when both files are on the
@@ -251,6 +251,19 @@ Worker V1 supports:
 - `tools/call`
 - `hooks/call`
 - `shutdown`
+
+One invocation owns one `PluginWorkerSession` for each worker-backed accepted
+plugin. Contribution discovery, worker tool calls, and trusted worker hook
+calls share that initialized process. The session mutex admits one outstanding
+request at a time, so a concurrent pending-request map is unnecessary. The
+stdout reader preserves JSON-RPC envelopes; the caller accepts only the exact
+numeric response id it sent, ignores notifications, and treats malformed or
+mismatched response envelopes as a protocol failure that closes the worker.
+Thus a notification or bad line cannot consume one call's response or poison
+the following call. Invocation
+shutdown sends `shutdown` once and then reaps the child. Runtime does not spawn
+a fresh worker for each contribution list, tool call, or hook call, and does
+not pool workers across independent invocations.
 
 The first executable worker declaration is a tool. Worker tool descriptors
 become `ToolBinding` adapters and enter `ToolSurfaceAssembly.extension_tools`.

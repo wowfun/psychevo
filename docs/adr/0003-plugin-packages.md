@@ -18,9 +18,9 @@ loads the manifest, applies policy, and maps supported declarations into
 runtime-owned extension contributors.
 
 Psychevo should follow that shape. A plugin package is distribution and
-configuration. Runtime authority still comes from `ExtensionRegistry`
-contributors, hook runtime review, tool dispatch, permission policy, resource
-policy, and provider resolution.
+configuration. Runtime authority still comes from direct host assembly, hook
+runtime review, tool dispatch, permission policy, resource policy, and provider
+resolution.
 
 ## Decision
 
@@ -29,11 +29,11 @@ extension sources.
 
 Installing a plugin makes a package available to policy. It does not enable the
 plugin, trust its hooks, start its worker, expose tools to the model, grant
-permissions, create credentials, or mutate the `ExtensionRegistry`.
+permissions, create credentials, or mutate invocation assembly.
 
 The host plugin manager owns plugin discovery, installation, manifest loading,
 policy evaluation, compatibility mapping, data-root assignment, diagnostics,
-and conversion from accepted declarations into extension contributors. A plugin
+and conversion from accepted declarations into owning-module inputs. A plugin
 package never registers directly into the runtime.
 
 Plugin declarations are candidates. Host code may map accepted declarations
@@ -146,5 +146,5 @@ typed contributors.
 This design keeps package distribution separate from runtime authority. The
 cost is that plugin authors must fit Psychevo's manifest and mapping rules
 instead of mutating the runtime directly. The benefit is that every plugin
-effect remains explainable through the same `ExtensionRegistry`, hook,
-permission, tool, provider, and evidence interfaces as built-in behavior.
+effect remains explainable through the same host assembly, hook, permission,
+tool, provider, and evidence interfaces as built-in behavior.

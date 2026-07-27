@@ -15,7 +15,7 @@ Define the runtime contract owned by `psychevo`.
 - resource surface wiring
 - agent-invocation scoped tool surface assembly
 - permission policy, permission mode, approval handler, and session grant wiring
-- capability-extension declaration acceptance and extension registry assembly
+- capability-extension declaration acceptance and direct owner assembly
 - stop, abort, cancellation, and pending user-input control wiring
 - durable evidence sink wiring
 - transport-neutral runtime library boundary
@@ -63,7 +63,7 @@ After a session boundary exists, runtime assembles an agent invocation from call
 - agent-invocation scoped tool surface
 - permission policy inputs, permission mode, approval handler, and session grants
 - generation-request tool declaration snapshots
-- extension registry view and accepted declaration facts
+- accepted capability-source and owning-module facts
 - optional selected agent definition and child-agent control scope
 - stop, abort, cancellation, and pending user-input control signals
 - evidence sink
@@ -92,7 +92,7 @@ does not change which tool declarations runtime may expose.
 [041 Permissions](../041-permissions/spec.md) owns permission semantics, rule
 precedence, approval behavior, and fallback policy.
 
-Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external sources. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, declaration, activation, availability, conflict, and runtime extension registry boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
+Runtime resolves optional capability targets and toolset hints from built-in, runtime-provided, or external sources. If required capability material, working context, toolset, model, resource boundary, or evidence wiring cannot be assembled, runtime rejects the request before `agent_start`. A before-agent-start rejection is an invocation rejection, not a failed agent invocation. [050 Capability Extensions](../050-capability-extensions/spec.md) defines source, declaration, activation, availability, conflict, and direct assembly boundaries. This spec does not define plugin manifests, extension APIs, package formats, discovery paths, hot reload, startup protocols, shutdown protocols, or healthcheck protocols.
 
 Runtime may receive interface-supplied capability sources as invocation or
 session inputs. ACP-supplied MCP servers are one such source. Runtime owns

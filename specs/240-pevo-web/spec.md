@@ -147,6 +147,15 @@ send is `unknown` and is never automatically replayed. Malformed protocol
 frames are connection faults that close the current generation and enter
 recovery. One notification handler failure is isolated and reported through a
 bounded diagnostic subscription without preventing other handlers or frames.
+The Client validates each notification once against the generated
+`ServerNotificationSchema` and publishes the generated typed value. Feature
+modules must not parse the same notification again. The schema requires the
+turn-start receipt.
+
+One external `GatewayEventJournal` owns retained diagnostic events. It uses an
+O(1) ring of at most 2,000 global events and an O(1) ring of at most 500 events
+per Thread. Global, Thread, and event-family subscriptions receive only their
+scope; appending an event does not clone, flatten, or sort the whole journal.
 The injected `GatewayTransport` remains the narrow Adapter interface for
 connect, reconnectable `close`, terminal async `dispose`, send, message, and
 disconnect operations; connection policy is not duplicated in browser or
@@ -716,7 +725,8 @@ preparation may enable this pending submission path; unrelated context or
 control mutations keep Send disabled until their authoritative result applies.
 
 `ThreadSession` is the only caller-facing Thread Module. It exposes one
-immutable `ThreadSessionView { snapshot, context }` read/subscription plus
+immutable `ThreadSessionView { threadSnapshot, liveEntries, context }`
+read/subscription, where `threadSnapshot.entries` is the committed prefix, plus
 `openDraft`, `load`, `loadOlder`, `send`, `setControl`, `interrupt`, `respond`,
 and `dispose`. `load` resets snapshot, context, paging cursor, correlation, and
 live overlay in one commit. `loadOlder` prepends a strictly older page while
@@ -727,6 +737,12 @@ batch-applies replaceable observations and publishes one view notification.
 and a latest-wins control mutation sequence before awaiting its receipt. A
 receipt that no longer matches those facts is returned to its caller but cannot
 mutate or publish the current Session view.
+Before enqueueing, the Module rejects notifications whose Thread or Turn does
+not match the current view. It retains one current-turn first-assistant flag,
+not an unbounded set of historical Turn ids.
+Subscribers that need only Thread identity read it from the committed view;
+they do not call the compatibility materializer that joins the entire committed
+prefix and live overlay.
 The Module owns the
 scheduling queue: the first non-empty assistant text bypasses frame pacing,
 later replaceable updates coalesce per entry, and terminal observations flush
@@ -744,6 +760,10 @@ subscriptions and cannot leave the reused owner permanently inert.
 The Transcript renders retained pages through dynamic-height virtualization.
 Measurement follows actual row height and keeps the visible anchor stable when
 older pages are prepended, evidence expands, or streamed content grows.
+Its committed visibility, id-index, and offset layout are cached independently
+from the live overlay. A live delta rebuilds only the invocation-bounded live
+segment; only a committed-prefix change or committed-row measurement rebuilds
+the retained-history layout.
 The main Workbench exposes a compact load-earlier action whenever the retained
 snapshot has an older-history cursor; it prepends through `ThreadSession`
 instead of silently truncating the Thread. One layout-anchor calculation owns
@@ -752,6 +772,18 @@ never applied both during measurement and after the revision commit.
 Virtualization is a presentation projection only: copy, search, export, Agent
 navigation, file links, keyboard focus, accessibility semantics, and live
 completion operate on the full retained Session state.
+
+The retained Session state is one committed transcript prefix plus one
+invocation-bounded `liveEntries` overlay. Streaming deltas update only the
+overlay; they do not clone or sort the committed prefix. Terminal
+reconciliation replaces the overlay with authoritative committed entries for
+that Turn while preserving older loaded pages.
+
+The Team panel subscribes only to Team, mission, and subagent lifecycle event
+families. A relevant event requests one refresh. Refresh is single-flight; if
+more relevant events arrive while it is running, exactly one trailing refresh
+runs afterward. Ordinary token, tool, transcript, or unrelated Gateway events
+must not refresh Team status.
 
 `send` returns a typed `accepted`, `reconciled`, `cancelled`, or `not_sent`
 outcome. A successful `turn/start` response is always `accepted`; when the
@@ -777,7 +809,8 @@ unless the visible Transcript contains an unresolved file link. Workspace Home
 reads Diff plus Observability, Review reads Diff plus Changes, Files reads the
 file inventory, and other tabs read none of those resources. Reads remain
 single-flight, latest-wins, and view-epoch guarded. Turn completion reevaluates
-the visible transcript together with committed entries; when either contains
+the materialized `ThreadSession` transcript after reduction, including a live
+overlay retained by a terminal with an empty committed slice; when it contains
 workspace-file demand, the same-workspace inventory refreshes once even while
 Files is closed, so created and deleted paths do not leave transcript actions
 stale. A completed supported file-tool entry triggers the same refresh

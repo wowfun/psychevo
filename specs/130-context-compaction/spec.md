@@ -63,6 +63,11 @@ Runtime uses only the latest checkpoint that is still valid for the current
 effective transcript boundary. Undo or revert state can make a later checkpoint
 inapplicable without deleting the checkpoint row.
 
+Store applies the effective revert boundary and latest valid checkpoint before
+returning projected context rows. Context assembly and compaction decode only
+the retained range; they must not fetch and deserialize the full Thread history
+to discard older rows in memory.
+
 ## Projection
 
 Context assembly for a compacted session prepends the latest valid summary as

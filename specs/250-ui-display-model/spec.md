@@ -370,6 +370,14 @@ and typed live lifecycle events. Live entry events are overlay records; the
 committed entries returned at turn completion are authoritative for that turn's
 ordinary transcript projection.
 
+The client representation is a committed prefix plus a current-Turn live
+overlay. Applying one text or tool delta scales with the overlay entry it
+changes, not with all retained pages. Completion atomically reconciles the
+overlay against committed entries; it never re-sorts the whole transcript per
+streaming token. Browser virtualization maintains separate committed and live
+id/offset segments. A live-token render reuses the committed visibility and
+layout caches rather than traversing all retained entry ids or offsets.
+
 Session-list projection may include a target label and lifecycle descriptors
 for `fork` and `delete`. These are display-ready product facts: each descriptor
 contains an enabled state and optional unavailable reason. Renderers must not

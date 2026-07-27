@@ -11,8 +11,8 @@ and manifest details.
 - plugin as a manifest-first package, installable source, and policy-controlled
   declaration source
 - separation between install, enablement, visibility, execution, permission, and evidence
-- relationship between plugin packages, host-owned declaration mapping, and the
-  runtime extension registry
+- relationship between plugin packages, host-owned declaration mapping, and
+  direct runtime assembly
 
 Out of scope:
 - concrete manifest field schemas, worker wire messages, store record schemas, or CLI flags
@@ -44,8 +44,8 @@ must be mapped by Psychevo host code before use:
 - agents and agent backends map to 051 Agents
 - commands map to the shared command catalog and CLI/TUI/Web command surfaces
 - providers map to the provider manager and AI protocol boundary
-- accepted runtime effects map into the typed contributors defined by 050
-  Runtime Extension Registry
+- accepted runtime effects map directly into the owning modules defined by 050
+  Capability Extensions
 
 Plugin identity must be preserved for diagnostics, conflict handling, data-root
 selection, and evidence.
@@ -88,9 +88,9 @@ runtime code. Inspection does not make the source installable, enabled, or
 executable.
 
 An explicit Codex install or upgrade trusts only the fingerprint returned by
-that operation. Background content changes, externally performed mutations, or
-an unexpected Codex version invalidate that trust rather than silently
-extending it.
+that operation. Background content changes or externally performed package
+mutations invalidate that trust. Codex binary version changes do not alter a
+package fingerprint and therefore do not invalidate package trust.
 
 Policy can enable or disable a plugin package. Enabling a plugin makes its
 accepted declarations available to the owning runtime modules, but it does not
@@ -157,10 +157,13 @@ component status must not claim native execution; effective MCP servers may be
 delegated to Codex, while path-backed skills or hooks report unavailable.
 
 Codex compatibility is an external capability authority, not an import of the
-user's active Codex environment. It uses an external reviewed binary with the
-private home `$PSYCHEVO_HOME/codex/`, ignores inherited `CODEX_HOME`, and never
-mutates the plugin, marketplace, or configuration state used by Codex CLI or
-third-party applications.
+user's active Codex environment. It uses the configured external binary with
+the private home `$PSYCHEVO_HOME/codex/`, ignores inherited `CODEX_HOME`, and
+never mutates the plugin, marketplace, or configuration state used by Codex
+CLI or third-party applications. Startup validates a semantic version identity
+and the private-home boundary once. It does not pin an exact Codex patch
+version or issue invalid-parameter probes for every possible method; each
+operation validates the response fields it actually consumes.
 
 Psychevo does not execute Codex, Claude Code, Hermes, Pi, or OpenCode in-process
 plugin interfaces directly.
@@ -181,4 +184,4 @@ separate ACP Agent runtime profiles.
 - [053 Hooks](../053-hooks/spec.md) defines the hook declaration boundary.
 - [140 Hook Runtime](../140-hook-runtime/spec.md) defines hook execution.
 - [050 Capability Extensions](../050-capability-extensions/spec.md) defines
-  source/declaration boundaries and runtime extension registry mapping.
+  source/declaration boundaries and direct owning-module mapping.

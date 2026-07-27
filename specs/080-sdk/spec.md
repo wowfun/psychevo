@@ -125,8 +125,8 @@ The stable high-level interface contains:
 
 - `Application::builder`, `Application::client`, and graceful or forced
   shutdown;
-- `Client::start_thread`, `Client::resume_thread`, and summary-only
-  `Client::list_threads`;
+- `Client::start_thread`, `Client::resume_thread`, and keyset-paged,
+  summary-only `Client::list_threads` with a default of 50 and maximum of 200;
 - Thread identity and authoritative snapshot access plus `start_turn`,
   `respond`, `compact`, `fork`, and `archive`; an ordinary snapshot includes a
   bounded latest transcript page and its older-history cursor;
@@ -296,7 +296,13 @@ state mutation before a later normal request is dispatched. After that ordered
 prefix, independent ordinary requests and reverse-callback responses may run
 concurrently. Stdio and WebSocket use the same rule.
 
-Each connection admits at most 64 concurrent ordinary requests. One
+Each connection admits at most 64 concurrent requests. Ordinary data, read, and
+start requests may occupy at most 63 slots; shutdown, interrupt, steer, and
+interaction-response control requests may use the reserved final slot. This
+keeps control reachable during an ordinary-request flood without a global
+scheduler or priority queue. A JSON-RPC response to a server-initiated
+`tool/call` or `approval/request` is not a client request: it is correlated
+immediately and does not consume either request quota. One
 connection-local task owner continuously reaps completed requests, reverse
 callbacks, and event relays while the connection remains open. Disconnect
 aborts connection-local waits, callbacks, and relays, but not accepted
@@ -322,6 +328,21 @@ returns the current receipt without replaying the Turn's retained event log
 again on that connection or multiplying delivery of future events. A new
 connection may establish its own single relay and then reconcile against the
 authoritative snapshot.
+
+`turn/start` and `turn/resume` require a caller-generated Turn id. The server
+validates and uses that identity for relay registration before work can emit an
+event; it does not allocate an unknown id after dispatch. Application reserves
+the Turn identity and the per-Thread operation lane in one atomic registration.
+An active or pending-terminal duplicate is rejected before durable acceptance
+and cannot replace another Turn's handle. `turn/event` notifications carry both
+`threadId` and `turnId`, including retained replay established by
+`turn/resume`, so callback routing never depends on a provisional empty Thread
+identity.
+
+Framework Thread archive and delete own both State mutation and Thread-scoped
+runtime release. Gateway and App Server lifecycle routes call those operations
+instead of mutating State behind Application, so restore cannot reuse an MCP
+runtime retained across archive or delete.
 
 There is no telemetry capability, telemetry notification, or outbound
 telemetry protocol. Existing explicitly enabled local journey profiles, local
@@ -402,6 +423,16 @@ The Python SDK supports:
 - async custom tools and approval or clarify handlers;
 - Thread listing, resume, snapshots, turns, controls, interactions, compact,
   fork, and archive.
+
+The local stdio transport configures its subprocess stream reader and its
+explicit byte check to the same 16 MiB JSON-line maximum. A larger line is a
+terminal transport error rather than a partial read or `LimitOverrunError`
+leaking through the SDK.
+
+Python registers a Turn event sink under the caller-generated Turn id before it
+sends `turn/start` or `turn/resume`. The response attaches the handle to that
+sink. There is no unbounded early-event dictionary keyed by as-yet unknown
+server Turn ids.
 
 It does not search `PATH`, download a binary, discover or create a daemon,
 connect to raw TCP or Unix sockets, load Rust through FFI, expose a Python

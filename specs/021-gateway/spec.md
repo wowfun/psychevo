@@ -705,6 +705,12 @@ entry counts; content search and transcript rendering use the authoritative
 thread read instead. Availability is a product projection with an explanatory
 reason; clients do not infer it from runtime names.
 
+`thread/list` is keyset paged. The default page is 50 summaries and the hard
+maximum is 200. Its opaque cursor encodes the existing stable descending sort
+tuple and is valid only for the same filter. Framework, Gateway, App Server,
+and Python preserve this page contract; a convenience iterator may fetch later
+pages, but no layer first materializes all sessions and slices in memory.
+
 After the first successful turn of a newly created human-visible top-level
 session, Gateway/runtime persists a concise `title` when the title is still
 empty. This applies across visible interactive sources such as `run`, `tui`,

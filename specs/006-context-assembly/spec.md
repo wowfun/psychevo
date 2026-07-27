@@ -180,6 +180,11 @@ visible turn. Persisted tool-token counts are tied to the recorded tool
 declaration hash; missing or mismatched historical tool facts make the
 projection partial instead of silently substituting the current tool surface.
 
+Finding the latest provider request first selects the final eligible visible
+assistant/prompt boundary in Store and reconstructs exactly that request.
+Runtime must not reconstruct every historical assistant boundary and discard
+all but the last.
+
 ## Session Observability Projection
 
 Runtime may expose a session observability projection for UI surfaces. It is a
@@ -214,6 +219,10 @@ history/revert visibility boundary used by transcript reload. It must not sum
 messages from other sessions, hidden reverted ranges, or other cwds. Missing
 accounting facts are treated as unknown/zero for display rather than
 reconstructing provider requests.
+
+Store computes session usage with one aggregate over structured usage columns
+after applying the effective revert boundary. It does not deserialize every
+Message JSON payload and does not require a materialized usage table.
 
 UI surfaces may render compact always-visible metrics such as context percent,
 cache percent, total session tokens, and estimated cost, with richer detail in
