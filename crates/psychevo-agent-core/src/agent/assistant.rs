@@ -62,30 +62,105 @@ pub(crate) fn build_assistant_message(
     }
 }
 
-pub(crate) fn split_inline_think_blocks(input: &str, streaming: bool) -> (String, String) {
-    let mut visible = String::new();
-    let mut reasoning = Vec::new();
-    let mut cursor = 0usize;
-    while let Some(relative_start) = input[cursor..].find("<think>") {
-        let start = cursor + relative_start;
-        visible.push_str(&input[cursor..start]);
-        let content_start = start + "<think>".len();
-        if let Some(relative_end) = input[content_start..].find("</think>") {
-            let end = content_start + relative_end;
-            let thought = input[content_start..end].trim();
-            if !thought.is_empty() {
-                reasoning.push(thought.to_string());
-            }
-            cursor = end + "</think>".len();
-        } else {
-            if !streaming {
-                visible.push_str(&input[start..]);
-            }
-            return (visible, reasoning.join("\n\n"));
+pub(crate) struct InlineThinkParser {
+    pending: String,
+    open_thought: String,
+    visible: String,
+    reasoning: String,
+    inside_thought: bool,
+}
+
+impl InlineThinkParser {
+    pub(crate) fn new() -> Self {
+        Self {
+            pending: String::new(),
+            open_thought: String::new(),
+            visible: String::new(),
+            reasoning: String::new(),
+            inside_thought: false,
         }
     }
-    visible.push_str(&input[cursor..]);
-    (visible, reasoning.join("\n\n"))
+
+    pub(crate) fn push(&mut self, delta: &str) -> (String, String) {
+        const OPEN: &str = "<think>";
+        const CLOSE: &str = "</think>";
+        self.pending.push_str(delta);
+        let mut visible_delta = String::new();
+        let mut reasoning_delta = String::new();
+        loop {
+            if self.inside_thought {
+                if let Some(end) = self.pending.find(CLOSE) {
+                    self.open_thought.push_str(&self.pending[..end]);
+                    self.pending.drain(..end + CLOSE.len());
+                    let thought = self.open_thought.trim();
+                    if !thought.is_empty() {
+                        if !self.reasoning.is_empty() {
+                            self.reasoning.push_str("\n\n");
+                            reasoning_delta.push_str("\n\n");
+                        }
+                        self.reasoning.push_str(thought);
+                        reasoning_delta.push_str(thought);
+                    }
+                    self.open_thought.clear();
+                    self.inside_thought = false;
+                    continue;
+                }
+                let retained = trailing_tag_prefix_len(&self.pending, CLOSE);
+                let safe_len = self.pending.len() - retained;
+                self.open_thought.push_str(&self.pending[..safe_len]);
+                self.pending.drain(..safe_len);
+                break;
+            }
+
+            if let Some(start) = self.pending.find(OPEN) {
+                let text = self.pending[..start].to_string();
+                self.visible.push_str(&text);
+                visible_delta.push_str(&text);
+                self.pending.drain(..start + OPEN.len());
+                self.inside_thought = true;
+                continue;
+            }
+            let retained = trailing_tag_prefix_len(&self.pending, OPEN);
+            let safe_len = self.pending.len() - retained;
+            let text = self.pending[..safe_len].to_string();
+            self.visible.push_str(&text);
+            visible_delta.push_str(&text);
+            self.pending.drain(..safe_len);
+            break;
+        }
+        (visible_delta, reasoning_delta)
+    }
+
+    pub(crate) fn finish(&mut self) -> (String, String) {
+        let visible_delta = if self.inside_thought {
+            let text = format!("<think>{}{}", self.open_thought, self.pending);
+            self.visible.push_str(&text);
+            text
+        } else {
+            let text = std::mem::take(&mut self.pending);
+            self.visible.push_str(&text);
+            text
+        };
+        self.pending.clear();
+        self.open_thought.clear();
+        self.inside_thought = false;
+        (visible_delta, String::new())
+    }
+
+    pub(crate) fn visible(&self) -> &str {
+        &self.visible
+    }
+
+    pub(crate) fn reasoning(&self) -> &str {
+        &self.reasoning
+    }
+}
+
+fn trailing_tag_prefix_len(value: &str, tag: &str) -> usize {
+    (1..tag.len())
+        .rev()
+        .find(|length| value.ends_with(&tag[..*length]))
+        .unwrap_or(0)
 }
 
 pub(crate) fn combine_reasoning(provider_reasoning: &str, inline_reasoning: &str) -> String {

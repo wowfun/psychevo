@@ -2,10 +2,13 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use sqlx::Connection;
 use sqlx::migrate::Migrator;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteConnection, SqlitePoolOptions, SqliteSynchronous,
+};
 
 use crate::error::{Error, Result};
 
@@ -14,6 +17,10 @@ use super::{
 };
 
 static STATE_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const WAL_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
+const WAL_BOOTSTRAP_INITIAL_BACKOFF: Duration = Duration::from_millis(10);
+const WAL_BOOTSTRAP_MAX_BACKOFF: Duration = Duration::from_millis(250);
 
 fn state_pool_options(in_memory: bool) -> SqlitePoolOptions {
     let options = SqlitePoolOptions::new().max_connections(if in_memory { 1 } else { 5 });
@@ -21,6 +28,42 @@ fn state_pool_options(in_memory: bool) -> SqlitePoolOptions {
         options.idle_timeout(None).max_lifetime(None)
     } else {
         options
+    }
+}
+
+async fn bootstrap_persistent_wal(options: &SqliteConnectOptions) -> Result<()> {
+    let mut connection = SqliteConnection::connect_with(options).await?;
+    let started = Instant::now();
+    let mut backoff = WAL_BOOTSTRAP_INITIAL_BACKOFF;
+
+    loop {
+        match sqlx::query_scalar::<_, String>("PRAGMA journal_mode = WAL")
+            .fetch_one(&mut connection)
+            .await
+        {
+            Ok(mode) if mode.eq_ignore_ascii_case("wal") => {
+                connection.close().await?;
+                return Ok(());
+            }
+            Ok(mode) if started.elapsed() >= WAL_BOOTSTRAP_TIMEOUT => {
+                let _ = connection.close().await;
+                return Err(Error::Message(format!(
+                    "sqlite failed to enable WAL journal mode within five seconds; database remained in {mode} mode"
+                )));
+            }
+            Ok(_) => {}
+            Err(error)
+                if super::store_sqlx_runtime::is_sqlx_busy_error(&error)
+                    && started.elapsed() < WAL_BOOTSTRAP_TIMEOUT => {}
+            Err(error) => {
+                let _ = connection.close().await;
+                return Err(error.into());
+            }
+        }
+
+        let remaining = WAL_BOOTSTRAP_TIMEOUT.saturating_sub(started.elapsed());
+        tokio::time::sleep(backoff.min(remaining)).await;
+        backoff = backoff.saturating_mul(2).min(WAL_BOOTSTRAP_MAX_BACKOFF);
     }
 }
 
@@ -37,14 +80,16 @@ impl StateRuntime {
         let sqlite_options = if in_memory {
             SqliteConnectOptions::new().in_memory(true)
         } else {
-            SqliteConnectOptions::new()
+            let options = SqliteConnectOptions::new()
                 .filename(path)
                 .create_if_missing(true)
+                .busy_timeout(SQLITE_BUSY_TIMEOUT);
+            bootstrap_persistent_wal(&options).await?;
+            options
         }
         .foreign_keys(true)
-        .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(SQLITE_BUSY_TIMEOUT);
         let pool = state_pool_options(in_memory)
             .connect_with(sqlite_options)
             .await?;
@@ -142,8 +187,13 @@ mod tests {
             .fetch_one(&runtimes[0].inner.pool)
             .await
             .expect("schema version");
+        let journal_mode = sqlx::query_scalar::<_, String>("PRAGMA journal_mode")
+            .fetch_one(&runtimes[0].inner.pool)
+            .await
+            .expect("journal mode");
         assert_eq!(migration_count, 2);
         assert_eq!(user_version, SQLITE_SCHEMA_VERSION);
+        assert_eq!(journal_mode, "wal");
         assert!(
             runtimes
                 .iter()

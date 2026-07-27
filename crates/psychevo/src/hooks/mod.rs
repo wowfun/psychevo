@@ -37,7 +37,7 @@ pub fn agent_hook_source(agent_name: &str, hooks: Option<&Value>) -> Option<Hook
     })
 }
 
-pub fn run_hook_commands(
+pub async fn run_hook_commands(
     hooks: Option<&Value>,
     event: &str,
     cwd: &Path,
@@ -50,10 +50,12 @@ pub fn run_hook_commands(
         None,
         hooks.cloned().unwrap_or(Value::Null),
     );
-    run_hook_sources(&[source], event, cwd, payload).blocked_reason
+    run_hook_sources(&[source], event, cwd, payload)
+        .await
+        .blocked_reason
 }
 
-pub fn run_hook_sources(
+pub async fn run_hook_sources(
     sources: &[HookSourceDescriptor],
     event: &str,
     cwd: &Path,
@@ -67,7 +69,7 @@ pub fn run_hook_sources(
             bypass_trust: false,
         },
     );
-    runtime.run_event(event, payload)
+    runtime.run_event(event, payload).await
 }
 
 pub fn hook_payload(event: &str, source: Option<&HookSourceDescriptor>, payload: Value) -> Value {

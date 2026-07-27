@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
+use futures::stream::{self, StreamExt};
 use http::{HeaderName, HeaderValue};
 use psychevo_agent_core::{
     ToolBinding, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, ToolExecutionMode,
@@ -39,6 +40,16 @@ const GET_MCP_PROMPT_TOOL: &str = "get_mcp_prompt";
 const MCP_TOOL_NAME_DELIMITER: &str = "__";
 const MAX_TOOL_NAME_LENGTH: usize = 64;
 const HASH_SUFFIX_LEN: usize = 12;
+const MCP_STARTUP_CONCURRENCY: usize = 8;
+const DEFAULT_MCP_STARTUP_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_MCP_CALL_TIMEOUT_SECS: u64 = 300;
+const MCP_UTILITY_LIST_LIMIT: usize = 1_000;
+
+fn effective_mcp_tool_timeout_secs(policy: &McpServerPolicy) -> u64 {
+    policy
+        .tool_timeout_secs
+        .unwrap_or(DEFAULT_MCP_CALL_TIMEOUT_SECS)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum McpSourceTier {
@@ -574,8 +585,8 @@ pub(crate) async fn mcp_runtime_snapshot(
     let sampling_config = McpSamplingConfig::bounded_default();
     let elicitation_policy = McpElicitationPolicy::default_form_and_url();
 
-    for entry in &catalog.entries {
-        let server_name = entry.normalized_name.clone();
+    let mut enabled_entries = Vec::new();
+    for (index, entry) in catalog.entries.iter().cloned().enumerate() {
         if !entry.input.policy.enabled {
             let message = format!("MCP server `{}` is disabled", entry.input.name);
             warnings.push(mcp_warning(message.clone()));
@@ -585,56 +596,48 @@ pub(crate) async fn mcp_runtime_snapshot(
             }
             continue;
         }
-        if let Some(permission_runtime) = permission_runtime
-            && let Err(err) = permission_runtime
-                .authorize_mcp_startup(&server_name, mcp_transport_kind(&entry.input.transport))
-                .await
-        {
-            let message = format!("MCP server `{}` startup omitted: {err}", entry.input.name);
-            warnings.push(mcp_warning(message.clone()));
-            reusable = false;
-            if entry.input.policy.required {
-                required_failures.push(message);
-            }
-            continue;
-        }
+        enabled_entries.push((index, entry));
+    }
+    let mut prepared = stream::iter(enabled_entries)
+        .map(|(index, entry)| async move {
+            (
+                index,
+                prepare_mcp_server(entry, cwd, permission_runtime).await,
+            )
+        })
+        .buffer_unordered(MCP_STARTUP_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    prepared.sort_by_key(|(index, _)| *index);
 
-        let service = match connect_mcp_server_with_policy(&entry.input, cwd).await {
-            Ok(service) => service,
-            Err(err) => {
-                let message = format!("MCP server `{}` is unavailable: {err}", entry.input.name);
-                warnings.push(mcp_warning(message.clone()));
+    for (_, result) in prepared {
+        let prepared = match result {
+            Ok(prepared) => prepared,
+            Err(failure) => {
+                warnings.push(mcp_warning(failure.message.clone()));
                 reusable = false;
-                if entry.input.policy.required {
-                    required_failures.push(message);
+                if failure.required {
+                    required_failures.push(failure.message);
                 }
                 continue;
             }
         };
-        let peer = service.peer().clone();
-        let connection = Arc::new(McpConnection {
-            peer,
-            _service: Mutex::new(service),
-        });
+        let entry = &prepared.entry;
+        let server_name = entry.normalized_name.clone();
+        let connection = prepared.connection;
         accepted_servers.push(server_name.clone());
         connections.insert(server_name.clone(), Arc::clone(&connection));
+        resources_available |= prepared.resources_available;
+        prompts_available |= prepared.prompts_available;
+        if let Some(error) = prepared.tool_listing_error {
+            warnings.push(mcp_warning(format!(
+                "MCP server `{}` did not list tools: {error}",
+                entry.input.name
+            )));
+            reusable = false;
+        }
 
-        let listed = match connection.peer.list_all_tools().await {
-            Ok(listed) => listed,
-            Err(err) => {
-                warnings.push(mcp_warning(format!(
-                    "MCP server `{}` did not list tools: {err}",
-                    entry.input.name
-                )));
-                reusable = false;
-                Vec::new()
-            }
-        };
-        resources_available |= connection.peer.list_all_resources().await.is_ok()
-            || connection.peer.list_all_resource_templates().await.is_ok();
-        prompts_available |= connection.peer.list_all_prompts().await.is_ok();
-
-        for tool in listed {
+        for tool in prepared.tools {
             let raw_tool_name = tool.name.to_string();
             if !mcp_tool_allowed_by_policy(&entry.input.policy, &raw_tool_name) {
                 continue;
@@ -666,7 +669,7 @@ pub(crate) async fn mcp_runtime_snapshot(
                     description,
                     parameters: Value::Object((*tool.input_schema).clone()),
                     supports_parallel_tool_calls: entry.input.policy.supports_parallel_tool_calls,
-                    tool_timeout_secs: entry.input.policy.tool_timeout_secs,
+                    tool_timeout_secs: effective_mcp_tool_timeout_secs(&entry.input.policy),
                     connection: Arc::clone(&connection),
                 },
             });
@@ -722,6 +725,106 @@ pub(crate) async fn mcp_runtime_snapshot(
         elicitation_policy,
         reusable,
     }
+}
+
+struct PreparedMcpServer {
+    entry: McpCatalogEntry,
+    connection: Arc<McpConnection>,
+    tools: Vec<rmcp::model::Tool>,
+    tool_listing_error: Option<String>,
+    resources_available: bool,
+    prompts_available: bool,
+}
+
+struct McpStartupFailure {
+    message: String,
+    required: bool,
+}
+
+async fn prepare_mcp_server(
+    entry: McpCatalogEntry,
+    cwd: &Path,
+    permission_runtime: Option<&PermissionRuntime>,
+) -> Result<PreparedMcpServer, McpStartupFailure> {
+    let timeout_secs = entry
+        .input
+        .policy
+        .startup_timeout_secs
+        .unwrap_or(DEFAULT_MCP_STARTUP_TIMEOUT_SECS);
+    match tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        prepare_mcp_server_within_deadline(entry.clone(), cwd, permission_runtime),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            if let Some(permission_runtime) = permission_runtime {
+                permission_runtime
+                    .cancel_authorization(&format!(
+                        "mcp_startup:{}",
+                        entry.normalized_name
+                    ))
+                    .await;
+            }
+            Err(McpStartupFailure {
+                message: format!(
+                    "MCP server `{}` startup timed out after {timeout_secs}s",
+                    entry.input.name
+                ),
+                required: entry.input.policy.required,
+            })
+        }
+    }
+}
+
+async fn prepare_mcp_server_within_deadline(
+    entry: McpCatalogEntry,
+    cwd: &Path,
+    permission_runtime: Option<&PermissionRuntime>,
+) -> Result<PreparedMcpServer, McpStartupFailure> {
+    let server_name = entry.normalized_name.clone();
+    if let Some(permission_runtime) = permission_runtime
+        && let Err(err) = permission_runtime
+            .authorize_mcp_startup(&server_name, mcp_transport_kind(&entry.input.transport))
+            .await
+    {
+        return Err(McpStartupFailure {
+            message: format!("MCP server `{}` startup omitted: {err}", entry.input.name),
+            required: entry.input.policy.required,
+        });
+    }
+    let service = connect_mcp_server(&entry.input, cwd)
+        .await
+        .map_err(|err| McpStartupFailure {
+            message: format!("MCP server `{}` is unavailable: {err}", entry.input.name),
+            required: entry.input.policy.required,
+        })?;
+    let peer = service.peer().clone();
+    let capabilities = peer
+        .peer_info()
+        .map(|info| info.capabilities.clone())
+        .unwrap_or_default();
+    let (tools, tool_listing_error) = if capabilities.tools.is_some() {
+        match peer.list_all_tools().await {
+            Ok(tools) => (tools, None),
+            Err(err) => (Vec::new(), Some(err.to_string())),
+        }
+    } else {
+        (Vec::new(), None)
+    };
+    let connection = Arc::new(McpConnection {
+        peer,
+        _service: Mutex::new(service),
+    });
+    Ok(PreparedMcpServer {
+        entry,
+        connection,
+        tools,
+        tool_listing_error,
+        resources_available: capabilities.resources.is_some(),
+        prompts_available: capabilities.prompts.is_some(),
+    })
 }
 
 pub(crate) fn mcp_transport_kind(transport: &McpTransportInput) -> &'static str {
@@ -1122,20 +1225,16 @@ async fn connect_mcp_server_with_policy(
     input: &McpServerInput,
     cwd: &Path,
 ) -> Result<RunningService<RoleClient, ()>, String> {
-    match input.policy.startup_timeout_secs {
-        Some(timeout_secs) => {
-            match tokio::time::timeout(
-                Duration::from_secs(timeout_secs),
-                connect_mcp_server(input, cwd),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(format!("startup timed out after {timeout_secs}s")),
-            }
-        }
-        None => connect_mcp_server(input, cwd).await,
-    }
+    let timeout_secs = input
+        .policy
+        .startup_timeout_secs
+        .unwrap_or(DEFAULT_MCP_STARTUP_TIMEOUT_SECS);
+    tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        connect_mcp_server(input, cwd),
+    )
+    .await
+    .map_err(|_| format!("startup timed out after {timeout_secs}s"))?
 }
 
 fn mcp_tool_allowed_by_policy(policy: &McpServerPolicy, raw_tool_name: &str) -> bool {
@@ -1394,34 +1493,82 @@ async fn execute_mcp_utility(
         McpUtilityKind::ListResources => {
             let mut resources = Vec::new();
             let mut errors = Vec::new();
-            for (server, peer) in connection_set.peers_for_optional_server(server) {
-                if abort.aborted() {
-                    return ToolOutput::error("MCP resource listing was aborted");
-                }
-                match peer.list_all_resources().await {
-                    Ok(listed) => resources.extend(
-                        listed
-                            .into_iter()
-                            .map(|resource| json!({ "server": server, "resource": resource })),
-                    ),
+            let mut truncated = false;
+            let requests = connection_set
+                .peers_for_optional_server(server)
+                .into_iter()
+                .map(|(server, peer)| {
+                    let mut abort = abort.clone();
+                    let request = Box::pin(async move {
+                        await_mcp_utility(
+                            peer.list_all_resources(),
+                            &mut abort,
+                            "MCP resource listing",
+                        )
+                        .await
+                    }) as BoxFuture<'static, Result<Vec<_>, String>>;
+                    (server, request)
+                })
+                .collect();
+            for (server, result) in collect_mcp_utility_lists(requests).await {
+                match result {
+                    Ok(listed) => {
+                        truncated = append_utility_values(
+                            &mut resources,
+                            listed
+                                .into_iter()
+                                .map(|resource| json!({ "server": server, "resource": resource })),
+                        );
+                        if truncated {
+                            break;
+                        }
+                    }
                     Err(err) => errors.push(json!({ "server": server, "error": err.to_string() })),
                 }
+            }
+            if truncated {
+                errors.push(utility_truncation_error());
             }
             utility_list_output("resources", resources, errors)
         }
         McpUtilityKind::ListResourceTemplates => {
             let mut templates = Vec::new();
             let mut errors = Vec::new();
-            for (server, peer) in connection_set.peers_for_optional_server(server) {
-                if abort.aborted() {
-                    return ToolOutput::error("MCP resource template listing was aborted");
-                }
-                match peer.list_all_resource_templates().await {
-                    Ok(listed) => templates.extend(listed.into_iter().map(
-                        |template| json!({ "server": server, "resource_template": template }),
-                    )),
+            let mut truncated = false;
+            let requests = connection_set
+                .peers_for_optional_server(server)
+                .into_iter()
+                .map(|(server, peer)| {
+                    let mut abort = abort.clone();
+                    let request = Box::pin(async move {
+                        await_mcp_utility(
+                            peer.list_all_resource_templates(),
+                            &mut abort,
+                            "MCP resource template listing",
+                        )
+                        .await
+                    }) as BoxFuture<'static, Result<Vec<_>, String>>;
+                    (server, request)
+                })
+                .collect();
+            for (server, result) in collect_mcp_utility_lists(requests).await {
+                match result {
+                    Ok(listed) => {
+                        truncated = append_utility_values(
+                            &mut templates,
+                            listed.into_iter().map(
+                                |template| json!({ "server": server, "resource_template": template }),
+                            ),
+                        );
+                        if truncated {
+                            break;
+                        }
+                    }
                     Err(err) => errors.push(json!({ "server": server, "error": err.to_string() })),
                 }
+            }
+            if truncated {
+                errors.push(utility_truncation_error());
             }
             utility_list_output("resource_templates", templates, errors)
         }
@@ -1436,43 +1583,65 @@ async fn execute_mcp_utility(
                 return ToolOutput::error(format!("MCP server `{server}` is not available"));
             };
             let request = ReadResourceRequestParams::new(uri.to_string());
-            tokio::select! {
-                _ = abort.wait_for_abort() => ToolOutput::error(format!(
-                    "MCP resource `{server}/{uri}` was aborted"
-                )),
-                result = peer.read_resource(request) => match result {
-                    Ok(result) => {
-                        let json = json!({
-                            "server": server,
-                            "uri": uri,
-                            "contents": result.contents,
-                        });
-                        ToolOutput::ok_with_model_content(
-                            json.clone(),
-                            serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string()),
-                        )
-                    }
-                    Err(err) => ToolOutput::error(format!(
-                        "MCP resource `{server}/{uri}` failed: {err}"
-                    )),
-                },
+            match await_mcp_utility(
+                peer.read_resource(request),
+                &mut abort,
+                &format!("MCP resource `{server}/{uri}`"),
+            )
+            .await
+            {
+                Ok(result) => {
+                    let json = json!({
+                        "server": server,
+                        "uri": uri,
+                        "contents": result.contents,
+                    });
+                    ToolOutput::ok_with_model_content(
+                        json.clone(),
+                        serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string()),
+                    )
+                }
+                Err(err) => ToolOutput::error(err),
             }
         }
         McpUtilityKind::ListPrompts => {
             let mut prompts = Vec::new();
             let mut errors = Vec::new();
-            for (server, peer) in connection_set.peers_for_optional_server(server) {
-                if abort.aborted() {
-                    return ToolOutput::error("MCP prompt listing was aborted");
-                }
-                match peer.list_all_prompts().await {
-                    Ok(listed) => prompts.extend(
-                        listed
-                            .into_iter()
-                            .map(|prompt| json!({ "server": server, "prompt": prompt })),
-                    ),
+            let mut truncated = false;
+            let requests = connection_set
+                .peers_for_optional_server(server)
+                .into_iter()
+                .map(|(server, peer)| {
+                    let mut abort = abort.clone();
+                    let request = Box::pin(async move {
+                        await_mcp_utility(
+                            peer.list_all_prompts(),
+                            &mut abort,
+                            "MCP prompt listing",
+                        )
+                        .await
+                    }) as BoxFuture<'static, Result<Vec<_>, String>>;
+                    (server, request)
+                })
+                .collect();
+            for (server, result) in collect_mcp_utility_lists(requests).await {
+                match result {
+                    Ok(listed) => {
+                        truncated = append_utility_values(
+                            &mut prompts,
+                            listed
+                                .into_iter()
+                                .map(|prompt| json!({ "server": server, "prompt": prompt })),
+                        );
+                        if truncated {
+                            break;
+                        }
+                    }
                     Err(err) => errors.push(json!({ "server": server, "error": err.to_string() })),
                 }
+            }
+            if truncated {
+                errors.push(utility_truncation_error());
             }
             utility_list_output("prompts", prompts, errors)
         }
@@ -1490,30 +1659,99 @@ async fn execute_mcp_utility(
             if let Some(arguments) = object.get("arguments").and_then(Value::as_object) {
                 request = request.with_arguments(arguments.clone());
             }
-            tokio::select! {
-                _ = abort.wait_for_abort() => ToolOutput::error(format!(
-                    "MCP prompt `{server}/{name}` was aborted"
-                )),
-                result = peer.get_prompt(request) => match result {
-                    Ok(result) => {
-                        let json = json!({
-                            "server": server,
-                            "name": name,
-                            "description": result.description,
-                            "messages": result.messages,
-                        });
-                        ToolOutput::ok_with_model_content(
-                            json.clone(),
-                            serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string()),
-                        )
-                    }
-                    Err(err) => ToolOutput::error(format!(
-                        "MCP prompt `{server}/{name}` failed: {err}"
-                    )),
-                },
+            match await_mcp_utility(
+                peer.get_prompt(request),
+                &mut abort,
+                &format!("MCP prompt `{server}/{name}`"),
+            )
+            .await
+            {
+                Ok(result) => {
+                    let json = json!({
+                        "server": server,
+                        "name": name,
+                        "description": result.description,
+                        "messages": result.messages,
+                    });
+                    ToolOutput::ok_with_model_content(
+                        json.clone(),
+                        serde_json::to_string(&json).unwrap_or_else(|_| "{}".to_string()),
+                    )
+                }
+                Err(err) => ToolOutput::error(err),
             }
         }
     }
+}
+
+type McpUtilityListResult<T> = Result<Vec<T>, String>;
+type McpUtilityListRequest<T> = (String, BoxFuture<'static, McpUtilityListResult<T>>);
+type IndexedMcpUtilityListRequest<T> =
+    BoxFuture<'static, (usize, String, McpUtilityListResult<T>)>;
+
+async fn collect_mcp_utility_lists<T: Send + 'static>(
+    requests: Vec<McpUtilityListRequest<T>>,
+) -> Vec<(String, Result<Vec<T>, String>)> {
+    let mut pending: Vec<IndexedMcpUtilityListRequest<T>> =
+        Vec::with_capacity(requests.len());
+    for (index, (server, request)) in requests.into_iter().enumerate() {
+        pending.push(Box::pin(async move {
+            (index, server, request.await)
+        }));
+    }
+    let mut results = stream::iter(pending)
+        .buffer_unordered(MCP_STARTUP_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    results.sort_by_key(|(index, _, _)| *index);
+    results
+        .into_iter()
+        .map(|(_, server, result)| (server, result))
+        .collect()
+}
+
+async fn await_mcp_utility<T, E>(
+    future: impl std::future::Future<Output = Result<T, E>>,
+    abort: &mut AbortSignal,
+    label: &str,
+) -> Result<T, String>
+where
+    E: std::fmt::Display,
+{
+    tokio::select! {
+        _ = abort.wait_for_abort() => Err(format!("{label} was aborted")),
+        result = tokio::time::timeout(
+            Duration::from_secs(DEFAULT_MCP_CALL_TIMEOUT_SECS),
+            future,
+        ) => match result {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => Err(format!("{label} failed: {error}")),
+            Err(_) => Err(format!(
+                "{label} timed out after {DEFAULT_MCP_CALL_TIMEOUT_SECS}s"
+            )),
+        },
+    }
+}
+
+fn append_utility_values(
+    target: &mut Vec<Value>,
+    values: impl IntoIterator<Item = Value>,
+) -> bool {
+    for value in values {
+        if target.len() == MCP_UTILITY_LIST_LIMIT {
+            return true;
+        }
+        target.push(value);
+    }
+    false
+}
+
+fn utility_truncation_error() -> Value {
+    json!({
+        "error": format!(
+            "results truncated at {MCP_UTILITY_LIST_LIMIT} entries"
+        )
+    })
 }
 
 fn utility_list_output(key: &str, items: Vec<Value>, errors: Vec<Value>) -> ToolOutput {
@@ -1538,7 +1776,7 @@ pub(crate) struct McpToolBinding {
     pub(crate) description: String,
     pub(crate) parameters: Value,
     pub(crate) supports_parallel_tool_calls: bool,
-    pub(crate) tool_timeout_secs: Option<u64>,
+    pub(crate) tool_timeout_secs: u64,
     pub(crate) connection: Arc<McpConnection>,
 }
 
@@ -1642,33 +1880,19 @@ impl ToolBinding for McpToolBinding {
                 source_id,
                 source_kind,
             };
-            if let Some(timeout_secs) = tool_timeout_secs {
-                tokio::select! {
-                    _ = abort.wait_for_abort() => ToolOutput::error(format!(
-                        "MCP tool `{server_name}/{raw_tool_name}` was aborted"
+            tokio::select! {
+                _ = abort.wait_for_abort() => ToolOutput::error(format!(
+                    "MCP tool `{server_name}/{raw_tool_name}` was aborted"
+                )),
+                result = tokio::time::timeout(Duration::from_secs(tool_timeout_secs), call) => match result {
+                    Ok(Ok(result)) => mcp_tool_output_with_identity(identity, result),
+                    Ok(Err(err)) => ToolOutput::error(format!(
+                        "MCP tool `{server_name}/{raw_tool_name}` failed: {err}"
                     )),
-                    result = tokio::time::timeout(Duration::from_secs(timeout_secs), call) => match result {
-                        Ok(Ok(result)) => mcp_tool_output_with_identity(identity, result),
-                        Ok(Err(err)) => ToolOutput::error(format!(
-                            "MCP tool `{server_name}/{raw_tool_name}` failed: {err}"
-                        )),
-                        Err(_) => ToolOutput::error(format!(
-                            "MCP tool `{server_name}/{raw_tool_name}` timed out after {timeout_secs}s"
-                        )),
-                    },
-                }
-            } else {
-                tokio::select! {
-                    _ = abort.wait_for_abort() => ToolOutput::error(format!(
-                        "MCP tool `{server_name}/{raw_tool_name}` was aborted"
+                    Err(_) => ToolOutput::error(format!(
+                        "MCP tool `{server_name}/{raw_tool_name}` timed out after {tool_timeout_secs}s"
                     )),
-                    result = call => match result {
-                        Ok(result) => mcp_tool_output_with_identity(identity, result),
-                        Err(err) => ToolOutput::error(format!(
-                            "MCP tool `{server_name}/{raw_tool_name}` failed: {err}"
-                        )),
-                    },
-                }
+                },
             }
         })
     }
@@ -1858,6 +2082,121 @@ pub(crate) mod tests {
         assert_ne!(
             McpSourceCatalog::resolve(&[base]).hash(),
             McpSourceCatalog::resolve(&[filtered]).hash()
+        );
+    }
+
+    #[test]
+    fn omitted_mcp_tool_timeout_resolves_to_the_bounded_default() {
+        assert_eq!(
+            effective_mcp_tool_timeout_secs(&McpServerPolicy::default()),
+            DEFAULT_MCP_CALL_TIMEOUT_SECS
+        );
+        assert_eq!(
+            effective_mcp_tool_timeout_secs(&McpServerPolicy {
+                tool_timeout_secs: Some(7),
+                ..McpServerPolicy::default()
+            }),
+            7
+        );
+    }
+
+    #[derive(Debug)]
+    struct PendingMcpApproval {
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl crate::types::ApprovalHandler for PendingMcpApproval {
+        fn request_permission(
+            &self,
+            _request: crate::types::PermissionApprovalRequest,
+        ) -> BoxFuture<'static, crate::types::PermissionApprovalDecision> {
+            Box::pin(std::future::pending())
+        }
+
+        fn cancel_permission(&self, _tool_call_id: &str) -> BoxFuture<'static, ()> {
+            let cancelled = Arc::clone(&self.cancelled);
+            Box::pin(async move {
+                cancelled.store(true, std::sync::atomic::Ordering::Release);
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_timeout_cancels_its_permission_request() {
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let handler = Arc::new(PendingMcpApproval {
+            cancelled: Arc::clone(&cancelled),
+        });
+        let cwd = std::env::temp_dir();
+        let permissions = PermissionRuntime::new(
+            cwd.clone(),
+            cwd.join(".psychevo"),
+            crate::types::PermissionConfig::default(),
+            crate::types::PermissionMode::Default,
+            crate::types::ApprovalMode::Manual,
+            Some(handler),
+            None,
+        );
+        let input = McpServerInput::with_source(
+            "pending",
+            McpTransportInput::Unsupported {
+                kind: "pending".to_string(),
+            },
+            "test:mcp:pending",
+            "session",
+        )
+        .with_policy(McpServerPolicy {
+            startup_timeout_secs: Some(1),
+            ..McpServerPolicy::default()
+        });
+        let entry = McpSourceCatalog::resolve(&[input])
+            .entries
+            .into_iter()
+            .next()
+            .expect("catalog entry");
+
+        let failure = match prepare_mcp_server(entry, &cwd, Some(&permissions)).await {
+            Ok(_) => panic!("expected startup timeout"),
+            Err(failure) => failure,
+        };
+
+        assert!(failure.message.contains("timed out"));
+        assert!(cancelled.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn utility_lists_run_concurrently_and_merge_in_catalog_order() {
+        let (first_started_tx, first_started_rx) = tokio::sync::oneshot::channel();
+        let (release_first_tx, release_first_rx) = tokio::sync::oneshot::channel();
+        let (second_finished_tx, second_finished_rx) = tokio::sync::oneshot::channel();
+        let first: BoxFuture<'static, Result<Vec<u8>, String>> = Box::pin(async move {
+            let _ = first_started_tx.send(());
+            let _ = release_first_rx.await;
+            Ok(vec![1])
+        });
+        let second: BoxFuture<'static, Result<Vec<u8>, String>> = Box::pin(async move {
+            let _ = first_started_rx.await;
+            let _ = second_finished_tx.send(());
+            Ok(vec![2])
+        });
+
+        let collecting = tokio::spawn(collect_mcp_utility_lists(vec![
+            ("first".to_string(), first),
+            ("second".to_string(), second),
+        ]));
+        tokio::time::timeout(Duration::from_millis(100), second_finished_rx)
+            .await
+            .expect("second utility must not wait for the first")
+            .expect("second utility completion");
+        let _ = release_first_tx.send(());
+        let results = collecting.await.expect("collector");
+
+        assert_eq!(
+            results
+                .iter()
+                .map(|(server, _)| server.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second"]
         );
     }
 
@@ -2054,6 +2393,26 @@ pub(crate) mod tests {
         for tool in tools {
             crate::tests::assert_first_party_tool_declaration_quality(tool.as_ref());
         }
+    }
+
+    #[test]
+    fn utility_list_is_bounded_with_an_explicit_truncation_diagnostic() {
+        let mut values = Vec::new();
+        let truncated = append_utility_values(
+            &mut values,
+            (0..=MCP_UTILITY_LIST_LIMIT).map(|index| json!(index)),
+        );
+
+        assert!(truncated);
+        assert_eq!(values.len(), MCP_UTILITY_LIST_LIMIT);
+        assert_eq!(
+            utility_truncation_error(),
+            json!({
+                "error": format!(
+                    "results truncated at {MCP_UTILITY_LIST_LIMIT} entries"
+                )
+            })
+        );
     }
 
     #[test]

@@ -789,6 +789,7 @@ pub(crate) async fn spawn_child_agent_background(
     if prompt.trim().is_empty() {
         return Err(Error::Message("agent message is empty".to_string()));
     }
+    let worker_lease = context.extension_inputs.acquire_worker_lease();
     let id = Uuid::now_v7().to_string();
     let task_name = default_task_name(&agent.name, &id);
     let role = AgentInvocationRole::Subagent;
@@ -897,6 +898,9 @@ pub(crate) async fn spawn_child_agent_background(
     };
     tokio::spawn(async move {
         let _ = run_child_agent(child).await;
+        if let Some(lease) = worker_lease {
+            lease.shutdown().await;
+        }
     });
     Ok(record)
 }

@@ -13,7 +13,7 @@ use crate::config::{PluginPolicyConfig, PluginPolicyEntry, ToolsetContribution};
 use crate::hooks::{HookSourceDescriptor, HookWorkerAdapter};
 use crate::types::{McpServerInput, RuntimeTool};
 
-pub(crate) fn load_enabled_plugin_contributions(
+pub(crate) async fn load_enabled_plugin_contributions(
     home: &Path,
     cwd: &Path,
     env: &BTreeMap<String, String>,
@@ -26,12 +26,13 @@ pub(crate) fn load_enabled_plugin_contributions(
         mcp_servers: Vec::new(),
         toolsets: Vec::new(),
         runtime_tools: Vec::new(),
+        worker_sessions: Vec::new(),
         warnings: Vec::new(),
     };
     let enabled = enabled_plugin_manifests(home, cwd, policy, &mut assembly.warnings);
     for enabled in enabled {
-        let worker_session = enabled.manifest.worker.as_ref().and_then(|worker| {
-            match PluginWorkerSession::start(&enabled.record, &enabled.manifest, worker, env) {
+        let worker_session = if let Some(worker) = enabled.manifest.worker.as_ref() {
+            match PluginWorkerSession::start(&enabled.record, &enabled.manifest, worker, env).await {
                 Ok(session) => Some(session),
                 Err(err) => {
                     assembly.warnings.push(plugin_warning(format!(
@@ -41,7 +42,9 @@ pub(crate) fn load_enabled_plugin_contributions(
                     None
                 }
             }
-        });
+        } else {
+            None
+        };
         add_static_contributions(
             &mut assembly,
             &enabled.record,
@@ -51,7 +54,8 @@ pub(crate) fn load_enabled_plugin_contributions(
             worker_session.clone(),
         );
         if let Some(session) = worker_session {
-            match worker_tools_in_session(&session) {
+            assembly.worker_sessions.push(Arc::clone(&session));
+            match worker_tools_in_session(&session).await {
                 Ok(tools) => {
                     for tool in tools {
                         assembly.runtime_tools.push(RuntimeTool::with_source(

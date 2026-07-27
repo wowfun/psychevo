@@ -40,6 +40,7 @@ enum InteractionCommand {
         interaction_id: String,
         kind: String,
         reason: String,
+        receipt: Option<oneshot::Sender<std::result::Result<(), String>>>,
     },
     Finish,
 }
@@ -191,6 +192,7 @@ impl InteractionBroker {
                         interaction_id,
                         kind,
                         reason,
+                        receipt,
                     } => {
                         let status = if matches!(
                             reason.as_str(),
@@ -205,7 +207,7 @@ impl InteractionBroker {
                             "interactionKind": kind,
                             "reason": reason,
                         });
-                        if state
+                        let result = state
                             .resolve_framework_interaction(
                                 &interaction_id,
                                 &thread_id,
@@ -215,13 +217,16 @@ impl InteractionBroker {
                                 resolution,
                             )
                             .await
-                            .unwrap_or(false)
-                        {
+                            .map_err(|error| error.to_string());
+                        if matches!(result, Ok(true)) {
                             log.push(TurnEvent::InteractionResolved {
-                                interaction_id,
+                                interaction_id: interaction_id.clone(),
                                 kind,
                                 reason,
                             });
+                        }
+                        if let Some(receipt) = receipt {
+                            let _ = receipt.send(result.map(|_| ()));
                         }
                     }
                     InteractionCommand::Finish => break,
@@ -260,6 +265,7 @@ impl InteractionBroker {
                 interaction_id,
                 kind,
                 reason,
+                receipt: None,
             },
             _ => return,
         };
@@ -305,6 +311,23 @@ impl InteractionBroker {
         receipt_rx
             .await
             .map_err(|_| Error::Message("interaction response was cancelled".to_string()))?
+            .map_err(Error::Message)
+    }
+
+    async fn cancel(&self, interaction_id: &str, kind: &str, reason: &str) -> Result<()> {
+        let (receipt_tx, receipt_rx) = oneshot::channel();
+        self.sender
+            .send(InteractionCommand::ObservedResolution {
+                interaction_id: interaction_id.to_string(),
+                kind: kind.to_string(),
+                reason: reason.to_string(),
+                receipt: Some(receipt_tx),
+            })
+            .await
+            .map_err(|_| Error::Message("interaction broker is closed".to_string()))?;
+        receipt_rx
+            .await
+            .map_err(|_| Error::Message("interaction cancellation was cancelled".to_string()))?
             .map_err(Error::Message)
     }
 
@@ -508,6 +531,18 @@ impl ApprovalHandler for FrameworkApprovalHandler {
             };
             interactions.remove_permission(&interaction_id);
             decision
+        })
+    }
+
+    fn cancel_permission(&self, tool_call_id: &str) -> BoxFuture<'static, ()> {
+        let interaction_id = tool_call_id.to_string();
+        let interactions = self.interactions.clone();
+        let broker = self.broker.clone();
+        Box::pin(async move {
+            interactions.remove_permission(&interaction_id);
+            let _ = broker
+                .cancel(&interaction_id, "permission", "timed_out")
+                .await;
         })
     }
 }

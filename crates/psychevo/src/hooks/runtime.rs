@@ -122,85 +122,96 @@ impl HookRuntime {
             .collect()
     }
 
-    pub fn run_event(&self, event: &str, payload: &Value) -> HookResponse {
+    pub async fn run_event(&self, event: &str, payload: &Value) -> HookResponse {
         let Some(event) = HookEventName::parse(event) else {
             return HookResponse {
                 diagnostics: vec![format!("unsupported hook event `{event}`")],
                 ..HookResponse::default()
             };
         };
-        self.run_event_name(event, payload)
+        self.run_event_name(event, payload).await
     }
 
-    pub fn run_session_start(&self, payload: &Value) -> HookLifecycleOutcome {
+    pub async fn run_session_start(&self, payload: &Value) -> HookLifecycleOutcome {
         HookLifecycleOutcome::from_response(
-            self.run_event_name(HookEventName::SessionStart, payload),
+            self.run_event_name(HookEventName::SessionStart, payload).await,
         )
     }
 
-    pub fn run_session_end(&self, payload: &Value) -> HookReadOnlyOutcome {
-        HookReadOnlyOutcome::from_response(self.run_event_name(HookEventName::SessionEnd, payload))
-    }
-
-    pub fn run_subagent_start(&self, payload: &Value) -> HookLifecycleOutcome {
-        HookLifecycleOutcome::from_response(
-            self.run_event_name(HookEventName::SubagentStart, payload),
-        )
-    }
-
-    pub fn run_subagent_stop(&self, payload: &Value) -> HookStopOutcome {
-        HookStopOutcome::from_response(self.run_event_name(HookEventName::SubagentStop, payload))
-    }
-
-    pub fn run_user_prompt_submit(&self, payload: &Value) -> HookUserPromptSubmitOutcome {
-        HookUserPromptSubmitOutcome::from_response(
-            self.run_event_name(HookEventName::UserPromptSubmit, payload),
-        )
-    }
-
-    pub fn run_pre_tool_use(&self, payload: &Value) -> HookPreToolUseOutcome {
-        HookPreToolUseOutcome::from_response(
-            self.run_event_name(HookEventName::PreToolUse, payload),
-        )
-    }
-
-    pub fn run_permission_request(&self, payload: &Value) -> HookPermissionRequestOutcome {
-        HookPermissionRequestOutcome::from_response(
-            self.run_event_name(HookEventName::PermissionRequest, payload),
-        )
-    }
-
-    pub fn run_post_tool_use(&self, payload: &Value) -> HookPostToolUseOutcome {
-        HookPostToolUseOutcome::from_response(
-            self.run_event_name(HookEventName::PostToolUse, payload),
-        )
-    }
-
-    pub fn run_post_llm_call(&self, payload: &Value) -> HookReadOnlyOutcome {
-        HookReadOnlyOutcome::from_response(self.run_event_name(HookEventName::PostLLMCall, payload))
-    }
-
-    pub fn run_pre_compact(&self, payload: &Value) -> HookLifecycleOutcome {
-        HookLifecycleOutcome::from_response(self.run_event_name(HookEventName::PreCompact, payload))
-    }
-
-    pub fn run_post_compact(&self, payload: &Value) -> HookLifecycleOutcome {
-        HookLifecycleOutcome::from_response(
-            self.run_event_name(HookEventName::PostCompact, payload),
-        )
-    }
-
-    pub fn run_notification(&self, payload: &Value) -> HookReadOnlyOutcome {
+    pub async fn run_session_end(&self, payload: &Value) -> HookReadOnlyOutcome {
         HookReadOnlyOutcome::from_response(
-            self.run_event_name(HookEventName::Notification, payload),
+            self.run_event_name(HookEventName::SessionEnd, payload).await,
         )
     }
 
-    pub fn run_stop(&self, payload: &Value) -> HookStopOutcome {
-        HookStopOutcome::from_response(self.run_event_name(HookEventName::Stop, payload))
+    pub async fn run_subagent_start(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(
+            self.run_event_name(HookEventName::SubagentStart, payload).await,
+        )
     }
 
-    fn run_event_name(&self, event: HookEventName, payload: &Value) -> HookResponse {
+    pub async fn run_subagent_stop(&self, payload: &Value) -> HookStopOutcome {
+        HookStopOutcome::from_response(
+            self.run_event_name(HookEventName::SubagentStop, payload).await,
+        )
+    }
+
+    pub async fn run_user_prompt_submit(&self, payload: &Value) -> HookUserPromptSubmitOutcome {
+        HookUserPromptSubmitOutcome::from_response(
+            self.run_event_name(HookEventName::UserPromptSubmit, payload)
+                .await,
+        )
+    }
+
+    pub async fn run_pre_tool_use(&self, payload: &Value) -> HookPreToolUseOutcome {
+        HookPreToolUseOutcome::from_response(
+            self.run_event_name(HookEventName::PreToolUse, payload).await,
+        )
+    }
+
+    pub async fn run_permission_request(&self, payload: &Value) -> HookPermissionRequestOutcome {
+        HookPermissionRequestOutcome::from_response(
+            self.run_event_name(HookEventName::PermissionRequest, payload)
+                .await,
+        )
+    }
+
+    pub async fn run_post_tool_use(&self, payload: &Value) -> HookPostToolUseOutcome {
+        HookPostToolUseOutcome::from_response(
+            self.run_event_name(HookEventName::PostToolUse, payload).await,
+        )
+    }
+
+    pub async fn run_post_llm_call(&self, payload: &Value) -> HookReadOnlyOutcome {
+        HookReadOnlyOutcome::from_response(
+            self.run_event_name(HookEventName::PostLLMCall, payload)
+                .await,
+        )
+    }
+
+    pub async fn run_pre_compact(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(
+            self.run_event_name(HookEventName::PreCompact, payload).await,
+        )
+    }
+
+    pub async fn run_post_compact(&self, payload: &Value) -> HookLifecycleOutcome {
+        HookLifecycleOutcome::from_response(
+            self.run_event_name(HookEventName::PostCompact, payload).await,
+        )
+    }
+
+    pub async fn run_notification(&self, payload: &Value) -> HookReadOnlyOutcome {
+        HookReadOnlyOutcome::from_response(
+            self.run_event_name(HookEventName::Notification, payload).await,
+        )
+    }
+
+    pub async fn run_stop(&self, payload: &Value) -> HookStopOutcome {
+        HookStopOutcome::from_response(self.run_event_name(HookEventName::Stop, payload).await)
+    }
+
+    async fn run_event_name(&self, event: HookEventName, payload: &Value) -> HookResponse {
         let mut response = HookResponse::default();
         let mut command_jobs = Vec::new();
         let (tx, rx) = mpsc::channel();
@@ -232,7 +243,8 @@ impl HookRuntime {
                         Some(worker) => {
                             let payload =
                                 runtime_payload(event, &hook.metadata, &self.cwd, payload);
-                            let result = call_worker_hook(worker, &hook.metadata, payload);
+                            let result =
+                                call_worker_hook(worker, &hook.metadata, payload).await;
                             summary_from_worker_result(hook, started, result)
                         }
                         None => skipped_summary(hook, "worker adapter unavailable"),

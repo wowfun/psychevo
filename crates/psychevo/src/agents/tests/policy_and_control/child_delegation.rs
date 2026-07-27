@@ -585,6 +585,7 @@ pub(crate) async fn child_agent_tool_calls_run_plugin_hooks() {
     let worker = manifest.worker.clone().expect("worker");
     let worker_session =
         crate::plugins::PluginWorkerSession::start(&record, &manifest, &worker, &BTreeMap::new())
+            .await
             .expect("plugin worker session");
     let plugin_source = crate::hooks::HookSourceDescriptor {
         source_id: format!("plugin:{}@{}", record.name, record.source_slug),

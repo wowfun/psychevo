@@ -120,12 +120,11 @@ pub(crate) async fn stream_assistant(
             return Err(err.into());
         }
     };
-    let mut raw_text = String::new();
+    let mut inline_think = InlineThinkParser::new();
     let mut provider_reasoning = String::new();
     let mut reasoning_details = Vec::new();
     let mut usage = None;
     let mut metadata = None;
-    let mut emitted_inline_reasoning_len = 0usize;
     let mut tool_builders: BTreeMap<(usize, usize), ToolCallBuilder> = BTreeMap::new();
     let mut provider_tools: BTreeMap<String, ProviderToolBlock> = BTreeMap::new();
     let mut sources: Vec<AssistantSource> = Vec::new();
@@ -174,16 +173,25 @@ pub(crate) async fn stream_assistant(
         };
         match event {
             StreamEvent::TextDelta { text: delta } => {
-                raw_text.push_str(&delta);
-                let (_, inline_reasoning) = split_inline_think_blocks(&raw_text, true);
-                if inline_reasoning.len() > emitted_inline_reasoning_len {
-                    let delta = inline_reasoning[emitted_inline_reasoning_len..].to_string();
-                    emitted_inline_reasoning_len = inline_reasoning.len();
-                    if !delta.is_empty() {
-                        emit(&sink, AgentEvent::ReasoningDelta { text: delta }).await?;
-                    }
+                let (visible_delta, reasoning_delta) = inline_think.push(&delta);
+                if !visible_delta.is_empty() {
+                    emit(
+                        &sink,
+                        AgentEvent::AssistantTextDelta {
+                            text: visible_delta,
+                        },
+                    )
+                    .await?;
                 }
-                visible_changed = true;
+                if !reasoning_delta.is_empty() {
+                    emit(
+                        &sink,
+                        AgentEvent::ReasoningDelta {
+                            text: reasoning_delta,
+                        },
+                    )
+                    .await?;
+                }
             }
             StreamEvent::ReasoningDelta {
                 text: delta,
@@ -317,45 +325,58 @@ pub(crate) async fn stream_assistant(
                 break;
             }
         }
-        let (visible_text, inline_reasoning) = split_inline_think_blocks(&raw_text, true);
-        let reasoning = combine_reasoning(&provider_reasoning, &inline_reasoning);
-        assistant = build_assistant_message(
-            AssistantBuildState {
-                text: &visible_text,
-                reasoning: &reasoning,
-                reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
-                tool_builders: &tool_builders,
-                provider_tools: &provider_tools,
-                sources: &sources,
-                timestamp_ms,
-                finish_reason: finish_reason.clone(),
-                outcome,
-            },
-            request,
-        );
-        if visible_changed && visible_assistant_changed(&last_visible_assistant, &assistant) {
-            last_visible_assistant = assistant.clone();
-            emit(
-                &sink,
-                AgentEvent::MessageUpdate {
-                    message: assistant.clone(),
+        if visible_changed {
+            let reasoning = combine_reasoning(&provider_reasoning, inline_think.reasoning());
+            assistant = build_assistant_message(
+                AssistantBuildState {
+                    text: inline_think.visible(),
+                    reasoning: &reasoning,
+                    reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
+                    tool_builders: &tool_builders,
+                    provider_tools: &provider_tools,
+                    sources: &sources,
+                    timestamp_ms,
+                    finish_reason: finish_reason.clone(),
+                    outcome,
                 },
-            )
-            .await?;
+                request,
+            );
+            if visible_assistant_changed(&last_visible_assistant, &assistant) {
+                last_visible_assistant = assistant.clone();
+                emit(
+                    &sink,
+                    AgentEvent::MessageUpdate {
+                        message: assistant.clone(),
+                    },
+                )
+                .await?;
+            }
         }
     }
 
-    let (visible_text, inline_reasoning) = split_inline_think_blocks(&raw_text, false);
-    if inline_reasoning.len() > emitted_inline_reasoning_len {
-        let delta = inline_reasoning[emitted_inline_reasoning_len..].to_string();
-        if !delta.is_empty() {
-            emit(&sink, AgentEvent::ReasoningDelta { text: delta }).await?;
-        }
+    let (visible_delta, reasoning_delta) = inline_think.finish();
+    if !visible_delta.is_empty() {
+        emit(
+            &sink,
+            AgentEvent::AssistantTextDelta {
+                text: visible_delta,
+            },
+        )
+        .await?;
     }
-    let reasoning = combine_reasoning(&provider_reasoning, &inline_reasoning);
+    if !reasoning_delta.is_empty() {
+        emit(
+            &sink,
+            AgentEvent::ReasoningDelta {
+                text: reasoning_delta,
+            },
+        )
+        .await?;
+    }
+    let reasoning = combine_reasoning(&provider_reasoning, inline_think.reasoning());
     assistant = build_assistant_message(
         AssistantBuildState {
-            text: &visible_text,
+            text: inline_think.visible(),
             reasoning: &reasoning,
             reasoning_provider_evidence: reasoning_provider_evidence(&reasoning_details),
             tool_builders: &tool_builders,

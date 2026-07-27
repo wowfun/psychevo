@@ -33,7 +33,9 @@ impl StateOperation {
             }
             Err(error) => {
                 self.inner.failed_operations.fetch_add(1, Ordering::Relaxed);
-                if is_sqlx_busy_error(error) {
+                if let crate::error::Error::Sqlx(error) = error
+                    && is_sqlx_busy_error(error)
+                {
                     self.inner.busy_operations.fetch_add(1, Ordering::Relaxed);
                 }
             }
@@ -112,8 +114,8 @@ fn elapsed_micros(started: Instant) -> u64 {
     started.elapsed().as_micros().min(u64::MAX as u128) as u64
 }
 
-fn is_sqlx_busy_error(error: &crate::error::Error) -> bool {
-    let crate::error::Error::Sqlx(sqlx::Error::Database(database)) = error else {
+pub(super) fn is_sqlx_busy_error(error: &sqlx::Error) -> bool {
+    let sqlx::Error::Database(database) = error else {
         return false;
     };
     database

@@ -101,6 +101,7 @@ fn trace_drafts_from_agent_event(
         }
         AgentEvent::MessageStart { .. }
         | AgentEvent::MessageUpdate { .. }
+        | AgentEvent::AssistantTextDelta { .. }
         | AgentEvent::ReasoningDelta { .. }
         | AgentEvent::ToolCallPending { .. }
         | AgentEvent::ToolExecutionUpdate { .. } => unreachable!("coalesced above"),
@@ -181,6 +182,7 @@ fn trace_event_kind(event: &AgentEvent) -> &'static str {
         AgentEvent::GenerationEnd { .. } => "generation_end",
         AgentEvent::MessageStart { .. } => "message_start",
         AgentEvent::MessageUpdate { .. } => "message_update",
+        AgentEvent::AssistantTextDelta { .. } => "assistant_text_delta",
         AgentEvent::MessageEnd { .. } => "message_end",
         AgentEvent::ReasoningDelta { .. } => "reasoning_delta",
         AgentEvent::ReasoningEnd { .. } => "reasoning_end",
@@ -196,6 +198,7 @@ fn should_coalesce_event(event: &AgentEvent) -> bool {
         event,
         AgentEvent::MessageStart { .. }
             | AgentEvent::MessageUpdate { .. }
+            | AgentEvent::AssistantTextDelta { .. }
             | AgentEvent::ReasoningDelta { .. }
             | AgentEvent::ToolCallPending { .. }
             | AgentEvent::ToolExecutionUpdate { .. }

@@ -101,6 +101,16 @@ impl PermissionRuntime {
             })
     }
 
+    pub(crate) async fn cancel_authorization(&self, tool_call_id: &str) {
+        let handler = match self.inner.config.approvals_reviewer {
+            crate::types::ApprovalsReviewer::User => self.inner.approval_handler.as_ref(),
+            crate::types::ApprovalsReviewer::Smart => self.inner.smart_approval_handler.as_ref(),
+        };
+        if let Some(handler) = handler {
+            handler.cancel_permission(tool_call_id).await;
+        }
+    }
+
     pub(crate) async fn authorize(
         &self,
         tool_call_id: &str,

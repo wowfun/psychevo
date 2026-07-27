@@ -132,7 +132,7 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
     };
     let (plugin_policy, plugin_env, home) =
         load_plugin_policy_config_lenient(&project_context_options, &cwd)?;
-    let extension_assembly =
+    let mut extension_assembly =
         crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
             home: &home,
             cwd: &cwd,
@@ -141,7 +141,9 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
             selected_capability_roots: &[],
             mcp_servers: Vec::new(),
             runtime_tools: Vec::new(),
-        });
+        })
+        .await;
+    let reload_result = async {
     let project_context_mode =
         load_project_context_instruction_mode(&project_context_options, &cwd)?;
     let agents_home = resolve_agents_home(&env, &cwd)?;
@@ -388,6 +390,10 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         model: record.model,
         invalidation_reason: record.invalidation_reason,
     })
+    }
+    .await;
+    extension_assembly.shutdown_workers().await;
+    reload_result
 }
 
 pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentSpawnResult> {
@@ -436,7 +442,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     let home = crate::config::resolve_psychevo_home(&loaded.env)?;
     let mut mcp_inputs = options.mcp_servers.clone();
     mcp_inputs.extend(loaded.config.mcp_servers.clone());
-    let extension_assembly =
+    let mut extension_assembly =
         crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
             home: &home,
             cwd: &cwd,
@@ -445,7 +451,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             selected_capability_roots: &options.selected_capability_roots,
             mcp_servers: mcp_inputs,
             runtime_tools: Vec::new(),
-        });
+        })
+        .await;
+    let spawn_result = async {
     let permission_mode = options.permission_mode.unwrap_or_default();
     let approval_mode = options.approval_mode.unwrap_or({
         match loaded.config.permissions.approvals_reviewer {
@@ -634,4 +642,8 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         parent_session_id,
         agent,
     })
+    }
+    .await;
+    extension_assembly.shutdown_workers().await;
+    spawn_result
 }

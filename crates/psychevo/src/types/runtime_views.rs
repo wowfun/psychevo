@@ -787,6 +787,9 @@ impl DeliveryDiagnosticStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunStreamEvent {
     Event(Box<SessionEvent>),
+    AssistantTextDelta {
+        text: String,
+    },
     ReasoningDelta {
         text: String,
     },

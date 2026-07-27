@@ -384,6 +384,9 @@ pub(crate) fn project_agent_event_with_accounting(
     accounting: Option<&MessageAccounting>,
 ) -> Option<Value> {
     let projected = match event {
+        AgentEvent::AssistantTextDelta { text } => {
+            return Some(json!({ "type": "assistant_text_delta", "text": text }));
+        }
         AgentEvent::ReasoningDelta { text } => {
             return include_reasoning.then(|| json!({ "type": "reasoning_delta", "text": text }));
         }
@@ -451,6 +454,9 @@ pub(crate) fn project_run_stream_event_with_accounting(
     accounting: Option<&MessageAccounting>,
 ) -> Option<RunStreamEvent> {
     match event {
+        AgentEvent::AssistantTextDelta { text } => {
+            Some(RunStreamEvent::AssistantTextDelta { text: text.clone() })
+        }
         AgentEvent::ReasoningDelta { text } => {
             Some(RunStreamEvent::ReasoningDelta { text: text.clone() })
         }

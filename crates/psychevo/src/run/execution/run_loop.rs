@@ -26,7 +26,7 @@ pub(crate) async fn run_live_internal(
     let home = crate::config::resolve_psychevo_home(&loaded.env)?;
     let mut mcp_inputs = options.mcp_servers.clone();
     mcp_inputs.extend(loaded.config.mcp_servers.clone());
-    let extension_assembly =
+    let mut extension_assembly =
         crate::extensions::assemble_extensions(crate::extensions::ExtensionAssemblyInput {
             home: &home,
             cwd: &cwd,
@@ -35,7 +35,9 @@ pub(crate) async fn run_live_internal(
             selected_capability_roots: &options.selected_capability_roots,
             mcp_servers: mcp_inputs,
             runtime_tools: options.runtime_tools.clone(),
-        });
+        })
+        .await;
+    let run_result = async {
     let extension_warnings = extension_assembly.warnings.clone();
     let project_context_mode = loaded.config.project_context.instructions;
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
@@ -597,7 +599,8 @@ pub(crate) async fn run_live_internal(
             "session_id": session_id,
             "source": if created_session { "startup" } else { "resume" },
             "cwd": cwd,
-        }));
+        }))
+        .await;
         if let Some(reason) = outcome.stop_reason {
             return Err(Error::Message(reason));
         }
@@ -755,7 +758,8 @@ pub(crate) async fn run_live_internal(
             "session_id": session_id,
             "prompt": options.prompt,
             "cwd": cwd,
-        }));
+        }))
+        .await;
         if let Some(reason) = prompt_hook.block_reason {
             return Err(Error::Message(reason));
         }
@@ -927,11 +931,13 @@ pub(crate) async fn run_live_internal(
             "session_id": session_id,
             "outcome": completion.outcome.as_str(),
             "assistant_text": final_answer,
-        }));
+        }))
+        .await;
         let stop = runtime.run_stop(&json!({
             "session_id": session_id,
             "outcome": completion.outcome.as_str(),
-        }));
+        }))
+        .await;
         if let Some(reason) = stop.block_reason {
             return Err(Error::Message(reason));
         }
@@ -1015,7 +1021,8 @@ pub(crate) async fn run_live_internal(
         let _ = runtime.run_session_end(&json!({
             "session_id": session_id,
             "outcome": completion.outcome.as_str(),
-        }));
+        }))
+        .await;
     }
     Ok(RunResult {
         session_id,
@@ -1038,6 +1045,10 @@ pub(crate) async fn run_live_internal(
         events,
         warnings,
     })
+    }
+    .await;
+    extension_assembly.shutdown_workers().await;
+    run_result
 }
 
 fn hook_contextual_user_messages(

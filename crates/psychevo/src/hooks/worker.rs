@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::types::{HookMetadata, HookWorkerAdapter};
 
-pub(crate) fn call_worker_hook(
+pub(crate) async fn call_worker_hook(
     worker: &HookWorkerAdapter,
     metadata: &HookMetadata,
     payload: Value,
@@ -11,16 +11,18 @@ pub(crate) fn call_worker_hook(
         .session
         .as_ref()
         .ok_or_else(|| "plugin worker session unavailable".to_string())?;
-    session.call(
-        "hooks/call",
-        json!({
-            "hook": {
-                "key": metadata.key,
-                "event": metadata.event,
-                "matcher": metadata.matcher,
-                "handler_type": metadata.handler_type.as_str(),
-            },
-            "payload": payload,
-        }),
-    )
+    session
+        .call(
+            "hooks/call",
+            json!({
+                "hook": {
+                    "key": metadata.key,
+                    "event": metadata.event,
+                    "matcher": metadata.matcher,
+                    "handler_type": metadata.handler_type.as_str(),
+                },
+                "payload": payload,
+            }),
+        )
+        .await
 }

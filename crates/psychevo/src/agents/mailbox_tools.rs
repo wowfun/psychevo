@@ -537,13 +537,13 @@ pub(crate) fn resolve_agents_home(env: &BTreeMap<String, String>, cwd: &Path) ->
 }
 
 #[cfg(test)]
-pub(crate) fn run_hook_commands(
+pub(crate) async fn run_hook_commands(
     hooks: Option<&Value>,
     event: &str,
     cwd: &Path,
     payload: &Value,
 ) -> Option<String> {
-    crate::hooks::run_hook_commands(hooks, event, cwd, payload)
+    crate::hooks::run_hook_commands(hooks, event, cwd, payload).await
 }
 
 pub(crate) fn now_ms() -> i64 {

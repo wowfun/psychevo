@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,6 +10,7 @@ use crate::hooks::HookSourceDescriptor;
 use crate::types::{McpServerInput, RuntimeTool};
 
 use super::compatibility::PluginComponentStatus;
+use super::worker::PluginWorkerSession;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -294,7 +296,20 @@ pub(crate) struct PluginRuntimeAssembly {
     pub(crate) mcp_servers: Vec<McpServerInput>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) runtime_tools: Vec<RuntimeTool>,
+    pub(crate) worker_sessions: Vec<Arc<PluginWorkerSession>>,
     pub(crate) warnings: Vec<crate::types::RunWarning>,
+}
+
+impl PluginRuntimeAssembly {
+    #[cfg(test)]
+    pub(crate) async fn shutdown_workers(&self) {
+        futures::future::join_all(
+            self.worker_sessions
+                .iter()
+                .map(|session| session.shutdown()),
+        )
+        .await;
+    }
 }
 
 pub(crate) struct EnabledPluginManifest {

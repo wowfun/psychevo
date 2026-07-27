@@ -81,7 +81,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             "agent": child.agent.name.clone(),
             "child_session_id": child_session.clone(),
             "parent_session_id": child.context.parent_session_id.clone(),
-        }));
+        }))
+        .await;
         if let Some(reason) = outcome.stop_reason {
             update_run_failed(&child.id, &reason);
             let _ = child
@@ -364,7 +365,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
                     "agent": child.agent.name.clone(),
                     "outcome": "failed",
                     "error": err.to_string(),
-                }));
+                }))
+                .await;
             }
             return Err(err.into());
         }
@@ -381,7 +383,8 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             "agent": child.agent.name.clone(),
             "outcome": completion.outcome.as_str(),
             "final_answer": final_answer.clone(),
-        }));
+        }))
+        .await;
         if let Some(reason) = stop.block_reason {
             update_run_failed(&child.id, &reason);
             let _ = child

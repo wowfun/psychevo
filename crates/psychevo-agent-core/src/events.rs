@@ -44,6 +44,9 @@ pub enum AgentEvent {
     MessageUpdate {
         message: Message,
     },
+    AssistantTextDelta {
+        text: String,
+    },
     MessageEnd {
         message: Message,
         #[serde(default, skip_serializing_if = "Option::is_none")]

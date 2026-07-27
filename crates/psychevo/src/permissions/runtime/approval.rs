@@ -138,7 +138,8 @@ impl PermissionRuntime {
                     "allow_always": false,
                     "filesystem": filesystem.clone(),
                 }),
-            );
+            )
+            .await;
             if let Some(decision) = hook_outcome.approval_decision() {
                 if decision.outcome == PermissionApprovalOutcome::Deny {
                     let hook_reason = hook_outcome

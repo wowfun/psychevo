@@ -960,7 +960,8 @@ pub(crate) async fn pre_tool_hook_exit_two_blocks_with_stderr() {
         "PreToolUse",
         tmp.path(),
         &json!({"tool": "read"}),
-    );
+    )
+    .await;
     assert_eq!(blocked.as_deref(), Some("blocked"));
 }
 

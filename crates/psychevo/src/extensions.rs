@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +87,8 @@ pub(crate) struct ExtensionAssembly {
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
     pub(crate) warnings: Vec<RunWarning>,
+    worker_owner: Option<PluginWorkerOwner>,
+    worker_lease: Option<PluginWorkerLease>,
 }
 
 #[derive(Clone, Default)]
@@ -93,6 +97,7 @@ pub(crate) struct AcceptedExtensionInputs {
     pub(crate) runtime_tools: Vec<RuntimeTool>,
     pub(crate) hook_sources: Vec<HookSourceDescriptor>,
     pub(crate) toolsets: Vec<ToolsetContribution>,
+    worker_owner: Option<PluginWorkerOwner>,
 }
 
 impl ExtensionAssembly {
@@ -102,7 +107,83 @@ impl ExtensionAssembly {
             runtime_tools: self.runtime_tools.clone(),
             hook_sources: self.hook_sources.clone(),
             toolsets: self.toolsets.clone(),
+            worker_owner: self.worker_owner.clone(),
         }
+    }
+
+    pub(crate) async fn shutdown_workers(&mut self) {
+        if let Some(lease) = self.worker_lease.take() {
+            lease.shutdown().await;
+        }
+    }
+}
+
+impl AcceptedExtensionInputs {
+    pub(crate) fn acquire_worker_lease(&self) -> Option<PluginWorkerLease> {
+        self.worker_owner.as_ref().map(PluginWorkerOwner::acquire)
+    }
+}
+
+#[derive(Clone)]
+struct PluginWorkerOwner {
+    inner: Arc<PluginWorkerOwnerInner>,
+}
+
+struct PluginWorkerOwnerInner {
+    sessions: Vec<Arc<crate::plugins::PluginWorkerSession>>,
+    leases: AtomicUsize,
+}
+
+impl PluginWorkerOwner {
+    fn new(sessions: Vec<Arc<crate::plugins::PluginWorkerSession>>) -> Option<Self> {
+        (!sessions.is_empty()).then(|| Self {
+            inner: Arc::new(PluginWorkerOwnerInner {
+                sessions,
+                leases: AtomicUsize::new(0),
+            }),
+        })
+    }
+
+    fn acquire(&self) -> PluginWorkerLease {
+        self.inner.leases.fetch_add(1, Ordering::AcqRel);
+        PluginWorkerLease {
+            owner: self.clone(),
+            active: true,
+        }
+    }
+}
+
+pub(crate) struct PluginWorkerLease {
+    owner: PluginWorkerOwner,
+    active: bool,
+}
+
+impl PluginWorkerLease {
+    pub(crate) async fn shutdown(mut self) {
+        if self.release() {
+            futures::future::join_all(
+                self.owner
+                    .inner
+                    .sessions
+                    .iter()
+                    .map(|session| session.shutdown()),
+            )
+            .await;
+        }
+    }
+
+    fn release(&mut self) -> bool {
+        if !self.active {
+            return false;
+        }
+        self.active = false;
+        self.owner.inner.leases.fetch_sub(1, Ordering::AcqRel) == 1
+    }
+}
+
+impl Drop for PluginWorkerLease {
+    fn drop(&mut self) {
+        let _ = self.release();
     }
 }
 
@@ -110,101 +191,112 @@ impl ExtensionAssembly {
 /// extension assembly used by the Native runtime, without starting an MCP
 /// client. Agent adapters use this to hand an explicitly selected subset to an
 /// external Agent.
-pub fn resolve_mcp_server_handoffs(
-    options: &RunOptions,
-    names: &std::collections::BTreeSet<String>,
-) -> crate::Result<Vec<ResolvedMcpServerInput>> {
-    if names.is_empty() {
-        return Ok(Vec::new());
-    }
+pub fn resolve_mcp_server_handoffs<'a>(
+    options: &'a RunOptions,
+    names: &'a std::collections::BTreeSet<String>,
+) -> futures::future::BoxFuture<'a, crate::Result<Vec<ResolvedMcpServerInput>>> {
+    Box::pin(async move {
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
 
-    let cwd = canonical_cwd(&options.cwd)?;
-    let loaded = load_run_config(options, &cwd)?;
-    let home = resolve_psychevo_home(&loaded.env)?;
-    let mut mcp_servers = options.mcp_servers.clone();
-    mcp_servers.extend(loaded.config.mcp_servers.clone());
-    let assembly = assemble_extensions(ExtensionAssemblyInput {
-        home: &home,
-        cwd: &cwd,
-        env: &loaded.env,
-        plugin_policy: &loaded.config.plugins,
-        selected_capability_roots: &options.selected_capability_roots,
-        mcp_servers,
-        runtime_tools: Vec::new(),
-    });
-    let available = assembly.mcp_servers;
-    let mut resolved = Vec::with_capacity(names.len());
-    for name in names {
-        let mut matches = available.iter().filter(|server| server.name == *name);
-        let mut server = matches.next().cloned().ok_or_else(|| {
-            crate::Error::Config(format!(
-                "Agent MCP server `{name}` is not declared in the effective configuration"
-            ))
-        })?;
-        if matches.next().is_some() {
-            return Err(crate::Error::Config(format!(
-                "Agent MCP server `{name}` has multiple effective declarations"
-            )));
-        }
-        if !server.policy.enabled {
-            return Err(crate::Error::Config(format!(
-                "Agent MCP server `{name}` is disabled in the effective configuration"
-            )));
-        }
-        if let McpTransportInput::Stdio {
-            command,
-            env: server_env,
-            ..
-        } = &mut server.transport
-        {
-            let mut executable_env = loaded.env.clone();
-            executable_env.extend(server_env.clone());
-            let command_text = command.to_string_lossy().into_owned();
-            let resolved_command = resolve_executable_path(
-                &command_text,
-                &cwd,
-                &ExecutableResolveOptions {
-                    platform: HostPlatform::current(),
-                    env: &executable_env,
-                },
-            )
-            .ok_or_else(|| {
+        let cwd = canonical_cwd(&options.cwd)?;
+        let loaded = load_run_config(options, &cwd)?;
+        let home = resolve_psychevo_home(&loaded.env)?;
+        let mut mcp_servers = options.mcp_servers.clone();
+        mcp_servers.extend(loaded.config.mcp_servers.clone());
+        let mut assembly = assemble_extensions(ExtensionAssemblyInput {
+            home: &home,
+            cwd: &cwd,
+            env: &loaded.env,
+            plugin_policy: &loaded.config.plugins,
+            selected_capability_roots: &options.selected_capability_roots,
+            mcp_servers,
+            runtime_tools: Vec::new(),
+        })
+        .await;
+        let result = async {
+            let available = &assembly.mcp_servers;
+            let mut resolved = Vec::with_capacity(names.len());
+            for name in names {
+                let mut matches = available.iter().filter(|server| server.name == *name);
+            let mut server = matches.next().cloned().ok_or_else(|| {
                 crate::Error::Config(format!(
-                    "Agent MCP server `{name}` command `{command_text}` was not found"
+                    "Agent MCP server `{name}` is not declared in the effective configuration"
                 ))
             })?;
-            *command = resolved_command;
-        }
-        let bearer_token = match &server.transport {
-            McpTransportInput::StreamableHttp {
-                url,
-                bearer_token_env_var,
+            if matches.next().is_some() {
+                return Err(crate::Error::Config(format!(
+                    "Agent MCP server `{name}` has multiple effective declarations"
+                )));
+            }
+            if !server.policy.enabled {
+                return Err(crate::Error::Config(format!(
+                    "Agent MCP server `{name}` is disabled in the effective configuration"
+                )));
+            }
+            if let McpTransportInput::Stdio {
+                command,
+                env: server_env,
                 ..
-            } => bearer_token_env_var
-                .as_ref()
-                .and_then(|env_var| loaded.env.get(env_var))
-                .map(String::as_str)
-                .map(str::trim)
-                .filter(|token| !token.is_empty())
-                .map(str::to_string)
-                .or_else(|| {
-                    load_mcp_oauth_access_token(&home, &server.name, url)
-                        .ok()
-                        .flatten()
-                }),
-            _ => None,
-        };
-        resolved.push(ResolvedMcpServerInput {
-            server,
-            bearer_token,
-        });
-    }
-    Ok(resolved)
+            } = &mut server.transport
+            {
+                let mut executable_env = loaded.env.clone();
+                executable_env.extend(server_env.clone());
+                let command_text = command.to_string_lossy().into_owned();
+                let resolved_command = resolve_executable_path(
+                    &command_text,
+                    &cwd,
+                    &ExecutableResolveOptions {
+                        platform: HostPlatform::current(),
+                        env: &executable_env,
+                    },
+                )
+                .ok_or_else(|| {
+                    crate::Error::Config(format!(
+                        "Agent MCP server `{name}` command `{command_text}` was not found"
+                    ))
+                })?;
+                *command = resolved_command;
+            }
+            let bearer_token = match &server.transport {
+                McpTransportInput::StreamableHttp {
+                    url,
+                    bearer_token_env_var,
+                    ..
+                } => bearer_token_env_var
+                    .as_ref()
+                    .and_then(|env_var| loaded.env.get(env_var))
+                    .map(String::as_str)
+                    .map(str::trim)
+                    .filter(|token| !token.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        load_mcp_oauth_access_token(&home, &server.name, url)
+                            .ok()
+                            .flatten()
+                    }),
+                _ => None,
+            };
+                resolved.push(ResolvedMcpServerInput {
+                    server,
+                    bearer_token,
+                });
+            }
+            Ok(resolved)
+        }
+        .await;
+        assembly.shutdown_workers().await;
+        result
+    })
 }
 
-pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> ExtensionAssembly {
+pub(crate) async fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> ExtensionAssembly {
     let plugin_assembly =
-        load_enabled_plugin_contributions(input.home, input.cwd, input.env, input.plugin_policy);
+        load_enabled_plugin_contributions(input.home, input.cwd, input.env, input.plugin_policy)
+            .await;
+    let worker_owner = PluginWorkerOwner::new(plugin_assembly.worker_sessions.clone());
+    let worker_lease = worker_owner.as_ref().map(PluginWorkerOwner::acquire);
     let selected_root_contributions =
         selected_root_contributions(input.cwd, input.selected_capability_roots);
 
@@ -245,6 +337,8 @@ pub(crate) fn assemble_extensions(input: ExtensionAssemblyInput<'_>) -> Extensio
             .chain(selected_root_contributions.toolsets)
             .collect(),
         warnings,
+        worker_owner,
+        worker_lease,
     }
 }
 
@@ -404,7 +498,9 @@ mod tests {
         options.mcp_servers.push(server.clone());
         let names = std::collections::BTreeSet::from(["repo".to_string()]);
 
-        let resolved = resolve_mcp_server_handoffs(&options, &names).expect("handoff");
+        let resolved = resolve_mcp_server_handoffs(&options, &names)
+            .await
+            .expect("handoff");
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(
@@ -417,6 +513,7 @@ mod tests {
 
         options.mcp_servers.push(server);
         let error = resolve_mcp_server_handoffs(&options, &names)
+            .await
             .expect_err("ambiguous declaration must fail closed");
         assert!(
             error
@@ -490,8 +587,8 @@ mod tests {
         assert_eq!(contributions.warnings.len(), 1);
     }
 
-    #[test]
-    fn assembly_freezes_static_inputs_and_selected_root_outputs() {
+    #[tokio::test]
+    async fn assembly_freezes_static_inputs_and_selected_root_outputs() {
         let temp = tempfile::tempdir().expect("temp");
         let home = temp.path().join("home");
         let root = temp.path().join("plugin");
@@ -525,7 +622,8 @@ mod tests {
                 },
             )],
             runtime_tools: Vec::new(),
-        });
+        })
+        .await;
         let accepted = assembly.accepted_inputs();
 
         assert_eq!(

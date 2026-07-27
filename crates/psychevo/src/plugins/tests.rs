@@ -1096,8 +1096,8 @@ fn scoped_selectors_and_policy_keys_distinguish_duplicate_installations() {
         .expect("profile installation remains selectable");
 }
 
-#[test]
-fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
+#[tokio::test]
+async fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1141,7 +1141,8 @@ fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
         },
     );
 
-    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy);
+    let assembly =
+        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
 
     assert_eq!(assembly.mcp_servers.len(), 1);
     assert_eq!(assembly.mcp_servers[0].name, "stdio");
@@ -1159,8 +1160,8 @@ fn enabled_plugin_contributions_materialize_mcp_servers_and_toolsets() {
     assert_eq!(assembly.toolsets[0].name, "contrib-tools");
 }
 
-#[test]
-fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
+#[tokio::test]
+async fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1201,7 +1202,8 @@ fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
         },
     );
 
-    let assembly = load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy);
+    let assembly =
+        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
 
     assert_eq!(assembly.runtime_tools.len(), 1);
     assert_eq!(assembly.runtime_tools[0].name(), "cleanup_status");
@@ -1250,6 +1252,76 @@ fn enabled_plugin_worker_tools_enter_tool_surface_as_searchable_plugin_tools() {
 
     assert!(names.contains(&"tool_search".to_string()));
     assert!(!names.contains(&"cleanup_status".to_string()));
+}
+
+#[tokio::test]
+async fn plugin_assembly_owns_graceful_worker_shutdown() {
+    let temp = tempdir().expect("temp");
+    let home = temp.path().join("home");
+    let cwd = temp.path().join("work");
+    let shutdown_marker = temp.path().join("shutdown");
+    fs::create_dir_all(&cwd).expect("cwd");
+    let source = temp.path().join("source");
+    write_plugin(
+        &source,
+        r#"{
+              "name": "shutdown-owner",
+              "version": "1.0.0",
+              "description": "shutdown owner",
+              "psychevo": {"runtime": {"worker": {"command": "./worker.py"}}}
+            }"#,
+    );
+    write_worker(
+        &source,
+        &format!(
+            r#"#!/usr/bin/env python3
+import json, pathlib, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    result = {{"tools": []}} if method == "contributions/list" else {{"ok": True}}
+    print(json.dumps({{
+        "jsonrpc": "2.0",
+        "id": request.get("id"),
+        "result": result
+    }}), flush=True)
+    if method == "shutdown":
+        pathlib.Path({marker}).write_text("shutdown")
+        break
+"#,
+            marker = serde_json::to_string(&shutdown_marker).expect("marker json"),
+        ),
+    );
+    install_plugin(
+        &home,
+        &cwd,
+        PluginInstallOptions {
+            source: source.display().to_string(),
+            source_kind: None,
+            scope: PluginScope::Global,
+            git_ref: None,
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install");
+    let mut policy = PluginPolicyConfig::default();
+    policy.plugins.insert(
+        "shutdown-owner".to_string(),
+        PluginPolicyEntry {
+            enabled: Some(true),
+        },
+    );
+
+    let assembly =
+        load_enabled_plugin_contributions(&home, &cwd, &BTreeMap::new(), &policy).await;
+    assembly.shutdown_workers().await;
+
+    assert_eq!(
+        fs::read_to_string(shutdown_marker).expect("shutdown marker"),
+        "shutdown"
+    );
 }
 
 #[test]
@@ -1314,8 +1386,8 @@ fn marketplace_rejects_unsupported_kind() {
     assert!(err.to_string().contains("expected local, git, or npm"));
 }
 
-#[test]
-fn worker_tool_executes_through_binding() {
+#[tokio::test]
+async fn worker_tool_executes_through_binding() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1350,7 +1422,9 @@ fn worker_tool_executes_through_binding() {
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let tools = worker_tools(&record, &manifest, &spec, &BTreeMap::new()).expect("tools");
+    let tools = worker_tools(&record, &manifest, &spec, &BTreeMap::new())
+        .await
+        .expect("tools");
     assert_eq!(tools[0].name, "cleanup_status");
     let output = call_worker_tool(
         &record,
@@ -1360,13 +1434,14 @@ fn worker_tool_executes_through_binding() {
         "call_1",
         json!({}),
     )
+    .await
     .expect("call");
     assert!(!output.is_error);
     assert_eq!(output.json["status"], "ok");
 }
 
-#[test]
-fn one_worker_session_serves_discovery_tools_and_hooks() {
+#[tokio::test]
+async fn one_worker_session_serves_discovery_tools_and_hooks() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1429,21 +1504,27 @@ for line in sys.stdin:
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let session =
-        PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new()).expect("session");
+    let session = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
+        .await
+        .expect("session");
 
-    let tools = worker_tools_in_session(&session).expect("discover tools");
+    let tools = worker_tools_in_session(&session)
+        .await
+        .expect("discover tools");
     let tool_result = super::worker::call_worker_tool_in_session(
         &session,
         &tools[0].name,
         "call_1",
         json!({}),
+        None,
     )
+    .await
     .expect("tool call");
     let hook_result = session
         .call("hooks/call", json!({"hook": {}, "payload": {}}))
+        .await
         .expect("hook call");
-    session.shutdown().expect("shutdown");
+    session.shutdown().await.expect("shutdown");
 
     assert_eq!(tool_result.json["method"], "tools/call");
     assert_eq!(hook_result["method"], "hooks/call");
@@ -1452,8 +1533,8 @@ for line in sys.stdin:
     assert_eq!(hook_result["initialize_count"], 1);
 }
 
-#[test]
-fn worker_notifications_do_not_consume_correlated_responses() {
+#[tokio::test]
+async fn worker_notifications_do_not_consume_correlated_responses() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1509,18 +1590,21 @@ for line in sys.stdin:
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let session =
-        PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new()).expect("session");
+    let session = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
+        .await
+        .expect("session");
 
-    let tools = worker_tools_in_session(&session).expect("correlated contribution response");
+    let tools = worker_tools_in_session(&session)
+        .await
+        .expect("correlated contribution response");
 
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "notification_probe");
-    session.shutdown().expect("shutdown");
+    session.shutdown().await.expect("shutdown");
 }
 
-#[test]
-fn worker_mismatched_response_id_is_a_terminal_protocol_error() {
+#[tokio::test]
+async fn worker_mismatched_response_id_is_a_terminal_protocol_error() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1571,13 +1655,14 @@ for line in sys.stdin:
     let spec = manifest.worker.clone().expect("worker");
 
     let error = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
+        .await
         .expect_err("mismatched response id");
 
     assert!(error.contains("response id"), "{error}");
 }
 
-#[test]
-fn worker_contribution_discovery_receives_effective_env() {
+#[tokio::test]
+async fn worker_contribution_discovery_receives_effective_env() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1615,13 +1700,15 @@ fn worker_contribution_discovery_receives_effective_env() {
     let mut env = BTreeMap::new();
     env.insert("PLUGIN_DISCOVERY_TOKEN".to_string(), "ok".to_string());
 
-    let tools = worker_tools(&record, &manifest, &spec, &env).expect("tools");
+    let tools = worker_tools(&record, &manifest, &spec, &env)
+        .await
+        .expect("tools");
 
     assert_eq!(tools[0].name, "env_tool");
 }
 
-#[test]
-fn worker_contribution_discovery_times_out() {
+#[tokio::test]
+async fn worker_contribution_discovery_times_out() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -1657,7 +1744,9 @@ fn worker_contribution_discovery_times_out() {
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
 
-    let err = worker_tools(&record, &manifest, &spec, &BTreeMap::new()).expect_err("timeout");
+    let err = worker_tools(&record, &manifest, &spec, &BTreeMap::new())
+        .await
+        .expect_err("timeout");
 
     assert!(err.contains("timed out waiting for contributions/list response"));
 }
@@ -1698,8 +1787,9 @@ async fn worker_tool_call_timeout_returns_tool_error() {
     .expect("install");
     let manifest = load_plugin_manifest(&record.package_root, true).expect("manifest");
     let spec = manifest.worker.clone().expect("worker");
-    let session =
-        PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new()).expect("session");
+    let session = PluginWorkerSession::start(&record, &manifest, &spec, &BTreeMap::new())
+        .await
+        .expect("session");
 
     let tool = PluginWorkerTool {
         plugin_name: record.name,

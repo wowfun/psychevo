@@ -858,6 +858,10 @@ pub trait ApprovalHandler: Send + Sync + fmt::Debug {
         &self,
         request: PermissionApprovalRequest,
     ) -> BoxFuture<'static, PermissionApprovalDecision>;
+
+    fn cancel_permission(&self, _tool_call_id: &str) -> BoxFuture<'static, ()> {
+        Box::pin(async {})
+    }
 }
 
 impl RunMode {

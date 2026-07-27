@@ -639,6 +639,72 @@ pub(crate) async fn usage_and_metadata_do_not_emit_empty_message_updates() {
 }
 
 #[tokio::test]
+pub(crate) async fn text_stream_emits_linear_deltas_without_full_message_per_token() {
+    let mut provider_events = (0..1_000)
+        .map(|_| StreamEvent::TextDelta {
+            text: "x".to_string(),
+        })
+        .collect::<Vec<_>>();
+    provider_events.push(StreamEvent::Done {
+        outcome: Outcome::Normal,
+        finish_reason: Some("stop".to_string()),
+    });
+    let provider = Arc::new(StaticProvider {
+        events: provider_events,
+    });
+    let sink = Arc::new(CaptureSink::default());
+    let (_, control) = ControlHandle::new();
+
+    let completion = run_agent_loop(provider, request(), sink.clone(), control)
+        .await
+        .expect("loop");
+
+    let events = sink.events.lock().expect("events");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::AssistantTextDelta { .. }))
+            .count(),
+        1_000
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::MessageUpdate { .. }))
+            .count(),
+        1
+    );
+    let Message::Assistant { content, .. } = completion.messages.last().expect("assistant") else {
+        panic!("assistant message");
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [AssistantBlock::Text { text }] if text.len() == 1_000
+    ));
+}
+
+#[test]
+pub(crate) fn inline_think_parser_handles_split_tags_without_rescanning_history() {
+    let mut parser = InlineThinkParser::new();
+    let chunks = ["hello <", "think> private", " </thi", "nk> world"];
+    let mut visible = String::new();
+    let mut reasoning = String::new();
+    for chunk in chunks {
+        let (visible_delta, reasoning_delta) = parser.push(chunk);
+        visible.push_str(&visible_delta);
+        reasoning.push_str(&reasoning_delta);
+    }
+    let (visible_delta, reasoning_delta) = parser.finish();
+    visible.push_str(&visible_delta);
+    reasoning.push_str(&reasoning_delta);
+
+    assert_eq!(visible, "hello  world");
+    assert_eq!(reasoning, "private");
+    assert_eq!(parser.visible(), visible);
+    assert_eq!(parser.reasoning(), reasoning);
+}
+
+#[tokio::test]
 pub(crate) async fn tool_call_pending_is_emitted_before_message_end() {
     let provider = Arc::new(StaticProvider {
         events: vec![

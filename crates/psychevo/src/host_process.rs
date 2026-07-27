@@ -29,6 +29,12 @@ impl InstanceLease {
     }
 }
 
+impl Drop for InstanceLease {
+    fn drop(&mut self) {
+        let _ = self._file.unlock();
+    }
+}
+
 fn open_lock_file(path: &Path) -> io::Result<File> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

@@ -39,7 +39,7 @@ impl ToolBinding for HookedTool {
                 "tool_call_id": tool_call_id.clone(),
                 "arguments": args.clone(),
             });
-            let pre_result = hook_runtime.run_pre_tool_use(&pre_payload);
+            let pre_result = hook_runtime.run_pre_tool_use(&pre_payload).await;
             if let Some(blocked) = pre_result.block_reason {
                 return ToolOutput::error(blocked);
             }
@@ -56,7 +56,7 @@ impl ToolBinding for HookedTool {
                 "output": output.json.clone(),
                 "is_error": output.is_error,
             });
-            let post_result = hook_runtime.run_post_tool_use(&post_payload);
+            let post_result = hook_runtime.run_post_tool_use(&post_payload).await;
             match post_result.model_content {
                 Some(model_content) => output.with_model_content(model_content),
                 None => output,

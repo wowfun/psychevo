@@ -189,7 +189,8 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
             "first_kept_session_seq": first_kept_session_seq,
             "tokens_before": preparation.tokens_before,
             "tokens_after_without_summary": preparation.tokens_after_without_summary,
-        }));
+        }))
+        .await;
         if let Some(reason) = pre.stop_reason {
             return Ok(skipped_result(&summary.id, options.reason, &reason));
         }
@@ -248,7 +249,8 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
             "first_kept_session_seq": record.first_kept_session_seq,
             "tokens_before": record.tokens_before,
             "tokens_after": record.tokens_after,
-        }));
+        }))
+        .await;
         if let Some(reason) = post.stop_reason {
             return Err(Error::Message(reason));
         }

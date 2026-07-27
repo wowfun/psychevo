@@ -81,7 +81,7 @@ pub fn plugin_view_value(options: &RunOptions, selector: &str) -> Result<Value> 
     }))
 }
 
-pub fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Result<Value> {
+pub async fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Result<Value> {
     let cwd = canonical_cwd(&options.cwd)?;
     let loaded = load_run_config(options, &cwd)?;
     let home = resolve_psychevo_home(&loaded.env)?;
@@ -115,7 +115,7 @@ pub fn plugin_doctor_value(options: &RunOptions, selector: Option<&str>) -> Resu
             && policy.is_some_and(PluginPolicyEntry::plugin_enabled)
             && let Some(spec) = &manifest.worker
         {
-            worker = match worker_tools(record, manifest, spec, &loaded.env) {
+            worker = match worker_tools(record, manifest, spec, &loaded.env).await {
                 Ok(tools) => json!({"configured": true, "tools": tools, "status": "ok"}),
                 Err(err) => {
                     json!({"configured": true, "tools": [], "status": "failed", "error": err})

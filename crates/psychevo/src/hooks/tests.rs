@@ -59,8 +59,8 @@ impl ToolBinding for RecordingExecTool {
     }
 }
 
-#[test]
-fn pre_tool_use_exit_two_blocks_with_stderr() {
+#[tokio::test]
+async fn pre_tool_use_exit_two_blocks_with_stderr() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": ["cat >/dev/null; echo blocked >&2; exit 2"]});
     let result = run_hook_sources(
@@ -68,14 +68,15 @@ fn pre_tool_use_exit_two_blocks_with_stderr() {
         "PreToolUse",
         temp.path(),
         &json!({"tool": "read"}),
-    );
+    )
+    .await;
 
     assert_eq!(result.blocked_reason.as_deref(), Some("blocked"));
     assert_eq!(result.summaries[0].status, HookRunStatus::Blocked);
 }
 
-#[test]
-fn non_blocking_hook_failures_are_diagnostics() {
+#[tokio::test]
+async fn non_blocking_hook_failures_are_diagnostics() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": ["echo nope >&2; exit 1"]});
     let result = run_hook_sources(
@@ -83,7 +84,8 @@ fn non_blocking_hook_failures_are_diagnostics() {
         "PreToolUse",
         temp.path(),
         &json!({}),
-    );
+    )
+    .await;
 
     assert_eq!(result.blocked_reason, None);
     assert_eq!(result.summaries[0].status, HookRunStatus::Failed);
@@ -166,8 +168,8 @@ fn project_hooks_require_trusted_hash_and_detect_modification() {
     );
 }
 
-#[test]
-fn capability_root_hooks_are_source_qualified_and_fail_closed() {
+#[tokio::test]
+async fn capability_root_hooks_are_source_qualified_and_fail_closed() {
     let temp = tempdir().expect("temp");
     let marker = temp.path().join("capability-root-ran");
     let hooks = json!({"SessionStart": [{"hooks": [{
@@ -186,7 +188,7 @@ fn capability_root_hooks_are_source_qualified_and_fail_closed() {
     assert_eq!(metadata.source_kind, "capability_root");
     assert_eq!(metadata.trust_status, HookTrustStatus::Untrusted);
     assert_eq!(metadata.skipped_reason.as_deref(), Some("untrusted"));
-    let result = untrusted.run_event("SessionStart", &json!({}));
+    let result = untrusted.run_event("SessionStart", &json!({})).await;
     assert_eq!(result.summaries[0].status, HookRunStatus::Skipped);
     assert!(!marker.exists());
 
@@ -285,8 +287,8 @@ fn same_matcher_group_same_type_handlers_get_distinct_keys() {
     assert_ne!(metadata[0].key, metadata[1].key);
 }
 
-#[test]
-fn bounded_hook_output_truncates_on_utf8_boundary() {
+#[tokio::test]
+async fn bounded_hook_output_truncates_on_utf8_boundary() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": [{"hooks": [{
         "type": "command",
@@ -297,15 +299,16 @@ fn bounded_hook_output_truncates_on_utf8_boundary() {
         "PreToolUse",
         temp.path(),
         &json!({"tool": "exec_command"}),
-    );
+    )
+    .await;
     let stdout = &result.summaries[0].stdout;
 
     assert!(stdout.ends_with("...[truncated]"), "{stdout:?}");
     assert!(stdout.is_char_boundary(stdout.len()));
 }
 
-#[test]
-fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_order() {
+#[tokio::test]
+async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_order() {
     let temp = tempdir().expect("temp");
     let marker = temp.path().join("marker");
     let hooks = json!({
@@ -324,7 +327,8 @@ fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_ord
         "PreToolUse",
         temp.path(),
         &json!({"tool": "exec_command"}),
-    );
+    )
+    .await;
     assert!(started.elapsed() < Duration::from_millis(350));
     assert_eq!(result.summaries.len(), 2);
     assert_eq!(result.summaries[0].display_order, 0);
@@ -334,8 +338,8 @@ fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_ord
     assert!(marker.contains("slow"));
 }
 
-#[test]
-fn pre_tool_use_completion_order_resolves_updated_input() {
+#[tokio::test]
+async fn pre_tool_use_completion_order_resolves_updated_input() {
     let temp = tempdir().expect("temp");
     let hooks = json!({
         "PreToolUse": [
@@ -352,15 +356,16 @@ fn pre_tool_use_completion_order_resolves_updated_input() {
         "PreToolUse",
         temp.path(),
         &json!({"tool": "exec_command"}),
-    );
+    )
+    .await;
     assert_eq!(
         result.updated_input.as_ref().unwrap(),
         &json!({"cmd": "slow"})
     );
 }
 
-#[test]
-fn permission_request_deny_wins_over_allow() {
+#[tokio::test]
+async fn permission_request_deny_wins_over_allow() {
     let temp = tempdir().expect("temp");
     let hooks = json!({
         "PermissionRequest": [
@@ -377,15 +382,16 @@ fn permission_request_deny_wins_over_allow() {
         "PermissionRequest",
         temp.path(),
         &json!({"tool": "exec_command"}),
-    );
+    )
+    .await;
     assert_eq!(
         result.permission_decision,
         Some(HookPermissionDecision::Deny)
     );
 }
 
-#[test]
-fn command_timeout_is_bounded_diagnostic() {
+#[tokio::test]
+async fn command_timeout_is_bounded_diagnostic() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"PreToolUse": [{"hooks": [{"type": "command", "command": "sleep 2", "timeout": 1}]}]});
     let result = run_hook_sources(
@@ -393,7 +399,8 @@ fn command_timeout_is_bounded_diagnostic() {
         "PreToolUse",
         temp.path(),
         &json!({"tool": "exec_command"}),
-    );
+    )
+    .await;
     assert_eq!(result.summaries[0].status, HookRunStatus::TimedOut);
     assert!(
         result
@@ -403,8 +410,8 @@ fn command_timeout_is_bounded_diagnostic() {
     );
 }
 
-#[test]
-fn prompt_handlers_contribute_typed_context_without_transcript_output() {
+#[tokio::test]
+async fn prompt_handlers_contribute_typed_context_without_transcript_output() {
     let temp = tempdir().expect("temp");
     let hooks = json!({"UserPromptSubmit": [{"hooks": [{"type": "prompt", "prompt": "prefer repo-local validation"}]}]});
     let result = run_hook_sources(
@@ -412,13 +419,14 @@ fn prompt_handlers_contribute_typed_context_without_transcript_output() {
         "UserPromptSubmit",
         temp.path(),
         &json!({"prompt": "test"}),
-    );
+    )
+    .await;
     assert_eq!(result.context[0]["text"], "prefer repo-local validation");
     assert!(result.blocked_reason.is_none());
 }
 
-#[test]
-fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
+#[tokio::test]
+async fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
     let temp = tempdir().expect("temp");
     let runtime = HookRuntime::new(
         temp.path().to_path_buf(),
@@ -437,23 +445,31 @@ fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
         },
     );
 
-    let session = runtime.run_session_start(&json!({"source": "startup"}));
+    let session = runtime
+        .run_session_start(&json!({"source": "startup"}))
+        .await;
     assert!(session.should_stop());
     assert_eq!(session.stop_reason.as_deref(), Some("session paused"));
 
-    let prompt = runtime.run_user_prompt_submit(&json!({"prompt": "ship"}));
+    let prompt = runtime
+        .run_user_prompt_submit(&json!({"prompt": "ship"}))
+        .await;
     assert!(!prompt.is_blocked());
     assert_eq!(prompt.context[0]["text"], "prefer narrow validation");
 
-    let pre_compact = runtime.run_pre_compact(&json!({"trigger": "manual"}));
+    let pre_compact = runtime
+        .run_pre_compact(&json!({"trigger": "manual"}))
+        .await;
     assert_eq!(pre_compact.stop_reason.as_deref(), Some("compact later"));
-    let post_compact = runtime.run_post_compact(&json!({"trigger": "manual"}));
+    let post_compact = runtime
+        .run_post_compact(&json!({"trigger": "manual"}))
+        .await;
     assert_eq!(
         post_compact.stop_reason.as_deref(),
         Some("post compact review")
     );
 
-    let stop = runtime.run_stop(&json!({"outcome": "normal"}));
+    let stop = runtime.run_stop(&json!({"outcome": "normal"})).await;
     assert!(stop.is_blocked());
     assert_eq!(stop.block_reason.as_deref(), Some("continue work"));
     assert!(
@@ -468,8 +484,8 @@ fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
     );
 }
 
-#[test]
-fn typed_subagent_outcomes_can_block_start_and_stop() {
+#[tokio::test]
+async fn typed_subagent_outcomes_can_block_start_and_stop() {
     let temp = tempdir().expect("temp");
     let runtime = HookRuntime::new(
         temp.path().to_path_buf(),
@@ -485,10 +501,14 @@ fn typed_subagent_outcomes_can_block_start_and_stop() {
         },
     );
 
-    let start = runtime.run_subagent_start(&json!({"agent": "reviewer"}));
+    let start = runtime
+        .run_subagent_start(&json!({"agent": "reviewer"}))
+        .await;
     assert_eq!(start.stop_reason.as_deref(), Some("reviewer unavailable"));
 
-    let stop = runtime.run_subagent_stop(&json!({"agent": "reviewer"}));
+    let stop = runtime
+        .run_subagent_stop(&json!({"agent": "reviewer"}))
+        .await;
     assert_eq!(
         stop.block_reason.as_deref(),
         Some("needs parent continuation")
@@ -639,8 +659,8 @@ async fn permission_request_hook_deny_uses_feedback_reason() {
     );
 }
 
-#[test]
-fn worker_handler_calls_hooks_call_adapter() {
+#[tokio::test]
+async fn worker_handler_calls_hooks_call_adapter() {
     let temp = tempdir().expect("temp");
     let home = temp.path().join("home");
     let cwd = temp.path().join("work");
@@ -703,6 +723,7 @@ fn worker_handler_calls_hooks_call_adapter() {
         &worker_spec,
         &BTreeMap::new(),
     )
+    .await
     .expect("worker session");
     let mut source = source(
         "plugin",
@@ -734,14 +755,15 @@ fn worker_handler_calls_hooks_call_adapter() {
     let result = runtime.run_event(
         "PostToolUse",
         &json!({"tool": "exec_command", "is_error": false}),
-    );
+    )
+    .await;
 
     assert_eq!(result.feedback, vec!["worker saw hook"]);
     assert_eq!(result.summaries[0].status, HookRunStatus::Completed);
 }
 
-#[test]
-fn post_tool_use_model_content_is_parsed_as_current_result_transform() {
+#[tokio::test]
+async fn post_tool_use_model_content_is_parsed_as_current_result_transform() {
     let temp = tempfile::tempdir().expect("temp");
     let runtime = HookRuntime::new(
         temp.path().to_path_buf(),
@@ -760,7 +782,8 @@ fn post_tool_use_model_content_is_parsed_as_current_result_transform() {
     let result = runtime.run_event(
         "PostToolUse",
         &json!({"tool": "exec_command", "is_error": false}),
-    );
+    )
+    .await;
 
     assert_eq!(result.model_content.as_deref(), Some("redacted result"));
 }
