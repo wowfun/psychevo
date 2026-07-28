@@ -5,19 +5,23 @@ use futures::StreamExt;
 use std::time::Duration;
 
 use crate::openai_http::{
-    GuardedHttpError, checked_response, generation_http_client, inference_event_is_progress,
-    inference_idle_timeout, response_json_guarded, send_guarded, wait_for_deadline,
+    GuardedHttpError, checked_response, inference_event_is_progress, response_json_guarded,
+    send_guarded, wait_for_deadline,
 };
+#[cfg(test)]
+use crate::openai_http::{generation_http_client, inference_idle_timeout};
 
 #[derive(Debug, Clone)]
 pub struct OpenAiResponsesProvider {
-    client: reqwest::Client,
-    base_url: String,
-    api_key: String,
-    inference_idle_timeout: Option<Duration>,
+    pub(crate) client: reqwest::Client,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) inference_idle_timeout: Option<Duration>,
+    pub(crate) headers: BTreeMap<String, String>,
 }
 
 impl OpenAiResponsesProvider {
+    #[cfg(test)]
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
             client: generation_http_client(),
@@ -26,17 +30,13 @@ impl OpenAiResponsesProvider {
             inference_idle_timeout: inference_idle_timeout(
                 crate::openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
             ),
+            headers: BTreeMap::new(),
         }
     }
 
+    #[cfg(test)]
     pub fn with_inference_idle_timeout_secs(mut self, seconds: u64) -> Self {
         self.inference_idle_timeout = inference_idle_timeout(seconds);
-        self
-    }
-
-    #[cfg(test)]
-    pub fn with_client(mut self, client: reqwest::Client) -> Self {
-        self.client = client;
         self
     }
 }
@@ -279,6 +279,10 @@ impl OpenAiResponsesProvider {
     }
 
     fn authorized(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let mut request = request;
+        for (name, value) in &self.headers {
+            request = request.header(name, value);
+        }
         if self.api_key.trim().is_empty() {
             request
         } else {
@@ -367,7 +371,52 @@ pub fn openai_responses_request_body(request: &GenerationRequest, base_url: &str
     {
         body["reasoning"] = json!({"effort": effort, "summary": "auto"});
     }
+    apply_openai_responses_settings(&mut body, &request.metadata);
     body
+}
+
+pub(crate) fn apply_openai_responses_settings(body: &mut Value, metadata: &Value) {
+    let Some(settings) = metadata
+        .get("_psychevo_ai_settings")
+        .and_then(|value| serde_json::from_value::<LanguageSettings>(value.clone()).ok())
+    else {
+        return;
+    };
+    if let Some(value) = settings.max_output_tokens {
+        body["max_output_tokens"] = json!(value);
+    }
+    if let Some(value) = settings.temperature {
+        body["temperature"] = json!(value);
+    }
+    if let Some(value) = settings.top_p {
+        body["top_p"] = json!(value);
+    }
+    if let Some(format) = settings.response_format {
+        body["text"] = match format {
+            ResponseFormat::Text => json!({"format": {"type": "text"}}),
+            ResponseFormat::JsonObject => json!({"format": {"type": "json_object"}}),
+            ResponseFormat::JsonSchema {
+                name,
+                schema,
+                strict,
+            } => json!({
+                "format": {
+                    "type": "json_schema",
+                    "name": name,
+                    "schema": schema,
+                    "strict": strict,
+                }
+            }),
+        };
+    }
+    if let Some(choice) = settings.tool_choice {
+        body["tool_choice"] = match choice {
+            ToolChoice::Auto => json!("auto"),
+            ToolChoice::None => json!("none"),
+            ToolChoice::Required => json!("required"),
+            ToolChoice::Tool { name } => json!({"type": "function", "name": name}),
+        };
+    }
 }
 
 fn responses_input(request: &GenerationRequest, base_url: &str) -> Vec<Value> {

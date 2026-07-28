@@ -1,4 +1,4 @@
-use psychevo_ai::{
+use crate::{
     AbortSignal, FakeAsrProvider, FakeRealtimeProvider, FakeTtsProvider, VoiceAsrProvider,
     VoiceAsrRequest, VoiceAudioFormat, VoiceAudioInput, VoiceRealtimeProvider, VoiceTtsProvider,
     VoiceTtsRequest, parse_xiaomi_asr_response, parse_xiaomi_tts_response,
@@ -39,11 +39,11 @@ async fn fake_realtime_emits_started_transcript_and_closed() {
     let provider = FakeRealtimeProvider;
     let (result, mut events) = provider
         .start(
-            psychevo_ai::VoiceRealtimeStartRequest {
+            crate::VoiceRealtimeStartRequest {
                 thread_id: "thread-1".to_string(),
                 provider: "fake".to_string(),
                 model: "fake-realtime".to_string(),
-                transport: psychevo_ai::VoiceRealtimeTransport::Websocket,
+                transport: crate::VoiceRealtimeTransport::Websocket,
                 voice: None,
                 sdp_offer: None,
             },
@@ -57,27 +57,21 @@ async fn fake_realtime_emits_started_transcript_and_closed() {
         .await
         .expect("started")
         .expect("started event");
-    assert!(matches!(
-        started,
-        psychevo_ai::VoiceRealtimeEvent::Started { .. }
-    ));
+    assert!(matches!(started, crate::VoiceRealtimeEvent::Started { .. }));
     let transcript = futures::StreamExt::next(&mut events)
         .await
         .expect("transcript")
         .expect("transcript event");
     assert!(matches!(
         transcript,
-        psychevo_ai::VoiceRealtimeEvent::TranscriptDone { .. }
+        crate::VoiceRealtimeEvent::TranscriptDone { .. }
     ));
     tx.send(true).expect("abort");
     let closed = futures::StreamExt::next(&mut events)
         .await
         .expect("closed")
         .expect("closed event");
-    assert!(matches!(
-        closed,
-        psychevo_ai::VoiceRealtimeEvent::Closed { .. }
-    ));
+    assert!(matches!(closed, crate::VoiceRealtimeEvent::Closed { .. }));
 }
 
 #[test]

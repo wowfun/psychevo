@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
-pub fn normalize_usage(usage: &Value) -> Option<Value> {
+pub(crate) fn normalize_usage(usage: &Value) -> Option<Value> {
     let object = usage.as_object()?;
     let mut out = serde_json::Map::new();
     copy_number_field(
@@ -54,7 +54,7 @@ pub fn normalize_usage(usage: &Value) -> Option<Value> {
     (!out.is_empty()).then_some(Value::Object(out))
 }
 
-pub fn allowlisted_provider_metadata(metadata: &Value) -> Option<Value> {
+pub(crate) fn allowlisted_provider_metadata(metadata: &Value) -> Option<Value> {
     let object = metadata.as_object()?;
     let mut out = serde_json::Map::new();
     for key in [

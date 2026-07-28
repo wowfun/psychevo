@@ -6,24 +6,30 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-readme = "../../README.md"
-description = "Provider-neutral generation types and transports for Psychevo"
+readme = "README.md"
+description = "Provider-neutral Rust SDK for language, image, speech, transcription, and realtime AI"
 documentation = "https://docs.rs/psychevo-ai"
 keywords = ["ai", "agent", "llm"]
 categories = ["api-bindings", "development-tools"]
+
+[features]
+default = ["openai", "anthropic", "xiaomi"]
+openai = ["dep:image"]
+anthropic = []
+xiaomi = []
 
 [dependencies]
 base64.workspace = true
 bytes.workspace = true
 futures.workspace = true
-image.workspace = true
+image = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tiktoken.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
 tempfile.workspace = true
+tiktoken.workspace = true

@@ -88,9 +88,70 @@ pub(crate) fn openai_chat_request_body_with_image_mode(
     {
         body["reasoning_effort"] = Value::String(reasoning_effort.to_string());
     }
+    apply_openai_chat_settings(&mut body, &request.metadata);
     body
 }
 
+pub(crate) fn apply_openai_chat_settings(body: &mut Value, metadata: &Value) {
+    let Some(settings) = metadata
+        .get("_psychevo_ai_settings")
+        .and_then(|value| serde_json::from_value::<LanguageSettings>(value.clone()).ok())
+    else {
+        return;
+    };
+    if let Some(value) = settings.max_output_tokens {
+        body["max_tokens"] = json!(value);
+    }
+    if let Some(value) = settings.temperature {
+        body["temperature"] = json!(value);
+    }
+    if let Some(value) = settings.top_p {
+        body["top_p"] = json!(value);
+    }
+    if let Some(value) = settings.frequency_penalty {
+        body["frequency_penalty"] = json!(value);
+    }
+    if let Some(value) = settings.presence_penalty {
+        body["presence_penalty"] = json!(value);
+    }
+    if !settings.stop_sequences.is_empty() {
+        body["stop"] = json!(settings.stop_sequences);
+    }
+    if let Some(value) = settings.seed {
+        body["seed"] = json!(value);
+    }
+    if let Some(format) = settings.response_format {
+        body["response_format"] = match format {
+            ResponseFormat::Text => json!({"type": "text"}),
+            ResponseFormat::JsonObject => json!({"type": "json_object"}),
+            ResponseFormat::JsonSchema {
+                name,
+                schema,
+                strict,
+            } => json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": name,
+                    "schema": schema,
+                    "strict": strict,
+                }
+            }),
+        };
+    }
+    if let Some(choice) = settings.tool_choice {
+        body["tool_choice"] = match choice {
+            ToolChoice::Auto => json!("auto"),
+            ToolChoice::None => json!("none"),
+            ToolChoice::Required => json!("required"),
+            ToolChoice::Tool { name } => json!({
+                "type": "function",
+                "function": {"name": name},
+            }),
+        };
+    }
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenAiChatTokenCount {
     pub encoding: String,
@@ -117,18 +178,21 @@ pub struct OpenAiChatTokenCount {
     pub skill_entries: Vec<OpenAiChatSkillTokenCount>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenAiChatRoleTokenCount {
     pub count: usize,
     pub tokens: u64,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenAiChatSkillTokenCount {
     pub name: String,
     pub tokens: u64,
 }
 
+#[cfg(test)]
 pub fn count_openai_chat_request(
     request: &GenerationRequest,
     base_url: &str,
@@ -258,6 +322,7 @@ pub fn count_openai_chat_request(
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct CountEncoding {
     pub(crate) name: String,
@@ -265,6 +330,7 @@ pub(crate) struct CountEncoding {
     pub(crate) fallback: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_count_encoding(provider: &str, model: &str) -> CountEncoding {
     if let Some(name) = tiktoken::model_to_encoding(model) {
         return CountEncoding {
@@ -314,6 +380,7 @@ pub(crate) fn resolve_count_encoding(provider: &str, model: &str) -> CountEncodi
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RequestContextCountingMetadata {
     pub(crate) previous_message_count: usize,
@@ -322,6 +389,7 @@ pub(crate) struct RequestContextCountingMetadata {
     pub(crate) skill_names: Vec<String>,
 }
 
+#[cfg(test)]
 pub(crate) fn request_context_counting_metadata(
     request: &GenerationRequest,
 ) -> RequestContextCountingMetadata {
@@ -354,16 +422,19 @@ pub(crate) fn request_context_counting_metadata(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn count_value(enc: &tiktoken::CoreBpe, value: &Value) -> u64 {
     serde_json::to_string(value)
         .map(|text| count_text(enc, &text))
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 pub(crate) fn count_text(enc: &tiktoken::CoreBpe, text: &str) -> u64 {
     enc.count(text) as u64
 }
 
+#[cfg(test)]
 pub(crate) fn skill_entry_token_counts(
     enc: &tiktoken::CoreBpe,
     provider_message: &Value,
@@ -390,6 +461,7 @@ pub(crate) fn skill_entry_token_counts(
     entries
 }
 
+#[cfg(test)]
 pub(crate) fn skill_entry_name(entry: &str) -> Option<&str> {
     let start = entry.find("<name>")? + "<name>".len();
     let end = entry[start..].find("</name>")? + start;
@@ -397,6 +469,7 @@ pub(crate) fn skill_entry_name(entry: &str) -> Option<&str> {
     (!name.is_empty()).then_some(name)
 }
 
+#[cfg(test)]
 pub(crate) fn normalized_message_role(message: &Value) -> String {
     match message
         .get("role")
@@ -408,6 +481,7 @@ pub(crate) fn normalized_message_role(message: &Value) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_slot(message: &Value) -> Option<&str> {
     message
         .get("metadata")
@@ -415,6 +489,7 @@ pub(crate) fn prompt_slot(message: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_semantic_role(message: &Value) -> Option<&str> {
     message
         .get("metadata")
@@ -422,6 +497,7 @@ pub(crate) fn prompt_semantic_role(message: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+#[cfg(test)]
 pub(crate) fn context_category(message: &Value) -> Option<&str> {
     message
         .get("metadata")

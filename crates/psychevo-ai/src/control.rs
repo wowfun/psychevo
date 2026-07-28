@@ -5,6 +5,26 @@ pub struct AbortSignal {
     pub(crate) rx: watch::Receiver<bool>,
 }
 
+#[derive(Clone, Debug)]
+pub struct AbortHandle {
+    tx: watch::Sender<bool>,
+}
+
+pub(crate) fn abort_pair() -> (AbortHandle, AbortSignal) {
+    let (tx, rx) = watch::channel(false);
+    (AbortHandle { tx }, AbortSignal { rx })
+}
+
+impl AbortHandle {
+    pub fn abort(&self) -> bool {
+        self.tx.send(true).is_ok()
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        *self.tx.borrow()
+    }
+}
+
 impl AbortSignal {
     pub fn new(rx: watch::Receiver<bool>) -> Self {
         Self { rx }
@@ -27,7 +47,8 @@ impl AbortSignal {
     }
 }
 
-pub trait GenerationProvider: Send + Sync {
+#[cfg(feature = "openai")]
+pub(crate) trait GenerationProvider: Send + Sync {
     fn stream(
         &self,
         request: GenerationRequest,

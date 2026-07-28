@@ -64,7 +64,8 @@ impl SseParser {
             return Ok(());
         }
 
-        while let Some((line_end, consumed)) = next_sse_line(&self.buffer, finish) {
+        while let Some((line_end, consumed)) = crate::sse_line::next_sse_line(&self.buffer, finish)
+        {
             let line = std::str::from_utf8(&self.buffer[..line_end])
                 .map_err(|err| Error::Provider(format!("SSE line is not UTF-8: {err}")))?
                 .to_string();
@@ -146,27 +147,5 @@ impl SseParser {
         }
         events.push(serde_json::from_str(data)?);
         Ok(())
-    }
-}
-
-pub(crate) fn next_sse_line(buffer: &[u8], finish: bool) -> Option<(usize, usize)> {
-    let pos = buffer
-        .iter()
-        .position(|byte| *byte == b'\n' || *byte == b'\r');
-    match pos {
-        Some(index) => {
-            if buffer[index] == b'\r' && buffer.get(index + 1).is_none() && !finish {
-                return None;
-            }
-            let consumed =
-                if buffer[index] == b'\r' && buffer.get(index + 1).copied() == Some(b'\n') {
-                    index + 2
-                } else {
-                    index + 1
-                };
-            Some((index, consumed))
-        }
-        None if finish && !buffer.is_empty() => Some((buffer.len(), buffer.len())),
-        None => None,
     }
 }

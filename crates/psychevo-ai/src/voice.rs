@@ -1,9 +1,22 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+#[cfg(test)]
+use futures::stream::{self, BoxStream};
+#[cfg(test)]
+use std::pin::Pin;
 
 pub const MAX_VOICE_AUDIO_BASE64_BYTES: usize = 10 * 1024 * 1024;
 
-pub type VoiceAudioStream = BoxStream<'static, Result<VoiceAudioChunk>>;
+fn voice_chat_completions_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/chat/completions")
+    }
+}
+
+#[cfg(test)]
 pub type VoiceRealtimeStream = BoxStream<'static, Result<VoiceRealtimeEvent>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +67,7 @@ pub struct VoiceAudioOutput {
     pub mime_type: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceAudioChunk {
     pub data: String,
@@ -96,6 +110,7 @@ pub struct VoiceTtsResult {
     pub metadata: Value,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceRealtimeTransport {
@@ -103,6 +118,7 @@ pub enum VoiceRealtimeTransport {
     Websocket,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceRealtimeStartRequest {
     pub thread_id: String,
@@ -113,12 +129,14 @@ pub struct VoiceRealtimeStartRequest {
     pub sdp_offer: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceRealtimeStartResult {
     pub session_id: String,
     pub thread_id: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VoiceRealtimeEvent {
@@ -155,7 +173,7 @@ pub enum VoiceRealtimeEvent {
     },
 }
 
-pub trait VoiceAsrProvider: Send + Sync {
+pub(crate) trait VoiceAsrProvider: Send + Sync {
     fn transcribe(
         &self,
         request: VoiceAsrRequest,
@@ -163,7 +181,7 @@ pub trait VoiceAsrProvider: Send + Sync {
     ) -> BoxFuture<'static, Result<VoiceAsrResult>>;
 }
 
-pub trait VoiceTtsProvider: Send + Sync {
+pub(crate) trait VoiceTtsProvider: Send + Sync {
     fn synthesize(
         &self,
         request: VoiceTtsRequest,
@@ -171,7 +189,8 @@ pub trait VoiceTtsProvider: Send + Sync {
     ) -> BoxFuture<'static, Result<VoiceTtsResult>>;
 }
 
-pub trait VoiceRealtimeProvider: Send + Sync {
+#[cfg(test)]
+pub(crate) trait VoiceRealtimeProvider: Send + Sync {
     fn start(
         &self,
         request: VoiceRealtimeStartRequest,
@@ -179,11 +198,13 @@ pub trait VoiceRealtimeProvider: Send + Sync {
     ) -> BoxFuture<'static, Result<(VoiceRealtimeStartResult, VoiceRealtimeStream)>>;
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct FakeAsrProvider {
     transcript: String,
 }
 
+#[cfg(test)]
 impl FakeAsrProvider {
     pub fn new(transcript: impl Into<String>) -> Self {
         Self {
@@ -192,6 +213,7 @@ impl FakeAsrProvider {
     }
 }
 
+#[cfg(test)]
 impl VoiceAsrProvider for FakeAsrProvider {
     fn transcribe(
         &self,
@@ -214,11 +236,13 @@ impl VoiceAsrProvider for FakeAsrProvider {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct FakeTtsProvider {
     audio_data: String,
 }
 
+#[cfg(test)]
 impl FakeTtsProvider {
     pub fn new(audio_data: impl Into<String>) -> Self {
         Self {
@@ -227,6 +251,7 @@ impl FakeTtsProvider {
     }
 }
 
+#[cfg(test)]
 impl VoiceTtsProvider for FakeTtsProvider {
     fn synthesize(
         &self,
@@ -253,9 +278,11 @@ impl VoiceTtsProvider for FakeTtsProvider {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct FakeRealtimeProvider;
 
+#[cfg(test)]
 impl VoiceRealtimeProvider for FakeRealtimeProvider {
     fn start(
         &self,
@@ -312,31 +339,11 @@ impl VoiceRealtimeProvider for FakeRealtimeProvider {
 
 #[derive(Debug, Clone)]
 pub struct XiaomiVoiceProvider {
-    client: reqwest::Client,
-    base_url: String,
-    api_key: String,
-    provider_name: String,
-}
-
-impl XiaomiVoiceProvider {
-    pub fn new(
-        base_url: impl Into<String>,
-        api_key: impl Into<String>,
-        provider_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            base_url: base_url.into(),
-            api_key: api_key.into(),
-            provider_name: provider_name.into(),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn with_client(mut self, client: reqwest::Client) -> Self {
-        self.client = client;
-        self
-    }
+    pub(crate) client: reqwest::Client,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) provider_name: String,
+    pub(crate) headers: BTreeMap<String, String>,
 }
 
 impl VoiceAsrProvider for XiaomiVoiceProvider {
@@ -349,14 +356,18 @@ impl VoiceAsrProvider for XiaomiVoiceProvider {
         let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let provider_name = self.provider_name.clone();
+        let headers = self.headers.clone();
         Box::pin(async move {
             let mut abort = abort;
             validate_voice_asr_request(&request)?;
-            let endpoint = openai_chat_completions_endpoint(&base_url);
+            let endpoint = voice_chat_completions_endpoint(&base_url);
             let mut http_request = client
                 .post(endpoint)
                 .header("accept", "application/json")
                 .json(&xiaomi_asr_request_body(&request));
+            for (name, value) in &headers {
+                http_request = http_request.header(name, value);
+            }
             if !api_key.trim().is_empty() {
                 http_request = http_request.bearer_auth(api_key);
             }
@@ -390,14 +401,18 @@ impl VoiceTtsProvider for XiaomiVoiceProvider {
         let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let provider_name = self.provider_name.clone();
+        let headers = self.headers.clone();
         Box::pin(async move {
             let mut abort = abort;
             validate_voice_tts_request(&request)?;
-            let endpoint = openai_chat_completions_endpoint(&base_url);
+            let endpoint = voice_chat_completions_endpoint(&base_url);
             let mut http_request = client
                 .post(endpoint)
                 .header("accept", "application/json")
                 .json(&xiaomi_tts_request_body(&request, false));
+            for (name, value) in &headers {
+                http_request = http_request.header(name, value);
+            }
             if !api_key.trim().is_empty() {
                 http_request = http_request.bearer_auth(api_key);
             }
@@ -544,6 +559,7 @@ pub fn parse_xiaomi_tts_response(
     })
 }
 
+#[cfg(test)]
 pub fn parse_xiaomi_tts_sse_audio_delta(value: &Value) -> Option<VoiceAudioChunk> {
     let delta = value
         .get("choices")
@@ -575,6 +591,7 @@ pub fn parse_xiaomi_tts_sse_audio_delta(value: &Value) -> Option<VoiceAudioChunk
     })
 }
 
+#[cfg(test)]
 pub fn parse_voice_audio_format(value: &str) -> Option<VoiceAudioFormat> {
     match value.trim().to_ascii_lowercase().as_str() {
         "wav" | "wave" => Some(VoiceAudioFormat::Wav),
@@ -590,14 +607,42 @@ async fn xiaomi_voice_json_response(
 ) -> Result<Value> {
     let status = response.status();
     if !status.is_success() {
+        let retry_after_seconds = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok());
         let body = response
             .text()
             .await
             .unwrap_or_else(|err| format!("<failed to read error body: {err}>"));
-        return Err(Error::Provider(format!(
-            "{provider_name} returned HTTP {status}: {}",
-            truncate_provider_body(&body)
-        )));
+        let value = serde_json::from_str::<Value>(&body).ok();
+        let code = value
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .pointer("/error/code")
+                    .or_else(|| value.pointer("/error/type"))
+            })
+            .and_then(|value| match value {
+                Value::String(value) => Some(value.clone()),
+                Value::Number(value) => Some(value.to_string()),
+                _ => None,
+            });
+        let message = value
+            .as_ref()
+            .and_then(|value| value.pointer("/error/message"))
+            .and_then(Value::as_str)
+            .unwrap_or(&body);
+        return Err(Error::ProviderResponse {
+            status: status.as_u16(),
+            code,
+            retry_after_seconds,
+            summary: format!(
+                "{provider_name} returned HTTP {status}: {}",
+                truncate_provider_body(message)
+            ),
+        });
     }
     Ok(response.json::<Value>().await?)
 }

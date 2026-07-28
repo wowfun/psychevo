@@ -1,11 +1,17 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+#[cfg(any(feature = "openai", feature = "xiaomi"))]
 #[derive(Debug, Error)]
-pub enum Error {
-    #[error("fake provider script exhausted")]
-    ScriptExhausted,
+pub(crate) enum Error {
     #[error("provider failed: {0}")]
     Provider(String),
+    #[error("provider failed: {summary}")]
+    ProviderResponse {
+        status: u16,
+        code: Option<String>,
+        retry_after_seconds: Option<u64>,
+        summary: String,
+    },
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
     #[error("JSON failed: {0}")]
@@ -32,32 +38,37 @@ impl Outcome {
     }
 }
 
+#[cfg(feature = "openai")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelTarget {
+pub(crate) struct ModelTarget {
     pub provider: String,
     pub model: String,
 }
 
+#[cfg(feature = "openai")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerationRequest {
+pub(crate) struct GenerationRequest {
     pub model: ModelTarget,
     pub messages: Vec<Value>,
     pub tools: Vec<GenerationTool>,
     pub metadata: Value,
 }
 
+#[cfg(feature = "openai")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HostedWebSearchTool {
+pub(crate) struct HostedWebSearchTool {
     pub config: Value,
 }
 
+#[cfg(feature = "openai")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum GenerationTool {
+pub(crate) enum GenerationTool {
     Function { declaration: ToolDeclaration },
     WebSearch(HostedWebSearchTool),
 }
 
+#[cfg(feature = "openai")]
 impl From<ToolDeclaration> for GenerationTool {
     fn from(declaration: ToolDeclaration) -> Self {
         Self::Function { declaration }
@@ -161,9 +172,10 @@ impl ToolDeclaration {
     }
 }
 
+#[cfg(feature = "openai")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum StreamEvent {
+pub(crate) enum StreamEvent {
     TextDelta {
         text: String,
     },

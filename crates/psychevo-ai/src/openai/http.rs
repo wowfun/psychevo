@@ -1,6 +1,7 @@
 use super::*;
 
 use std::future::Future;
+#[cfg(test)]
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use tokio::time::Instant;
 pub const DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS: u64 = 300;
 pub(crate) const ERROR_BODY_LIMIT_BYTES: usize = 64 * 1024;
 
+#[cfg(test)]
 static GENERATION_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
@@ -17,10 +19,12 @@ static GENERATION_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .expect("generation HTTP client")
 });
 
+#[cfg(test)]
 pub(crate) fn generation_http_client() -> reqwest::Client {
     GENERATION_HTTP_CLIENT.clone()
 }
 
+#[cfg(test)]
 pub(crate) fn inference_idle_timeout(seconds: u64) -> Option<Duration> {
     (seconds > 0).then(|| Duration::from_secs(seconds))
 }
@@ -52,10 +56,18 @@ pub(crate) async fn checked_response(
     if status.is_success() {
         return Ok(response);
     }
+    let retry_after_seconds = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok());
     let body = error_body_guarded(response, abort, idle_timeout, label).await?;
-    Err(GuardedHttpError::Failed(Error::Provider(format!(
-        "{label} returned HTTP {status}: {body}"
-    ))))
+    Err(GuardedHttpError::Failed(provider_response_error(
+        status,
+        retry_after_seconds,
+        label,
+        &body,
+    )))
 }
 
 pub(crate) async fn error_body_guarded(
@@ -167,6 +179,37 @@ pub(crate) fn idle_error(label: &str, timeout: Duration) -> Error {
         "{label} made no progress for {} seconds",
         timeout.as_secs()
     ))
+}
+
+pub(crate) fn provider_response_error(
+    status: reqwest::StatusCode,
+    retry_after_seconds: Option<u64>,
+    label: &str,
+    body: &str,
+) -> Error {
+    let value = serde_json::from_str::<Value>(body).ok();
+    let code = value
+        .as_ref()
+        .and_then(|value| {
+            value
+                .pointer("/error/code")
+                .or_else(|| value.pointer("/error/type"))
+        })
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let detail = value
+        .as_ref()
+        .and_then(|value| value.pointer("/error/message"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(body);
+    Error::ProviderResponse {
+        status: status.as_u16(),
+        code,
+        retry_after_seconds,
+        summary: format!("{label} returned HTTP {status}: {detail}"),
+    }
 }
 
 pub(crate) fn inference_event_is_progress(event: &StreamEvent) -> bool {

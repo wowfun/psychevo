@@ -3,9 +3,11 @@ pub(crate) use super::*;
 use std::time::Duration;
 
 use crate::openai_http::{
-    GuardedHttpError, error_body_guarded, generation_http_client, inference_event_is_progress,
-    inference_idle_timeout, send_guarded, wait_for_deadline,
+    GuardedHttpError, error_body_guarded, inference_event_is_progress, provider_response_error,
+    send_guarded, wait_for_deadline,
 };
+#[cfg(test)]
+use crate::openai_http::{generation_http_client, inference_idle_timeout};
 
 #[derive(Debug, Clone)]
 pub struct OpenAiChatProvider {
@@ -14,9 +16,12 @@ pub struct OpenAiChatProvider {
     pub(crate) api_key: String,
     pub(crate) provider_name: String,
     pub(crate) inference_idle_timeout: Option<Duration>,
+    pub(crate) headers: BTreeMap<String, String>,
+    pub(crate) allow_image_text_fallback: bool,
 }
 
 impl OpenAiChatProvider {
+    #[cfg(test)]
     pub fn new(
         base_url: impl Into<String>,
         api_key: impl Into<String>,
@@ -30,17 +35,14 @@ impl OpenAiChatProvider {
             inference_idle_timeout: inference_idle_timeout(
                 crate::openai_http::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
             ),
+            headers: BTreeMap::new(),
+            allow_image_text_fallback: true,
         }
     }
 
+    #[cfg(test)]
     pub fn with_inference_idle_timeout_secs(mut self, seconds: u64) -> Self {
         self.inference_idle_timeout = inference_idle_timeout(seconds);
-        self
-    }
-
-    #[cfg(test)]
-    pub fn with_client(mut self, client: reqwest::Client) -> Self {
-        self.client = client;
         self
     }
 }
@@ -56,6 +58,8 @@ impl GenerationProvider for OpenAiChatProvider {
         let api_key = self.api_key.clone();
         let provider_name = self.provider_name.clone();
         let inference_idle_timeout = self.inference_idle_timeout;
+        let headers = self.headers.clone();
+        let allow_image_text_fallback = self.allow_image_text_fallback;
         Box::pin(async move {
             let mut abort = abort;
             if abort.aborted() {
@@ -75,6 +79,9 @@ impl GenerationProvider for OpenAiChatProvider {
                     .post(endpoint.clone())
                     .header("accept", "text/event-stream")
                     .json(&body);
+                for (name, value) in &headers {
+                    http_request = http_request.header(name, value);
+                }
                 if !api_key.trim().is_empty() {
                     http_request = http_request.bearer_auth(&api_key);
                 }
@@ -95,6 +102,11 @@ impl GenerationProvider for OpenAiChatProvider {
                 if status.is_success() {
                     break response;
                 }
+                let retry_after_seconds = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.trim().parse::<u64>().ok());
                 let body = match error_body_guarded(
                     response,
                     &mut abort,
@@ -112,13 +124,17 @@ impl GenerationProvider for OpenAiChatProvider {
                     &body,
                     has_image_blocks,
                     force_text_images,
-                ) {
+                ) && allow_image_text_fallback
+                {
                     force_text_images = true;
                     continue;
                 }
-                return Err(Error::Provider(format!(
-                    "{provider_name} returned HTTP {status}: {body}"
-                )));
+                return Err(provider_response_error(
+                    status,
+                    retry_after_seconds,
+                    &provider_name,
+                    &body,
+                ));
             };
 
             let bytes = Box::pin(response.bytes_stream());
