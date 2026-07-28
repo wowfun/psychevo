@@ -29,10 +29,25 @@ pub(crate) fn build_assistant_message(
         });
     }
     for builder in state.tool_builders.values() {
-        let parsed = serde_json::from_str::<Value>(&builder.arguments_json);
-        let (arguments, arguments_error) = match parsed {
-            Ok(value) => (value, None),
-            Err(err) => (Value::Null, Some(err.to_string())),
+        let (arguments, arguments_error) = match &builder.argument_error {
+            Some(error) => (Value::Null, Some(error.clone())),
+            None => match serde_json::from_str::<Value>(&builder.arguments_json) {
+                Ok(Value::Object(object)) => (Value::Object(object), None),
+                Ok(_) => (
+                    Value::Null,
+                    Some(psychevo_ai::ToolArgumentError {
+                        kind: psychevo_ai::ToolArgumentErrorKind::NotAnObject,
+                        message: "tool arguments must be a JSON object".to_string(),
+                    }),
+                ),
+                Err(error) => (
+                    Value::Null,
+                    Some(psychevo_ai::ToolArgumentError {
+                        kind: psychevo_ai::ToolArgumentErrorKind::InvalidJson,
+                        message: format!("invalid tool argument JSON: {error}"),
+                    }),
+                ),
+            },
         };
         content.push(AssistantBlock::ToolCall(ToolCallBlock {
             id: builder.id.clone(),
@@ -57,6 +72,74 @@ pub(crate) fn build_assistant_message(
         timestamp_ms: state.timestamp_ms,
         finish_reason: state.finish_reason,
         outcome: state.outcome,
+        model: Some(request.model.clone()),
+        provider: Some(request.model_provider.clone()),
+    }
+}
+
+pub(crate) fn build_assistant_message_from_snapshot(
+    snapshot: &psychevo_ai::AssistantMessage,
+    request: &AgentLoopRequest,
+    timestamp_ms: i64,
+    finish_reason: Option<String>,
+    outcome: Outcome,
+) -> Message {
+    let mut content = Vec::new();
+    for (content_index, block) in snapshot.content.iter().enumerate() {
+        match block {
+            psychevo_ai::AssistantContent::Text(text) => {
+                let mut parser = InlineThinkParser::new();
+                parser.push(&text.text);
+                parser.finish();
+                if !parser.reasoning().is_empty() {
+                    content.push(AssistantBlock::Reasoning {
+                        text: parser.reasoning().to_string(),
+                        provider_evidence: None,
+                    });
+                }
+                if !parser.visible().is_empty() {
+                    content.push(AssistantBlock::Text {
+                        text: parser.visible().to_string(),
+                    });
+                }
+            }
+            psychevo_ai::AssistantContent::Reasoning {
+                text,
+                provider_evidence,
+            } => content.push(AssistantBlock::Reasoning {
+                text: text.clone(),
+                provider_evidence: provider_evidence.clone(),
+            }),
+            psychevo_ai::AssistantContent::ToolCall(call) => {
+                content.push(AssistantBlock::ToolCall(ToolCallBlock {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone().unwrap_or(Value::Null),
+                    arguments_json: call.arguments_raw.clone(),
+                    arguments_error: call.argument_error.clone(),
+                    content_index,
+                    call_index: content_index,
+                }));
+            }
+            psychevo_ai::AssistantContent::ProviderTool(tool) => {
+                content.push(AssistantBlock::ProviderTool(ProviderToolBlock {
+                    id: tool.id.clone(),
+                    name: tool.name.clone(),
+                    action: tool.action.clone(),
+                    status: tool.status.clone(),
+                }));
+            }
+            psychevo_ai::AssistantContent::Source { source } => {
+                content.push(AssistantBlock::Source(source.clone()));
+            }
+            psychevo_ai::AssistantContent::Extension { .. } => {}
+        }
+    }
+    Message::Assistant {
+        content,
+        timestamp_ms,
+        finish_reason,
+        outcome,
         model: Some(request.model.clone()),
         provider: Some(request.model_provider.clone()),
     }

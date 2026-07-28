@@ -1,12 +1,10 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use psychevo_ai::{
-    FakeImageGenerationProvider, ImageGenerationInputImage, ImageGenerationProvider,
-    ImageGenerationRequest, OpenAiImageGenerationProvider,
+    DeploymentConfig, Fake, ImageModel, ImageRequest, MediaInput, OpenAi, SecretValue,
 };
 
 use super::*;
 
-pub(crate) const MAX_IMAGE_TOOL_INPUTS: usize = psychevo_ai::MAX_IMAGE_GENERATION_INPUTS;
+pub(crate) const MAX_IMAGE_TOOL_INPUTS: usize = 5;
 
 pub(crate) struct ViewImageTool {
     cwd: PathBuf,
@@ -180,6 +178,7 @@ impl ToolBinding for ImageGenerateTool {
         let cwd = self.cwd.clone();
         let context = self.context.clone();
         Box::pin(async move {
+            let mut abort = abort;
             let Some(prompt) = args
                 .get("prompt")
                 .and_then(Value::as_str)
@@ -248,36 +247,50 @@ impl ToolBinding for ImageGenerateTool {
                     Err(err) => return ToolOutput::error(err.to_string()),
                 }
             }
-            let request = ImageGenerationRequest {
-                provider: config.provider.clone(),
-                model: config.model.clone(),
+            let request = ImageRequest {
                 prompt: prompt.to_string(),
+                count: 1,
                 aspect_ratio,
-                image: input_image,
-                reference_images: resolved_references,
+                input_images: input_image
+                    .into_iter()
+                    .chain(resolved_references)
+                    .collect(),
                 size: Some(config.size.clone()),
-                format: config.format,
+                format: Some(config.format.as_str().to_string()),
+                headers: BTreeMap::new(),
+                extensions: BTreeMap::new(),
             };
             let provider = match image_generation_provider(&config) {
                 Ok(provider) => provider,
                 Err(err) => return ToolOutput::error(err.to_string()),
             };
-            let result = match provider.generate(request, abort).await {
+            let mut invocation = provider.generate(request);
+            let result = tokio::select! {
+                result = &mut invocation => result,
+                _ = abort.wait_for_abort() => {
+                    invocation.abort();
+                    invocation.await
+                }
+            };
+            let result = match result {
                 Ok(result) => result,
                 Err(err) => return ToolOutput::error(err.to_string()),
             };
-            let bytes = match BASE64_STANDARD.decode(result.data_base64.as_bytes()) {
+            let Some(image) = result.images.first() else {
+                return ToolOutput::error("image provider returned no images");
+            };
+            let bytes = match image.media.bytes() {
                 Ok(bytes) => bytes,
                 Err(err) => {
                     return ToolOutput::error(format!(
-                        "image provider returned invalid base64: {err}"
+                        "image provider returned invalid media: {err}"
                     ));
                 }
             };
             let artifact = match crate::media::write_generated_image_artifact(
                 &home,
-                &bytes,
-                &result.mime_type,
+                bytes.as_ref(),
+                image.media.mime_type(),
             ) {
                 Ok(artifact) => artifact,
                 Err(err) => return ToolOutput::error(err.to_string()),
@@ -289,18 +302,18 @@ impl ToolBinding for ImageGenerateTool {
                 "artifactId": artifact.artifact_id,
                 "mimeType": artifact.mime_type,
                 "prompt": prompt,
-                "provider": result.provider,
-                "model": result.model,
+                "provider": result.model.provider_family,
+                "model": result.model.model_id,
                 "savedPath": artifact.saved_path.display().to_string(),
                 "displayUrl": artifact.display_url,
                 "agentVisibleSource": artifact.agent_visible_source,
-                "revisedPrompt": result.revised_prompt,
+                "revisedPrompt": image.revised_prompt,
                 "width": artifact.width,
                 "height": artifact.height,
                 "sizeBytes": artifact.size_bytes,
                 "recentImagesRequested": requested_recent,
                 "recentImagesSelected": 0,
-                "providerMetadata": result.metadata,
+                "providerMetadata": result.provider_metadata,
             });
             let model_content = serde_json::to_string(&output)
                 .unwrap_or_else(|_| "{\"status\":\"completed\"}".to_string());
@@ -313,32 +326,23 @@ async fn resolve_generation_input_image(
     source: &str,
     cwd: &Path,
     home: &Path,
-) -> Result<ImageGenerationInputImage> {
+) -> Result<MediaInput> {
     let resolved = crate::media::resolve_explicit_image_source(source, cwd, home).await?;
-    Ok(ImageGenerationInputImage {
-        source: resolved.agent_visible_source,
+    Ok(MediaInput::Url {
+        url: resolved.agent_visible_source,
         mime_type: Some(resolved.mime_type),
     })
 }
 
 fn image_generation_provider(
     config: &ResolvedImageGenerationConfig,
-) -> Result<Arc<dyn ImageGenerationProvider>> {
+) -> Result<ImageModel> {
     match config.provider.as_str() {
-        "fake" => Ok(Arc::new(FakeImageGenerationProvider::default())),
-        "openai" => {
-            let api_key = config.api_key.clone().ok_or_else(|| {
-                Error::Config(format!(
-                    "{} is required for OpenAI image generation",
-                    config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY")
-                ))
-            })?;
-            Ok(Arc::new(OpenAiImageGenerationProvider::new(
-                config.base_url.clone(),
-                api_key,
-                config.provider.clone(),
-            )))
-        }
+        "fake" => Fake::new()
+            .map_err(|error| Error::Config(error.to_string()))?
+            .provider()
+            .image_model(config.model.clone())
+            .map_err(|error| Error::Config(error.to_string())),
         provider => {
             let api_key = config.api_key.clone().ok_or_else(|| {
                 Error::Config(format!(
@@ -346,11 +350,18 @@ fn image_generation_provider(
                     config.api_key_env.as_deref().unwrap_or("provider API key")
                 ))
             })?;
-            Ok(Arc::new(OpenAiImageGenerationProvider::new(
-                config.base_url.clone(),
-                api_key,
-                config.provider.clone(),
-            )))
+            OpenAi::builder(
+                DeploymentConfig::new(
+                    config.provider.clone(),
+                    config.provider.clone(),
+                    config.base_url.clone(),
+                )
+                .with_default_language_protocol("openai_chat"),
+            )
+            .with_api_key(SecretValue::new(api_key))
+            .build()
+            .and_then(|facade| facade.image(config.model.clone()))
+            .map_err(|error| Error::Config(error.to_string()))
         }
     }
 }
@@ -379,6 +390,7 @@ fn view_image_model_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
     fn abort_signal() -> AbortSignal {
         let (_tx, rx) = tokio::sync::watch::channel(false);
@@ -473,7 +485,7 @@ mod tests {
                     api_key_env: None,
                     api_key: None,
                     size: "1024x1024".to_string(),
-                    format: psychevo_ai::ImageGenerationFormat::Png,
+                    format: crate::config::ImageGenerationFormat::Png,
                 }),
                 ..ToolRuntimeContext::default()
             },

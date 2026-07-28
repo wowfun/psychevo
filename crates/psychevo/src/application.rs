@@ -129,7 +129,7 @@ pub struct ApplicationBuilder {
     config_path: Option<PathBuf>,
     event_capacity: Option<usize>,
     agent_sessions: Option<Arc<dyn AgentSessionAdapter>>,
-    provider: Option<Arc<dyn psychevo_ai::GenerationProvider>>,
+    provider: Option<psychevo_ai::Provider>,
 }
 
 #[derive(Clone)]
@@ -223,7 +223,7 @@ pub struct TurnControl {
 struct NativeAgentSessionAdapter {
     state: StateRuntime,
     config_path: Option<PathBuf>,
-    provider: Option<Arc<dyn psychevo_ai::GenerationProvider>>,
+    provider: Option<psychevo_ai::Provider>,
 }
 
 #[derive(Debug)]
@@ -2574,10 +2574,11 @@ no_auth = true
         )
         .expect("config");
         crate::tests::seed_managed_rg(&home);
-        let provider = Arc::new(psychevo_ai::FakeProvider::new(vec![vec![
-            psychevo_ai::RawStreamEvent::Text("native fake answer".to_string()),
-            psychevo_ai::RawStreamEvent::Done(psychevo_ai::Outcome::Normal),
-        ]]));
+        let provider = psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::text(
+            "native fake answer",
+        ))
+        .expect("fake provider")
+        .provider();
         let application = Application::builder()
             .home(&home)
             .provider(provider)
@@ -2698,10 +2699,10 @@ enabled = true
         )
         .expect("config");
         crate::tests::seed_managed_rg(&home);
-        let provider = Arc::new(psychevo_ai::FakeProvider::new(vec![vec![
-            psychevo_ai::RawStreamEvent::Text("done".to_string()),
-            psychevo_ai::RawStreamEvent::Done(psychevo_ai::Outcome::Normal),
-        ]]));
+        let provider =
+            psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::text("done"))
+                .expect("fake provider")
+                .provider();
         let application = Application::builder()
             .home(&home)
             .provider(provider)

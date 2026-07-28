@@ -5,6 +5,7 @@ pub(crate) struct ToolCallBuilder {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) arguments_json: String,
+    pub(crate) argument_error: Option<psychevo_ai::ToolArgumentError>,
     pub(crate) content_index: usize,
     pub(crate) call_index: usize,
 }
@@ -103,7 +104,7 @@ async fn execute_tool_search(
     )
     .await?;
     let output = if let Some(err) = &call.arguments_error {
-        ToolOutput::error(format!("invalid tool arguments JSON: {err}"))
+        ToolOutput::error(format!("invalid tool arguments: {}", err.message))
     } else {
         router.execute_tool_search(&call.arguments)
     };
@@ -156,7 +157,7 @@ pub(crate) async fn execute_one_tool(
     )
     .await?;
     let output = if let Some(err) = &call.arguments_error {
-        ToolOutput::error(format!("invalid tool arguments JSON: {err}"))
+        ToolOutput::error(format!("invalid tool arguments: {}", err.message))
     } else if let Some(tool) = tool {
         tool.execute(call.id.clone(), call.arguments.clone(), abort)
             .await

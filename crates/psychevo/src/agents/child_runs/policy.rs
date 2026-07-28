@@ -12,7 +12,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         update_run_failed(&child.id, "parent invocation aborted");
         return Err(Error::Message("parent invocation aborted".to_string()));
     }
-    let child_model = child_model(&child);
+    let child_model = child.model.clone();
     let child_session = if let Some(child_session) = child.existing_child_session.clone() {
         child.context.state.resume_session(&child_session).await?;
         child
@@ -343,7 +343,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     let parent_store = child.context.state.clone();
     let parent_session_id = child.context.parent_session_id.clone();
     let completion = match psychevo_agent_core::run_agent_loop(
-        Arc::clone(&child.context.provider),
+        child.provider.clone(),
         request,
         sink,
         child.control_receivers,
@@ -562,14 +562,6 @@ fn child_hook_runtime_config(
     crate::hooks::hook_runtime_config_from_options(&options, &context.cwd)
 }
 
-pub(crate) fn child_model(child: &ChildRun) -> String {
-    child_model_from(
-        &child.context,
-        &child.agent,
-        child.model_override.as_deref(),
-    )
-}
-
 pub(crate) fn child_model_from(
     context: &AgentToolContext,
     agent: &AgentDefinition,
@@ -589,6 +581,19 @@ pub(crate) fn child_model_from(
         })
         .or_else(|| agent.model.clone())
         .unwrap_or_else(|| context.model.clone())
+}
+
+pub(crate) fn bind_child_model(
+    context: &AgentToolContext,
+    agent: &AgentDefinition,
+    model_override: Option<&str>,
+) -> Result<(String, LanguageModel)> {
+    let model = child_model_from(context, agent, model_override);
+    let provider = context
+        .provider
+        .language_model(model.clone())
+        .map_err(|error| Error::Config(error.to_string()))?;
+    Ok((model, provider))
 }
 
 pub(crate) fn invocation_role_str(role: AgentInvocationRole) -> &'static str {

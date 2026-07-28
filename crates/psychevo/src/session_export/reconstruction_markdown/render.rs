@@ -18,7 +18,9 @@ pub(crate) fn prompt_prefix_version(metadata: &Option<Value>) -> Option<i64> {
         .and_then(Value::as_i64)
 }
 
-pub(crate) fn prefix_prompt_instruction_values(prefix: &PromptPrefixRecord) -> Vec<Value> {
+pub(crate) fn prefix_prompt_instruction_messages(
+    prefix: &PromptPrefixRecord,
+) -> Vec<psychevo_ai::Message> {
     let mut slots = prefix
         .slots
         .iter()
@@ -28,7 +30,7 @@ pub(crate) fn prefix_prompt_instruction_values(prefix: &PromptPrefixRecord) -> V
     slots
         .into_iter()
         .map(|slot| {
-            PromptInstruction {
+            prompt_instruction_to_ai(&PromptInstruction {
                 slot: slot.slot.clone(),
                 tier: slot.tier.clone(),
                 semantic_role: slot.semantic_role.clone(),
@@ -39,8 +41,7 @@ pub(crate) fn prefix_prompt_instruction_values(prefix: &PromptPrefixRecord) -> V
                 source_kind: slot.source_kind.clone(),
                 source_name: slot.source_name.clone(),
                 source_path: slot.source_path.clone(),
-            }
-            .to_provider_value()
+            })
         })
         .collect()
 }
@@ -82,16 +83,16 @@ pub(crate) fn prefix_contextual_user_messages(
     }
 }
 
-pub(crate) fn turn_prompt_instruction_values_from_evidence(
+pub(crate) fn turn_prompt_instruction_messages_from_evidence(
     evidence: &[ContextEvidenceRecord],
-) -> Vec<Value> {
-    prompt_instruction_values_from_evidence(evidence, "turn_prompt_instructions")
+) -> Vec<psychevo_ai::Message> {
+    prompt_instruction_messages_from_evidence(evidence, "turn_prompt_instructions")
 }
 
-pub(crate) fn prompt_instruction_values_from_evidence(
+pub(crate) fn prompt_instruction_messages_from_evidence(
     evidence: &[ContextEvidenceRecord],
     provider_group: &str,
-) -> Vec<Value> {
+) -> Vec<psychevo_ai::Message> {
     let mut items = evidence
         .iter()
         .filter(|item| {
@@ -135,19 +136,18 @@ pub(crate) fn prompt_instruction_values_from_evidence(
             let order = metadata
                 .and_then(|metadata| metadata.get("order"))
                 .and_then(Value::as_u64);
-            serde_json::json!({
-                "role": item.role,
-                "content": item.content_text,
-                "metadata": {
-                    "prompt_slot": slot,
-                    "prompt_slot_tier": tier,
-                    "prompt_semantic_role": semantic_role,
-                    "prompt_content_hash": content_hash,
-                    "prompt_order": order,
-                    "source_kind": item.source_kind,
-                    "source_name": item.source_name,
-                    "source_path": item.source_path,
-                }
+            prompt_instruction_to_ai(&PromptInstruction {
+                slot: slot.unwrap_or_else(|| "reconstructed".to_string()),
+                tier: tier.to_string(),
+                semantic_role: semantic_role
+                    .unwrap_or_else(|| "developer_prompt".to_string()),
+                provider_role: item.role.clone(),
+                order: order.unwrap_or_default() as usize,
+                content: item.content_text.clone(),
+                content_hash: content_hash.unwrap_or_default().to_string(),
+                source_kind: Some(item.source_kind.clone()),
+                source_name: item.source_name.clone(),
+                source_path: item.source_path.clone(),
             })
         })
         .collect()
@@ -234,12 +234,8 @@ pub(crate) fn contextual_user_messages_from_evidence_for_kinds(
         .collect()
 }
 
-pub(crate) fn message_to_value(message: &Message) -> Result<Value> {
-    Ok(serde_json::to_value(message)?)
-}
-
-pub(crate) fn push_mailbox_events_delivered_after_message(
-    provider_messages: &mut Vec<Value>,
+pub(crate) async fn push_mailbox_events_delivered_after_message(
+    provider_messages: &mut Vec<psychevo_ai::Message>,
     mailbox_events: &[AgentMailboxEventRecord],
     session_seq: i64,
 ) -> Result<()> {
@@ -247,13 +243,13 @@ pub(crate) fn push_mailbox_events_delivered_after_message(
         .iter()
         .filter(|event| event.delivered_after_session_seq == Some(session_seq))
     {
-        provider_messages.push(message_to_value(&agent_mailbox_event_message(event))?);
+        provider_messages.push(message_to_ai(&agent_mailbox_event_message(event)).await);
     }
     Ok(())
 }
 
-pub(crate) fn push_mailbox_events_delivered_for_prompt(
-    provider_messages: &mut Vec<Value>,
+pub(crate) async fn push_mailbox_events_delivered_for_prompt(
+    provider_messages: &mut Vec<psychevo_ai::Message>,
     mailbox_events: &[AgentMailboxEventRecord],
     prompt_session_seq: i64,
 ) -> Result<()> {
@@ -262,7 +258,7 @@ pub(crate) fn push_mailbox_events_delivered_for_prompt(
             .delivered_prompt_session_seq
             .is_some_and(|seq| seq <= prompt_session_seq)
     }) {
-        provider_messages.push(message_to_value(&agent_mailbox_event_message(event))?);
+        provider_messages.push(message_to_ai(&agent_mailbox_event_message(event)).await);
     }
     Ok(())
 }
@@ -348,12 +344,21 @@ pub(crate) fn reconstructed_tool_declarations(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
-        base_url.clone(),
+    let provider = crate::run::generation_provider(
+        if base_url.trim().is_empty() {
+            "http://127.0.0.1:9/v1".to_string()
+        } else {
+            base_url.clone()
+        },
         String::new(),
         summary.provider.clone(),
         psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
-    );
+    )
+    .unwrap_or_else(|_| {
+        psychevo_ai::Fake::new()
+            .expect("built-in fake provider")
+            .provider()
+    });
     let tools = assemble_tool_surface(ToolSurfaceAssembly {
         cwd: cwd.to_path_buf(),
         task_id: summary.id.clone(),

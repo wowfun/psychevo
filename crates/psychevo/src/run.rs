@@ -2,14 +2,13 @@ pub(crate) use std::collections::BTreeMap;
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant};
 
-pub(crate) use futures::StreamExt;
 pub(crate) use psychevo_agent_core::{
     AgentLoopRequest, AssistantBlock, ControlHandle, Message, NoopEventSink, PromptInstruction,
     run_agent_loop, user_text_message,
 };
 pub(crate) use psychevo_ai::{
-    AbortSignal, GenerationProvider, GenerationRequest, ModelTarget, OpenAiChatProvider,
-    OpenAiResponsesProvider, Outcome, StreamEvent,
+    Anthropic, DeploymentConfig, GenerationEvent, LanguageModel, LanguageRequest, OpenAi, Outcome,
+    Provider, SecretValue, TimeoutPolicy,
 };
 pub(crate) use serde_json::{Value, json};
 pub(crate) use tokio::time;
@@ -28,11 +27,12 @@ pub(crate) use crate::compaction::{
     load_projected_messages,
 };
 pub(crate) use crate::config::{
-    ResolvedRunProvider, load_plugin_policy_config_lenient, load_project_context_instruction_mode,
-    load_run_config, resolve_run_provider,
+    LoadedRunConfig, ResolvedRunProvider, load_plugin_policy_config_lenient,
+    load_project_context_instruction_mode, load_run_config, parse_provider_model_spec,
+    resolve_one_provider, resolve_run_provider,
 };
 pub(crate) use crate::context_usage::{
-    ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
+    ContextRecorder, ContextRecordingAdapter, LiveContextProfile, context_counting_metadata,
 };
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::events::PersistenceSink;
@@ -64,10 +64,10 @@ pub(crate) use crate::tool_surface::{
 };
 pub(crate) use crate::tools::{detach_exec_sessions_for_task, interrupt_exec_sessions_for_task};
 pub(crate) use crate::types::{
-    AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ModelMetadata,
-    PermissionApprovalDecision, PermissionApprovalRequest, PermissionConfig, ReloadContextOptions,
-    ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent, RunStreamSink,
-    RunWarning, RuntimeTool, SelectedAgent, SmokeControl,
+    AgentSpawnOptions, AgentSpawnResult, ApprovalHandler, ApprovalsReviewer, ModelMetadata,
+    PermissionApprovalDecision, PermissionApprovalRequest, PermissionConfig,
+    ReloadContextOptions, ReloadContextResult, RunControl, RunOptions, RunResult, RunStreamEvent,
+    RunStreamSink, RunWarning, RuntimeTool, SelectedAgent, SmokeControl,
 };
 
 #[allow(unused_imports)]
@@ -109,19 +109,42 @@ pub(crate) fn generation_provider(
     api_key: impl Into<String>,
     provider: impl Into<String>,
     inference_idle_timeout_secs: u64,
-) -> Arc<dyn GenerationProvider> {
+) -> Result<Provider> {
     let base_url = base_url.into();
     let api_key = api_key.into();
     let provider = provider.into();
-    if crate::config::normalize_provider_id(&provider) == "openai" {
-        Arc::new(
-            OpenAiResponsesProvider::new(base_url, api_key)
-                .with_inference_idle_timeout_secs(inference_idle_timeout_secs),
-        )
+    let provider_family = crate::config::normalize_provider_id(&provider);
+    let protocol = language_protocol_for_provider(&provider_family);
+    let config = DeploymentConfig::new(provider_family.clone(), provider_family.clone(), base_url)
+        .with_default_language_protocol(protocol)
+        .with_timeout_policy(TimeoutPolicy {
+            progress_idle_timeout_secs: inference_idle_timeout_secs,
+            ..TimeoutPolicy::default()
+        });
+    let result = if provider_family == "anthropic" {
+        let builder = Anthropic::builder(config);
+        if api_key.trim().is_empty() {
+            builder.build()
+        } else {
+            builder.with_api_key(SecretValue::new(api_key)).build()
+        }
+        .and_then(|facade| facade.provider())
     } else {
-        Arc::new(
-            OpenAiChatProvider::new(base_url, api_key, provider)
-                .with_inference_idle_timeout_secs(inference_idle_timeout_secs),
-        )
+        let builder = OpenAi::builder(config);
+        if api_key.trim().is_empty() {
+            builder.build()
+        } else {
+            builder.with_api_key(SecretValue::new(api_key)).build()
+        }
+        .and_then(|facade| facade.provider())
+    };
+    result.map_err(|error| Error::Config(error.to_string()))
+}
+
+pub(crate) fn language_protocol_for_provider(provider: &str) -> &'static str {
+    match crate::config::normalize_provider_id(provider).as_str() {
+        "openai" => "openai_responses",
+        "anthropic" => "anthropic_messages",
+        _ => "openai_chat",
     }
 }

@@ -12,7 +12,7 @@ use psychevo_agent_core::{
     AgentLoopRequest, AssistantBlock, ControlHandle, Message, ToolBinding, ToolDisplaySpec,
     ToolExecutionMode, ToolOutput, user_text_message,
 };
-use psychevo_ai::{AbortSignal, GenerationProvider, Outcome};
+use psychevo_ai::{AbortSignal, LanguageModel, Outcome, Provider};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;

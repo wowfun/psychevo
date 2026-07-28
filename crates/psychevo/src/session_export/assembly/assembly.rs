@@ -151,10 +151,13 @@ pub(crate) struct ProviderRequestExport {
     pub(crate) provider: String,
     pub(crate) model: String,
     pub(crate) base_url: String,
+    pub(crate) protocol: String,
     pub(crate) endpoint: String,
     pub(crate) reconstructed: bool,
     pub(crate) warnings: Vec<String>,
     pub(crate) body: Value,
+    #[serde(skip)]
+    pub(crate) request: LanguageRequest,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -467,7 +470,11 @@ pub(crate) async fn reconstruct_last_provider_request(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let endpoint = openai_chat_completions_endpoint(&base_url);
+    let protocol = metadata
+        .get("language_protocol")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| crate::run::language_protocol_for_provider(&summary.provider))
+        .to_string();
     let mut warnings = base_reconstruction_warnings(&metadata);
     let mode = session_mode_from_metadata(&metadata, &mut warnings);
     let generation_metadata = generation_metadata_from_session_metadata(&metadata, &mut warnings);
@@ -514,16 +521,46 @@ pub(crate) async fn reconstruct_last_provider_request(
         &mut request_warnings,
     )
     .await?;
-    let request = GenerationRequest {
-        model: ModelTarget {
-            provider: summary.provider.clone(),
-            model: summary.model.clone(),
-        },
-        messages: provider_messages,
-        tools: tools.into_iter().map(Into::into).collect(),
-        metadata: generation_metadata,
+    let descriptor = ModelDescriptor {
+        deployment_id: summary.provider.clone(),
+        provider_family: summary.provider.clone(),
+        capability: Capability::Language,
+        model_id: summary.model.clone(),
+        protocol_id: protocol.clone(),
     };
-    let body = openai_chat_request_body(&request, &base_url);
+    let request = LanguageRequest {
+        messages: provider_messages,
+        tools: tools.into_iter().map(LanguageTool::from).collect(),
+        extensions: BTreeMap::from([("psychevo".to_string(), generation_metadata)]),
+        ..LanguageRequest::default()
+    };
+    let (endpoint, preview) = match protocol.as_str() {
+        "openai_chat" => (
+            OpenAiChatAdapter::endpoint(&base_url),
+            OpenAiChatAdapter::preview(&descriptor, &request),
+        ),
+        "openai_responses" => (
+            OpenAiResponsesAdapter::endpoint(&base_url),
+            OpenAiResponsesAdapter::preview(&descriptor, &request),
+        ),
+        "anthropic_messages" => (
+            AnthropicMessagesAdapter::endpoint(&base_url),
+            AnthropicMessagesAdapter::preview(&descriptor, &request),
+        ),
+        protocol => {
+            return Err(Error::Message(format!(
+                "provider request preview is not available for protocol `{protocol}`"
+            )));
+        }
+    };
+    let preview = preview.map_err(|error| Error::Message(error.to_string()))?;
+    request_warnings.extend(
+        preview
+            .warnings
+            .into_iter()
+            .map(|warning| warning.message),
+    );
+    let body = preview.body;
 
     Ok(Some(ProviderRequestExport {
         prompt_session_seq,
@@ -531,10 +568,12 @@ pub(crate) async fn reconstruct_last_provider_request(
         provider: summary.provider.clone(),
         model: summary.model.clone(),
         base_url,
+        protocol,
         endpoint,
         reconstructed: true,
         warnings: request_warnings,
         body,
+        request,
     }))
 }
 
@@ -570,7 +609,7 @@ pub(crate) async fn reconstructed_provider_messages(
     prompt_metadata: &Option<Value>,
     assistant_metadata: &Option<Value>,
     warnings: &mut Vec<String>,
-) -> Result<Vec<Value>> {
+) -> Result<Vec<psychevo_ai::Message>> {
     let evidence = context
         .store
         .load_context_evidence(context.session_id, prompt_session_seq)
@@ -588,16 +627,14 @@ pub(crate) async fn reconstructed_provider_messages(
             context.messages,
             assistant_index,
             prompt_session_seq,
-        );
+        )
+        .await;
     }
 
     let mut provider_messages =
-        prompt_instruction_values_from_evidence(&evidence, "prefix_prompt_instructions");
+        prompt_instruction_messages_from_evidence(&evidence, "prefix_prompt_instructions");
     if provider_messages.is_empty() {
-        provider_messages.push(serde_json::json!({
-            "role": "system",
-            "content": mode_instruction(context.mode),
-        }));
+        provider_messages.push(psychevo_ai::Message::system(mode_instruction(context.mode)));
         warnings.push(
             "prompt-scoped system instruction evidence was unavailable; default mode instruction was reconstructed"
                 .to_string(),
@@ -609,18 +646,20 @@ pub(crate) async fn reconstructed_provider_messages(
         .iter()
         .take_while(|record| record.session_seq < prompt_session_seq)
     {
-        provider_messages.push(message_to_value(&record.message)?);
+        provider_messages.push(message_to_ai(&record.message).await);
         push_mailbox_events_delivered_after_message(
             &mut provider_messages,
             &mailbox_events,
             record.session_seq,
-        )?;
+        )
+        .await?;
     }
     push_mailbox_events_delivered_for_prompt(
         &mut provider_messages,
         &mailbox_events,
         prompt_session_seq,
-    )?;
+    )
+    .await?;
 
     if evidence.is_empty() {
         warnings.push(
@@ -629,7 +668,7 @@ pub(crate) async fn reconstructed_provider_messages(
         );
     } else {
         for message in contextual_user_messages_from_evidence(&evidence) {
-            provider_messages.push(message.to_provider_value());
+            provider_messages.push(contextual_user_message_to_ai(&message));
         }
     }
 
@@ -639,51 +678,54 @@ pub(crate) async fn reconstructed_provider_messages(
         .take(assistant_index)
         .filter(|record| record.session_seq >= prompt_session_seq)
     {
-        provider_messages.push(message_to_value(&record.message)?);
+        provider_messages.push(message_to_ai(&record.message).await);
         push_mailbox_events_delivered_after_message(
             &mut provider_messages,
             &mailbox_events,
             record.session_seq,
-        )?;
+        )
+        .await?;
     }
 
     Ok(provider_messages)
 }
 
-pub(crate) fn reconstructed_provider_messages_from_prefix(
+pub(crate) async fn reconstructed_provider_messages_from_prefix(
     evidence: &[ContextEvidenceRecord],
     mailbox_events: &[AgentMailboxEventRecord],
     prefix: &PromptPrefixRecord,
     messages: &[ExportMessageRecord],
     assistant_index: usize,
     prompt_session_seq: i64,
-) -> Result<Vec<Value>> {
+) -> Result<Vec<psychevo_ai::Message>> {
     let mut provider_messages = Vec::new();
-    provider_messages.extend(prefix_prompt_instruction_values(prefix));
+    provider_messages.extend(prefix_prompt_instruction_messages(prefix));
     for message in prefix_contextual_user_messages(prefix) {
-        provider_messages.push(message.to_provider_value());
+        provider_messages.push(contextual_user_message_to_ai(&message));
     }
 
     for record in messages
         .iter()
         .take_while(|record| record.session_seq < prompt_session_seq)
     {
-        provider_messages.push(message_to_value(&record.message)?);
+        provider_messages.push(message_to_ai(&record.message).await);
         push_mailbox_events_delivered_after_message(
             &mut provider_messages,
             mailbox_events,
             record.session_seq,
-        )?;
+        )
+        .await?;
     }
     push_mailbox_events_delivered_for_prompt(
         &mut provider_messages,
         mailbox_events,
         prompt_session_seq,
-    )?;
+    )
+    .await?;
 
-    provider_messages.extend(turn_prompt_instruction_values_from_evidence(evidence));
+    provider_messages.extend(turn_prompt_instruction_messages_from_evidence(evidence));
     for message in turn_contextual_user_messages_from_evidence(evidence) {
-        provider_messages.push(message.to_provider_value());
+        provider_messages.push(contextual_user_message_to_ai(&message));
     }
 
     for record in messages
@@ -691,12 +733,13 @@ pub(crate) fn reconstructed_provider_messages_from_prefix(
         .take(assistant_index)
         .filter(|record| record.session_seq >= prompt_session_seq)
     {
-        provider_messages.push(message_to_value(&record.message)?);
+        provider_messages.push(message_to_ai(&record.message).await);
         push_mailbox_events_delivered_after_message(
             &mut provider_messages,
             mailbox_events,
             record.session_seq,
-        )?;
+        )
+        .await?;
     }
 
     Ok(provider_messages)

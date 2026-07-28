@@ -43,7 +43,7 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
     let (_tx, rx) = watch::channel(false);
     let output = ListAgentsTool::new(test_agent_tool_context(
         &tmp,
-        Arc::new(FakeProvider::new(Vec::new())),
+        fake_language_model(Vec::new()),
         store,
         db_path,
         parent,

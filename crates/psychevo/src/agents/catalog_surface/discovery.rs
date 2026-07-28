@@ -111,7 +111,7 @@ pub(crate) struct RawAgentFrontmatter {
 
 #[derive(Clone)]
 pub(crate) struct AgentToolContext {
-    pub(crate) provider: Arc<dyn GenerationProvider>,
+    pub(crate) provider: Provider,
     pub(crate) model_provider: String,
     pub(crate) model: String,
     pub(crate) provider_label: String,

@@ -9,7 +9,7 @@ use super::{
         AgentRunRecord, AgentRunState, AgentRunStatus, AgentSource, AgentToolContext,
         MAX_AGENT_SPAWN_DEPTH_CAP, SUBAGENT_TASK_LABEL_MAX_CHARS,
     },
-    child_runs::{ChildRun, default_task_name, run_child_agent},
+    child_runs::{ChildRun, bind_child_model, default_task_name, run_child_agent},
     definition_policy::parse_agent_file,
     mailbox_tools::now_ms,
 };
@@ -250,6 +250,8 @@ pub(crate) async fn send_agent_message_with_context(
         .session_summary(&edge.child_session_id)
         .await?
         .map(|summary| summary.model);
+    let (child_model, child_provider) =
+        bind_child_model(&context, &agent, model_override.as_deref())?;
     let spawn_depth_remaining = edge_spawn_depth_remaining(&edge);
     let record = AgentRunRecord {
         id: id.clone(),
@@ -297,7 +299,8 @@ pub(crate) async fn send_agent_message_with_context(
         agent,
         prompt: message.to_string(),
         task_name,
-        model_override,
+        model: child_model,
+        provider: child_provider,
         fork_context: false,
         fork_turns: None,
         max_turns: None,

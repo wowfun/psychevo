@@ -121,6 +121,6 @@ transport = "websocket"
     assert_eq!(realtime.provider, "fake");
     assert_eq!(
         realtime.transport,
-        psychevo_ai::VoiceRealtimeTransport::Websocket
+        crate::config::VoiceRealtimeTransport::Websocket
     );
 }

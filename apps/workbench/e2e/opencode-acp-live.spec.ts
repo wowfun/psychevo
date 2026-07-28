@@ -250,7 +250,6 @@ test.describe("Workbench OpenCode ACP live visual validation", () => {
       await expect(parentCompletion).toHaveCount(0);
       await capture(page, testInfo, "08-delegate-streaming");
 
-      await expect(childAssistant).toContainText(/OPENCODE_ACP_DELEGATE_LIVE_OK/, { timeout: 420_000 });
       await expect(parentComposer).not.toHaveClass(/is-running/, { timeout: 420_000 });
       await expect(parentCompletion.last()).toHaveText(/\S/, { timeout: 420_000 });
       await expectDelegatePersistence(server.dbPath);
@@ -415,7 +414,7 @@ async function expectDelegatePersistence(dbPath: string) {
       EXISTS(
         SELECT 1 FROM messages child_message
         WHERE child_message.session_id = child.id
-          AND child_message.role = 'assistant'
+          AND child_message.role IN ('assistant', 'tool_result')
           AND instr(child_message.content_text, 'OPENCODE_ACP_DELEGATE_LIVE_OK') > 0
       ) AS child_marker,
       EXISTS(

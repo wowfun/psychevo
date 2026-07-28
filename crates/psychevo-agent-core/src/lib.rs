@@ -2,12 +2,11 @@ pub(crate) use std::collections::{BTreeMap, VecDeque};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub(crate) use futures::StreamExt;
 pub(crate) use futures::future::{BoxFuture, join_all};
 pub(crate) use psychevo_ai::{
-    AbortSignal, AssistantSource, GenerationProvider, GenerationRequest, GenerationTool,
-    HostedWebSearchTool, Outcome, StreamEvent, ToolDeclaration, allowlisted_provider_metadata,
-    normalize_usage,
+    AbortSignal, AssistantSource, FinishReasonKind, GenerationEvent, GenerationOutcome,
+    LanguageModel, LanguageRequest, LanguageSettings, LanguageTool, Outcome, ToolDeclaration,
+    WebSearchTool,
 };
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
@@ -37,8 +36,8 @@ pub(crate) mod agent_loop;
 pub use agent_loop::*;
 #[path = "agent/stream.rs"]
 pub(crate) mod agent_stream;
-#[allow(unused_imports)]
-use agent_stream::*;
+pub use agent_stream::{contextual_user_message_to_ai, message_to_ai, prompt_instruction_to_ai};
+pub(crate) use agent_stream::{emit, stream_assistant};
 #[path = "agent/assistant.rs"]
 pub(crate) mod agent_assistant;
 #[allow(unused_imports)]

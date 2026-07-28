@@ -1,12 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use futures::StreamExt;
 use psychevo_agent_core::{
-    AssistantBlock, ControlHandle, Message, ToolCallBlock, UserContentBlock, user_text_message,
+    AssistantBlock, Message, ToolCallBlock, UserContentBlock, user_text_message,
 };
-use psychevo_ai::{GenerationProvider, GenerationRequest, ModelTarget, Outcome, StreamEvent};
+use psychevo_ai::{
+    FinishReason, FinishReasonKind, GenerationEvent, GenerationOutcome, LanguageModel,
+    LanguageRequest,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -198,12 +199,14 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
 
     let compression = resolve_compression_config(&run_options, &loaded, &current)?;
 
-    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
+    let provider = crate::run::generation_provider(
         compression.provider.base_url.clone(),
         compression.provider.api_key.clone(),
         compression.provider.provider.clone(),
         compression.provider.inference_idle_timeout_secs,
-    );
+    )?
+    .language_model(compression.provider.model.clone())
+    .map_err(|error| Error::Config(error.to_string()))?;
     let summary_text = generate_summary(
         provider,
         &compression.provider,
@@ -485,7 +488,7 @@ pub(crate) fn assistant_tool_call_ids(message: &Message) -> Vec<String> {
 }
 
 pub(crate) async fn generate_summary(
-    provider: Arc<dyn GenerationProvider>,
+    provider: LanguageModel,
     resolved: &crate::config::ResolvedRunProvider,
     previous: Option<&SessionCompactionRecord>,
     messages: &[SessionMessageRecord],
@@ -502,42 +505,33 @@ pub(crate) async fn generate_summary(
             Value::String(effort.clone()),
         );
     }
-    let request = GenerationRequest {
-        model: ModelTarget {
-            provider: resolved.provider.clone(),
-            model: resolved.model.clone(),
-        },
+    let request = LanguageRequest {
         messages: vec![
-            json!({
-                "role": "system",
-                "content": summary_system_prompt(),
-            }),
-            json!({
-                "role": "user",
-                "content": summary_user_prompt(previous, messages, instructions),
-            }),
+            psychevo_ai::Message::system(summary_system_prompt()),
+            psychevo_ai::Message::user(summary_user_prompt(
+                previous,
+                messages,
+                instructions,
+            )),
         ],
         tools: Vec::new(),
-        metadata,
+        extensions: BTreeMap::from([("psychevo".to_string(), metadata)]),
+        ..LanguageRequest::default()
     };
-    let (_handle, receivers) = ControlHandle::new();
-    let mut stream = provider
-        .stream(request, receivers.abort_signal())
-        .await
-        .map_err(|err| Error::Message(format!("summary provider failed: {err}")))?;
+    let mut stream = provider.stream(request);
     let mut text = String::new();
-    while let Some(event) = stream.next().await {
-        match event.map_err(|err| Error::Message(format!("summary provider failed: {err}")))? {
-            StreamEvent::TextDelta { text: delta } => text.push_str(&delta),
-            StreamEvent::Done { outcome, .. } if outcome != Outcome::Normal => {
-                return Err(Error::Message(format!(
-                    "summary provider ended with {}",
-                    outcome.as_str()
-                )));
-            }
-            _ => {}
+    while let Some(event) = stream.next_event().await {
+        if let GenerationEvent::TextDelta { delta, .. } =
+            event.map_err(|err| Error::Message(format!("summary provider failed: {err}")))?
+        {
+            text.push_str(&delta);
         }
     }
+    let output = stream
+        .finish()
+        .await
+        .map_err(|err| Error::Message(format!("summary provider failed: {err}")))?;
+    validate_summary_completion(output.outcome, output.finish_reason.as_ref())?;
     let text = text.trim();
     if text.is_empty() {
         return Err(Error::Message(
@@ -545,6 +539,21 @@ pub(crate) async fn generate_summary(
         ));
     }
     Ok(text.to_string())
+}
+
+fn validate_summary_completion(
+    outcome: GenerationOutcome,
+    finish_reason: Option<&FinishReason>,
+) -> Result<()> {
+    if outcome == GenerationOutcome::Completed
+        && finish_reason.is_some_and(|reason| reason.kind == FinishReasonKind::Stop)
+    {
+        return Ok(());
+    }
+    Err(Error::Message(format!(
+        "summary provider did not complete normally: outcome={outcome:?}, finish_reason={:?}",
+        finish_reason.map(|reason| reason.kind)
+    )))
 }
 
 pub(crate) fn summary_system_prompt() -> &'static str {

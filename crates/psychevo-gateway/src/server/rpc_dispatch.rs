@@ -249,19 +249,19 @@ where
             let params = request.required_params::<wire::ThreadRealtimeAppendAudioParams>()?;
             Ok(serde_json::to_value(voice::append_realtime_audio(
                 &state, params,
-            )?)?)
+            ).await?)?)
         }
         "thread/realtime/appendText" => {
             let params = request.required_params::<wire::ThreadRealtimeAppendTextParams>()?;
             Ok(serde_json::to_value(voice::append_realtime_text(
                 &state, params,
-            )?)?)
+            ).await?)?)
         }
         "thread/realtime/appendSpeech" => {
             let params = request.required_params::<wire::ThreadRealtimeAppendSpeechParams>()?;
             Ok(serde_json::to_value(voice::append_realtime_speech(
                 &state, params,
-            )?)?)
+            ).await?)?)
         }
         "thread/realtime/stop" => {
             let params = request.required_params::<wire::ThreadRealtimeSessionParams>()?;

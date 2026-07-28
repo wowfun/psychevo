@@ -3,13 +3,19 @@ pub(crate) use super::*;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("provider failed: {0}")]
-    Provider(#[from] psychevo_ai::Error),
+    Provider(#[from] Box<psychevo_ai::GenerationError>),
     #[error("event sink failed: {0}")]
     EventSink(String),
     #[error("agent failed: {0}")]
     Agent(String),
     #[error(transparent)]
     ToolRouter(#[from] ToolRouterError),
+}
+
+impl From<psychevo_ai::GenerationError> for Error {
+    fn from(error: psychevo_ai::GenerationError) -> Self {
+        Self::Provider(Box::new(error))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -237,7 +243,7 @@ pub struct ToolCallBlock {
     pub name: String,
     pub arguments: Value,
     pub arguments_json: String,
-    pub arguments_error: Option<String>,
+    pub arguments_error: Option<psychevo_ai::ToolArgumentError>,
     pub content_index: usize,
     pub call_index: usize,
 }

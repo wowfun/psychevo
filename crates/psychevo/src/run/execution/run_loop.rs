@@ -10,7 +10,7 @@ pub(crate) async fn run_live_internal(
     stream_events: Option<RunStreamSink>,
     control: Option<RunControl>,
     overflow_retry_attempted: bool,
-    provider_override: Option<Arc<dyn GenerationProvider>>,
+    provider_override: Option<Provider>,
 ) -> Result<RunResult> {
     let cwd = canonical_cwd(&options.cwd)?;
     if options.prompt.trim().is_empty() && options.image_inputs.is_empty() {
@@ -124,6 +124,17 @@ pub(crate) async fn run_live_internal(
             .ok();
     let image_input_enabled =
         !crate::prompt_image::model_metadata_explicitly_disallows_image_input(&resolved.metadata);
+    let language_protocol = provider_override
+        .as_ref()
+        .map(|provider| {
+            provider
+                .deployment_config()
+                .default_language_protocol
+                .clone()
+        })
+        .unwrap_or_else(|| {
+            crate::run::language_protocol_for_provider(&resolved.provider).to_string()
+        });
     let managed_tools = ensure_rg(&loaded.env).await?;
     let skills_home = resolve_skills_home(&loaded.env, &cwd)?;
     let mut explicit_skill_inputs = options.skill_inputs.clone();
@@ -171,6 +182,7 @@ pub(crate) async fn run_live_internal(
         let mut metadata = json!({
             "provider_label": resolved.display_label.clone(),
             "base_url": resolved.base_url.clone(),
+            "language_protocol": language_protocol.clone(),
             "api_key_env": resolved.api_key_env.clone(),
             "reasoning_effort": resolved.reasoning_effort.clone(),
             "context_limit": resolved.context_limit,
@@ -377,36 +389,57 @@ pub(crate) async fn run_live_internal(
         .filter(|record| record.delivered_at_ms.is_some())
         .map(|record| agent_mailbox_event_message(&record))
         .collect::<Vec<_>>();
-    let provider: Arc<dyn GenerationProvider> =
-        provider_override.clone().unwrap_or_else(|| {
+    let provider =
+        if let Some(provider) = provider_override.clone() {
+            provider
+        } else {
             crate::run::generation_provider(
                 resolved.base_url.clone(),
                 resolved.api_key.clone(),
                 resolved.provider.clone(),
                 resolved.inference_idle_timeout_secs,
-            )
-        });
+            )?
+        };
     let title_resolved = resolve_title_generation_provider(&resolved_options, &loaded, &resolved)?;
-    let provider_for_title: Arc<dyn GenerationProvider> =
-        provider_override.clone().unwrap_or_else(|| {
+    let provider_for_title =
+        if let Some(provider) = provider_override.clone() {
+            provider
+        } else {
             crate::run::generation_provider(
                 title_resolved.base_url.clone(),
                 title_resolved.api_key.clone(),
                 title_resolved.provider.clone(),
                 title_resolved.inference_idle_timeout_secs,
-            )
-        });
+            )?
+        }
+        .language_model(title_resolved.model.clone())
+        .map_err(|error| Error::Config(error.to_string()))?;
     let context_recorder = ContextRecorder::default();
-    let provider: Arc<dyn GenerationProvider> = Arc::new(ContextRecordingProvider::new(
-        Arc::clone(&provider),
-        context_recorder.clone(),
-        LiveContextProfile {
-            session_id: session_id.clone(),
-            base_url: resolved.base_url.clone(),
-            context_limit: resolved.context_limit,
-            mode: options.mode,
-        },
-    ));
+    let reviewer_model = smart_reviewer_model(
+        provider_override.as_ref(),
+        &provider,
+        &resolved_options,
+        &loaded,
+        &resolved,
+        &loaded.config.permissions,
+    );
+    let context_profile = LiveContextProfile {
+        session_id: session_id.clone(),
+        context_limit: resolved.context_limit,
+        mode: options.mode,
+    };
+    let provider = provider
+        .map_language_adapter(|adapter| {
+            Arc::new(ContextRecordingAdapter::new(
+                adapter,
+                context_recorder.clone(),
+                context_profile,
+            ))
+        })
+        .map_err(|error| Error::Config(error.to_string()))?;
+    let language_model = provider
+        .language_model(resolved.model.clone())
+        .map_err(|error| Error::Config(error.to_string()))?;
     let stream_events_after = stream_events.clone();
     let controlled_run = control.is_some();
     let (control_handle, control_receivers, clarify_control) = match control {
@@ -451,7 +484,7 @@ pub(crate) async fn run_live_internal(
         .turn_filesystem_grant_guard(session_id.clone());
     let agent_tools = if !options.no_agents {
         Some(AgentToolContext {
-            provider: Arc::clone(&provider),
+            provider: provider.clone(),
             model_provider: resolved.provider.clone(),
             model: resolved.model.clone(),
             provider_label: resolved.display_label.clone(),
@@ -517,8 +550,7 @@ pub(crate) async fn run_live_internal(
         approval_mode,
         options.approval_handler.clone(),
         smart_approval_handler(
-            Arc::clone(&provider),
-            &resolved,
+            reviewer_model,
             &loaded.config.permissions,
             generation_metadata.clone(),
         ),
@@ -858,7 +890,7 @@ pub(crate) async fn run_live_internal(
         tool_search: tool_search_options,
         max_turns: DEFAULT_AGENT_MAX_TURNS,
     };
-    let completion = match run_agent_loop(Arc::clone(&provider), request, sink, control_receivers)
+    let completion = match run_agent_loop(language_model, request, sink, control_receivers)
         .await
     {
         Ok(completion) => completion,

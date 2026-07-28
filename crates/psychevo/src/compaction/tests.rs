@@ -3,6 +3,12 @@ pub(crate) mod tests {
     pub(crate) use super::*;
     use crate::context_usage::{ContextScope, ContextTokenizer, ContextTotal};
     use psychevo_agent_core::{AssistantBlock, ToolCallBlock, now_ms};
+    use futures::stream;
+    use psychevo_ai::{
+        AdapterCall, AdapterFuture, AdapterStream, DeploymentConfig, FinishReason,
+        FinishReasonKind, GenerationOutcome, LanguageAdapter, LanguageAdapterEvent,
+        LanguageRequest, Outcome, Provider,
+    };
     use std::fs;
     use std::path::PathBuf;
 
@@ -58,6 +64,93 @@ pub(crate) mod tests {
             categories: BTreeMap::new(),
             advice: Vec::new(),
         }
+    }
+
+    #[derive(Debug, Clone)]
+    struct SummaryAdapter {
+        finish_reason: FinishReason,
+    }
+
+    impl LanguageAdapter for SummaryAdapter {
+        fn stream(
+            &self,
+            _call: AdapterCall<LanguageRequest>,
+        ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+            let finish_reason = self.finish_reason.clone();
+            Box::pin(async move {
+                Ok(Box::pin(stream::iter([
+                    Ok(LanguageAdapterEvent::TextStart { content_index: 0 }),
+                    Ok(LanguageAdapterEvent::TextDelta {
+                        content_index: 0,
+                        delta: "partial summary".to_string(),
+                    }),
+                    Ok(LanguageAdapterEvent::TextEnd { content_index: 0 }),
+                    Ok(LanguageAdapterEvent::Finish {
+                        finish_reason: Some(finish_reason),
+                    }),
+                ])) as AdapterStream<_>)
+            })
+        }
+    }
+
+    fn summary_model(kind: FinishReasonKind) -> psychevo_ai::LanguageModel {
+        Provider::builder(
+            DeploymentConfig::new("summary", "test", "test://summary")
+                .with_default_language_protocol("test"),
+        )
+        .language_adapter(SummaryAdapter {
+            finish_reason: FinishReason {
+                kind,
+                raw: Some("test_terminal".to_string()),
+            },
+        })
+        .build()
+        .expect("summary provider")
+        .language_model("summary-model")
+        .expect("summary model")
+    }
+
+    fn resolved_summary_provider() -> crate::config::ResolvedRunProvider {
+        crate::config::ResolvedRunProvider {
+            provider: "summary".to_string(),
+            display_label: "Summary".to_string(),
+            model: "summary-model".to_string(),
+            base_url: "test://summary".to_string(),
+            api_key_env: None,
+            api_key: String::new(),
+            inference_idle_timeout_secs: 0,
+            reasoning_effort: None,
+            context_limit: None,
+            metadata: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn summary_generation_rejects_non_stop_terminal_text() {
+        let resolved = resolved_summary_provider();
+        let summary = generate_summary(
+            summary_model(FinishReasonKind::Stop),
+            &resolved,
+            None,
+            &[],
+            None,
+        )
+        .await
+        .expect("stop summary");
+        assert_eq!(summary, "partial summary");
+        for kind in [FinishReasonKind::Length, FinishReasonKind::ContentFilter] {
+            let error = generate_summary(summary_model(kind), &resolved, None, &[], None)
+                .await
+                .expect_err("non-stop summary must fail");
+            assert!(
+                error.to_string().contains("did not complete normally"),
+                "{error}"
+            );
+        }
+        assert!(
+            validate_summary_completion(GenerationOutcome::Aborted, None).is_err(),
+            "aborted summary must fail"
+        );
     }
 
     async fn auto_check_options(

@@ -1,6 +1,6 @@
 use super::{
     AbortSignal, AgentEdgeStatus, AgentLoopRequest, BTreeMap, ClarifyToolSurface,
-    CompactSessionOptions, CompactionReason, ContextRecorder, ControlHandle, Error,
+    CompactSessionOptions, CompactionReason, ContextRecorder, ControlHandle, Error, LanguageModel,
     ExternalAgentDelegateRequest, Instant, Message, Mutex, PersistenceSink,
     PromptPrefixRecordInput, Result, RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool,
     SelectedAgent, SmokeControl, ToolOutput, ToolSurfaceAssembly, Uuid, Value, compact_session,

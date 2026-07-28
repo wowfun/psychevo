@@ -54,6 +54,34 @@ pub(crate) async fn aliases_and_auto_resolution_use_local_env_map() {
 }
 
 #[tokio::test]
+pub(crate) async fn anthropic_is_a_built_in_and_auto_selectable_provider() {
+    let temp = tempdir().expect("temp");
+    let mut options = base_options(&temp).await;
+    options.model = Some("anthropic/claude-sonnet-4-5".to_string());
+    let config_dir = home_dir(&temp);
+    fs::create_dir_all(&config_dir).expect("config dir");
+    write_config(config_dir.join("config.toml"), "").expect("config");
+    fs::write(config_dir.join(".env"), "ANTHROPIC_API_KEY=anthropic-key\n").expect("env");
+
+    let cwd = canonical_cwd(&options.cwd).expect("cwd");
+    let loaded = load_run_config(&options, &cwd).expect("config");
+    let explicit = resolve_run_provider(&options, &loaded).expect("explicit Anthropic");
+    assert_eq!(explicit.provider, "anthropic");
+    assert_eq!(explicit.base_url, "https://api.anthropic.com");
+    assert_eq!(explicit.api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
+
+    options.model = None;
+    write_config(
+        config_dir.join("config.toml"),
+        r#"model = "claude-sonnet-4-5""#,
+    )
+    .expect("config");
+    let loaded = load_run_config(&options, &cwd).expect("config");
+    let automatic = resolve_run_provider(&options, &loaded).expect("automatic Anthropic");
+    assert_eq!(automatic.provider, "anthropic");
+}
+
+#[tokio::test]
 pub(crate) async fn explicit_config_replaces_home_and_project_config_but_loads_project_env() {
     let temp = tempdir().expect("temp");
     let mut options = base_options(&temp).await;

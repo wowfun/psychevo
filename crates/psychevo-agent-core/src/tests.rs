@@ -1,11 +1,113 @@
 pub(crate) use super::*;
 use futures::stream;
-use psychevo_ai::{FakeProvider, RawStreamEvent};
+use psychevo_ai::{
+    AdapterCall, AdapterFuture, AdapterStream, DeploymentConfig, FakeLanguageAdapter, FinishReason,
+    FinishReasonKind, LanguageAdapter, LanguageAdapterEvent, LanguageModel, LanguageRequest,
+    Provider, Usage,
+};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum RawStreamEvent {
+    Text(String),
+    Reasoning(String),
+    ToolStart {
+        content_index: usize,
+        call_index: usize,
+        id: String,
+        name: String,
+    },
+    ToolArgs {
+        content_index: usize,
+        call_index: usize,
+        delta: String,
+    },
+    ToolEnd {
+        content_index: usize,
+        call_index: usize,
+    },
+    Done(Outcome),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum StreamEvent {
+    TextDelta {
+        text: String,
+    },
+    ReasoningDelta {
+        text: String,
+        reasoning_content: Option<String>,
+    },
+    ReasoningDetails {
+        details: Value,
+    },
+    ToolCallStart {
+        content_index: usize,
+        call_index: usize,
+        id: String,
+        name: String,
+    },
+    ToolCallDelta {
+        content_index: usize,
+        call_index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_delta: String,
+    },
+    ToolCallEnd {
+        content_index: usize,
+        call_index: usize,
+    },
+    ProviderToolStart {
+        id: String,
+        name: String,
+        action: Option<Value>,
+    },
+    ProviderToolEnd {
+        id: String,
+        name: String,
+        action: Option<Value>,
+        status: String,
+    },
+    Source {
+        source: AssistantSource,
+    },
+    Usage {
+        usage: Value,
+    },
+    Metadata {
+        metadata: Value,
+    },
+    Done {
+        outcome: Outcome,
+        finish_reason: Option<String>,
+    },
+}
 
 #[derive(Default)]
 pub(crate) struct CaptureSink {
     pub(crate) events: Mutex<Vec<AgentEvent>>,
+}
+
+pub(crate) struct AbortOnFirstDeltaSink {
+    pub(crate) control: ControlHandle,
+    pub(crate) events: Mutex<Vec<AgentEvent>>,
+    pub(crate) deltas: AtomicUsize,
+}
+
+impl EventSink for AbortOnFirstDeltaSink {
+    fn emit(&self, event: AgentEvent) -> BoxFuture<'static, Result<()>> {
+        if matches!(event, AgentEvent::AssistantTextDelta { .. })
+            && self.deltas.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            self.control.abort();
+        }
+        self.events.lock().expect("events").push(event);
+        Box::pin(async { Ok(()) })
+    }
 }
 
 impl EventSink for CaptureSink {
@@ -20,40 +122,366 @@ pub(crate) struct StaticProvider {
     pub(crate) events: Vec<StreamEvent>,
 }
 
-impl GenerationProvider for StaticProvider {
+impl LanguageAdapter for StaticProvider {
     fn stream(
         &self,
-        _request: GenerationRequest,
-        _abort: AbortSignal,
-    ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
-        let events = self.events.clone().into_iter().map(Ok);
-        Box::pin(async move {
-            let output: psychevo_ai::GenerationStream = Box::pin(stream::iter(events));
-            Ok(output)
-        })
+        _call: AdapterCall<LanguageRequest>,
+    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+        let events = normalize_test_events(self.events.clone())
+            .into_iter()
+            .map(Ok);
+        Box::pin(async move { Ok(Box::pin(stream::iter(events)) as AdapterStream<_>) })
     }
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct RequestCaptureProvider {
-    pub(crate) requests: Arc<Mutex<Vec<GenerationRequest>>>,
+    pub(crate) requests: Arc<Mutex<Vec<LanguageRequest>>>,
 }
 
-impl GenerationProvider for RequestCaptureProvider {
+impl LanguageAdapter for RequestCaptureProvider {
     fn stream(
         &self,
-        request: GenerationRequest,
-        _abort: AbortSignal,
-    ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
-        self.requests.lock().expect("requests").push(request);
+        call: AdapterCall<LanguageRequest>,
+    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+        self.requests.lock().expect("requests").push(call.request);
         Box::pin(async {
-            let output: psychevo_ai::GenerationStream =
-                Box::pin(stream::iter([Ok(StreamEvent::Done {
-                    outcome: Outcome::Normal,
-                    finish_reason: Some("stop".to_string()),
-                })]));
-            Ok(output)
+            Ok(Box::pin(stream::iter([Ok(LanguageAdapterEvent::Finish {
+                finish_reason: Some(finish_reason("stop")),
+            })])) as AdapterStream<_>)
         })
+    }
+}
+
+pub(crate) fn test_model(adapter: impl LanguageAdapter) -> LanguageModel {
+    Provider::builder(
+        DeploymentConfig::new("fake", "fake", "fake://local")
+            .with_default_language_protocol("fake"),
+    )
+    .language_adapter(adapter)
+    .build()
+    .expect("fake provider")
+    .language_model("model")
+    .expect("fake language model")
+}
+
+fn raw_test_model(scripts: Vec<Vec<RawStreamEvent>>) -> LanguageModel {
+    #[derive(Clone)]
+    struct RawAdapter {
+        scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
+    }
+
+    impl LanguageAdapter for RawAdapter {
+        fn stream(
+            &self,
+            _call: AdapterCall<LanguageRequest>,
+        ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+            let script = self
+                .scripts
+                .lock()
+                .expect("raw scripts")
+                .pop_front()
+                .expect("raw adapter script");
+            let events = script.into_iter().map(raw_stream_event).collect::<Vec<_>>();
+            Box::pin(async move {
+                Ok(Box::pin(stream::iter(
+                    normalize_test_events(events).into_iter().map(Ok),
+                )) as AdapterStream<_>)
+            })
+        }
+    }
+
+    test_model(RawAdapter {
+        scripts: Arc::new(Mutex::new(scripts.into())),
+    })
+}
+
+fn raw_stream_event(event: RawStreamEvent) -> StreamEvent {
+    match event {
+        RawStreamEvent::Text(text) => StreamEvent::TextDelta { text },
+        RawStreamEvent::Reasoning(text) => StreamEvent::ReasoningDelta {
+            text,
+            reasoning_content: None,
+        },
+        RawStreamEvent::ToolStart {
+            content_index,
+            call_index,
+            id,
+            name,
+        } => StreamEvent::ToolCallStart {
+            content_index,
+            call_index,
+            id,
+            name,
+        },
+        RawStreamEvent::ToolArgs {
+            content_index,
+            call_index,
+            delta,
+        } => StreamEvent::ToolCallDelta {
+            content_index,
+            call_index,
+            id: None,
+            name: None,
+            arguments_delta: delta,
+        },
+        RawStreamEvent::ToolEnd {
+            content_index,
+            call_index,
+        } => StreamEvent::ToolCallEnd {
+            content_index,
+            call_index,
+        },
+        RawStreamEvent::Done(outcome) => StreamEvent::Done {
+            outcome,
+            finish_reason: None,
+        },
+    }
+}
+
+fn normalize_test_events(events: Vec<StreamEvent>) -> Vec<LanguageAdapterEvent> {
+    let mut normalized = Vec::new();
+    let mut next_content_index = 0;
+    let mut text_index = None;
+    let mut reasoning_index = None;
+    let mut tool_arguments = BTreeMap::<(usize, usize), (usize, String)>::new();
+
+    let close_text = |normalized: &mut Vec<_>, text_index: &mut Option<usize>| {
+        if let Some(content_index) = text_index.take() {
+            normalized.push(LanguageAdapterEvent::TextEnd { content_index });
+        }
+    };
+    let close_reasoning = |normalized: &mut Vec<_>, reasoning_index: &mut Option<usize>| {
+        if let Some(content_index) = reasoning_index.take() {
+            normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
+        }
+    };
+
+    for event in events {
+        match event {
+            StreamEvent::TextDelta { text } => {
+                close_reasoning(&mut normalized, &mut reasoning_index);
+                let content_index = *text_index.get_or_insert_with(|| {
+                    let content_index = next_content_index;
+                    next_content_index += 1;
+                    normalized.push(LanguageAdapterEvent::TextStart { content_index });
+                    content_index
+                });
+                normalized.push(LanguageAdapterEvent::TextDelta {
+                    content_index,
+                    delta: text,
+                });
+            }
+            StreamEvent::ReasoningDelta { text, .. } => {
+                close_text(&mut normalized, &mut text_index);
+                let content_index = *reasoning_index.get_or_insert_with(|| {
+                    let content_index = next_content_index;
+                    next_content_index += 1;
+                    normalized.push(LanguageAdapterEvent::ReasoningStart { content_index });
+                    content_index
+                });
+                normalized.push(LanguageAdapterEvent::ReasoningDelta {
+                    content_index,
+                    delta: text,
+                    provider_evidence: None,
+                });
+            }
+            StreamEvent::ReasoningDetails { details } => {
+                close_text(&mut normalized, &mut text_index);
+                let content_index = *reasoning_index.get_or_insert_with(|| {
+                    let content_index = next_content_index;
+                    next_content_index += 1;
+                    normalized.push(LanguageAdapterEvent::ReasoningStart { content_index });
+                    content_index
+                });
+                normalized.push(LanguageAdapterEvent::ReasoningDelta {
+                    content_index,
+                    delta: String::new(),
+                    provider_evidence: Some(json!({
+                        "reasoning_details": details,
+                    })),
+                });
+            }
+            StreamEvent::ToolCallStart {
+                content_index,
+                call_index,
+                id,
+                name,
+            } => {
+                close_text(&mut normalized, &mut text_index);
+                close_reasoning(&mut normalized, &mut reasoning_index);
+                let sdk_index = next_content_index;
+                next_content_index += 1;
+                tool_arguments.insert((content_index, call_index), (sdk_index, String::new()));
+                normalized.push(LanguageAdapterEvent::ToolCallStart {
+                    content_index: sdk_index,
+                    id,
+                    name,
+                });
+            }
+            StreamEvent::ToolCallDelta {
+                content_index,
+                call_index,
+                arguments_delta,
+                ..
+            } => {
+                let (sdk_index, arguments) = tool_arguments
+                    .get_mut(&(content_index, call_index))
+                    .expect("tool-call delta after start");
+                arguments.push_str(&arguments_delta);
+                normalized.push(LanguageAdapterEvent::ToolCallArgumentsDelta {
+                    content_index: *sdk_index,
+                    delta: arguments_delta,
+                });
+            }
+            StreamEvent::ToolCallEnd {
+                content_index,
+                call_index,
+            } => {
+                let (sdk_index, arguments_raw) = tool_arguments
+                    .remove(&(content_index, call_index))
+                    .expect("tool-call end after start");
+                normalized.push(LanguageAdapterEvent::ToolCallEnd {
+                    content_index: sdk_index,
+                    arguments_raw,
+                });
+            }
+            StreamEvent::ProviderToolStart { id, name, action } => {
+                close_text(&mut normalized, &mut text_index);
+                close_reasoning(&mut normalized, &mut reasoning_index);
+                let content_index = next_content_index;
+                next_content_index += 1;
+                normalized.push(LanguageAdapterEvent::ProviderToolStart {
+                    content_index,
+                    id,
+                    name,
+                    action,
+                });
+            }
+            StreamEvent::ProviderToolEnd {
+                id,
+                name,
+                action,
+                status,
+            } => {
+                let content_index = next_content_index.saturating_sub(1);
+                normalized.push(LanguageAdapterEvent::ProviderToolEnd {
+                    content_index,
+                    id,
+                    name,
+                    action,
+                    status,
+                });
+            }
+            StreamEvent::Source { source } => {
+                close_text(&mut normalized, &mut text_index);
+                close_reasoning(&mut normalized, &mut reasoning_index);
+                let content_index = next_content_index;
+                next_content_index += 1;
+                normalized.push(LanguageAdapterEvent::Source {
+                    content_index,
+                    source,
+                });
+            }
+            StreamEvent::Usage { usage } => {
+                normalized.push(LanguageAdapterEvent::Usage {
+                    usage: typed_test_usage(&usage),
+                });
+            }
+            StreamEvent::Metadata { metadata } => {
+                normalized.push(LanguageAdapterEvent::Metadata {
+                    metadata: allowlisted_test_metadata(&metadata),
+                });
+            }
+            StreamEvent::Done {
+                outcome: _,
+                finish_reason: reason,
+            } => {
+                close_text(&mut normalized, &mut text_index);
+                close_reasoning(&mut normalized, &mut reasoning_index);
+                for (_, (content_index, arguments_raw)) in std::mem::take(&mut tool_arguments) {
+                    normalized.push(LanguageAdapterEvent::ToolCallEnd {
+                        content_index,
+                        arguments_raw,
+                    });
+                }
+                normalized.push(LanguageAdapterEvent::Finish {
+                    finish_reason: reason.as_deref().map(finish_reason),
+                });
+            }
+        }
+    }
+    normalized
+}
+
+fn typed_test_usage(value: &Value) -> Usage {
+    Usage {
+        input_tokens: value
+            .get("input_tokens")
+            .or_else(|| value.get("prompt_tokens"))
+            .and_then(Value::as_u64),
+        output_tokens: value
+            .get("output_tokens")
+            .or_else(|| value.get("completion_tokens"))
+            .and_then(Value::as_u64),
+        total_tokens: value.get("total_tokens").and_then(Value::as_u64),
+        ..Usage::default()
+    }
+}
+
+fn allowlisted_test_metadata(value: &Value) -> BTreeMap<String, Value> {
+    let Some(object) = value.as_object() else {
+        return BTreeMap::new();
+    };
+    [
+        "provider_response_id",
+        "response_id",
+        "model",
+        "system_fingerprint",
+        "service_tier",
+        "created",
+        "finish_reason",
+        "request_id",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        object
+            .get(key)
+            .filter(|value| {
+                matches!(
+                    value,
+                    Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null
+                )
+            })
+            .cloned()
+            .map(|value| (key.to_string(), value))
+    })
+    .chain(
+        (!object.contains_key("provider_response_id"))
+            .then(|| object.get("id"))
+            .flatten()
+            .filter(|value| {
+                matches!(
+                    value,
+                    Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null
+                )
+            })
+            .cloned()
+            .map(|value| ("provider_response_id".to_string(), value)),
+    )
+    .collect()
+}
+
+fn finish_reason(raw: &str) -> FinishReason {
+    FinishReason {
+        kind: match raw {
+            "stop" => FinishReasonKind::Stop,
+            "length" => FinishReasonKind::Length,
+            "tool_calls" => FinishReasonKind::ToolCalls,
+            "content_filter" => FinishReasonKind::ContentFilter,
+            _ => FinishReasonKind::Other,
+        },
+        raw: Some(raw.to_string()),
     }
 }
 
@@ -266,7 +694,7 @@ pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
     request.tools = vec![Arc::new(DisplayOnlyTool)];
 
     run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         request,
         Arc::new(NoopEventSink),
         control,
@@ -276,7 +704,7 @@ pub(crate) async fn tool_display_spec_is_not_model_visible_declaration() {
 
     let requests = requests.lock().expect("requests");
     let tool = requests[0].tools.first().expect("tool declaration");
-    let psychevo_ai::GenerationTool::Function { declaration } = tool else {
+    let psychevo_ai::LanguageTool::Function { declaration } = tool else {
         panic!("expected function declaration");
     };
     let value = serde_json::to_value(declaration).expect("tool declaration json");
@@ -471,7 +899,7 @@ pub(crate) async fn prefix_contextual_user_messages_are_inserted_before_history(
     let requests = Arc::clone(&provider.requests);
     let (_, control) = ControlHandle::new();
     let completion = run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         AgentLoopRequest {
             model_provider: "fake".to_string(),
             model: "model".to_string(),
@@ -516,14 +944,16 @@ pub(crate) async fn prefix_contextual_user_messages_are_inserted_before_history(
     assert_eq!(content, &[UserContentBlock::text("accepted prompt")]);
 
     let requests = requests.lock().expect("requests");
-    let messages = &requests[0].messages;
+    let messages =
+        serde_json::to_value(&requests[0].messages).expect("typed language request messages");
+    let messages = messages.as_array().expect("message array");
     assert_eq!(messages.len(), 3);
     assert_eq!(
-        messages[0]["metadata"]["provider_group"],
+        messages[0]["extensions"]["psychevo"]["provider_group"],
         "project_instructions"
     );
     assert_eq!(
-        messages[0]["metadata"]["context_category"],
+        messages[0]["extensions"]["psychevo"]["context_category"],
         "project_context"
     );
     assert_eq!(messages[0]["content"].as_array().expect("blocks").len(), 2);
@@ -535,11 +965,11 @@ pub(crate) async fn prefix_contextual_user_messages_are_inserted_before_history(
 
 #[tokio::test]
 pub(crate) async fn reasoning_only_progress_has_no_visible_message_update() {
-    let provider = Arc::new(FakeProvider::new(vec![vec![
+    let provider = raw_test_model(vec![vec![
         RawStreamEvent::Reasoning("private".to_string()),
         RawStreamEvent::Text("visible".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    ]]);
     let sink = Arc::new(CaptureSink::default());
     let (_, control) = ControlHandle::new();
     let completion = run_agent_loop(provider, request(), sink.clone(), control)
@@ -599,7 +1029,7 @@ pub(crate) fn user_message_deserializes_text_blocks_and_serializes_local_images(
 
 #[tokio::test]
 pub(crate) async fn usage_and_metadata_do_not_emit_empty_message_updates() {
-    let provider = Arc::new(StaticProvider {
+    let provider = test_model(StaticProvider {
         events: vec![
             StreamEvent::Metadata {
                 metadata: json!({"id":"resp"}),
@@ -649,7 +1079,7 @@ pub(crate) async fn text_stream_emits_linear_deltas_without_full_message_per_tok
         outcome: Outcome::Normal,
         finish_reason: Some("stop".to_string()),
     });
-    let provider = Arc::new(StaticProvider {
+    let provider = test_model(StaticProvider {
         events: provider_events,
     });
     let sink = Arc::new(CaptureSink::default());
@@ -706,7 +1136,7 @@ pub(crate) fn inline_think_parser_handles_split_tags_without_rescanning_history(
 
 #[tokio::test]
 pub(crate) async fn tool_call_pending_is_emitted_before_message_end() {
-    let provider = Arc::new(StaticProvider {
+    let provider = test_model(StaticProvider {
         events: vec![
             StreamEvent::ToolCallStart {
                 content_index: 0,
@@ -780,29 +1210,99 @@ pub(crate) async fn tool_call_pending_is_emitted_before_message_end() {
 }
 
 #[tokio::test]
+pub(crate) async fn abort_does_not_drain_buffered_generation_deltas() {
+    let mut events = (0..2_048)
+        .map(|_| StreamEvent::TextDelta {
+            text: "x".to_string(),
+        })
+        .collect::<Vec<_>>();
+    events.push(StreamEvent::Done {
+        outcome: Outcome::Normal,
+        finish_reason: Some("stop".to_string()),
+    });
+    let provider = test_model(StaticProvider { events });
+    let (control, receivers) = ControlHandle::new();
+    let sink = Arc::new(AbortOnFirstDeltaSink {
+        control,
+        events: Mutex::new(Vec::new()),
+        deltas: AtomicUsize::new(0),
+    });
+
+    let completion = run_agent_loop(provider, request(), sink.clone(), receivers)
+        .await
+        .expect("aborted loop");
+
+    assert_eq!(completion.outcome, Outcome::Aborted);
+    assert_eq!(
+        sink.deltas.load(Ordering::SeqCst),
+        1,
+        "buffered deltas after cancellation must be discarded"
+    );
+    assert!(
+        sink.events
+            .lock()
+            .expect("events")
+            .iter()
+            .any(|event| matches!(
+                event,
+                AgentEvent::AgentEnd {
+                    outcome: Outcome::Aborted,
+                    ..
+                }
+            ))
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn content_filter_completion_is_stopped() {
+    let provider = test_model(StaticProvider {
+        events: vec![
+            StreamEvent::TextDelta {
+                text: "filtered partial".to_string(),
+            },
+            StreamEvent::Done {
+                outcome: Outcome::Normal,
+                finish_reason: Some("content_filter".to_string()),
+            },
+        ],
+    });
+    let (_, receivers) = ControlHandle::new();
+
+    let completion = run_agent_loop(
+        provider,
+        request(),
+        Arc::new(CaptureSink::default()),
+        receivers,
+    )
+    .await
+    .expect("filtered completion");
+
+    assert_eq!(completion.outcome, Outcome::Stopped);
+    assert!(matches!(
+        completion.messages.last(),
+        Some(Message::Assistant {
+            outcome: Outcome::Stopped,
+            finish_reason: Some(reason),
+            ..
+        }) if reason == "content_filter"
+    ));
+}
+
+#[tokio::test]
 pub(crate) async fn tool_output_can_separate_event_json_from_model_content() {
     #[derive(Clone)]
     struct SequencedProvider {
         responses: Arc<Mutex<Vec<Vec<StreamEvent>>>>,
     }
 
-    impl GenerationProvider for SequencedProvider {
+    impl LanguageAdapter for SequencedProvider {
         fn stream(
             &self,
-            _request: GenerationRequest,
-            _abort: AbortSignal,
-        ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
-            let events = self
-                .responses
-                .lock()
-                .expect("responses")
-                .remove(0)
-                .into_iter()
-                .map(Ok);
-            Box::pin(async move {
-                let output: psychevo_ai::GenerationStream = Box::pin(stream::iter(events));
-                Ok(output)
-            })
+            _call: AdapterCall<LanguageRequest>,
+        ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+            let events = self.responses.lock().expect("responses").remove(0);
+            let events = normalize_test_events(events).into_iter().map(Ok);
+            Box::pin(async move { Ok(Box::pin(stream::iter(events)) as AdapterStream<_>) })
         }
     }
 
@@ -845,7 +1345,7 @@ pub(crate) async fn tool_output_can_separate_event_json_from_model_content() {
         }
     }
 
-    let provider = Arc::new(SequencedProvider {
+    let provider = test_model(SequencedProvider {
         responses: Arc::new(Mutex::new(vec![
             vec![
                 StreamEvent::ToolCallStart {
@@ -921,10 +1421,10 @@ pub(crate) async fn tool_output_can_separate_event_json_from_model_content() {
 
 #[tokio::test]
 pub(crate) async fn complete_inline_think_blocks_are_folded_reasoning() {
-    let provider = Arc::new(FakeProvider::new(vec![vec![
+    let provider = raw_test_model(vec![vec![
         RawStreamEvent::Text("visible <think>secret</think> done".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    ]]);
     let sink = Arc::new(CaptureSink::default());
     let (_, control) = ControlHandle::new();
     let completion = run_agent_loop(provider, request(), sink.clone(), control)
@@ -956,7 +1456,7 @@ pub(crate) async fn complete_inline_think_blocks_are_folded_reasoning() {
 
 #[tokio::test]
 pub(crate) async fn reasoning_details_attach_to_reasoning_block_evidence() {
-    let provider = Arc::new(StaticProvider {
+    let provider = test_model(StaticProvider {
         events: vec![
             StreamEvent::ReasoningDelta {
                 text: "scratch".to_string(),
@@ -1001,6 +1501,96 @@ pub(crate) async fn reasoning_details_attach_to_reasoning_block_evidence() {
     assert_eq!(
         reasoning.1.as_ref().expect("evidence")["reasoning_details"][0]["type"],
         "thinking"
+    );
+}
+
+#[tokio::test]
+pub(crate) async fn final_assistant_uses_sdk_content_order_and_native_reasoning_evidence() {
+    let provider = test_model(FakeLanguageAdapter::new(vec![
+        vec![
+            Ok(LanguageAdapterEvent::ToolCallStart {
+                content_index: 0,
+                id: "call-1".to_string(),
+                name: "display_only".to_string(),
+            }),
+            Ok(LanguageAdapterEvent::ToolCallArgumentsDelta {
+                content_index: 0,
+                delta: "{}".to_string(),
+            }),
+            Ok(LanguageAdapterEvent::ToolCallEnd {
+                content_index: 0,
+                arguments_raw: "{}".to_string(),
+            }),
+            Ok(LanguageAdapterEvent::TextStart { content_index: 1 }),
+            Ok(LanguageAdapterEvent::TextDelta {
+                content_index: 1,
+                delta: "visible".to_string(),
+            }),
+            Ok(LanguageAdapterEvent::TextEnd { content_index: 1 }),
+            Ok(LanguageAdapterEvent::ReasoningStart { content_index: 2 }),
+            Ok(LanguageAdapterEvent::ReasoningDelta {
+                content_index: 2,
+                delta: "private".to_string(),
+                provider_evidence: Some(json!({"signature": "signed-thinking"})),
+            }),
+            Ok(LanguageAdapterEvent::ReasoningEnd { content_index: 2 }),
+            Ok(LanguageAdapterEvent::Finish {
+                finish_reason: Some(finish_reason("tool_calls")),
+            }),
+        ],
+        vec![
+            Ok(LanguageAdapterEvent::TextStart { content_index: 0 }),
+            Ok(LanguageAdapterEvent::TextDelta {
+                content_index: 0,
+                delta: "done".to_string(),
+            }),
+            Ok(LanguageAdapterEvent::TextEnd { content_index: 0 }),
+            Ok(LanguageAdapterEvent::Finish {
+                finish_reason: Some(finish_reason("stop")),
+            }),
+        ],
+    ]));
+    let (_, control) = ControlHandle::new();
+    let completion = run_agent_loop(
+        provider,
+        AgentLoopRequest {
+            tools: vec![Arc::new(DisplayOnlyTool)],
+            max_turns: 2,
+            ..request()
+        },
+        Arc::new(CaptureSink::default()),
+        control,
+    )
+    .await
+    .expect("loop");
+    let content = completion
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::Assistant { content, .. }
+                if content
+                    .iter()
+                    .any(|block| matches!(block, AssistantBlock::ToolCall(_))) =>
+            {
+                Some(content)
+            }
+            _ => None,
+        })
+        .expect("assistant with tool call");
+
+    assert!(matches!(content[0], AssistantBlock::ToolCall(_)));
+    assert_eq!(
+        content[1],
+        AssistantBlock::Text {
+            text: "visible".to_string(),
+        }
+    );
+    assert_eq!(
+        content[2],
+        AssistantBlock::Reasoning {
+            text: "private".to_string(),
+            provider_evidence: Some(json!({"signature": "signed-thinking"})),
+        }
     );
 }
 

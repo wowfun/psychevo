@@ -4,8 +4,80 @@ pub(crate) use std::fs;
 pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::time::Duration;
 
-pub use psychevo_ai::{ImageGenerationFormat, VoiceAudioFormat, VoiceRealtimeTransport};
 pub(crate) use serde_json::{Value, json};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageGenerationFormat {
+    Png,
+    Jpeg,
+    Webp,
+}
+
+impl ImageGenerationFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpeg",
+            Self::Webp => "webp",
+        }
+    }
+
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Webp => "image/webp",
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::Webp => "webp",
+        }
+    }
+
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceAudioFormat {
+    Wav,
+    Mp3,
+    Pcm16,
+}
+
+impl VoiceAudioFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Wav => "wav",
+            Self::Mp3 => "mp3",
+            Self::Pcm16 => "pcm16",
+        }
+    }
+
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Wav => "audio/wav",
+            Self::Mp3 => "audio/mpeg",
+            Self::Pcm16 => "audio/pcm",
+        }
+    }
+
+    pub fn supports_asr_input(self) -> bool {
+        matches!(self, Self::Wav | Self::Mp3)
+    }
+
+    pub fn supports_tts_output(self) -> bool {
+        matches!(self, Self::Wav | Self::Pcm16)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceRealtimeTransport {
+    Webrtc,
+    Websocket,
+}
 
 pub(crate) use crate::agents::{
     AgentBackendConfig, AgentBackendKind, AgentEntrypoint, default_peer_agent_entrypoints,

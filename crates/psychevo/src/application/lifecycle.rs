@@ -321,7 +321,7 @@ impl ApplicationBuilder {
         self
     }
 
-    pub fn provider(mut self, provider: Arc<dyn psychevo_ai::GenerationProvider>) -> Self {
+    pub fn provider(mut self, provider: psychevo_ai::Provider) -> Self {
         self.provider = Some(provider);
         self
     }

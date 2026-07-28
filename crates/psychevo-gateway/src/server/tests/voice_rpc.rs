@@ -12,6 +12,45 @@
         std::fs::write(state.inner.home.join("config.toml"), "# config\n").expect("config");
     }
 
+    #[derive(Debug)]
+    struct AcceptanceRealtimeAdapter {
+        accepted: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl psychevo::__ai::RealtimeAdapter for AcceptanceRealtimeAdapter {
+        fn connect(
+            &self,
+            _call: psychevo::__ai::AdapterCall<psychevo::__ai::RealtimeConnectRequest>,
+        ) -> psychevo::__ai::AdapterFuture<'_, psychevo::__ai::RealtimeAdapterTransport> {
+            let accepted = Arc::clone(&self.accepted);
+            Box::pin(async move {
+                Ok(psychevo::__ai::RealtimeAdapterTransport {
+                    commands: Arc::new(AcceptanceRealtimeSink { accepted }),
+                    events: Box::pin(futures::stream::pending()),
+                })
+            })
+        }
+    }
+
+    struct AcceptanceRealtimeSink {
+        accepted: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl psychevo::__ai::RealtimeCommandSink for AcceptanceRealtimeSink {
+        fn send(
+            &self,
+            _command: psychevo::__ai::RealtimeCommand,
+        ) -> psychevo::__ai::AdapterFuture<'_, ()> {
+            self.accepted
+                .store(true, std::sync::atomic::Ordering::Release);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn close(&self) -> psychevo::__ai::AdapterFuture<'_, ()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
     #[tokio::test]
     async fn voice_fake_asr_and_tts_rpc_use_deterministic_providers() {
         let (_temp, state) = web_state().await;
@@ -61,6 +100,72 @@
         assert_eq!(tts["model"], "fake-tts");
         assert_eq!(tts["audio"]["data"], "UklGRg==");
         assert_eq!(tts["audio"]["format"], "wav");
+    }
+
+    #[tokio::test]
+    async fn voice_asr_rejects_declared_pcm16_even_with_wav_mime() {
+        let (_temp, state) = web_state().await;
+        write_minimal_home_config(&state);
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+
+        let error = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            out_tx,
+            rpc_request(
+                "voice/asr/transcribe",
+                json!({
+                    "provider": "fake",
+                    "model": "fake-asr",
+                    "audio": {
+                        "data": "UklGRg==",
+                        "format": "pcm16",
+                        "mimeType": "audio/wav"
+                    }
+                }),
+            ),
+        )
+        .await
+        .expect_err("pcm16 is not an ASR input format");
+
+        assert!(
+            error.to_string().contains("unsupported ASR audio format `pcm16`"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn voice_asr_rejects_format_and_mime_conflict() {
+        let (_temp, state) = web_state().await;
+        write_minimal_home_config(&state);
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+
+        let error = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            out_tx,
+            rpc_request(
+                "voice/asr/transcribe",
+                json!({
+                    "provider": "fake",
+                    "model": "fake-asr",
+                    "audio": {
+                        "data": "UklGRg==",
+                        "format": "wav",
+                        "mimeType": "audio/mpeg"
+                    }
+                }),
+            ),
+        )
+        .await
+        .expect_err("declared format and MIME must agree");
+
+        assert!(
+            error
+                .to_string()
+                .contains("ASR audio format `wav` conflicts with MIME type `audio/mpeg`"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
@@ -178,4 +283,65 @@
         .await
         .expect("realtime stop");
         assert_eq!(stopped["accepted"], true);
+    }
+
+    #[tokio::test]
+    async fn realtime_append_response_waits_for_adapter_command_acceptance() {
+        let (_temp, state) = web_state().await;
+        let accepted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let provider = psychevo::__ai::Provider::builder(
+            psychevo::__ai::DeploymentConfig::new("acceptance", "test", "test://realtime"),
+        )
+        .realtime_adapter(AcceptanceRealtimeAdapter {
+            accepted: Arc::clone(&accepted),
+        })
+        .build()
+        .expect("provider");
+        let mut session = provider
+            .realtime_model("test")
+            .expect("model")
+            .connect(psychevo::__ai::RealtimeConnectRequest {
+                instructions: None,
+                voice: None,
+                headers: BTreeMap::new(),
+                extensions: BTreeMap::new(),
+            })
+            .await
+            .expect("session");
+        state
+            .inner
+            .realtime_sessions
+            .lock()
+            .expect("sessions")
+            .insert(
+                "acceptance-session".to_string(),
+                RealtimeSessionState {
+                    provider: "test".to_string(),
+                    sender: session.sender(),
+                },
+            );
+        let (out_tx, _out_rx) = mpsc::unbounded_channel();
+
+        let result = handle_rpc(
+            state,
+            AuthContext::Bearer,
+            out_tx,
+            rpc_request(
+                "thread/realtime/appendText",
+                json!({
+                    "sessionId": "acceptance-session",
+                    "text": "queued"
+                }),
+            ),
+        )
+        .await
+        .expect("append");
+
+        assert_eq!(result["accepted"], true);
+        assert!(
+            accepted.load(std::sync::atomic::Ordering::Acquire),
+            "accepted response must follow Adapter command acceptance"
+        );
+        session.abort();
+        let _ = session.next_event().await;
     }

@@ -45,7 +45,7 @@ pub(crate) use crate::types::{
 pub(crate) use psychevo_agent_core::{
     AgentEvent, AssistantBlock, EventSink, Message, ToolBinding, ToolDisplaySpec,
 };
-pub(crate) use psychevo_ai::{FakeProvider, Outcome, RawStreamEvent};
+pub(crate) use psychevo_ai::Outcome;
 pub(crate) use rusqlite::Connection;
 pub(crate) use serde_json::{Value, json};
 pub(crate) use tempfile::tempdir;

@@ -652,6 +652,7 @@ pub(crate) struct LoadedConfigValue {
 pub(crate) const AUTO_PROVIDER_ORDER: &[&str] = &[
     "openrouter",
     "openai",
+    "anthropic",
     "opencode-zen",
     "xai",
     "zai",
@@ -678,6 +679,12 @@ pub(crate) const BUILT_IN_PROVIDERS: &[BuiltInProvider] = &[
         id: "openai",
         name: "OpenAI",
         api: Some("https://api.openai.com/v1"),
+        allow_no_auth: false,
+    },
+    BuiltInProvider {
+        id: "anthropic",
+        name: "Anthropic",
+        api: Some("https://api.anthropic.com"),
         allow_no_auth: false,
     },
     BuiltInProvider {

@@ -47,7 +47,7 @@ Coordinate.
     let (_tx, rx) = watch::channel(false);
     let err = spawn_subagent(
         AgentToolContext {
-            provider: Arc::new(FakeProvider::new(Vec::new())),
+            provider: fake_language_model(Vec::new()),
             model_provider: "provider".to_string(),
             model: "model".to_string(),
             provider_label: "provider".to_string(),
@@ -779,7 +779,7 @@ pub(crate) async fn agent_tool_schema_omits_name_argument() {
         .expect("parent");
     let context = test_agent_tool_context(
         &tmp,
-        Arc::new(FakeProvider::new(Vec::new())),
+        fake_language_model(Vec::new()),
         store,
         db_path,
         parent,

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -10,10 +10,33 @@ use psychevo_agent_core::{
     user_text_message,
 };
 use psychevo_ai::{
-    AbortSignal, FakeProvider, GenerationProvider, GenerationRequest, GenerationStream, Outcome,
-    RawStreamEvent, StreamEvent,
+    AbortSignal, AdapterCall, AdapterFuture, AdapterStream, DeploymentConfig, LanguageAdapter,
+    LanguageAdapterEvent, LanguageModel, LanguageRequest, Outcome, Provider,
 };
 use serde_json::{Value, json};
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) enum RawStreamEvent {
+    Text(String),
+    Reasoning(String),
+    ToolStart {
+        content_index: usize,
+        call_index: usize,
+        id: String,
+        name: String,
+    },
+    ToolArgs {
+        content_index: usize,
+        call_index: usize,
+        delta: String,
+    },
+    ToolEnd {
+        content_index: usize,
+        call_index: usize,
+    },
+    Done(Outcome),
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct RecordingSink {
@@ -100,7 +123,7 @@ impl ToolBinding for SequentialDelayTool {
 #[derive(Clone)]
 pub(crate) struct RequestRecordingProvider {
     pub(crate) scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
-    pub(crate) requests: Arc<Mutex<Vec<GenerationRequest>>>,
+    pub(crate) requests: Arc<Mutex<Vec<LanguageRequest>>>,
 }
 
 impl RequestRecordingProvider {
@@ -112,77 +135,159 @@ impl RequestRecordingProvider {
     }
 }
 
-impl GenerationProvider for RequestRecordingProvider {
+impl LanguageAdapter for RequestRecordingProvider {
     fn stream(
         &self,
-        request: GenerationRequest,
-        abort: AbortSignal,
-    ) -> BoxFuture<'static, psychevo_ai::Result<GenerationStream>> {
-        let scripts = Arc::clone(&self.scripts);
-        let requests = Arc::clone(&self.requests);
-        Box::pin(async move {
-            requests.lock().expect("requests").push(request);
-            if abort.aborted() {
-                return Ok(Box::pin(stream::iter(vec![Ok(StreamEvent::Done {
-                    outcome: Outcome::Aborted,
-                    finish_reason: Some("aborted".to_string()),
-                })])) as GenerationStream);
-            }
-            let script = scripts
-                .lock()
-                .expect("scripts")
-                .pop_front()
-                .ok_or(psychevo_ai::Error::ScriptExhausted)?;
-            let events = script
-                .into_iter()
-                .map(raw_stream_event_to_stream_event)
-                .map(Ok);
-            Ok(Box::pin(stream::iter(events)) as GenerationStream)
-        })
+        call: AdapterCall<LanguageRequest>,
+    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+        self.requests.lock().expect("requests").push(call.request);
+        let script = self
+            .scripts
+            .lock()
+            .expect("scripts")
+            .pop_front()
+            .expect("request recording script");
+        let events = normalize_raw_events(script).into_iter().map(Ok);
+        Box::pin(async move { Ok(Box::pin(stream::iter(events)) as AdapterStream<_>) })
     }
 }
 
-pub(crate) fn raw_stream_event_to_stream_event(event: RawStreamEvent) -> StreamEvent {
-    match event {
-        RawStreamEvent::Text(text) => StreamEvent::TextDelta { text },
-        RawStreamEvent::Reasoning(text) => StreamEvent::ReasoningDelta {
-            text,
-            reasoning_content: None,
-        },
-        RawStreamEvent::ToolStart {
-            content_index,
-            call_index,
-            id,
-            name,
-        } => StreamEvent::ToolCallStart {
-            content_index,
-            call_index,
-            id,
-            name,
-        },
-        RawStreamEvent::ToolArgs {
-            content_index,
-            call_index,
-            delta,
-        } => StreamEvent::ToolCallDelta {
-            content_index,
-            call_index,
-            id: None,
-            name: None,
-            arguments_delta: delta,
-        },
-        RawStreamEvent::ToolEnd {
-            content_index,
-            call_index,
-        } => StreamEvent::ToolCallEnd {
-            content_index,
-            call_index,
-        },
-        RawStreamEvent::Done(outcome) => StreamEvent::Done {
-            outcome,
-            finish_reason: None,
-        },
+fn test_model(adapter: impl LanguageAdapter) -> LanguageModel {
+    Provider::builder(
+        DeploymentConfig::new("fake", "fake", "fake://local")
+            .with_default_language_protocol("fake"),
+    )
+    .language_adapter(adapter)
+    .build()
+    .expect("fake provider")
+    .language_model("fake")
+    .expect("fake language model")
+}
+
+#[derive(Clone)]
+struct ScriptedAdapter {
+    scripts: Arc<Mutex<VecDeque<Vec<RawStreamEvent>>>>,
+}
+
+impl LanguageAdapter for ScriptedAdapter {
+    fn stream(
+        &self,
+        _call: AdapterCall<LanguageRequest>,
+    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+        let script = self
+            .scripts
+            .lock()
+            .expect("scripts")
+            .pop_front()
+            .expect("scripted adapter script");
+        let events = normalize_raw_events(script).into_iter().map(Ok);
+        Box::pin(async move { Ok(Box::pin(stream::iter(events)) as AdapterStream<_>) })
     }
+}
+
+fn fake_model(scripts: Vec<Vec<RawStreamEvent>>) -> LanguageModel {
+    test_model(ScriptedAdapter {
+        scripts: Arc::new(Mutex::new(scripts.into())),
+    })
+}
+
+fn normalize_raw_events(events: Vec<RawStreamEvent>) -> Vec<LanguageAdapterEvent> {
+    let mut normalized = Vec::new();
+    let mut next_content_index = 0;
+    let mut text_index = None;
+    let mut reasoning_index = None;
+    let mut tool_arguments = BTreeMap::<(usize, usize), String>::new();
+
+    for event in events {
+        match event {
+            RawStreamEvent::Text(text) => {
+                if let Some(content_index) = reasoning_index.take() {
+                    normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
+                }
+                let content_index = *text_index.get_or_insert_with(|| {
+                    let content_index = next_content_index;
+                    next_content_index += 1;
+                    normalized.push(LanguageAdapterEvent::TextStart { content_index });
+                    content_index
+                });
+                normalized.push(LanguageAdapterEvent::TextDelta {
+                    content_index,
+                    delta: text,
+                });
+            }
+            RawStreamEvent::Reasoning(text) => {
+                if let Some(content_index) = text_index.take() {
+                    normalized.push(LanguageAdapterEvent::TextEnd { content_index });
+                }
+                let content_index = *reasoning_index.get_or_insert_with(|| {
+                    let content_index = next_content_index;
+                    next_content_index += 1;
+                    normalized.push(LanguageAdapterEvent::ReasoningStart { content_index });
+                    content_index
+                });
+                normalized.push(LanguageAdapterEvent::ReasoningDelta {
+                    content_index,
+                    delta: text,
+                    provider_evidence: None,
+                });
+            }
+            RawStreamEvent::ToolStart {
+                content_index,
+                call_index,
+                id,
+                name,
+            } => {
+                if let Some(content_index) = text_index.take() {
+                    normalized.push(LanguageAdapterEvent::TextEnd { content_index });
+                }
+                if let Some(content_index) = reasoning_index.take() {
+                    normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
+                }
+                tool_arguments.insert((content_index, call_index), String::new());
+                normalized.push(LanguageAdapterEvent::ToolCallStart {
+                    content_index,
+                    id,
+                    name,
+                });
+                next_content_index = next_content_index.max(content_index + 1);
+            }
+            RawStreamEvent::ToolArgs {
+                content_index,
+                call_index,
+                delta,
+            } => {
+                tool_arguments
+                    .get_mut(&(content_index, call_index))
+                    .expect("tool arguments after start")
+                    .push_str(&delta);
+                normalized.push(LanguageAdapterEvent::ToolCallArgumentsDelta {
+                    content_index,
+                    delta,
+                });
+            }
+            RawStreamEvent::ToolEnd {
+                content_index,
+                call_index,
+            } => normalized.push(LanguageAdapterEvent::ToolCallEnd {
+                content_index,
+                arguments_raw: tool_arguments
+                    .remove(&(content_index, call_index))
+                    .expect("tool end after start"),
+            }),
+            RawStreamEvent::Done(_) => {
+                if let Some(content_index) = text_index.take() {
+                    normalized.push(LanguageAdapterEvent::TextEnd { content_index });
+                }
+                if let Some(content_index) = reasoning_index.take() {
+                    normalized.push(LanguageAdapterEvent::ReasoningEnd { content_index });
+                }
+                normalized.push(LanguageAdapterEvent::Finish {
+                    finish_reason: None,
+                });
+            }
+        }
+    }
+    normalized
 }
 
 pub(crate) fn tool_script() -> Vec<Vec<RawStreamEvent>> {
@@ -257,7 +362,7 @@ pub(crate) async fn injected_user_shell_context_reaches_next_provider_request() 
     let (control, receivers) = ControlHandle::new();
     let sink = RecordingSink::default();
     let task = tokio::spawn(run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         AgentLoopRequest {
             model_provider: "fake".to_string(),
             model: "fake".to_string(),
@@ -330,7 +435,7 @@ pub(crate) async fn steered_user_message_reaches_next_provider_request_and_compl
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
     let task = tokio::spawn(run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         AgentLoopRequest {
             model_provider: "fake".to_string(),
             model: "fake".to_string(),
@@ -395,7 +500,7 @@ pub(crate) async fn pending_steer_can_be_updated_before_drain() {
     let requests = Arc::clone(&provider.requests);
     let (control, receivers) = ControlHandle::new();
     let task = tokio::spawn(run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         AgentLoopRequest {
             model_provider: "fake".to_string(),
             model: "fake".to_string(),
@@ -436,7 +541,7 @@ pub(crate) async fn pending_steer_can_be_cancelled_before_drain() {
     let requests = Arc::clone(&provider.requests);
     let (control, receivers) = ControlHandle::new();
     let task = tokio::spawn(run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         AgentLoopRequest {
             model_provider: "fake".to_string(),
             model: "fake".to_string(),
@@ -476,7 +581,7 @@ pub(crate) async fn cancel_pending_steer_after_drain_returns_false() {
     let requests = Arc::clone(&provider.requests);
     let (control, receivers) = ControlHandle::new();
     let task = tokio::spawn(run_agent_loop(
-        Arc::new(provider),
+        test_model(provider),
         AgentLoopRequest {
             model_provider: "fake".to_string(),
             model: "fake".to_string(),
@@ -508,7 +613,7 @@ pub(crate) async fn cancel_pending_steer_after_drain_returns_false() {
 
 #[tokio::test]
 pub(crate) async fn tool_execution_events_include_timing_fields() {
-    let provider = Arc::new(FakeProvider::new(vec![
+    let provider = fake_model(vec![
         vec![
             RawStreamEvent::ToolStart {
                 content_index: 0,
@@ -531,7 +636,7 @@ pub(crate) async fn tool_execution_events_include_timing_fields() {
             RawStreamEvent::Text("done".to_string()),
             RawStreamEvent::Done(Outcome::Normal),
         ],
-    ]));
+    ]);
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
     let (_control, receivers) = ControlHandle::new();
@@ -586,7 +691,7 @@ pub(crate) async fn tool_execution_events_include_timing_fields() {
 }
 
 pub(crate) async fn wait_for_request_count(
-    requests: &Arc<Mutex<Vec<GenerationRequest>>>,
+    requests: &Arc<Mutex<Vec<LanguageRequest>>>,
     expected: usize,
 ) {
     for _ in 0..200 {
@@ -600,7 +705,7 @@ pub(crate) async fn wait_for_request_count(
 
 #[tokio::test]
 pub(crate) async fn sequential_tool_elapsed_excludes_queue_time() {
-    let provider = Arc::new(FakeProvider::new(tool_script()));
+    let provider = fake_model(tool_script());
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
     let (_control, receivers) = ControlHandle::new();
@@ -648,7 +753,7 @@ pub(crate) async fn sequential_tool_elapsed_excludes_queue_time() {
 
 #[tokio::test]
 pub(crate) async fn parallel_tool_end_can_finish_before_source_ordered_tool_results() {
-    let provider = Arc::new(FakeProvider::new(tool_script()));
+    let provider = fake_model(tool_script());
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
     let (_control, receivers) = ControlHandle::new();
@@ -699,7 +804,7 @@ pub(crate) async fn parallel_tool_end_can_finish_before_source_ordered_tool_resu
 
 #[tokio::test]
 pub(crate) async fn invalid_tool_json_becomes_error_tool_result() {
-    let provider = Arc::new(FakeProvider::new(vec![
+    let provider = fake_model(vec![
         vec![
             RawStreamEvent::ToolStart {
                 content_index: 0,
@@ -722,7 +827,7 @@ pub(crate) async fn invalid_tool_json_becomes_error_tool_result() {
             RawStreamEvent::Text("recovered".to_string()),
             RawStreamEvent::Done(Outcome::Normal),
         ],
-    ]));
+    ]);
     let (_control, receivers) = ControlHandle::new();
     let completion = run_agent_loop(
         provider,
@@ -760,8 +865,74 @@ pub(crate) async fn invalid_tool_json_becomes_error_tool_result() {
 }
 
 #[tokio::test]
+pub(crate) async fn non_object_tool_json_becomes_error_tool_result_without_execution() {
+    let provider = fake_model(vec![
+        vec![
+            RawStreamEvent::ToolStart {
+                content_index: 0,
+                call_index: 0,
+                id: "not-an-object".to_string(),
+                name: "read".to_string(),
+            },
+            RawStreamEvent::ToolArgs {
+                content_index: 0,
+                call_index: 0,
+                delta: "[]".to_string(),
+            },
+            RawStreamEvent::ToolEnd {
+                content_index: 0,
+                call_index: 0,
+            },
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+        vec![
+            RawStreamEvent::Text("recovered".to_string()),
+            RawStreamEvent::Done(Outcome::Normal),
+        ],
+    ]);
+    let (_control, receivers) = ControlHandle::new();
+    let completion = run_agent_loop(
+        provider,
+        AgentLoopRequest {
+            model_provider: "fake".to_string(),
+            model: "fake".to_string(),
+            generation_metadata: json!({}),
+            prompt_instructions: Vec::new(),
+            turn_prompt_instructions: Vec::new(),
+            previous_messages: vec![],
+            context_messages: Vec::new(),
+            prefix_contextual_user_messages: Vec::new(),
+            turn_contextual_user_messages: Vec::new(),
+            prompt_messages: vec![user_text_message("run")],
+            tools: vec![Arc::new(DelayTool)],
+            tool_search: ToolSearchOptions::disabled(),
+            max_turns: 4,
+        },
+        Arc::new(RecordingSink::default()),
+        receivers,
+    )
+    .await
+    .expect("loop");
+    let error_result = completion
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::ToolResult {
+                tool_call_id,
+                is_error,
+                content,
+                ..
+            } if tool_call_id == "not-an-object" => Some((*is_error, content)),
+            _ => None,
+        });
+    let (is_error, content) = error_result.expect("tool result");
+    assert!(is_error);
+    assert!(content.contains("tool arguments must be a JSON object"));
+}
+
+#[tokio::test]
 pub(crate) async fn max_turn_budget_exhaustion_reports_terminal_reason() {
-    let provider = Arc::new(FakeProvider::new(vec![vec![
+    let provider = fake_model(vec![vec![
         RawStreamEvent::ToolStart {
             content_index: 0,
             call_index: 0,
@@ -778,7 +949,7 @@ pub(crate) async fn max_turn_budget_exhaustion_reports_terminal_reason() {
             call_index: 0,
         },
         RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    ]]);
     let sink = RecordingSink::default();
     let events = Arc::clone(&sink.events);
     let (_control, receivers) = ControlHandle::new();
@@ -827,10 +998,10 @@ pub(crate) async fn max_turn_budget_exhaustion_reports_terminal_reason() {
 
 #[tokio::test]
 pub(crate) async fn graceful_stop_finishes_current_turn() {
-    let provider = Arc::new(FakeProvider::new(vec![vec![
+    let provider = fake_model(vec![vec![
         RawStreamEvent::Text("one turn".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    ]]);
     let (control, receivers) = ControlHandle::new();
     control.stop();
     let completion = run_agent_loop(
@@ -860,10 +1031,10 @@ pub(crate) async fn graceful_stop_finishes_current_turn() {
 
 #[tokio::test]
 pub(crate) async fn abort_before_generation_returns_aborted() {
-    let provider = Arc::new(FakeProvider::new(vec![vec![
+    let provider = fake_model(vec![vec![
         RawStreamEvent::Text("unused".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    ]]);
     let (control, receivers) = ControlHandle::new();
     control.abort();
     let completion = run_agent_loop(
@@ -894,10 +1065,10 @@ pub(crate) async fn abort_before_generation_returns_aborted() {
 
 #[tokio::test]
 pub(crate) async fn event_sink_failure_fails_invocation() {
-    let provider = Arc::new(FakeProvider::new(vec![vec![
+    let provider = fake_model(vec![vec![
         RawStreamEvent::Text("hello".to_string()),
         RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    ]]);
     let (_control, receivers) = ControlHandle::new();
     let err = run_agent_loop(
         provider,

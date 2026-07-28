@@ -52,7 +52,7 @@ pub(crate) async fn run_live_streaming_controlled_with_provider(
     continue_sources: &[&str],
     stream: RunStreamSink,
     control: RunControl,
-    provider: Arc<dyn GenerationProvider>,
+    provider: Provider,
 ) -> Result<RunResult> {
     run_live_internal(
         options,
@@ -182,12 +182,15 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let model_metadata = session_model_metadata(&metadata);
     let agent_tools = if !options.no_agents {
-        let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
-            String::new(),
+        let provider = crate::run::generation_provider(
+            metadata
+                .get("base_url")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("http://127.0.0.1:9/v1"),
             String::new(),
             summary.provider.clone(),
             psychevo_ai::DEFAULT_INFERENCE_IDLE_TIMEOUT_SECS,
-        );
+        )?;
         Some(AgentToolContext {
             provider,
             model_provider: summary.provider.clone(),
@@ -546,6 +549,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
                 Some(json!({
                     "provider_label": resolved.display_label.clone(),
                     "base_url": resolved.base_url.clone(),
+                    "language_protocol": crate::run::language_protocol_for_provider(&resolved.provider),
                     "api_key_env": resolved.api_key_env.clone(),
                     "reasoning_effort": resolved.reasoning_effort.clone(),
                     "context_limit": resolved.context_limit,
@@ -567,12 +571,12 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             .ok();
     let image_input_enabled =
         !crate::prompt_image::model_metadata_explicitly_disallows_image_input(&resolved.metadata);
-    let provider: Arc<dyn GenerationProvider> = crate::run::generation_provider(
+    let provider = crate::run::generation_provider(
         resolved.base_url.clone(),
         resolved.api_key.clone(),
         resolved.provider.clone(),
         resolved.inference_idle_timeout_secs,
-    );
+    )?;
     let context = AgentToolContext {
         provider,
         model_provider: resolved.provider.clone(),

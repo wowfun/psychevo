@@ -156,7 +156,7 @@ pub use psychevo_agent_core as __agent_core;
 pub use psychevo_agent_core::ToolBinding as Tool;
 #[doc(hidden)]
 pub use psychevo_ai as __ai;
-pub use psychevo_ai::GenerationProvider as Provider;
+pub use psychevo_ai::Provider;
 pub use skills::SelectedSkill;
 pub use types::{
     ApprovalHandler, ApprovalMode, ImageInput, McpServerInput, PermissionMode,

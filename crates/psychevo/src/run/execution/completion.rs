@@ -87,45 +87,62 @@ pub(crate) fn required_agent_mentions(prompt: &str, agents: &[AgentDefinition]) 
 }
 
 pub(crate) fn smart_approval_handler(
-    provider: Arc<dyn GenerationProvider>,
-    resolved: &ResolvedRunProvider,
+    model: Option<LanguageModel>,
     config: &PermissionConfig,
     metadata: Value,
 ) -> Option<Arc<dyn ApprovalHandler>> {
     if config.approvals_reviewer != crate::types::ApprovalsReviewer::Smart {
         return None;
     }
-    let model = config
-        .auto_review
-        .model
-        .as_deref()
-        .and_then(parse_provider_model)
-        .unwrap_or_else(|| ModelTarget {
-            provider: resolved.provider.clone(),
-            model: resolved.model.clone(),
-        });
+    let model = model?;
     Some(Arc::new(SmartReviewerApprovalHandler {
-        provider,
         model,
         metadata,
         timeout_secs: config.auto_review.timeout_secs,
     }))
 }
 
-pub(crate) fn parse_provider_model(value: &str) -> Option<ModelTarget> {
-    let (provider, model) = value.trim().split_once('/')?;
-    let provider = provider.trim();
-    let model = model.trim();
-    (!provider.is_empty() && !model.is_empty()).then(|| ModelTarget {
-        provider: provider.to_string(),
-        model: model.to_string(),
-    })
+pub(crate) fn smart_reviewer_model(
+    injected_provider: Option<&Provider>,
+    primary_provider: &Provider,
+    options: &RunOptions,
+    loaded: &LoadedRunConfig,
+    resolved: &ResolvedRunProvider,
+    config: &PermissionConfig,
+) -> Option<LanguageModel> {
+    if config.approvals_reviewer != ApprovalsReviewer::Smart {
+        return None;
+    }
+    let Some(target) = config.auto_review.model.as_deref() else {
+        return primary_provider.language_model(resolved.model.clone()).ok();
+    };
+    let (provider_id, model_id) = parse_provider_model_spec(target).ok()?;
+    if let Some(provider) = injected_provider {
+        return provider.language_model(model_id).ok();
+    }
+    let reviewer = resolve_one_provider(
+        &provider_id,
+        Some(model_id.clone()),
+        None,
+        options,
+        loaded,
+        false,
+    )
+    .ok()?;
+    generation_provider(
+        reviewer.base_url,
+        reviewer.api_key,
+        reviewer.provider,
+        reviewer.inference_idle_timeout_secs,
+    )
+    .ok()?
+    .language_model(model_id)
+    .ok()
 }
 
 #[derive(Clone)]
 pub(crate) struct SmartReviewerApprovalHandler {
-    pub(crate) provider: Arc<dyn GenerationProvider>,
-    pub(crate) model: ModelTarget,
+    pub(crate) model: LanguageModel,
     pub(crate) metadata: Value,
     pub(crate) timeout_secs: u64,
 }
@@ -134,10 +151,7 @@ impl std::fmt::Debug for SmartReviewerApprovalHandler {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("SmartReviewerApprovalHandler")
-            .field(
-                "model",
-                &format!("{}/{}", self.model.provider, self.model.model),
-            )
+            .field("model", self.model.descriptor())
             .finish_non_exhaustive()
     }
 }
@@ -151,11 +165,10 @@ impl ApprovalHandler for SmartReviewerApprovalHandler {
         &self,
         request: PermissionApprovalRequest,
     ) -> futures::future::BoxFuture<'static, PermissionApprovalDecision> {
-        let provider = Arc::clone(&self.provider);
         let model = self.model.clone();
         let metadata = self.metadata.clone();
         Box::pin(async move {
-            smart_review_permission(provider, model, metadata, request)
+            smart_review_permission(model, metadata, request)
                 .await
                 .unwrap_or_else(|_| PermissionApprovalDecision::deny())
         })
@@ -163,8 +176,7 @@ impl ApprovalHandler for SmartReviewerApprovalHandler {
 }
 
 pub(crate) async fn smart_review_permission(
-    provider: Arc<dyn GenerationProvider>,
-    model: ModelTarget,
+    model: LanguageModel,
     metadata: Value,
     request: PermissionApprovalRequest,
 ) -> Result<PermissionApprovalDecision> {
@@ -179,28 +191,25 @@ pub(crate) async fn smart_review_permission(
             "filesystem": request.filesystem,
         }
     });
-    let generation = GenerationRequest {
-        model,
-        messages: vec![json!({
-            "role": "user",
-            "content": prompt.to_string(),
-        })],
+    let generation = LanguageRequest {
+        messages: vec![psychevo_ai::Message::user(prompt.to_string())],
         tools: Vec::new(),
-        metadata,
+        extensions: BTreeMap::from([("psychevo".to_string(), metadata)]),
+        ..LanguageRequest::default()
     };
-    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-    let mut stream = provider
-        .stream(generation, AbortSignal::new(abort_rx))
-        .await
-        .map_err(|err| Error::Message(err.to_string()))?;
+    let mut stream = model.stream(generation);
     let mut text = String::new();
-    while let Some(event) = stream.next().await {
+    while let Some(event) = stream.next_event().await {
         match event.map_err(|err| Error::Message(err.to_string()))? {
-            StreamEvent::TextDelta { text: delta } => text.push_str(&delta),
-            StreamEvent::Done { .. } => break,
+            GenerationEvent::TextDelta { delta, .. } => text.push_str(&delta),
+            GenerationEvent::Finish { .. } => break,
             _ => {}
         }
     }
+    stream
+        .finish()
+        .await
+        .map_err(|err| Error::Message(err.to_string()))?;
     let value: Value =
         serde_json::from_str(text.trim()).map_err(|err| Error::Message(err.to_string()))?;
     match value.get("decision").and_then(Value::as_str) {
@@ -304,7 +313,15 @@ mod main_agent_input_tests {
 #[cfg(test)]
 mod smart_reviewer_tests {
     use super::*;
-    use psychevo_ai::{FakeProvider, RawStreamEvent};
+    use psychevo_ai::{Fake, FakeLanguageAdapter};
+
+    fn fake_model(text: &str) -> LanguageModel {
+        Fake::with_language(FakeLanguageAdapter::text(text))
+            .expect("fake provider")
+            .provider()
+            .language_model("reviewer")
+            .expect("fake language model")
+    }
 
     fn request() -> PermissionApprovalRequest {
         PermissionApprovalRequest {
@@ -322,18 +339,10 @@ mod smart_reviewer_tests {
 
     #[tokio::test]
     async fn smart_reviewer_allows_once_from_json() {
-        let provider: Arc<dyn GenerationProvider> = Arc::new(FakeProvider::new(vec![vec![
-            RawStreamEvent::Text(
-                r#"{"decision":"allow","risk":"low","rationale":"read-only"}"#.to_string(),
-            ),
-            RawStreamEvent::Done(Outcome::Normal),
-        ]]));
+        let provider =
+            fake_model(r#"{"decision":"allow","risk":"low","rationale":"read-only"}"#);
         let decision = smart_review_permission(
             provider,
-            ModelTarget {
-                provider: "mock".to_string(),
-                model: "reviewer".to_string(),
-            },
             json!({}),
             request(),
         )
@@ -347,21 +356,75 @@ mod smart_reviewer_tests {
 
     #[tokio::test]
     async fn smart_reviewer_fails_closed_on_malformed_json() {
-        let provider: Arc<dyn GenerationProvider> = Arc::new(FakeProvider::new(vec![vec![
-            RawStreamEvent::Text("not json".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
-        ]]));
+        let provider = fake_model("not json");
         let err = smart_review_permission(
             provider,
-            ModelTarget {
-                provider: "mock".to_string(),
-                model: "reviewer".to_string(),
-            },
             json!({}),
             request(),
         )
         .await
         .expect_err("malformed JSON should fail");
         assert!(err.to_string().contains("expected ident"));
+    }
+
+    #[tokio::test]
+    async fn smart_reviewer_binds_the_independently_configured_provider_and_model() {
+        let temp = tempfile::tempdir().expect("temp");
+        let mut options = crate::tests::base_options(&temp).await;
+        std::fs::create_dir_all(&options.cwd).expect("cwd");
+        let config_path = temp.path().join("config.toml");
+        crate::tests::write_config(
+            &config_path,
+            r#"
+model = "primary/main-model"
+approvals_reviewer = "smart"
+
+[auto_review]
+model = "reviewer/review-model"
+
+[provider.primary]
+api = "http://127.0.0.1:8001/v1"
+
+[provider.primary.models.main-model]
+
+[provider.reviewer]
+api = "http://127.0.0.1:8002/v1"
+
+[provider.reviewer.models.review-model]
+"#,
+        )
+        .expect("config");
+        options.config_path = Some(config_path);
+        let cwd = canonical_cwd(&options.cwd).expect("canonical cwd");
+        let loaded = load_run_config(&options, &cwd).expect("loaded config");
+        let resolved = resolve_one_provider(
+            "primary",
+            Some("main-model".to_string()),
+            None,
+            &options,
+            &loaded,
+            false,
+        )
+        .expect("primary provider");
+        let primary = generation_provider(
+            resolved.base_url.clone(),
+            resolved.api_key.clone(),
+            resolved.provider.clone(),
+            resolved.inference_idle_timeout_secs,
+        )
+        .expect("primary SDK provider");
+
+        let reviewer = smart_reviewer_model(
+            None,
+            &primary,
+            &options,
+            &loaded,
+            &resolved,
+            &loaded.config.permissions,
+        )
+        .expect("reviewer model");
+
+        assert_eq!(reviewer.descriptor().provider_family, "reviewer");
+        assert_eq!(reviewer.descriptor().model_id, "review-model");
     }
 }

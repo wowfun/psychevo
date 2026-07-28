@@ -1,5 +1,14 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
+
+fn title_model(text: &str) -> psychevo_ai::LanguageModel {
+    psychevo_ai::Fake::with_language(psychevo_ai::FakeLanguageAdapter::text(text))
+        .expect("fake title provider")
+        .provider()
+        .language_model("model")
+        .expect("fake title model")
+}
+
 #[tokio::test]
 pub(crate) async fn latest_run_session_filters_source_and_cwd() {
     let temp = tempdir().expect("temp");
@@ -72,10 +81,7 @@ pub(crate) async fn new_visible_session_title_uses_model_generated_title_without
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .await
         .expect("session");
-    let provider = Arc::new(FakeProvider::new(vec![vec![
-        RawStreamEvent::Text("  \"Investigate TUI Copy\"  \nextra".to_string()),
-        RawStreamEvent::Done(Outcome::Normal),
-    ]]));
+    let provider = title_model("  \"Investigate TUI Copy\"  \nextra");
     let resolved = resolved_title_provider();
 
     ensure_new_visible_session_title(
@@ -110,7 +116,7 @@ pub(crate) async fn new_visible_session_title_falls_back_when_model_title_fails(
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .await
         .expect("session");
-    let provider = Arc::new(FakeProvider::new(Vec::new()));
+    let provider = title_model("");
     let resolved = resolved_title_provider();
 
     ensure_new_visible_session_title(
@@ -146,7 +152,7 @@ pub(crate) async fn new_visible_session_title_fallback_uses_selected_skill_for_m
         .create_session_with_metadata(&cwd, "tui", "model", "provider", None)
         .await
         .expect("session");
-    let provider = Arc::new(FakeProvider::new(Vec::new()));
+    let provider = title_model("");
     let resolved = resolved_title_provider();
     let (catalog, selected) = title_skill_catalog(temp.path());
 
@@ -201,7 +207,7 @@ pub(crate) async fn new_visible_session_title_fallback_covers_visible_sources() 
             "  summarize\nvisible   source  ",
             &[],
             &crate::skills::SkillCatalog::default(),
-            Arc::new(FakeProvider::new(Vec::new())),
+            title_model(""),
             &resolved,
         )
         .await
@@ -249,10 +255,7 @@ pub(crate) async fn new_visible_session_title_skips_internal_and_child_sessions(
             "should not persist",
             &[],
             &crate::skills::SkillCatalog::default(),
-            Arc::new(FakeProvider::new(vec![vec![
-                RawStreamEvent::Text("Generated Title".to_string()),
-                RawStreamEvent::Done(Outcome::Normal),
-            ]])),
+            title_model("Generated Title"),
             &resolved,
         )
         .await
@@ -288,10 +291,7 @@ pub(crate) async fn new_visible_session_title_preserves_existing_title() {
         "replace me",
         &[],
         &crate::skills::SkillCatalog::default(),
-        Arc::new(FakeProvider::new(vec![vec![
-            RawStreamEvent::Text("Generated Title".to_string()),
-            RawStreamEvent::Done(Outcome::Normal),
-        ]])),
+        title_model("Generated Title"),
         &resolved,
     )
     .await

@@ -1,14 +1,12 @@
 pub(crate) use std::collections::{BTreeMap, BTreeSet};
 pub(crate) use std::path::{Path, PathBuf};
-pub(crate) use std::sync::Arc;
-
 pub(crate) use psychevo_agent_core::{
     AssistantBlock, ContextualUserBlock, ContextualUserMessage, Message, PromptInstruction,
-    UserContentBlock,
+    UserContentBlock, contextual_user_message_to_ai, message_to_ai, prompt_instruction_to_ai,
 };
 pub(crate) use psychevo_ai::{
-    GenerationProvider, GenerationRequest, ModelTarget, ToolDeclaration,
-    openai_chat_completions_endpoint, openai_chat_request_body,
+    AnthropicMessagesAdapter, Capability, LanguageRequest, LanguageTool, ModelDescriptor,
+    OpenAiChatAdapter, OpenAiResponsesAdapter, ToolDeclaration,
 };
 pub(crate) use serde::Serialize;
 pub(crate) use serde_json::{Map, Value};
@@ -54,13 +52,13 @@ pub(crate) use reconstruction_markdown::{
     contextual_user_messages_from_evidence_for_kinds, effective_tool_names_from_message_metadata,
     effective_tool_names_from_prefix_metadata, effective_tool_names_from_value, export_document,
     filter_tool_declarations, generation_metadata_from_session_metadata,
-    json_value_object_with_model_metadata, message_to_value, prefix_contextual_user_messages,
-    prefix_prompt_instruction_values, prompt_instruction_values_from_evidence, prompt_prefix_hash,
+    json_value_object_with_model_metadata, prefix_contextual_user_messages,
+    prefix_prompt_instruction_messages, prompt_instruction_messages_from_evidence, prompt_prefix_hash,
     prompt_prefix_version, push_mailbox_events_delivered_after_message,
     push_mailbox_events_delivered_for_prompt, reconstructed_tool_declarations, render_markdown,
     render_markdown_message, render_markdown_prompt_prefix, sanitize_message_without_reasoning,
     session_mode_from_metadata, tool_declarations_hash_from_declarations,
-    turn_contextual_user_messages_from_evidence, turn_prompt_instruction_values_from_evidence,
+    turn_contextual_user_messages_from_evidence, turn_prompt_instruction_messages_from_evidence,
 };
 #[path = "session_export/markdown_helpers.rs"]
 mod markdown_helpers;

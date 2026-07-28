@@ -54,23 +54,17 @@ struct AbortAwareProvider {
     started: Arc<tokio::sync::Notify>,
 }
 
-impl GenerationProvider for AbortAwareProvider {
+impl LanguageAdapter for AbortAwareProvider {
     fn stream(
         &self,
-        _request: psychevo_ai::GenerationRequest,
-        mut abort: AbortSignal,
-    ) -> BoxFuture<'static, psychevo_ai::Result<psychevo_ai::GenerationStream>> {
+        call: AdapterCall<LanguageRequest>,
+    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
         let started = Arc::clone(&self.started);
         Box::pin(async move {
             started.notify_waiters();
+            let mut abort = call.context.abort;
             abort.wait_for_abort().await;
-            let stream: psychevo_ai::GenerationStream = Box::pin(futures::stream::iter([Ok(
-                psychevo_ai::StreamEvent::Done {
-                    outcome: Outcome::Aborted,
-                    finish_reason: Some("aborted".to_string()),
-                },
-            )]));
-            Ok(stream)
+            Ok(Box::pin(futures::stream::pending()) as AdapterStream<_>)
         })
     }
 }
@@ -91,7 +85,7 @@ pub(crate) async fn agent_control_declarations_hide_implementation_details() {
     let store = StateRuntime::open(&db_path).await.expect("store");
     let context = test_agent_tool_context(
         &tmp,
-        Arc::new(FakeProvider::new(Vec::new())),
+        fake_language_model(Vec::new()),
         store,
         db_path,
         "parent".to_string(),

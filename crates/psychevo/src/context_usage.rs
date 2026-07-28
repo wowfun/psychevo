@@ -2,11 +2,10 @@ pub(crate) use std::collections::BTreeMap;
 pub(crate) use std::path::PathBuf;
 pub(crate) use std::sync::{Arc, Mutex};
 
-pub(crate) use futures::future::BoxFuture;
 pub(crate) use psychevo_agent_core::{Message, PromptInstruction};
 pub(crate) use psychevo_ai::{
-    AbortSignal, GenerationProvider, GenerationRequest, GenerationStream, ModelTarget,
-    OpenAiChatTokenCount, count_openai_chat_request,
+    AdapterCall, AdapterFuture, AdapterStream, LanguageAdapter, LanguageAdapterEvent,
+    LanguageRequest, ModelDescriptor,
 };
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use serde_json::{Value, json};
@@ -31,6 +30,9 @@ pub(crate) use crate::types::{RunMode, RunOptions};
 
 #[path = "context_usage/snapshot.rs"]
 mod snapshot;
+#[path = "context_usage/counting.rs"]
+mod counting;
+pub(crate) use counting::*;
 pub use snapshot::{
     CONTEXT_BAR_MAX_CELLS, CONTEXT_BAR_MIN_CELLS, ContextAdvice, ContextCategory,
     ContextFormatOptions, ContextOptions, ContextScope, ContextSnapshot, ContextTokenizer,
@@ -39,7 +41,7 @@ pub use snapshot::{
     format_context_total_value_parts,
 };
 pub(crate) use snapshot::{
-    ContextRecorder, ContextRecordingProvider, LiveContextProfile, context_counting_metadata,
+    ContextRecorder, ContextRecordingAdapter, LiveContextProfile, context_counting_metadata,
 };
 #[path = "context_usage/presentation.rs"]
 mod presentation;

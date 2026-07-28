@@ -10,9 +10,33 @@ mod tests {
     pub(crate) use psychevo_agent_core::{
         AssistantBlock, ToolBinding, ToolCallBlock, ToolExecutionMode, ToolOutput,
     };
-    pub(crate) use psychevo_ai::{AbortSignal, FakeProvider, RawStreamEvent};
+    pub(crate) use psychevo_ai::{
+        AbortSignal, AdapterCall, AdapterFuture, AdapterStream, DeploymentConfig, Fake,
+        FakeLanguageAdapter, LanguageAdapter, LanguageAdapterEvent, LanguageRequest, Provider,
+    };
     pub(crate) use tempfile::TempDir;
     pub(crate) use tokio::sync::watch;
+
+    #[derive(Debug, Clone)]
+    pub(crate) enum RawStreamEvent {
+        Text(String),
+        ToolStart {
+            content_index: usize,
+            call_index: usize,
+            id: String,
+            name: String,
+        },
+        ToolArgs {
+            content_index: usize,
+            call_index: usize,
+            delta: String,
+        },
+        ToolEnd {
+            content_index: usize,
+            call_index: usize,
+        },
+        Done,
+    }
 
     struct TestTool(&'static str);
 
@@ -45,6 +69,96 @@ mod tests {
 
     pub(crate) fn test_tool(name: &'static str) -> Arc<dyn ToolBinding> {
         Arc::new(TestTool(name))
+    }
+
+    pub(crate) fn test_language_model(adapter: impl LanguageAdapter) -> Provider {
+        Provider::builder(
+            DeploymentConfig::new("fake", "fake", "fake://local")
+                .with_default_language_protocol("fake"),
+        )
+        .language_adapter(adapter)
+        .build()
+        .expect("fake provider")
+    }
+
+    pub(crate) fn fake_language_model(scripts: Vec<Vec<RawStreamEvent>>) -> Provider {
+        let scripts = scripts
+            .into_iter()
+            .map(raw_language_script)
+            .map(|events| events.into_iter().map(Ok).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        Fake::with_language(FakeLanguageAdapter::new(scripts))
+            .expect("built-in fake provider")
+            .provider()
+    }
+
+    fn raw_language_script(events: Vec<RawStreamEvent>) -> Vec<LanguageAdapterEvent> {
+        let mut normalized = Vec::new();
+        let mut text_index = None;
+        let mut next_content_index = 0;
+        let mut arguments = BTreeMap::<(usize, usize), String>::new();
+        for event in events {
+            match event {
+                RawStreamEvent::Text(text) => {
+                    let content_index = *text_index.get_or_insert_with(|| {
+                        let content_index = next_content_index;
+                        next_content_index += 1;
+                        normalized.push(LanguageAdapterEvent::TextStart { content_index });
+                        content_index
+                    });
+                    normalized.push(LanguageAdapterEvent::TextDelta {
+                        content_index,
+                        delta: text,
+                    });
+                }
+                RawStreamEvent::ToolStart {
+                    content_index,
+                    call_index,
+                    id,
+                    name,
+                } => {
+                    arguments.insert((content_index, call_index), String::new());
+                    normalized.push(LanguageAdapterEvent::ToolCallStart {
+                        content_index,
+                        id,
+                        name,
+                    });
+                    next_content_index = next_content_index.max(content_index + 1);
+                }
+                RawStreamEvent::ToolArgs {
+                    content_index,
+                    call_index,
+                    delta,
+                } => {
+                    arguments
+                        .get_mut(&(content_index, call_index))
+                        .expect("tool arguments after start")
+                        .push_str(&delta);
+                    normalized.push(LanguageAdapterEvent::ToolCallArgumentsDelta {
+                        content_index,
+                        delta,
+                    });
+                }
+                RawStreamEvent::ToolEnd {
+                    content_index,
+                    call_index,
+                } => normalized.push(LanguageAdapterEvent::ToolCallEnd {
+                    content_index,
+                    arguments_raw: arguments
+                        .remove(&(content_index, call_index))
+                        .expect("tool end after start"),
+                }),
+                RawStreamEvent::Done => {
+                    if let Some(content_index) = text_index.take() {
+                        normalized.push(LanguageAdapterEvent::TextEnd { content_index });
+                    }
+                    normalized.push(LanguageAdapterEvent::Finish {
+                        finish_reason: None,
+                    });
+                }
+            }
+        }
+        normalized
     }
 
     pub(crate) fn test_agent_run_record(
@@ -88,7 +202,7 @@ mod tests {
 
     pub(crate) fn test_agent_tool_context(
         tmp: &TempDir,
-        provider: Arc<dyn GenerationProvider>,
+        provider: Provider,
         store: StateRuntime,
         _db_path: PathBuf,
         parent: String,

@@ -2,11 +2,12 @@ use super::presentation::{
     context_advice, context_bar, format_compact_count, format_token_count, percent, scope_label,
 };
 use super::{
-    AbortSignal, Arc, BTreeMap, BoxFuture, Deserialize, EffectiveUsageTotal, Error,
-    GenerationProvider, GenerationRequest, GenerationStream, Message, ModelTarget, Mutex,
-    OpenAiChatTokenCount, PathBuf, PromptInstruction, Result, RunMode, RunOptions, Serialize,
+    AdapterCall, AdapterFuture, AdapterStream, Arc, BTreeMap, Deserialize, EffectiveUsageTotal,
+    Error, LanguageAdapter, LanguageAdapterEvent, LanguageRequest, Message, ModelDescriptor,
+    Mutex, OpenAiChatTokenCount, PathBuf, PromptInstruction, Result,
+    RunMode, RunOptions, Serialize,
     SkillDiscoveryOptions, SkillRuntime, StateRuntime, Value, canonical_cwd,
-    coding_core_tools_for_mode, count_openai_chat_request, discover_skills,
+    coding_core_tools_for_mode, count_openai_language_request, discover_skills,
     effective_usage_total, format_skills_for_prompt, json,
     load_project_context_instruction_mode, load_project_instructions, load_projected_messages,
     mode_instruction, resolve_skills_home, runtime_environment_prompt, selected_configured_model,
@@ -120,20 +121,19 @@ pub(crate) struct ContextRecorderState {
 #[derive(Debug, Clone)]
 pub(crate) struct LiveContextProfile {
     pub(crate) session_id: String,
-    pub(crate) base_url: String,
     pub(crate) context_limit: Option<u64>,
     pub(crate) mode: RunMode,
 }
 
-pub(crate) struct ContextRecordingProvider {
-    pub(crate) inner: Arc<dyn GenerationProvider>,
+pub(crate) struct ContextRecordingAdapter {
+    pub(crate) inner: Arc<dyn LanguageAdapter>,
     pub(crate) recorder: ContextRecorder,
     pub(crate) profile: LiveContextProfile,
 }
 
-impl ContextRecordingProvider {
+impl ContextRecordingAdapter {
     pub(crate) fn new(
-        inner: Arc<dyn GenerationProvider>,
+        inner: Arc<dyn LanguageAdapter>,
         recorder: ContextRecorder,
         profile: LiveContextProfile,
     ) -> Self {
@@ -145,22 +145,26 @@ impl ContextRecordingProvider {
     }
 }
 
-impl GenerationProvider for ContextRecordingProvider {
+impl LanguageAdapter for ContextRecordingAdapter {
     fn stream(
         &self,
-        request: GenerationRequest,
-        abort: AbortSignal,
-    ) -> BoxFuture<'static, psychevo_ai::Result<GenerationStream>> {
+        call: AdapterCall<LanguageRequest>,
+    ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
         self.recorder
-            .record_live_request(request.clone(), self.profile.clone());
-        self.inner.stream(request, abort)
+            .record_live_request(
+                call.request.clone(),
+                call.context.model.clone(),
+                self.profile.clone(),
+            );
+        self.inner.stream(call)
     }
 }
 
 impl ContextRecorder {
     pub(crate) fn record_live_request(
         &self,
-        request: GenerationRequest,
+        request: LanguageRequest,
+        model: ModelDescriptor,
         profile: LiveContextProfile,
     ) {
         let sequence = {
@@ -171,12 +175,13 @@ impl ContextRecorder {
         };
         let recorder = self.clone();
         tokio::task::spawn_blocking(move || {
-            let count = count_openai_chat_request(&request, &profile.base_url);
+            let count = count_openai_language_request(&model, &request)
+                .unwrap_or_default();
             let snapshot = snapshot_from_count(
                 ContextScope::LastProviderRequest,
                 Some(profile.session_id),
-                request.model.provider.clone(),
-                request.model.model.clone(),
+                model.provider_family,
+                model.model_id,
                 Some(profile.mode.as_str().to_string()),
                 profile.context_limit,
                 count,
@@ -375,58 +380,43 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
         effective_tool_names.iter().map(String::as_str),
     );
     let skills_prompt = format_skills_for_prompt(&prompt_skills);
-    let mut request_messages = vec![json!({
-        "role": "system",
-        "content": mode_instruction(mode),
-        "metadata": {
-            "prompt_slot": "base/mode",
-            "prompt_semantic_role": "base_policy",
-        },
-    })];
-    request_messages.push(json!({
-        "role": "system",
-        "content": runtime_environment_prompt(&cwd),
-        "metadata": {
-            "prompt_slot": "runtime_environment",
-            "prompt_semantic_role": "base_policy",
-        },
-    }));
+    let mut request_messages = vec![counting_system_message(
+        mode_instruction(mode),
+        "base/mode",
+        "base_policy",
+    )];
+    request_messages.push(counting_system_message(
+        runtime_environment_prompt(&cwd),
+        "runtime_environment",
+        "base_policy",
+    ));
     if !skills_prompt.trim().is_empty() {
-        request_messages.push(json!({
-            "role": "system",
-            "content": skills_prompt,
-            "metadata": {
-                "prompt_slot": "skill_index",
-                "prompt_semantic_role": "developer_prompt",
-            },
-        }));
+        request_messages.push(counting_system_message(
+            skills_prompt,
+            "skill_index",
+            "developer_prompt",
+        ));
     }
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     for (index, fragment) in project_instructions.fragments.iter().enumerate() {
-        request_messages.push(json!({
-            "role": "system",
-            "content": prompt_templates::project_context(&fragment.content),
-            "metadata": {
-                "prompt_slot": format!("project_context:{index}"),
-                "prompt_semantic_role": "developer_prompt",
-            },
-        }));
+        request_messages.push(counting_system_message(
+            prompt_templates::project_context(&fragment.content),
+            format!("project_context:{index}"),
+            "developer_prompt",
+        ));
     }
     for message in &messages {
-        request_messages.push(serde_json::to_value(message)?);
+        request_messages.push(psychevo_agent_core::message_to_ai(message).await);
     }
-    let request = GenerationRequest {
-        model: ModelTarget {
-            provider: summary.provider.clone(),
-            model: summary.model.clone(),
-        },
+    let request = LanguageRequest {
         messages: request_messages,
         tools: tool_declarations(&tools)
             .into_iter()
-            .map(Into::into)
+            .map(psychevo_ai::LanguageTool::from)
             .collect(),
-        metadata: json!({
-            "context_counting": {
+        extensions: BTreeMap::from([(
+            "psychevo".to_string(),
+            json!({"context_counting": {
                 "system_prompt_message_count": 2,
                 "base_policy_message_count": 2,
                 "skill_index_message_count": if prompt_skills.is_empty() { 0 } else { 1 },
@@ -434,10 +424,19 @@ pub async fn context_snapshot(options: ContextOptions) -> Result<ContextSnapshot
                 "project_instruction_context_message_count": 0,
                 "selected_skill_context_message_count": 0,
                 "skill_names": prompt_skills.iter().map(|skill| skill.name.clone()).collect::<Vec<_>>(),
-            }
-        }),
+            }}),
+        )]),
+        ..LanguageRequest::default()
     };
-    let fallback_count = count_openai_chat_request(&request, "");
+    let descriptor = ModelDescriptor {
+        deployment_id: summary.provider.clone(),
+        provider_family: summary.provider.clone(),
+        capability: psychevo_ai::Capability::Language,
+        model_id: summary.model.clone(),
+        protocol_id: "openai_chat".to_string(),
+    };
+    let fallback_count =
+        count_openai_language_request(&descriptor, &request).unwrap_or_default();
     let (count, reconstructed_session_seq, reconstructed_partial) = persisted_request_count
         .map(|value| {
             (
@@ -493,50 +492,36 @@ async fn persisted_provider_request_count(
     else {
         return Ok(None);
     };
-    let Some(provider_messages) = reconstructed
-        .body
-        .get("messages")
-        .and_then(Value::as_array)
-        .cloned()
-    else {
-        return Ok(None);
-    };
-    let tools = reconstructed
-        .body
-        .get("tools")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| tool.get("function"))
-        .filter_map(|function| {
-            let name = function.get("name").and_then(Value::as_str)?;
-            let description = function
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let parameters = function.get("parameters").cloned().unwrap_or(Value::Null);
-            Some(psychevo_ai::ToolDeclaration::new(
-                name,
-                description,
-                parameters,
-            ))
-        })
-        .map(Into::into)
-        .collect();
-    let request = GenerationRequest {
-        model: ModelTarget {
-            provider: reconstructed.provider.clone(),
-            model: reconstructed.model.clone(),
-        },
-        messages: provider_messages,
-        tools,
-        metadata: json!({}),
+    let descriptor = ModelDescriptor {
+        deployment_id: reconstructed.provider.clone(),
+        provider_family: reconstructed.provider.clone(),
+        capability: psychevo_ai::Capability::Language,
+        model_id: reconstructed.model.clone(),
+        protocol_id: "openai_chat".to_string(),
     };
     Ok(Some(PersistedProviderRequestCount {
-        count: count_openai_chat_request(&request, &reconstructed.base_url),
+        count: count_openai_language_request(&descriptor, &reconstructed.request)
+            .unwrap_or_default(),
         assistant_session_seq: reconstructed.assistant_session_seq,
         partial: !reconstructed.warnings.is_empty(),
     }))
+}
+
+fn counting_system_message(
+    content: impl Into<String>,
+    slot: impl Into<String>,
+    semantic_role: impl Into<String>,
+) -> psychevo_ai::Message {
+    psychevo_ai::Message::System {
+        content: vec![psychevo_ai::TextContent::new(content)],
+        extensions: BTreeMap::from([(
+            "psychevo".to_string(),
+            json!({
+                "prompt_slot": slot.into(),
+                "prompt_semantic_role": semantic_role.into(),
+            }),
+        )]),
+    }
 }
 
 pub(crate) fn context_counting_metadata(

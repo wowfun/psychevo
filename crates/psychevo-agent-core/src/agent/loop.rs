@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 pub async fn run_agent_loop(
-    provider: Arc<dyn GenerationProvider>,
+    model: LanguageModel,
     request: AgentLoopRequest,
     sink: Arc<dyn EventSink>,
     mut control: ControlReceivers,
@@ -117,7 +117,7 @@ pub async fn run_agent_loop(
             .await?;
 
         let assistant = stream_assistant(
-            Arc::clone(&provider),
+            model.clone(),
             &request,
             &tool_router,
             &context,

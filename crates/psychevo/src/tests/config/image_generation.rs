@@ -18,7 +18,7 @@ async fn image_generation_config_parses_documented_block() {
     assert_eq!(config.image_generation.size, "1024x1536");
     assert_eq!(
         config.image_generation.format,
-        psychevo_ai::ImageGenerationFormat::Webp
+        crate::config::ImageGenerationFormat::Webp
     );
 }
 

@@ -73,6 +73,8 @@ pub(crate) async fn spawn_subagent(
         return spawn_external_subagent(context, args, tool_call_id, abort, agent, team_member)
             .await;
     }
+    let (child_model, child_provider) =
+        bind_child_model(&context, &agent, args.model.as_deref())?;
     let id = Uuid::now_v7().to_string();
     let task_name = args.task_name.trim().to_string();
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
@@ -90,7 +92,7 @@ pub(crate) async fn spawn_subagent(
             id: &id,
             task_name: &task_name,
             prompt: &args.message,
-            model_override: args.model.as_deref(),
+            model: &child_model,
             role,
             background,
             fork_context: args.fork_context,
@@ -175,7 +177,8 @@ pub(crate) async fn spawn_subagent(
         agent,
         prompt: args.message,
         task_name: task_name.clone(),
-        model_override: args.model,
+        model: child_model,
+        provider: child_provider,
         fork_context: args.fork_context,
         fork_turns: args.fork_turns,
         max_turns: args.max_turns,
@@ -274,7 +277,7 @@ struct InternalChildSessionInput<'a> {
     id: &'a str,
     task_name: &'a str,
     prompt: &'a str,
-    model_override: Option<&'a str>,
+    model: &'a str,
     role: AgentInvocationRole,
     background: bool,
     fork_context: bool,
@@ -286,7 +289,6 @@ struct InternalChildSessionInput<'a> {
 async fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> Result<String> {
     let context = input.context;
     let agent = input.agent;
-    let child_model = child_model_from(context, agent, input.model_override);
     let mut metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: input.id,
         task_name: input.task_name,
@@ -305,7 +307,7 @@ async fn create_internal_child_session(input: InternalChildSessionInput<'_>) -> 
         &context.parent_session_id,
         &context.cwd,
         "agent",
-        &child_model,
+        input.model,
         &context.model_provider,
         Some(metadata.clone()),
     )
@@ -795,7 +797,7 @@ pub(crate) async fn spawn_child_agent_background(
     let role = AgentInvocationRole::Subagent;
     let background = true;
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, None);
-    let child_model = child_model_from(&context, &agent, None);
+    let (child_model, child_provider) = bind_child_model(&context, &agent, None)?;
     let metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: &id,
         task_name: &task_name,
@@ -882,7 +884,8 @@ pub(crate) async fn spawn_child_agent_background(
         agent,
         prompt,
         task_name,
-        model_override: None,
+        model: child_model,
+        provider: child_provider,
         fork_context: false,
         fork_turns: None,
         max_turns: None,
@@ -911,7 +914,8 @@ pub(crate) struct ChildRun {
     pub(crate) agent: AgentDefinition,
     pub(crate) prompt: String,
     pub(crate) task_name: String,
-    pub(crate) model_override: Option<String>,
+    pub(crate) model: String,
+    pub(crate) provider: LanguageModel,
     pub(crate) fork_context: bool,
     pub(crate) fork_turns: Option<String>,
     pub(crate) max_turns: Option<usize>,

@@ -401,6 +401,77 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn export_last_provider_request_uses_recorded_anthropic_protocol() {
+        let tmp = TempDir::new().expect("tmp");
+        let store = StateRuntime::open(tmp.path().join("state.db"))
+            .await
+            .expect("store");
+        let session = store
+            .create_session_with_metadata(
+                tmp.path(),
+                "run",
+                "claude-sonnet-4-5",
+                "anthropic",
+                Some(serde_json::json!({
+                    "base_url": "https://api.anthropic.com",
+                    "language_protocol": "anthropic_messages",
+                    "mode": "default",
+                    "model_metadata": {
+                        "capabilities": {
+                            "tool_call": true
+                        }
+                    }
+                })),
+            )
+            .await
+            .expect("session");
+        store
+            .append_message(&session, &user_text_message("explain this"))
+            .await
+            .expect("append user");
+        store
+            .append_message(
+                &session,
+                &Message::Assistant {
+                    content: vec![AssistantBlock::Text {
+                        text: "explained".to_string(),
+                    }],
+                    timestamp_ms: 2,
+                    finish_reason: Some("end_turn".to_string()),
+                    outcome: Outcome::Normal,
+                    model: Some("claude-sonnet-4-5".to_string()),
+                    provider: Some("anthropic".to_string()),
+                },
+            )
+            .await
+            .expect("append assistant");
+
+        let artifact = render_session_export(
+            &store,
+            &session,
+            SessionExportOptions {
+                format: SessionExportFormat::Json,
+                include: SessionExportIncludeSet::from_values([
+                    SessionExportInclude::LastProviderRequest,
+                ]),
+                artifact_kind: SessionArtifactKind::Export,
+            },
+        )
+        .await
+        .expect("export");
+        let value: Value = serde_json::from_str(&artifact.content).expect("json");
+        let request = &value["last_provider_request"];
+        assert_eq!(request["protocol"], "anthropic_messages");
+        assert_eq!(
+            request["endpoint"],
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(request["body"]["model"], "claude-sonnet-4-5");
+        assert_eq!(request["body"]["messages"][0]["role"], "user");
+        assert!(request["body"].get("input").is_none());
+    }
+
+    #[tokio::test]
     async fn export_last_provider_request_uses_message_prompt_prefix_version() {
         let tmp = TempDir::new().expect("tmp");
         let db = tmp.path().join("state.db");

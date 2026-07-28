@@ -1,15 +1,14 @@
 use super::*;
 use psychevo::__ai::{
-    AbortSignal, FakeAsrProvider, FakeRealtimeProvider, FakeTtsProvider, VoiceAsrProvider,
-    VoiceAsrRequest, VoiceAudioInput as AiVoiceAudioInput, VoiceRealtimeEvent,
-    VoiceRealtimeProvider, VoiceRealtimeStartRequest, VoiceTtsProvider, VoiceTtsRequest,
-    XiaomiVoiceProvider,
+    DeploymentConfig, Fake, FakeSpeechAdapter, FakeTranscriptionAdapter, Media, MediaInput,
+    Provider, RealtimeCloseReason, RealtimeConnectRequest, RealtimeEvent, RealtimeSender,
+    SecretValue, SpeechRequest, TranscriptionRequest, Xiaomi,
 };
 
 #[derive(Debug, Clone)]
 pub(super) struct RealtimeSessionState {
     pub(super) provider: String,
-    pub(super) abort_tx: tokio::sync::watch::Sender<bool>,
+    pub(super) sender: RealtimeSender,
 }
 
 pub(super) async fn voice_asr_transcribe_value(
@@ -26,43 +25,37 @@ pub(super) async fn voice_asr_transcribe_value(
         params.language.as_deref(),
     )?;
     let audio_format = ai_audio_format(params.audio.format);
-    let request = VoiceAsrRequest {
-        provider: resolved.provider.clone(),
-        model: resolved.model.clone(),
-        language: resolved.language.clone(),
-        audio: AiVoiceAudioInput {
-            data: params.audio.data,
-            format: audio_format,
-            mime_type: params.audio.mime_type,
+    let mime_type = validated_asr_mime_type(audio_format, params.audio.mime_type.as_deref())?;
+    let request = TranscriptionRequest {
+        audio: MediaInput::Inline {
+            media: Media::from_base64(mime_type, params.audio.data),
         },
+        language: resolved.language.clone(),
+        prompt: None,
+        headers: BTreeMap::new(),
+        extensions: BTreeMap::new(),
     };
-    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-    let result = if resolved.provider == "fake" {
-        FakeAsrProvider::new("fake transcript")
-            .transcribe(request, AbortSignal::new(abort_rx))
-            .await
-            .map_err(voice_runtime_error)?
-    } else if is_xiaomi_voice_provider(&resolved.provider) {
-        let api_key = resolved
-            .api_key
-            .clone()
-            .ok_or_else(|| missing_voice_credentials(&resolved.api_key_env))?;
-        XiaomiVoiceProvider::new(resolved.base_url, api_key, resolved.provider.clone())
-            .transcribe(request, AbortSignal::new(abort_rx))
-            .await
-            .map_err(voice_runtime_error)?
-    } else {
-        return Err(Error::Config(format!(
-            "voice ASR provider is not supported yet: {}",
-            resolved.provider
-        )));
-    };
+    let provider = voice_provider(
+        &resolved.provider,
+        &resolved.base_url,
+        resolved.api_key.as_deref(),
+        &resolved.api_key_env,
+    )?;
+    let model = provider
+        .transcription_model(resolved.model.clone())
+        .map_err(voice_runtime_error)?;
+    let result = model
+        .transcribe(request)
+        .await
+        .map_err(voice_runtime_error)?;
     Ok(serde_json::to_value(wire::VoiceAsrTranscribeResult {
-        transcript: result.transcript,
-        provider: result.provider,
-        model: result.model,
+        transcript: result.text,
+        provider: result.model.provider_family,
+        model: result.model.model_id,
         language: result.language,
-        metadata: Some(result.metadata),
+        metadata: Some(Value::Object(
+            result.provider_metadata.into_iter().collect(),
+        )),
     })?)
 }
 
@@ -80,44 +73,43 @@ pub(super) async fn voice_tts_synthesize_value(
         params.voice.as_deref(),
         params.format.map(ai_audio_format),
     )?;
-    let request = VoiceTtsRequest {
-        provider: resolved.provider.clone(),
-        model: resolved.model.clone(),
-        voice: resolved.voice.clone(),
-        format: resolved.format,
+    let request = SpeechRequest {
         text: params.text,
+        voice: Some(resolved.voice.clone()),
+        format: Some(resolved.format.as_str().to_string()),
+        speed: None,
+        headers: BTreeMap::new(),
+        extensions: BTreeMap::new(),
     };
-    let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-    let result = if resolved.provider == "fake" {
-        FakeTtsProvider::new("UklGRg==")
-            .synthesize(request, AbortSignal::new(abort_rx))
-            .await
-            .map_err(voice_runtime_error)?
-    } else if is_xiaomi_voice_provider(&resolved.provider) {
-        let api_key = resolved
-            .api_key
-            .clone()
-            .ok_or_else(|| missing_voice_credentials(&resolved.api_key_env))?;
-        XiaomiVoiceProvider::new(resolved.base_url, api_key, resolved.provider.clone())
-            .synthesize(request, AbortSignal::new(abort_rx))
-            .await
-            .map_err(voice_runtime_error)?
-    } else {
-        return Err(Error::Config(format!(
-            "voice TTS provider is not supported yet: {}",
-            resolved.provider
-        )));
-    };
+    let provider = voice_provider(
+        &resolved.provider,
+        &resolved.base_url,
+        resolved.api_key.as_deref(),
+        &resolved.api_key_env,
+    )?;
+    let model = provider
+        .speech_model(resolved.model.clone())
+        .map_err(voice_runtime_error)?;
+    let result = model
+        .synthesize(request)
+        .await
+        .map_err(voice_runtime_error)?;
     Ok(serde_json::to_value(wire::VoiceTtsSynthesizeResult {
         audio: wire::VoiceAudioOutput {
-            data: result.audio.data,
-            format: wire_audio_format(result.audio.format),
-            mime_type: result.audio.mime_type,
+            data: result
+                .audio
+                .base64()
+                .map_err(|error| Error::Message(error.to_string()))?
+                .to_string(),
+            format: wire_audio_format(resolved.format),
+            mime_type: result.audio.mime_type().to_string(),
         },
-        provider: result.provider,
-        model: result.model,
-        voice: result.voice,
-        metadata: Some(result.metadata),
+        provider: result.model.provider_family,
+        model: result.model.model_id,
+        voice: resolved.voice,
+        metadata: Some(Value::Object(
+            result.provider_metadata.into_iter().collect(),
+        )),
     })?)
 }
 
@@ -201,53 +193,75 @@ pub(super) async fn start_realtime(
             resolved.provider
         )));
     }
-    let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-    let (result, mut stream) = FakeRealtimeProvider
-        .start(
-            VoiceRealtimeStartRequest {
-                thread_id: params.thread_id.clone(),
-                provider: resolved.provider.clone(),
-                model: resolved.model.clone(),
-                transport: resolved.transport,
-                voice: resolved.voice.clone(),
-                sdp_offer: params.sdp_offer,
-            },
-            AbortSignal::new(abort_rx),
-        )
+    let model = Fake::new()
+        .map_err(voice_runtime_error)?
+        .provider()
+        .realtime_model(resolved.model.clone())
+        .map_err(voice_runtime_error)?;
+    let mut stream = model
+        .connect(RealtimeConnectRequest {
+            instructions: None,
+            voice: resolved.voice.clone(),
+            headers: BTreeMap::new(),
+            extensions: BTreeMap::from([(
+                "psychevo".to_string(),
+                json!({
+                    "thread_id": params.thread_id,
+                    "transport": match resolved.transport {
+                        psychevo::__product::configuration::VoiceRealtimeTransport::Webrtc => "webrtc",
+                        psychevo::__product::configuration::VoiceRealtimeTransport::Websocket => "websocket",
+                    },
+                    "sdp_offer": params.sdp_offer,
+                }),
+            )]),
+        })
         .await
         .map_err(voice_runtime_error)?;
+    let session_id = format!("fake-realtime-{}", params.thread_id);
+    let sender = stream.sender();
     state
         .inner
         .realtime_sessions
         .lock()
         .expect("realtime sessions poisoned")
         .insert(
-            result.session_id.clone(),
+            session_id.clone(),
             RealtimeSessionState {
                 provider: resolved.provider,
-                abort_tx,
+                sender,
             },
         );
-    let session_id = result.session_id.clone();
+    let _ = out_tx.send(rpc_notification(
+        "thread/realtime/started",
+        json!(wire::ThreadRealtimeStartedNotification {
+            session_id: session_id.clone(),
+            thread_id: params.thread_id.clone(),
+        }),
+    ));
+    let thread_id = params.thread_id.clone();
     let state_for_close = state.clone();
+    let event_session_id = session_id.clone();
+    let cleanup_session_id = session_id.clone();
     tokio::spawn(async move {
-        while let Some(event) = stream.next().await {
+        while let Some(event) = stream.next_event().await {
             let Ok(event) = event else {
                 continue;
             };
             let should_send = match &event {
-                VoiceRealtimeEvent::Closed { session_id, .. } => state_for_close
+                RealtimeEvent::Closed { .. } => state_for_close
                     .inner
                     .realtime_sessions
                     .lock()
                     .expect("realtime sessions poisoned")
-                    .contains_key(session_id),
+                    .contains_key(&event_session_id),
                 _ => true,
             };
             if !should_send {
                 continue;
             }
-            if let Some(notification) = realtime_event_notification(event) {
+            if let Some(notification) =
+                realtime_event_notification(&event_session_id, &thread_id, event)
+            {
                 let _ = out_tx.send(notification);
             }
         }
@@ -256,36 +270,57 @@ pub(super) async fn start_realtime(
             .realtime_sessions
             .lock()
             .expect("realtime sessions poisoned")
-            .remove(&session_id);
+            .remove(&cleanup_session_id);
     });
     Ok(wire::ThreadRealtimeStartResult {
         accepted: true,
-        session_id: result.session_id,
-        thread_id: result.thread_id,
+        session_id,
+        thread_id: params.thread_id,
     })
 }
 
-pub(super) fn append_realtime_audio(
+pub(super) async fn append_realtime_audio(
     state: &WebState,
     params: wire::ThreadRealtimeAppendAudioParams,
 ) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
-    ensure_realtime_session(state, &params.session_id)?;
+    let session = ensure_realtime_session(state, &params.session_id)?;
+    let mime_type = params
+        .audio
+        .mime_type
+        .unwrap_or_else(|| ai_audio_format(params.audio.format).mime_type().to_string());
+    let audio = Media::from_base64(mime_type, params.audio.data);
+    session
+        .sender
+        .send_audio(audio)
+        .await
+        .map_err(voice_runtime_error)?;
     Ok(realtime_accepted())
 }
 
-pub(super) fn append_realtime_text(
+pub(super) async fn append_realtime_text(
     state: &WebState,
     params: wire::ThreadRealtimeAppendTextParams,
 ) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
-    ensure_realtime_session(state, &params.session_id)?;
+    let session = ensure_realtime_session(state, &params.session_id)?;
+    session
+        .sender
+        .send_text(params.text)
+        .await
+        .map_err(voice_runtime_error)?;
     Ok(realtime_accepted())
 }
 
-pub(super) fn append_realtime_speech(
+pub(super) async fn append_realtime_speech(
     state: &WebState,
     params: wire::ThreadRealtimeAppendSpeechParams,
 ) -> psychevo::Result<wire::ThreadRealtimeMutationResult> {
-    ensure_realtime_session(state, &params.session_id)?;
+    let session = ensure_realtime_session(state, &params.session_id)?;
+    session
+        .sender
+        .send_text(params.text)
+        .await
+        .map_err(voice_runtime_error)?;
+    session.sender.commit().await.map_err(voice_runtime_error)?;
     Ok(realtime_accepted())
 }
 
@@ -302,7 +337,9 @@ pub(super) fn stop_realtime(
         .remove(&params.session_id);
     let accepted = removed.is_some();
     if let Some(session) = removed {
-        let _ = session.abort_tx.send(true);
+        tokio::spawn(async move {
+            let _ = session.sender.close().await;
+        });
         let _ = out_tx.send(rpc_notification(
             "thread/realtime/closed",
             json!(wire::ThreadRealtimeClosedNotification {
@@ -405,80 +442,116 @@ fn realtime_accepted() -> wire::ThreadRealtimeMutationResult {
     }
 }
 
-fn realtime_event_notification(event: VoiceRealtimeEvent) -> Option<String> {
+fn realtime_event_notification(
+    session_id: &str,
+    _thread_id: &str,
+    event: RealtimeEvent,
+) -> Option<String> {
     match event {
-        VoiceRealtimeEvent::Started {
-            session_id,
-            thread_id,
-        } => Some(rpc_notification(
-            "thread/realtime/started",
-            json!(wire::ThreadRealtimeStartedNotification {
-                session_id,
-                thread_id,
-            }),
-        )),
-        VoiceRealtimeEvent::Sdp { session_id, sdp } => Some(rpc_notification(
-            "thread/realtime/sdp",
-            json!(wire::ThreadRealtimeSdpNotification { session_id, sdp }),
-        )),
-        VoiceRealtimeEvent::TranscriptDelta {
-            session_id,
-            role,
-            text,
-        } => Some(rpc_notification(
+        RealtimeEvent::InputTranscriptDelta { delta } => Some(rpc_notification(
             "thread/realtime/transcript/delta",
             json!(wire::ThreadRealtimeTranscriptNotification {
-                session_id,
-                role,
-                text,
+                session_id: session_id.to_string(),
+                role: "user".to_string(),
+                text: delta,
             }),
         )),
-        VoiceRealtimeEvent::TranscriptDone {
-            session_id,
-            role,
-            text,
-        } => Some(rpc_notification(
+        RealtimeEvent::InputTranscriptDone { text } => Some(rpc_notification(
             "thread/realtime/transcript/done",
             json!(wire::ThreadRealtimeTranscriptNotification {
-                session_id,
-                role,
+                session_id: session_id.to_string(),
+                role: "user".to_string(),
                 text,
             }),
         )),
-        VoiceRealtimeEvent::OutputAudioDelta {
-            session_id,
-            data,
-            format,
-        } => Some(rpc_notification(
+        RealtimeEvent::OutputTextDelta { delta } => Some(rpc_notification(
+            "thread/realtime/transcript/delta",
+            json!(wire::ThreadRealtimeTranscriptNotification {
+                session_id: session_id.to_string(),
+                role: "assistant".to_string(),
+                text: delta,
+            }),
+        )),
+        RealtimeEvent::OutputTextDone { text } => Some(rpc_notification(
+            "thread/realtime/transcript/done",
+            json!(wire::ThreadRealtimeTranscriptNotification {
+                session_id: session_id.to_string(),
+                role: "assistant".to_string(),
+                text,
+            }),
+        )),
+        RealtimeEvent::OutputAudioDelta { audio } => Some(rpc_notification(
             "thread/realtime/outputAudio/delta",
             json!(wire::ThreadRealtimeOutputAudioDeltaNotification {
-                session_id,
-                data,
-                format: wire_audio_format(format),
+                session_id: session_id.to_string(),
+                data: audio.base64().ok()?.to_string(),
+                format: wire_audio_format_from_mime(audio.mime_type()),
             }),
         )),
-        VoiceRealtimeEvent::Error {
-            session_id,
-            message,
-        } => Some(rpc_notification(
+        RealtimeEvent::Warning { warning } => Some(rpc_notification(
             "thread/realtime/error",
             json!(wire::ThreadRealtimeErrorNotification {
-                session_id,
-                message,
+                session_id: session_id.to_string(),
+                message: warning.message,
             }),
         )),
-        VoiceRealtimeEvent::Closed { session_id, reason } => Some(rpc_notification(
+        RealtimeEvent::Closed { reason } => Some(rpc_notification(
             "thread/realtime/closed",
-            json!(wire::ThreadRealtimeClosedNotification { session_id, reason }),
+            json!(wire::ThreadRealtimeClosedNotification {
+                session_id: session_id.to_string(),
+                reason: match reason {
+                    RealtimeCloseReason::Requested => "requested".to_string(),
+                    RealtimeCloseReason::Remote => "remote".to_string(),
+                    RealtimeCloseReason::Aborted => "aborted".to_string(),
+                },
+            }),
         )),
+        RealtimeEvent::OutputAudioDone
+        | RealtimeEvent::ResponseDone
+        | RealtimeEvent::Metadata { .. } => None,
     }
+}
+
+fn voice_provider(
+    provider: &str,
+    base_url: &str,
+    api_key: Option<&str>,
+    api_key_env: &Option<String>,
+) -> psychevo::Result<psychevo::__ai::Provider> {
+    if provider == "fake" {
+        return Provider::builder(
+            DeploymentConfig::new("fake", "fake", "fake://local")
+                .with_default_language_protocol("fake"),
+        )
+        .transcription_adapter(FakeTranscriptionAdapter::default())
+        .speech_adapter(FakeSpeechAdapter::new(Media::from_base64(
+            "audio/wav",
+            "UklGRg==",
+        )))
+        .build()
+        .map_err(voice_runtime_error);
+    }
+    if !is_xiaomi_voice_provider(provider) {
+        return Err(Error::Config(format!(
+            "voice provider is not supported yet: {provider}"
+        )));
+    }
+    let api_key = api_key.ok_or_else(|| missing_voice_credentials(api_key_env))?;
+    Xiaomi::builder(
+        DeploymentConfig::new(provider, provider, base_url)
+            .with_default_language_protocol("xiaomi_voice"),
+    )
+    .with_api_key(SecretValue::new(api_key))
+    .build()
+    .and_then(|facade| facade.provider())
+    .map_err(voice_runtime_error)
 }
 
 fn is_xiaomi_voice_provider(provider: &str) -> bool {
     matches!(provider, "xiaomi" | "xiaomi-token-plan")
 }
 
-fn voice_runtime_error(err: psychevo::__ai::Error) -> Error {
+fn voice_runtime_error(err: impl std::fmt::Display) -> Error {
     Error::Message(format!("voice provider failed: {err}"))
 }
 
@@ -491,27 +564,81 @@ fn missing_voice_credentials(api_key_env: &Option<String>) -> Error {
     ))
 }
 
-fn ai_audio_format(format: wire::VoiceAudioFormat) -> psychevo::__ai::VoiceAudioFormat {
+fn ai_audio_format(
+    format: wire::VoiceAudioFormat,
+) -> psychevo::__product::configuration::VoiceAudioFormat {
     match format {
-        wire::VoiceAudioFormat::Wav => psychevo::__ai::VoiceAudioFormat::Wav,
-        wire::VoiceAudioFormat::Mp3 => psychevo::__ai::VoiceAudioFormat::Mp3,
-        wire::VoiceAudioFormat::Pcm16 => psychevo::__ai::VoiceAudioFormat::Pcm16,
+        wire::VoiceAudioFormat::Wav => psychevo::__product::configuration::VoiceAudioFormat::Wav,
+        wire::VoiceAudioFormat::Mp3 => psychevo::__product::configuration::VoiceAudioFormat::Mp3,
+        wire::VoiceAudioFormat::Pcm16 => {
+            psychevo::__product::configuration::VoiceAudioFormat::Pcm16
+        }
     }
 }
 
-fn wire_audio_format(format: psychevo::__ai::VoiceAudioFormat) -> wire::VoiceAudioFormat {
+fn validated_asr_mime_type(
+    format: psychevo::__product::configuration::VoiceAudioFormat,
+    declared_mime_type: Option<&str>,
+) -> psychevo::Result<String> {
+    if !format.supports_asr_input() {
+        return Err(Error::Message(format!(
+            "unsupported ASR audio format `{}`",
+            format.as_str()
+        )));
+    }
+    if let Some(declared) = declared_mime_type {
+        let declared = declared.trim().to_ascii_lowercase();
+        let matches = match format {
+            psychevo::__product::configuration::VoiceAudioFormat::Wav => {
+                matches!(
+                    declared.as_str(),
+                    "audio/wav" | "audio/wave" | "audio/x-wav"
+                )
+            }
+            psychevo::__product::configuration::VoiceAudioFormat::Mp3 => {
+                matches!(declared.as_str(), "audio/mpeg" | "audio/mp3")
+            }
+            psychevo::__product::configuration::VoiceAudioFormat::Pcm16 => false,
+        };
+        if !matches {
+            return Err(Error::Message(format!(
+                "ASR audio format `{}` conflicts with MIME type `{declared}`",
+                format.as_str()
+            )));
+        }
+    }
+    Ok(format.mime_type().to_string())
+}
+
+fn wire_audio_format(
+    format: psychevo::__product::configuration::VoiceAudioFormat,
+) -> wire::VoiceAudioFormat {
     match format {
-        psychevo::__ai::VoiceAudioFormat::Wav => wire::VoiceAudioFormat::Wav,
-        psychevo::__ai::VoiceAudioFormat::Mp3 => wire::VoiceAudioFormat::Mp3,
-        psychevo::__ai::VoiceAudioFormat::Pcm16 => wire::VoiceAudioFormat::Pcm16,
+        psychevo::__product::configuration::VoiceAudioFormat::Wav => wire::VoiceAudioFormat::Wav,
+        psychevo::__product::configuration::VoiceAudioFormat::Mp3 => wire::VoiceAudioFormat::Mp3,
+        psychevo::__product::configuration::VoiceAudioFormat::Pcm16 => {
+            wire::VoiceAudioFormat::Pcm16
+        }
+    }
+}
+
+fn wire_audio_format_from_mime(mime_type: &str) -> wire::VoiceAudioFormat {
+    match mime_type {
+        "audio/mpeg" | "audio/mp3" => wire::VoiceAudioFormat::Mp3,
+        "audio/pcm" | "audio/l16" => wire::VoiceAudioFormat::Pcm16,
+        _ => wire::VoiceAudioFormat::Wav,
     }
 }
 
 fn ai_realtime_transport(
     transport: wire::RealtimeTransport,
-) -> psychevo::__ai::VoiceRealtimeTransport {
+) -> psychevo::__product::configuration::VoiceRealtimeTransport {
     match transport {
-        wire::RealtimeTransport::Webrtc => psychevo::__ai::VoiceRealtimeTransport::Webrtc,
-        wire::RealtimeTransport::Websocket => psychevo::__ai::VoiceRealtimeTransport::Websocket,
+        wire::RealtimeTransport::Webrtc => {
+            psychevo::__product::configuration::VoiceRealtimeTransport::Webrtc
+        }
+        wire::RealtimeTransport::Websocket => {
+            psychevo::__product::configuration::VoiceRealtimeTransport::Websocket
+        }
     }
 }

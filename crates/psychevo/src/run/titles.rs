@@ -80,7 +80,7 @@ pub(crate) async fn ensure_new_visible_session_title(
     prompt: &str,
     selected_skills: &[SelectedSkill],
     skill_catalog: &SkillCatalog,
-    provider: Arc<dyn GenerationProvider>,
+    provider: LanguageModel,
     resolved: &ResolvedRunProvider,
 ) -> Result<()> {
     let Some(summary) = store.session_summary(session_id).await? else {
@@ -116,7 +116,7 @@ pub(crate) fn visible_session_source_allows_auto_title(source: &str) -> bool {
 }
 
 pub(crate) async fn generate_session_title(
-    provider: Arc<dyn GenerationProvider>,
+    provider: LanguageModel,
     resolved: &ResolvedRunProvider,
     prompt: &str,
     selected_skills: &[SelectedSkill],
