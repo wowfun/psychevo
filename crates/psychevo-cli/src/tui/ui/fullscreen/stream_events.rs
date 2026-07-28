@@ -4,7 +4,7 @@ impl<'a> FullscreenUi<'a> {
     pub(crate) fn apply_stream_event(
         &mut self,
         event: RunStreamEvent,
-        thinking_visible: bool,
+        _thinking_visible: bool,
         debug: bool,
     ) -> bool {
         match event {
@@ -45,8 +45,7 @@ impl<'a> FullscreenUi<'a> {
                     idx
                 });
                 self.append_thinking_text(idx, &text);
-                let reasoning = self.thinking_full_text(idx);
-                thinking_visible && self.apply_visible_tool_intent(&reasoning)
+                false
             }
             RunStreamEvent::ReasoningEnd => {
                 if let Some(idx) = self.reasoning_row.take() {
@@ -64,7 +63,7 @@ impl<'a> FullscreenUi<'a> {
             }
             RunStreamEvent::Event(value) => self.apply_value_event(value.as_value(), debug),
             RunStreamEvent::Scoped { event, .. } => {
-                self.apply_stream_event(*event, thinking_visible, debug)
+                self.apply_stream_event(*event, _thinking_visible, debug)
             }
         }
     }
@@ -183,18 +182,10 @@ impl<'a> FullscreenUi<'a> {
                         });
                         self.transcript[idx].text = text.clone();
                         self.remove_turn_meta();
-                        if event_type == Some("message_update") {
-                            active_tool_frame_requested |= self.apply_visible_tool_intent(&text);
-                        }
                     }
                 }
                 active_tool_frame_requested |= self.apply_streaming_tool_calls(value);
                 if event_type == Some("message_end") {
-                    let matched_tools = streaming_tool_calls_from_event(value)
-                        .into_iter()
-                        .map(|call| call.tool_name)
-                        .collect::<Vec<_>>();
-                    self.remove_unmatched_provisional_tool_intents(&matched_tools);
                     self.turn_usage = value.get("usage").cloned();
                     if let Some(tokens) = self.turn_usage.as_ref().and_then(usage_context_tokens) {
                         self.sidebar_tokens = Some(tokens);
@@ -368,16 +359,11 @@ impl<'a> FullscreenUi<'a> {
                 let write_preview = (tool == "write")
                     .then(|| value.get("args").and_then(write_argument_preview_from_args))
                     .flatten();
-                let idx = id_key
-                    .as_ref()
-                    .and_then(|key| self.tool_rows.get(key))
-                    .copied()
-                    .or_else(|| {
-                        position_key
-                            .as_ref()
-                            .and_then(|key| self.tool_rows.get(key))
-                            .copied()
-                    })
+                let idx = self
+                    .matching_live_tool_row_index(
+                        (!tool_call_id.is_empty()).then_some(tool_call_id.as_str()),
+                        position_key.as_deref(),
+                    )
                     .or_else(|| {
                         (tool != "spawn_agent").then(|| {
                             self.matching_agent_placeholder_index(tool, value, &tool_call_id)
@@ -547,16 +533,11 @@ impl<'a> FullscreenUi<'a> {
                 let id_key = (!tool_call_id.is_empty()).then(|| tool_id_key(tool_call_id));
                 let position_key =
                     event_scoped_tool_position_key(self.streaming_tool_message_seq, value);
-                let idx = id_key
-                    .as_ref()
-                    .and_then(|key| self.tool_rows.get(key))
-                    .copied()
-                    .or_else(|| {
-                        position_key
-                            .as_ref()
-                            .and_then(|key| self.tool_rows.get(key))
-                            .copied()
-                    })
+                let idx = self
+                    .matching_live_tool_row_index(
+                        (!tool_call_id.is_empty()).then_some(tool_call_id),
+                        position_key.as_deref(),
+                    )
                     .or_else(|| {
                         (tool != "spawn_agent").then(|| {
                             self.matching_agent_placeholder_index(tool, value, tool_call_id)
@@ -625,9 +606,6 @@ impl<'a> FullscreenUi<'a> {
                     } else {
                         row.clear_write_argument_preview_after_success();
                     }
-                }
-                if is_write_like_tool(tool) {
-                    self.remove_orphan_provisional_tool_intents(tool, Some(idx));
                 }
                 if tool == "spawn_agent" {
                     self.remove_duplicate_agent_placeholders_for_tool_value(idx, value);

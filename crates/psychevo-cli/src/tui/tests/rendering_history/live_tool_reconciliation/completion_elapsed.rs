@@ -2,7 +2,7 @@
 use super::*;
 
 #[tokio::test]
-pub(crate) async fn late_agent_pending_after_background_handoff_does_not_mark_interrupted() {
+pub(crate) async fn late_idless_agent_pending_does_not_interrupt_completed_handoffs() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
@@ -112,12 +112,23 @@ pub(crate) async fn late_agent_pending_after_background_handoff_does_not_mark_in
 
     let rows = agent_rows(&ui);
     assert_eq!(rows.len(), 2, "{:#?}", ui.transcript);
-    assert!(rows.iter().all(|row| !row.interrupted), "{rows:#?}");
     assert!(
-        rows.iter().all(|row| row
-            .agent_target
-            .as_deref()
-            .is_some_and(|id| id.starts_with("child-"))),
+        rows.iter()
+            .filter(|row| row.tool_call_id.is_some())
+            .all(|row| !row.interrupted
+                && row
+                    .agent_target
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("child-"))),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| {
+                row.tool_call_id.is_none() && !active_tool_row(row) && row.text == "not completed"
+            })
+            .count(),
+        0,
         "{rows:#?}"
     );
 }

@@ -188,10 +188,10 @@ fn remove_visible_write_stdin_row(ui: &mut FullscreenUi<'_>, tool_call_id: &str)
     ui.remove_streaming_tool_call_row("write_stdin", tool_call_id, None);
     let key = tool_id_key(tool_call_id);
     if let Some(index) = ui.tool_rows.get(&key).copied()
-        && ui
-            .transcript
-            .get(index)
-            .is_some_and(|row| row.tool_name.as_deref() == Some("write_stdin"))
+        && ui.transcript.get(index).is_some_and(|row| {
+            row.tool_name.as_deref() == Some("write_stdin")
+                && row.tool_call_id.as_deref() == Some(tool_call_id)
+        })
     {
         ui.remove_transcript_row(index);
     }

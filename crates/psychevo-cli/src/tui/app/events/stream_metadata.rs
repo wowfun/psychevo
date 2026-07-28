@@ -387,9 +387,6 @@ impl TuiApp {
             }
         }
         tag_gateway_transcript_row(ui, idx, entry_meta, block);
-        if is_write_like_tool(tool) {
-            ui.remove_orphan_provisional_tool_intents(tool, Some(idx));
-        }
         if tool == "spawn_agent" {
             ui.remove_duplicate_agent_placeholders_for_tool_value(idx, &value);
         }

@@ -48,7 +48,7 @@ pub(crate) async fn streaming_tool_completion_reuses_pending_row_as_completed_ev
 }
 
 #[tokio::test]
-pub(crate) async fn agent_pending_row_with_position_id_upgrade_merges_into_resolved_child_row() {
+pub(crate) async fn agent_calls_with_conflicting_ids_at_same_position_stay_distinct() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
@@ -114,12 +114,20 @@ pub(crate) async fn agent_pending_row_with_position_id_upgrade_merges_into_resol
     ui.finish_turn();
 
     let rows = agent_rows(&ui);
-    assert_eq!(rows.len(), 1, "{:#?}", ui.transcript);
-    let row = rows[0];
-    assert_eq!(row.tool_call_id.as_deref(), Some("resolved-agent-id"));
-    assert_eq!(row.agent_target.as_deref(), Some("child-en-to-cn"));
-    assert!(!row.interrupted, "{row:#?}");
-    assert_eq!(row.text, "Done (0 tool uses · 864 tokens)");
+    assert_eq!(rows.len(), 2, "{:#?}", ui.transcript);
+    let provisional = rows
+        .iter()
+        .find(|row| row.tool_call_id.as_deref() == Some("provisional-agent-id"))
+        .expect("provisional agent row");
+    assert!(!active_tool_row(provisional), "{provisional:#?}");
+    assert_eq!(provisional.text, "not completed");
+    let resolved = rows
+        .iter()
+        .find(|row| row.tool_call_id.as_deref() == Some("resolved-agent-id"))
+        .expect("resolved agent row");
+    assert_eq!(resolved.agent_target.as_deref(), Some("child-en-to-cn"));
+    assert!(!resolved.interrupted, "{resolved:#?}");
+    assert_eq!(resolved.text, "Done (0 tool uses · 864 tokens)");
 }
 
 #[tokio::test]
@@ -248,7 +256,7 @@ pub(crate) async fn parallel_agent_pending_rows_match_by_position_not_agent_name
 }
 
 #[tokio::test]
-pub(crate) async fn late_agent_pending_after_completion_does_not_create_third_row() {
+pub(crate) async fn idless_agent_pending_after_message_end_starts_new_scope() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
@@ -403,8 +411,7 @@ pub(crate) async fn late_agent_pending_after_completion_does_not_create_third_ro
     );
 
     let rows = agent_rows(&ui);
-    assert_eq!(rows.len(), 2, "{:#?}", ui.transcript);
-    assert!(rows.iter().all(|row| !active_tool_row(row)), "{rows:#?}");
+    assert_eq!(rows.len(), 3, "{:#?}", ui.transcript);
     assert!(
         rows.iter()
             .any(|row| row.agent_target.as_deref() == Some("child-cn"))
@@ -412,6 +419,13 @@ pub(crate) async fn late_agent_pending_after_completion_does_not_create_third_ro
     assert!(
         rows.iter()
             .any(|row| row.agent_target.as_deref() == Some("child-en"))
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.tool_call_id.is_none() && active_tool_row(row))
+            .count(),
+        1,
+        "{rows:#?}"
     );
 }
 
@@ -606,7 +620,7 @@ pub(crate) async fn agent_session_start_with_unknown_id_does_not_steal_pending_r
 }
 
 #[tokio::test]
-pub(crate) async fn background_agent_handoff_keeps_single_row_for_late_partial_pending() {
+pub(crate) async fn late_idless_agent_pending_does_not_replace_background_handoff() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
@@ -725,7 +739,19 @@ pub(crate) async fn background_agent_handoff_keeps_single_row_for_late_partial_p
 
     let rows = agent_rows(&ui);
     assert_eq!(rows.len(), 2, "{:#?}", ui.transcript);
-    assert!(rows.iter().all(|row| !row.interrupted), "{rows:#?}");
+    assert!(
+        rows.iter()
+            .filter(|row| row.tool_call_id.is_some())
+            .all(|row| !row.interrupted),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.tool_call_id.is_none() && active_tool_row(row))
+            .count(),
+        0,
+        "{rows:#?}"
+    );
     let en_row = rows
         .iter()
         .find(|row| row.agent_target.as_deref() == Some("child-en"))
@@ -736,7 +762,7 @@ pub(crate) async fn background_agent_handoff_keeps_single_row_for_late_partial_p
 }
 
 #[tokio::test]
-pub(crate) async fn background_agent_handoff_stepwise_never_duplicates_or_interrupts() {
+pub(crate) async fn background_agent_handoff_ignores_late_pending_for_owned_position() {
     let temp = tempdir().expect("temp");
     let app = test_app(&temp).await;
     let mut ui = FullscreenUi::new(&app);
@@ -842,10 +868,26 @@ pub(crate) async fn background_agent_handoff_stepwise_never_duplicates_or_interr
         }),
         false,
     );
-    assert_stable_agent_rows(&ui, 2);
+    assert_eq!(agent_rows(&ui).len(), 2, "{:#?}", ui.transcript);
     assert_agent_row_target(&ui, "call-en", Some("child-en"));
 
     ui.turn_outcome = Some(Outcome::Normal);
     ui.finish_turn();
-    assert_stable_agent_rows(&ui, 2);
+    let rows = agent_rows(&ui);
+    assert_eq!(rows.len(), 2, "{:#?}", ui.transcript);
+    assert!(
+        rows.iter()
+            .filter(|row| row.tool_call_id.is_some())
+            .all(|row| !row.interrupted),
+        "{rows:#?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| {
+                row.tool_call_id.is_none() && !active_tool_row(row) && row.text == "not completed"
+            })
+            .count(),
+        0,
+        "{rows:#?}"
+    );
 }

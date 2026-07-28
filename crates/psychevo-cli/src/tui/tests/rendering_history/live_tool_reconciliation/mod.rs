@@ -3,6 +3,7 @@ pub(crate) use super::*;
 
 mod agent_rows;
 mod completion_elapsed;
+mod identity;
 mod tool_preambles;
 
 fn agent_rows<'a>(ui: &'a FullscreenUi<'_>) -> Vec<&'a TranscriptRow> {

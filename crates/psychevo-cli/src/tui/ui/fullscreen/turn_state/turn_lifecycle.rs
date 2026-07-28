@@ -173,21 +173,20 @@ impl<'a> FullscreenUi<'a> {
             );
         }
         let id_key = call.id.as_deref().map(tool_id_key);
-        let intent_key =
-            (call.tool_name != "spawn_agent").then(|| tool_intent_key(&call.tool_name));
         let stale_agent_index = (call.tool_name == "spawn_agent")
             .then(|| self.completed_agent_invocation_index(&value, call.id.as_deref()))
             .flatten();
-        let idx = id_key
-            .as_ref()
-            .and_then(|key| self.tool_rows.get(key))
-            .or_else(|| self.tool_rows.get(&call.position_key))
-            .or_else(|| {
-                intent_key
-                    .as_ref()
-                    .and_then(|intent_key| self.tool_rows.get(intent_key))
+        let stale_position_owner_index = call
+            .id
+            .as_deref()
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+            .then(|| {
+                self.durable_position_owner_index(&call.tool_name, &call.position_key)
             })
-            .copied()
+            .flatten();
+        let idx = self
+            .matching_live_tool_row_index(call.id.as_deref(), Some(&call.position_key))
             .or_else(|| {
                 (call.tool_name != "spawn_agent").then(|| {
                     self.matching_agent_placeholder_index(
@@ -223,9 +222,6 @@ impl<'a> FullscreenUi<'a> {
                 }
                 return false;
             }
-            if let Some(intent_key) = &intent_key {
-                self.tool_rows.remove(intent_key);
-            }
             let row = &mut self.transcript[idx];
             row.kind = evidence_kind_for_value(&call.tool_name, &value);
             row.tool_name = Some(call.tool_name.clone());
@@ -255,6 +251,9 @@ impl<'a> FullscreenUi<'a> {
                 self.tool_rows.insert(id_key, idx);
             }
             return false;
+        } else if let Some(idx) = stale_position_owner_index {
+            self.tool_rows.insert(call.position_key, idx);
+            return false;
         } else {
             let mut row = TranscriptRow::with_title(
                 evidence_kind_for_value(&call.tool_name, &value),
@@ -278,7 +277,6 @@ impl<'a> FullscreenUi<'a> {
             self.tool_rows.insert(id_key, idx);
         }
         self.remove_turn_meta();
-        self.remove_orphan_provisional_tool_intents(&call.tool_name, Some(idx));
         active_tool_frame_requested
     }
 
@@ -288,24 +286,11 @@ impl<'a> FullscreenUi<'a> {
         tool_call_id: &str,
         position_key: Option<&str>,
     ) {
-        let mut keys = Vec::new();
-        if !tool_call_id.is_empty() {
-            keys.push(tool_id_key(tool_call_id));
-        }
-        if let Some(position_key) = position_key {
-            keys.push(position_key.to_string());
-        }
-        if tool_name != "spawn_agent" {
-            keys.push(tool_intent_key(tool_name));
-        }
-
-        let mut index = None;
-        for key in &keys {
-            if let Some(row_index) = self.tool_rows.remove(key) {
-                index.get_or_insert(row_index);
-            }
-        }
-        let Some(index) = index else {
+        let tool_call_id = tool_call_id.trim();
+        let Some(index) = self.matching_live_tool_row_index(
+            (!tool_call_id.is_empty()).then_some(tool_call_id),
+            position_key,
+        ) else {
             return;
         };
         let Some(row) = self.transcript.get(index) else {
@@ -477,31 +462,46 @@ impl<'a> FullscreenUi<'a> {
         self.transcript.iter().any(active_tool_row)
     }
 
-    pub(crate) fn remove_orphan_provisional_tool_intents(
-        &mut self,
-        tool: &str,
-        keep_index: Option<usize>,
-    ) {
-        let kind = evidence_kind(tool);
-        let fallback_title = active_tool_title(tool, &serde_json::json!({ "args": Value::Null }));
-        let mut indices = self
-            .transcript
-            .iter()
-            .enumerate()
-            .filter_map(|(index, row)| {
-                (Some(index) != keep_index
-                    && row.kind == kind
-                    && row.tool_name.as_deref() == Some(tool)
-                    && row.title == fallback_title
-                    && row.tool_call_id.is_none()
-                    && active_tool_row(row))
-                .then_some(index)
-            })
-            .collect::<Vec<_>>();
-        indices.sort_unstable_by(|a, b| b.cmp(a));
-        for index in indices {
-            self.remove_transcript_row(index);
+    pub(crate) fn matching_live_tool_row_index(
+        &self,
+        tool_call_id: Option<&str>,
+        position_key: Option<&str>,
+    ) -> Option<usize> {
+        let tool_call_id = tool_call_id
+            .map(str::trim)
+            .filter(|tool_call_id| !tool_call_id.is_empty());
+        if let Some(tool_call_id) = tool_call_id
+            && let Some(index) = self.tool_rows.get(&tool_id_key(tool_call_id)).copied()
+            && self
+                .transcript
+                .get(index)
+                .is_some_and(|row| row.tool_call_id.as_deref() == Some(tool_call_id))
+        {
+            return Some(index);
         }
+        let index = position_key
+            .and_then(|key| self.tool_rows.get(key))
+            .copied()?;
+        let row = self.transcript.get(index)?;
+        match tool_call_id {
+            Some(tool_call_id) => row
+                .tool_call_id
+                .as_deref()
+                .is_none_or(|existing| existing == tool_call_id)
+                .then_some(index),
+            None => row.tool_call_id.is_none().then_some(index),
+        }
+    }
+
+    fn durable_position_owner_index(&self, tool_name: &str, position_key: &str) -> Option<usize> {
+        let index = self.tool_rows.get(position_key).copied()?;
+        let row = self.transcript.get(index)?;
+        (row.tool_name.as_deref() == Some(tool_name)
+            && row
+                .tool_call_id
+                .as_deref()
+                .is_some_and(|tool_call_id| !tool_call_id.trim().is_empty()))
+        .then_some(index)
     }
 
     pub(crate) fn completed_agent_invocation_index(
@@ -603,6 +603,4 @@ impl<'a> FullscreenUi<'a> {
             self.remove_transcript_row(index);
         }
     }
-
-
 }

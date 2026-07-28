@@ -23,6 +23,7 @@ const TUI_CAPTURE_SCREENSHOTS: &[&str] = &[
     "23-permission-directory-scopes.png",
     "02-running-thinking.png",
     "03-final-ledger.png",
+    "24-transcript-tool-identity.png",
     "04-shell-mode.png",
     "05-long-markdown-bottom-scroll.png",
     "06-reasoning-only-collapsed.png",

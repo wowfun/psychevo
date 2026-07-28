@@ -51,6 +51,66 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 delay=0.1,
             )
+        elif (
+            "Transcript identity VHS fixture" in body
+            and "call_identity_exec_one" not in body
+        ):
+            self.send_tool_call(
+                "resp_tui_capture_identity_exec_one",
+                "call_identity_exec_one",
+                "exec_command",
+                {"cmd": "printf identity-exec-one"},
+            )
+        elif (
+            "call_identity_exec_one" in body
+            and "call_identity_read" not in body
+        ):
+            self.send_tool_call(
+                "resp_tui_capture_identity_read",
+                "call_identity_read",
+                "read",
+                {"path": "fixture.txt"},
+            )
+        elif (
+            "call_identity_read" in body
+            and "call_identity_exec_two" not in body
+        ):
+            self.send_tool_call(
+                "resp_tui_capture_identity_exec_two",
+                "call_identity_exec_two",
+                "exec_command",
+                {"cmd": "printf identity-exec-two"},
+            )
+        elif (
+            "call_identity_exec_two" in body
+            and "call_identity_write" not in body
+        ):
+            self.send_tool_call(
+                "resp_tui_capture_identity_write",
+                "call_identity_write",
+                "write",
+                {
+                    "path": "identity-output.md",
+                    "content": "transcript identity visual fixture\n",
+                },
+            )
+        elif (
+            "call_identity_write" in body
+            and "TRANSCRIPT_IDENTITY_FINAL" not in body
+        ):
+            self.send_event(
+                {
+                    "id": "resp_tui_capture_identity_final",
+                    "model": "mock-model",
+                    "choices": [
+                        {
+                            "delta": {"content": "TRANSCRIPT_IDENTITY_FINAL"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+                delay=0.2,
+            )
         elif "call_agent_cn_vhs" in body or "call_agent_en_vhs" in body:
             self.send_event(
                 {
@@ -649,6 +709,32 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
         if delay:
             time.sleep(delay)
+
+    def send_tool_call(self, response_id, tool_call_id, name, arguments):
+        self.send_event(
+            {
+                "id": response_id,
+                "model": "mock-model",
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": tool_call_id,
+                                    "function": {
+                                        "name": name,
+                                        "arguments": json.dumps(arguments),
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+            },
+            delay=0.2,
+        )
 
 
 server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

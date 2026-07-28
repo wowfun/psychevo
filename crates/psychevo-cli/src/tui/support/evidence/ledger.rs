@@ -18,10 +18,6 @@ pub(crate) fn evidence_kind_from_display(display: &ToolDisplaySpec) -> Transcrip
     }
 }
 
-pub(crate) fn is_write_like_tool(tool: &str) -> bool {
-    matches!(tool, "write" | "edit")
-}
-
 pub(crate) fn active_tool_row(row: &TranscriptRow) -> bool {
     !row.failed && !row.interrupted && row.tool_started.is_some() && row.tool_elapsed.is_none()
 }

@@ -76,6 +76,16 @@ Sleep 300 ms
 Screenshot "03-final-ledger.png"
 Escape
 Sleep 100 ms
+Type "/new"
+Enter
+Wait+Screen /Ask pevo/
+Sleep 100 ms
+Type "Transcript identity VHS fixture"
+Enter
+Wait+Screen /TRANSCRIPT_IDENTITY_FINAL/
+Sleep 300 ms
+Screenshot "24-transcript-tool-identity.png"
+Sleep 100 ms
 Type "!"
 Sleep 200 ms
 Screenshot "04-shell-mode.png"

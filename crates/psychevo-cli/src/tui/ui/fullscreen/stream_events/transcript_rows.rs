@@ -96,14 +96,6 @@ impl<'a> FullscreenUi<'a> {
         row.set_evidence_body_text(full);
     }
 
-    pub(crate) fn thinking_full_text(&self, index: usize) -> String {
-        self.transcript
-            .get(index)
-            .and_then(|row| row.full_text.as_ref().or(Some(&row.text)))
-            .cloned()
-            .unwrap_or_default()
-    }
-
     pub(crate) fn finish_thinking_row(&mut self, index: usize) {
         let Some(row) = self.transcript.get_mut(index) else {
             return;

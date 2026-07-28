@@ -223,10 +223,6 @@ pub(crate) fn tool_id_key(tool_call_id: &str) -> String {
     format!("id:{tool_call_id}")
 }
 
-pub(crate) fn tool_intent_key(tool: &str) -> String {
-    format!("intent:{tool}")
-}
-
 pub(crate) fn tool_position_key(content_index: u64, call_index: u64) -> String {
     format!("pos:{content_index}:{call_index}")
 }
