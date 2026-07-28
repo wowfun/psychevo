@@ -98,6 +98,10 @@ published to crates.io. Their public dependency manifests use released
 versions; path dependencies may additionally be present for workspace
 development.
 
+`psychevo-ai` is independently usable through path and git dependencies and
+must produce a publish-ready crate archive. This implementation slice validates
+packaging but does not publish a release.
+
 The published `psychevo` crate has an empty default feature set and exports the
 Framework interface. Private first-party product crates enable its `product`
 feature to assemble Gateway, ACP, CLI, and TUI behavior through one
@@ -108,6 +112,110 @@ crate that enables it can reach only the deliberately re-exported facade.
 
 `psychevo` is the successor of the pre-release `psychevo-runtime` package.
 There is no `psychevo_runtime` compatibility crate or crate-name alias.
+
+## Provider SDK
+
+`psychevo-ai` is a provider-neutral Rust SDK as well as the AI protocol Module
+used by Psychevo. It owns deployment construction, credentials resolved for one
+invocation, provider protocol translation, normalized capability results,
+timeouts, cancellation, and provider diagnostics. It does not own agent loops,
+tool execution, product provider profiles or aliases, `.env` discovery, secret
+persistence, OAuth, model catalog fetching, pricing, or fallback routing.
+
+The normal direct entrypoint is a built-in provider facade:
+
+```rust
+let openai = psychevo_ai::OpenAi::builder(config)
+    .with_api_key(secret)
+    .build()?;
+let model = openai.responses("gpt-5")?;
+let output = model.generate(request).await?;
+```
+
+The equivalent dynamic entrypoint is an immutable Registry. It resolves exact
+`deployment/model` strings into capability-specific model handles. Deployment
+ids are lowercase ASCII identifiers; the first slash separates deployment from
+the exact provider model id, which may itself contain slashes. Registry lookup
+does not infer aliases or defaults and rejects an unregistered deployment or
+capability before dispatch.
+
+Custom providers are assembled with a provider builder and capability-specific
+Adapters. There is no wide provider interface:
+
+```rust
+let provider = psychevo_ai::Provider::builder(deployment)
+    .language_adapter(my_language_adapter)
+    .image_adapter(my_image_adapter)
+    .build()?;
+```
+
+The same provider is directly usable or registerable before Registry freeze.
+Built-in Adapter types for OpenAI Chat, OpenAI Responses, OpenAI Image,
+Anthropic Messages, and Xiaomi voice are public and composable. Their raw wire
+encoders and parsers remain private.
+
+Public Adapter methods return boxed futures and pull-side streams so a
+downstream crate can implement them without `async_trait`. Each invocation
+receives a model id and an SDK-created Adapter context containing the immutable
+model descriptor, optional caller-bound advisory Model Profile, endpoint,
+merged safe headers, shared HTTP client, resolved credential snapshot, abort
+signal, and effective timeout policy. It does not expose the credential
+resolver, lifecycle handle, SDK task, queue, or output accumulator.
+
+Language models provide streaming as the primary operation and whole-response
+generation by collecting that same stream. Image, transcription, speech, and
+realtime connect use eager abortable invocation futures. Every invocation
+requires an ambient Tokio runtime; starting outside one returns the same handle
+shape and settles with a typed runtime-unavailable error.
+
+Provider configurations and provider-neutral requests, messages, events, and
+results are serde data. Secrets, runtime objects, capability handles, and
+Adapters are not serializable. Provider configuration contains no secret or
+constructed HTTP client.
+
+Credentials use named slots bound to credential references. An async resolver
+resolves every configured slot exactly once at invocation start and returns one
+immutable secret snapshot. A built-in facade may instead accept an explicit
+redacted secret or an explicitly captured process-environment snapshot. The SDK
+does not read ambient process environment implicitly.
+
+An SDK-created HTTP client uses a ten-second connection timeout. Language and
+unary calls use a 300-second progress-idle timeout by default and no total
+deadline; zero disables the corresponding SDK timer. An injected HTTP client
+owns its connection policy while SDK idle and total-deadline policy still
+applies. Active realtime sessions have no default event-idle timeout. The SDK
+does not perform generic automatic retries.
+
+Built-in provider support is controlled by independent default-on `openai`,
+`anthropic`, and `xiaomi` features. Core types, Registry, custom Adapter
+interfaces, and deterministic fake Adapters for all capabilities remain
+available without default features. The first release includes no real
+realtime provider.
+
+Model Profile data is caller-supplied advisory metadata. `psychevo-ai` does not
+ship a volatile model inventory and does not contact `/models`. Unsupported
+typed preferences are omitted with warnings; unsupported semantic requirements
+such as structured output, required tool choice, input modality, or hosted tool
+support fail before dispatch. Namespaced JSON extensions and per-request safe
+headers are the only raw extension mechanism.
+
+SDK errors expose a stable category, provider status and code when available,
+retry-after, failure phase, a bounded safe summary, and the partial normalized
+result. They do not expose credentials, authentication headers, complete
+request bodies, unbounded provider bodies, or a public dispatch-certainty
+claim. Built-in HTTP Adapters preserve non-success response status, bounded
+provider error code, and parseable retry metadata at the HTTP boundary so
+authentication and rate-limit failures cannot be downgraded to an unclassified
+provider string.
+Realtime command admission and command execution share the configured bounded
+deadline but retain distinct failure authority: queue-admission expiry is
+`Timeout`, a closed command channel is `Aborted`, and an accepted command waits
+for its Adapter acknowledgement or timeout.
+
+OpenAI and Anthropic support include credential-free high-level request
+previews and canonical endpoint resolution that reuse the production encoder
+and endpoint rules. Product-only token-category accounting remains in
+`psychevo`; the SDK does not expose raw wire builders to support it.
 
 ## Rust Interface
 

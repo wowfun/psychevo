@@ -422,14 +422,17 @@ evidence bundle does not claim exact provider request replay.
 `last_provider_request` contains the best-effort reconstructed provider request
 body sent immediately before the latest persisted assistant generation in the
 session. This body is regenerated from persisted transcript messages,
-prompt-scoped context evidence, session metadata, and the current
-OpenAI-compatible request adapter; it is labeled as reconstructed, excludes
-HTTP headers and API keys, and may differ from the original network payload if
-provider translation code, tool schemas, local image files, or unstored
-pruning/runtime options changed. Last-request reconstruction is unredacted and
-may expose hidden/system prompts, project instructions, skill context, tool
-schemas, tool outputs, reasoning adapter fields, and image data URLs when those
-inputs are reconstructable.
+prompt-scoped context evidence, session metadata, and the recorded provider
+protocol's current production request Adapter. The export uses the matching
+canonical endpoint and request body shape for OpenAI Chat, OpenAI Responses, or
+Anthropic Messages; it must not label an Anthropic session as
+`/chat/completions`. It is labeled as reconstructed, excludes HTTP headers and
+API keys, and may differ from the original network payload if provider
+translation code, tool schemas, local image files, or unstored pruning/runtime
+options changed. Last-request reconstruction is unredacted and may expose
+hidden/system prompts, project instructions, skill context, tool schemas, tool
+outputs, reasoning adapter fields, and image data URLs when those inputs are
+reconstructable.
 `last_provider_response` contains the latest persisted assistant response before
 the current undo/revert boundary, derived from stored assistant message,
 usage, and allowlisted provider metadata. It is labeled `raw: false` and

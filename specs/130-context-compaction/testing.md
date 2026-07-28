@@ -22,6 +22,9 @@ CI/CD vocabulary and generic validation boundaries follow
   leave the transcript and checkpoint table unchanged.
 - Completed native Psychevo compaction appends a checkpoint without deleting or
   rewriting original transcript messages.
+- Summary text is checkpointed only after `Completed + Stop`; deterministic
+  Length, ContentFilter, Aborted, provider failure, and empty-summary cases
+  leave the previous checkpoint and transcript boundary unchanged.
 - Runtime selects the latest checkpoint that is valid for the current transcript
   boundary and ignores later checkpoints invalidated by undo or revert state.
 - Compacted context projection prepends hidden summary context and then includes

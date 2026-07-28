@@ -295,11 +295,13 @@ Registered live checks:
   prompt usage is available or `partial` when only ACP context/usage evidence
   is available; `unavailable` is a failure after a completed turn.
 - `opencode-acp-delegate-live`: `@opencode` delegate live flow. The check proves
-  that the child streams before the parent finishes, the child and persisted
-  delegate result contain the requested sentinel, and the parent reaches a
-  non-empty normal terminal response. A provider may summarize that result
-  instead of copying the child's sentinel verbatim into its final prose, so
-  verbatim parent repetition is not a validation invariant. The generated
+  that the child streams before the parent finishes, the child's persisted
+  transcript evidence and persisted delegate result contain the requested
+  sentinel, and the parent reaches a non-empty normal terminal response. The
+  child may emit the sentinel as assistant text or through a read-only tool
+  result, and the provider may summarize that result instead of copying the
+  child's sentinel verbatim into its final prose; neither exact prose location
+  is a validation invariant. The generated
   `@opencode` Agent must resolve the configurable public `opencode` Runtime
   Profile when no Team member supplies another profile. The check configures
   that exact temporary Project Runtime Profile with the same live model used by

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-28
+
+- Made `psychevo-ai` a provider-neutral local Rust SDK with typed capabilities,
+  credentials, immutable registry lookup, feature-isolated built-ins, and
+  deterministic Adapter extension and fake-provider support.
+- Moved Psychevo language, image, voice, context-accounting, and session-export
+  integration onto the SDK boundary while keeping provider wire codecs private.
+- Hardened provider accounting, requests, errors, media validation, realtime
+  admission, agent-model preflight, ordered assistant replay, and cancellation
+  and compaction terminal behavior.
+- Stabilized Fullscreen TUI tool-row identity and stale-update reconciliation,
+  including concurrent and orphan observations and exec-owned yielded polling.
+
 ## 2026-07-27
 
 - Made the Framework the sole owner of direct runtime extension assembly,

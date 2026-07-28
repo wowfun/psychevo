@@ -44,6 +44,10 @@ When `auxiliary.compression.model` is absent, runtime falls back to legacy
 model for summary generation. When the configured auxiliary or legacy
 compression model cannot be resolved or fails during summary generation,
 runtime must leave the session unchanged and report the compaction failure.
+Summary generation is successful only when the SDK reports a completed
+generation with a normal `Stop` finish reason. Length-limited, content-filtered,
+aborted, failed, empty, or otherwise non-normal terminal results must not create
+or replace a checkpoint, even when they contain non-empty partial text.
 
 ## Checkpoints
 

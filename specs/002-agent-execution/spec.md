@@ -128,6 +128,12 @@ drain emit no message events for their old or canceled content.
 
 When a runtime-supplied binding reports a tool failure as a tool result, agent execution records it as a completed tool execution with a failed outcome summary unless the agent invocation itself is stopped, failed, or aborted for another reason.
 
+Agent execution builds the finalized assistant message from the AI SDK's
+ordered terminal snapshot. It preserves the shared content-index order and
+provider-native reasoning evidence. A structured invalid-tool-arguments error
+is retained on the tool-call block and prevents the runtime binding from being
+invoked; the loop emits an error ToolResult instead.
+
 ## Boundaries
 
 This spec owns agent-core execution semantics and event families.

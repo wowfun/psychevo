@@ -83,7 +83,10 @@ inside `voice.*`; voice provider credentials resolve through the same provider
 environment rules as model providers.
 
 Supported ASR input formats are `wav` and `mp3`. The Gateway rejects encoded
-audio payloads over `10 MB` before provider dispatch. Supported first-slice
+audio payloads over `10 MB` before provider dispatch. The required `format` is
+authoritative: Gateway derives the canonical MIME from it and rejects an
+optional `mimeType` that conflicts; a WAV MIME cannot make declared `pcm16`
+valid for ASR. Supported first-slice
 TTS synthesize formats are `wav` and `pcm16`; Workbench playback consumes
 browser-playable data URLs for `wav` and may use `pcm16` only through a
 streaming/realtime path that explicitly understands raw PCM.
@@ -99,8 +102,9 @@ streaming/realtime path that explicitly understands raw PCM.
 - Realtime starts one thread-scoped session, accepts audio/text/speech appends,
   emits normalized live events, and closes with a reason.
 
-Provider errors are structured and bounded. Callers must fall back to text when
-TTS or realtime delivery fails.
+Provider errors are structured and bounded. Xiaomi HTTP failures preserve
+status, provider code, and parseable retry metadata before the response body is
+consumed. Callers must fall back to text when TTS or realtime delivery fails.
 
 Xiaomi ASR/TTS reuse the OpenAI-compatible `chat/completions` endpoint shape:
 
@@ -140,6 +144,13 @@ Gateway emits these notifications:
 Realtime audio frames, SDP, provisional transcript deltas, and output audio are
 live-only. The durable transcript records only final user and assistant text
 through ordinary thread entries.
+
+An append RPC returns `accepted: true` only after the bounded SDK command queue
+has accepted the command and the realtime Adapter command sink has confirmed
+it. The handler awaits and propagates queue, closed-session, timeout, and
+provider errors. It must not create detached per-append tasks outside the SDK
+queue; after an append response, a client may issue stop knowing that append
+was processed first.
 
 ## Workbench UX
 
@@ -198,6 +209,8 @@ metadata.
 - Realtime methods return bounded unavailable errors until `voice.realtime` is
   configured and can emit deterministic fake started/transcript/audio/closed
   events in tests.
+- Realtime append success confirms Adapter command acceptance before the RPC
+  response and append failures are returned to the caller.
 - Workbench dictation inserts transcript into the composer draft without
   submitting it; read-aloud and auto-speak do not mutate transcript history.
 - Realtime live notifications do not create durable transcript entries until a

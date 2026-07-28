@@ -204,6 +204,17 @@ name, both already carry provider call ids, and their initial argument JSON is
 empty or incomplete. A temporary id may migrate to a provider id only within
 the same position. Tool-name matching is reserved for observations that carry
 no usable position and must never collapse simultaneous same-name calls.
+Position identity ends with the assistant segment that created it. A later
+segment may reuse the same `content_index` and `call_index` without aliasing the
+earlier row. When an observation carries a non-empty `tool_call_id`, a
+position-owned row may be adopted only when it has no durable id or already has
+that same id; a conflicting durable id is a different call. A terminal
+observation that cannot identify its live owner materializes independently and
+must not replace or remove an unrelated active row. Cleanup must not infer
+identity from the tool name or rendered text.
+Within the same assistant segment, once a positioned row has adopted a durable
+ID, a later idless pending update at that position is stale progress for that
+owner. It must not create a second active row or rewrite a completed Agent row.
 When a tool result carries execution timing, projection normalizes it onto the
 tool block as `metadata.elapsed_ms`. Message metadata `elapsed_ms` is
 authoritative; otherwise stable result fields such as `elapsed_ms` or

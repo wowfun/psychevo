@@ -8,7 +8,8 @@ Define the provider-neutral AI protocol and compatibility boundary owned by `psy
 ## Scope
 
 - provider-neutral AI protocol owned by `psychevo-ai`
-- currently specified agent-facing generation protocol
+- language generation, image generation, transcription, speech, and realtime
+  capability semantics exposed by the Rust SDK
 - mainstream-compatible generation request and stream semantics
 - semantic generation request concepts, including assembled model context
 - normalized generation concepts consumed by agent execution without exposing raw provider wire formats
@@ -19,7 +20,8 @@ Define the provider-neutral AI protocol and compatibility boundary owned by `psy
 Out of scope:
 - model catalogs, model selection policy, or provider registry rules
 - endpoint paths, authentication, network transport, retries, rate limits, or billing
-- exact OpenAI, Anthropic, or other provider request, response, or stream fields
+- exact OpenAI, Anthropic, Xiaomi, or other provider request, response, or
+  stream fields
 - concrete Rust traits, structs, functions, or module APIs
 - payload schemas, metadata schemas, provider-specific metadata keys, or persistence formats
 - concrete providers, concrete tools, or tool execution behavior
@@ -30,7 +32,12 @@ Out of scope:
 
 `003` owns the provider-neutral protocol space for AI capabilities exposed through `psychevo-ai`.
 
-This document specifies generation because agent execution needs generation first. Embeddings, reranking, vision, and other AI capabilities remain within this protocol area, but this document does not define their detailed semantics.
+This document specifies language generation in detail because agent execution
+consumes it directly. Image generation, transcription, speech, and realtime
+share the same provider-neutral ownership and error principles; their concrete
+Rust results and lifecycle are specified by [080 Framework and
+SDK](../080-sdk/spec.md). Embeddings and reranking remain within this protocol
+area but are not part of the current SDK capability set.
 
 Future specs may specialize non-generation capabilities. Those specs must preserve the provider-neutral boundary owned by `psychevo-ai`.
 
@@ -64,7 +71,10 @@ At the semantic level, a generation request contains:
 
 These concepts should map cleanly to `OpenAI-compatible` or `Anthropic-compatible` generation families when practical. This spec does not adopt either family's concrete fields.
 
-The model target identifies which model the AI layer should invoke. This spec does not define model catalog structure, provider selection, fallback, or routing policy.
+The model target identifies the model bound to the invocation. Callers resolve a
+deployment and model before constructing a request; requests do not repeat
+provider routing policy. This spec does not define product model catalogs,
+aliases, fallback, or automatic routing.
 
 Model context is the semantic input that runtime intends the model to consume. [006 Context Assembly](../006-context-assembly/spec.md) defines model context assembly and projection. Its loop-visible portion uses the message semantics from [002 Agent Execution](../002-agent-execution/spec.md).
 User messages in model context may contain provider-neutral text blocks, local
@@ -132,6 +142,11 @@ The stream categories are:
 
 Normalized streams preserve the kind of model output being produced. Agent execution may project these categories onto the message lifecycle events defined by [002 Agent Execution](../002-agent-execution/spec.md), but this spec does not collapse all output progress into a single message-progress shape.
 
+All content-bearing categories share one ordered content-index space. The final
+assistant message preserves that order across reasoning, text, requested tools,
+provider tools, and sources. Projection or persistence must not regroup blocks
+by category.
+
 Reasoning/thinking progress is local-only folded transcript material when
 retained. It is distinct from final visible assistant text and must not be
 projected into default visible assistant output. Interfaces may expose it
@@ -150,6 +165,10 @@ When a provider reports usage, the AI layer should normalize mainstream token
 usage concepts into provider-neutral consumption facts before agent execution
 or runtime projection consumes them. Normalized usage is not assistant content,
 not a transcript block, and not visible message text.
+For providers that report uncached input, cache reads, and cache writes as
+disjoint fields, normalized input is their saturating sum. The cache
+subcategories remain available separately, and normalized total adds output to
+that complete input count.
 
 Extension metadata may carry details that do not belong in core generation semantics. Metadata is optional unless a later spec promotes a field into core semantics.
 
@@ -158,7 +177,9 @@ allowlisted, non-secret metadata should be projected into runtime summaries or
 TUI debug views. Raw provider payloads, credentials, request headers, and
 unbounded metadata maps must not become default transcript material.
 
-The terminal outcome completes the generation stream. A generation stream must not leave agent execution without an observable terminal outcome.
+The terminal outcome completes the generation stream. A generation stream must
+not leave agent execution without an observable terminal outcome. EOF without a
+terminal provider fact is a protocol failure rather than an inferred success.
 
 ## Metadata Extensions
 
@@ -173,7 +194,9 @@ Metadata shape, serialization, persistence, replay rules, and provider-specific
 keys belong outside this spec. Provider-specific reasoning continuity fields
 such as `reasoning_content` remain provider wire fields. Runtime replay may
 derive or project them only when a compatible provider requires that protocol
-shape.
+shape. Provider-native evidence retained for replay stays attached to the
+reasoning content block that produced it and is not wrapped in a different
+provider's metadata shape.
 
 Normalized usage and allowlisted provider metadata may be associated with the
 assistant message lifecycle by agent execution or runtime, but they remain
@@ -190,13 +213,39 @@ Generation outcomes align with the outcome semantics defined by [002 Agent Execu
 
 A normal outcome means the model completed the generation without a stop-limit, failure, or abort condition.
 
-A stopped outcome means generation ended because a configured generation limit or stopping policy was reached.
+A stopped outcome means generation ended because a configured generation limit,
+content-filter/refusal policy, or other non-error stopping policy was reached.
 
 A failed outcome means the provider, model, or protocol normalization could not complete the generation.
 
 An aborted outcome means the caller or runtime cancelled generation before normal completion.
 
-Provider and model failures must surface as observable failed generation outcomes. This spec does not define whether an implementation reports that failure through return values, callbacks, streams, or errors.
+Provider and model failures surface as typed errors carrying the provider-neutral
+partial generation assembled before failure. Explicit caller abort is a normal
+aborted generation output. Provider-side cancellation and billing reversal are
+not implied by local abort.
+
+## Non-Language Capabilities
+
+Image generation returns one or more generated images plus warnings, usage when
+reported, and provider metadata. A successful result contains at least one
+image. Returning fewer images than requested is successful with a warning;
+returning none is a provider failure.
+
+Transcription returns text, ordered segments with start and end times in
+seconds, optional language and duration, warnings, and provider metadata.
+Segments may be empty when a provider does not expose them.
+
+Speech returns typed audio media plus warnings and provider metadata. Media
+preserves MIME identity and supports inline bytes or canonical Base64
+serialization without requiring callers to perform implicit filesystem I/O.
+Base64-backed media is decoded and validated on first byte/Base64 access;
+serialization must not forward an invalid original string as valid media.
+
+Realtime is a bidirectional session with typed text and audio commands, commit,
+events, graceful send-side close, and abort. The command side is bounded and
+backpressured. The event side is pull-based and has one terminal close
+authority. Unexpected transport EOF is a protocol failure.
 
 ## Boundaries
 

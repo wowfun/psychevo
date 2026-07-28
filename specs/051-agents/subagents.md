@@ -252,6 +252,16 @@ Child metadata records the resolved definition name, generated or provided
 settings, effective remaining spawn depth, and active team/mission identifiers
 when the invocation belongs to a team or mission run.
 
+For native child agents, the selected child model is an execution input rather
+than display metadata. Runtime retains the resolved Provider and binds a fresh
+language-model handle for the explicit spawn override,
+`PSYCHEVO_SUBAGENT_MODEL`, Agent Definition model, or inherited parent model in
+that precedence order. The model recorded in child events and persistence must
+be the same model id dispatched to the Adapter.
+Runtime validates that binding before creating or reopening the child session,
+durable parent/child edge, or running record. A binding failure leaves no open
+child lifecycle state.
+
 Existing session records are not migrated. Old verbose tool results and
 mailbox records remain historical development data. New records are compact by
 construction, and old `last-provider-request` reconstruction remains unchanged.

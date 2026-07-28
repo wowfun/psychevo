@@ -3,7 +3,8 @@ name: 120. Provider Registry
 psychevo_self_edit: deny
 ---
 
-Define the first live-provider registry and configuration contract.
+Define Psychevo product provider configuration and its mapping into the
+`psychevo-ai` SDK.
 
 This topic owns runtime provider/model configuration and resolution policy for
 the implementation slice. Concrete `pevo` CLI spelling belongs to
@@ -19,6 +20,7 @@ provider-neutral AI protocol in [003 AI Protocol](../003-ai-protocol/spec.md).
 - `.env` credential loading
 - provider/model resolution for `pevo run`
 - public model metadata resolution for context limits, capabilities, and cost
+- product construction of immutable SDK deployment registries
 
 Out of scope:
 
@@ -26,19 +28,37 @@ Out of scope:
   fetch flows, provider fallback execution, or dynamic routing
 - OAuth, browser login, device code flows, auth stores, or credential refresh
 - rate-limit accounting or provider-side billing reconciliation
-- provider-native APIs outside the Chat-compatible family, hosted agent-product
-  transports, external portal transports, or tool-protocol provider transports
+- provider-native APIs other than the explicit OpenAI Responses and Anthropic
+  Messages built-ins, hosted agent-product transports, external portal
+  transports, or tool-protocol provider transports
 - external auth file reading, credential pools, or setup commands
+
+## Product and SDK Registry Separation
+
+This topic owns a product configuration registry. It may discover aliases,
+merge TOML, load product `.env` files, attach model metadata, and choose a
+default provider. The `psychevo-ai` SDK Registry is a separate immutable runtime
+object: it accepts only explicit deployments and resolves exact
+`deployment/model` strings without aliases, environment discovery, catalog
+lookups, or default selection.
+
+Psychevo resolves all product policy first and constructs one SDK Registry for
+the resulting configuration snapshot. Product aliases never become aliases in
+the SDK. Model limits, pricing, context categories, and catalog facts remain
+product-owned `ModelProfile` input and are not bundled into `psychevo-ai`.
 
 ## Registry Contract
 
-The first live-provider registry is internal and static. Every built-in entry
-uses the OpenAI Chat Completions-compatible transport.
+The product live-provider registry contains built-in entries and user-defined
+OpenAI Chat-compatible entries. Built-ins select one SDK protocol Adapter:
+`openai` uses OpenAI Responses, `anthropic` uses Anthropic Messages, and the
+remaining language providers use OpenAI Chat.
 
 The built-in provider ids and aliases are:
 
 - `openrouter`
 - `openai`
+- `anthropic`
 - `xai`
 - `zai`, with aliases `z.ai`, `z-ai`, `glm`
 - `deepseek`
@@ -48,6 +68,11 @@ The built-in provider ids and aliases are:
 - `opencode-zen`, with aliases `opencode`, `opencode_zen`, `zen`
 - `lmstudio`
 - `custom`
+
+Automatic product selection considers credentialed Anthropic alongside the
+other built-ins. An explicit `anthropic/model` selection and an automatic
+selection with `ANTHROPIC_API_KEY` must reach the Anthropic Messages Adapter
+without requiring a duplicate user-defined provider entry.
 
 OpenCode Zen's built-in registry facts are: id `opencode-zen`, aliases
 `opencode`, `opencode_zen`, and `zen`, display name `OpenCode Zen`, API URL
@@ -62,6 +87,7 @@ Provider entries define:
 - accepted alias names
 - derived credential environment variable
 - whether a no-auth local placeholder is allowed
+- the built-in protocol family used to construct its SDK language Adapter
 
 Unknown built-in provider ids are rejected before `agent_start`. User-defined
 providers may be configured by name and must use the same Chat-compatible

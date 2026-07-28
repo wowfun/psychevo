@@ -88,6 +88,16 @@ Manual real-provider validation is opt-in only.
 - Fullscreen ledger projection for prompt blocks, Thinking, tool/evidence,
   Agent rows, assistant answers, compact metadata, context usage, status line,
   sidebars, terminal Markdown, raw display, and non-terminal plain rendering.
+- Fullscreen live-tool identity when assistant segments reuse tool positions,
+  simultaneous same-name calls have distinct positions but no durable ids yet,
+  terminal observations arrive without a matching live owner, and
+  `write_stdin` polling targets a yielded `exec_command`; no case may replace
+  or remove an unrelated row.
+- A late idless pending update at a position already owned by a durable,
+  completed Agent call is a no-op and leaves exactly one completed Agent row.
+- The deterministic TUI VHS capture includes a real mock-provider turn with
+  consecutive assistant tool messages reusing the same provider call position;
+  its final screenshot must visibly retain every tool title in execution order.
 - Resumed local Web Search results decode the persisted untrusted wrapper into
   the existing foldable tool row and never expose wrapper text as the result.
 - Context status uses the latest completed provider turn while Session tokens
