@@ -177,6 +177,10 @@ warning threshold. The build must not silence this warning by raising the
 threshold when a maintainable chunk split is available. Workspace package
 chunks must use explicit boundaries so client runtime chunks do not absorb
 generated protocol schema modules or their validation vendor dependencies.
+Generated protocol validation reuses the emitted schema objects through the
+compact CSP-safe runtime interpreter. It does not ship an expanded validator
+copy of the schema graph or move that duplicate cost into several eagerly loaded
+chunks.
 Lazy-loaded rich-renderer dependencies, including Mermaid and its parser,
 layout, math, and diagram-rendering packages, must stay in named async vendor
 groups instead of being absorbed into a monolithic fallback `vendor` chunk.
@@ -300,6 +304,29 @@ context read on activation, and applying that response must not schedule the
 same read again. Auxiliary Settings, Workspace, Observability, Agent catalog,
 and command refreshes are deduplicated by their owning scope and do not block
 the selected Transcript or Composer controls.
+
+Workbench composes two additional narrow external-store owners through
+`useSyncExternalStore`:
+
+- `SessionBrowserApplication` owns session/archive/workspace summaries,
+  pagination, pins, scope epoch, and one single-flight refresh;
+- `WorkspaceApplication` owns files, diff, changes, and branch as independent
+  facets, each with its own epoch, single-flight latest-wins request, and
+  demand-driven `ensure(facet)`.
+
+These owners publish snapshots and cohesive actions. The React composition root
+does not receive a setter bag, retain a global WeakMap request deduper, or issue
+duplicate administration reads. Panel visibility, voice draft, preferences,
+and other truly local presentation state remain local React state; this split
+does not add Redux, Zustand, a global reducer, or a Workbench mega-store.
+
+Session browser requests are invalidated when their Gateway client is replaced
+or when a newer request for the same result family supersedes them. Changing the
+active scope on the same client does not invalidate an already-started global
+`thread/browser` request: that RPC is scoped by its own optional `cwd` parameter,
+not by the later Composer scope. This preserves the required cold-start overlap
+between initialization and the first global session browse while still rejecting
+an older cwd-filtered result after a newer browse revision.
 
 After the first Turn of a detached draft is accepted, the durable Thread may be
 visible before its runtime binding has materialized. During that interval,

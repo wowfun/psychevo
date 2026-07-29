@@ -140,6 +140,13 @@ window and Floating window cannot overwrite each other's active Gateway
 connection. Sender keys are unique per bridge transport instance, not only per
 window label, so a stale renderer cleanup cannot remove a newer connection that
 uses the same surface.
+
+Every Gateway Tauri command receives the invoking `WebviewWindow`; native code
+derives the owner from its real label. Renderer payloads never choose
+`ownerWindow`. Connect, send, disconnect, cleanup, and emitted events validate
+both owner and generation, and native delivery uses `emit_to(owner)`. A
+cross-window renderer cannot spoof, send through, disconnect, or clean up
+another window's bridge entry.
 Request/response frames remain scoped to the initiating bridge connection, but
 thread-affecting Gateway notifications are shared across Desktop surfaces.
 The Gateway server's process-level Event Hub supplies that shared notification
@@ -170,6 +177,22 @@ disposal so pending RPCs reject immediately and connection subscribers observe
 the terminal state before native listeners are removed. Window destruction and
 application shutdown dispose that resource; transient Gateway loss uses the
 transport's reconnectable close path.
+
+Production command capabilities are generated from the Tauri AppManifest and
+split by surface. Workbench and Floating share only Gateway
+connect/send/disconnect, selection/region capture and picker, and required event
+listen permissions. Workbench additionally receives endpoint, fallback cwd,
+platform capability, and download commands. Floating additionally receives
+initial activation, open-in-Workbench, and the minimum window controls needed
+for its capsule. Test-only permissions are layered only into test
+capabilities.
+
+Production CSP permits self scripts, inline styles, blob workers, data/blob and
+HTTP(S) media, HTTP(S) frame/connect targets, and Tauri's `ipc:` custom
+protocol for native invoke, with
+`object-src 'none'`, `base-uri 'none'`, and `frame-ancestors 'none'`. `devCSP`
+retains `ipc:` and adds only the loopback Vite and HMR endpoints. Production does not inherit
+development wildcards.
 
 Floating is a Desktop-specialized small window, not a second chat
 implementation. Desktop must wire Floating and Workbench to shared
@@ -378,8 +401,12 @@ Default validation is deterministic and local:
   and screenshots. Rust-side milestones are emitted only under `wdio-test`;
   production builds expose no test recorder or managed token. Each milestone
   declares its own clock source, and cross-process timestamps are not directly
-  subtracted. Browser-side milestones use the Workbench content-free timing
-  registry so WebKit and Chromium retain the same readiness semantics
+  subtracted. A failed readiness checkpoint also captures one screenshot and a
+  bounded structural renderer-state artifact (shell datasets and form-control
+  state, never storage, credentials, transcript content, or full DOM) so the
+  native failure can be traced across process, bridge, and renderer boundaries.
+  Browser-side milestones use the Workbench content-free timing registry so
+  WebKit and Chromium retain the same readiness semantics
 - native Desktop Floating smoke covers content-fit sizing without exposed black
   transparent gutters and provider/live transcript output through the shared
   Transcript DOM

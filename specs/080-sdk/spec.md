@@ -252,6 +252,11 @@ facts remain behind the private first-party bridge. This preserves every
 supported input while preventing callers from depending on the storage layout
 of execution policy and capability assembly.
 
+`TurnRequest::with_approval` accepts only the interaction handler and whether
+clarify is supported. Reviewer selection comes from effective
+`approvals_reviewer` configuration; no Rust `ApprovalMode` or ignored
+`approval_mode` argument crosses the Framework interface.
+
 The high-level interface does not expose the state store, a SQLite pool,
 runtime-internal run options, a Native session id, event persistence sinks, or
 the Native run-loop entrypoints.
@@ -310,6 +315,27 @@ Adapter failures persist their error terminal without requiring a successful
 `TurnResult`. A durably committed terminal remains resumable as that exact
 outcome.
 
+The accepted Turn task owns one private finalizer from active-slot
+registration through completion settlement. The finalizer stages the exact
+`PendingTerminal` before the first terminal persistence attempt and applies the
+following order once:
+
+1. persist the semantic terminal;
+2. cancel pending permission waiters and finish the interaction broker;
+3. release the Thread lane and either remove the active slot or retain that
+   same `PendingTerminal`;
+4. publish the terminal event only after durable commit;
+5. close the event log and settle the typed completion.
+
+Any ordinary finalization error continues through the remaining in-memory
+cleanup and becomes a typed persistence or lifecycle failure; it cannot strand
+the lane or waiter. If finalization panics, task-local unwinding performs the
+same cleanup synchronously and retains the staged terminal for same-process
+retry. A Tokio forced abort does not run the panic outcome: it leaves the
+active slot to `shutdown_force_owned`, which persists the existing
+`Interrupted` outcome. Cleanup operations are idempotent and recover their
+private poisoned mutexes instead of panicking again.
+
 ## Accepted Turn Lifetime
 
 Starting a turn reserves its Thread queue slot and an Application-owned
@@ -346,6 +372,10 @@ cancellation cannot strand the Thread queue.
 
 Event receivers are bounded. A slow receiver may observe an explicit lag or
 resync condition instead of applying unbounded backpressure to execution. The
+generation stream may losslessly coalesce adjacent incremental deltas before a
+consumer observes them; provider chunk boundaries are not public identity, and
+consumers rely on ordered content plus the authoritative terminal snapshot
+rather than an exact delta-event count. The
 durable Thread snapshot is authoritative after reconnect, lag, or event loss.
 
 A transport reconnect can reattach to an active Turn while its Application
@@ -568,6 +598,24 @@ fail immediately with the same cause. Delivery-unknown mutations are not
 replayed on the half-closed transport. Turn handles are removed after their
 terminal settles. The Client does not implement automatic reconnect or request
 replay.
+
+Ordinary Python RPC requests have a 30-second default timeout and each request
+may override it. `TurnHandle.wait()` retains long-operation semantics with no
+default total timeout, while accepting an explicit timeout. A timed-out request
+removes its pending correlation; a late response is discarded and the SDK does
+not retry. It raises
+`RequestTimeoutError(method, timeout, delivery_unknown)`, where delivery is
+unknown only when the mutation may have crossed the transport boundary.
+
+Reverse callbacks use eight fixed workers and a bounded backlog of 64. A full
+queue returns an overload JSON-RPC error for a callback request and reports a
+notification overload through the event loop's exception handler. It never
+creates an unbounded callback task set.
+
+`Client.close_timeout` defaults to ten seconds. One deadline covers the
+shutdown RPC, callback worker cancellation, reader termination, transport
+close, and local stdio terminate-then-kill escalation. Close is idempotent and
+preserves the terminal error when the bounded shutdown cannot complete.
 
 Remote WebSocket framing, masking, fragmentation, ping/pong, close, and message
 size enforcement are delegated to the maintained `websockets` Python library.

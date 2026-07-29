@@ -32,13 +32,18 @@ directly.
 A hook source descriptor contains:
 
 - source id
-- source kind: managed, profile, project, capability_root, agent, plugin,
-  worker, or runtime
+- source kind: managed, profile, project, capability_root, plugin, worker, or
+  runtime
 - optional display name
 - source path when available
 - plugin id when relevant
 - canonical hook declaration data
 - trust facts available before normalized-hash review
+
+Agent declarations map their real source into this list: project agents are
+project, global/profile agents are profile, built-ins are managed, and
+generated or explicit agents are runtime. Their path/source id is preserved;
+there is no blanket trusted agent source kind.
 
 Runtime normalizes all accepted declaration shapes into event matcher groups
 with handler lists. Unsupported or malformed declarations become diagnostics
@@ -96,11 +101,15 @@ the plugin worker protocol. Prompt handlers return typed context candidates for
 the current turn only. Agent handlers are declared but not executable in this
 slice.
 
-Bounded command and worker stdout/stderr must remain valid UTF-8 after
-truncation. If output is larger than the capture limit, runtime truncates at a
-valid character boundary and appends a visible truncation marker; malformed
-input bytes degrade through lossy UTF-8 conversion instead of crashing the agent
-loop.
+Command execution uses `tokio::process`. One `HookRuntime` admits at most eight
+active handlers across all concurrently running event occurrences; the permit
+pool is owned by the runtime, not by one `run_event` call. Command and worker
+stdout/stderr each retain at most the first
+4,096 bytes while continuing to drain the child pipes, then mark the retained
+value truncated. Bounded output must remain valid UTF-8 after truncation. If
+output is larger than the capture limit, runtime truncates at a valid character
+boundary and appends a visible truncation marker; malformed input bytes degrade
+through lossy UTF-8 conversion instead of crashing the agent loop.
 
 Structured command stdout may return:
 
@@ -117,10 +126,12 @@ Unsupported fields produce diagnostics. They do not become durable transcript
 facts and do not mutate future permission, sandbox, provider, or capability
 state.
 
-For a single event occurrence, matching trusted handlers launch concurrently.
-Run summaries are reported in source display order, matcher-group order, and
-handler order. Any block or deny decision wins. Current-call input updates
-resolve by completion order.
+For a single event occurrence, matching trusted handlers launch concurrently
+under the runtime's eight-way limit. Run summaries and effects fold in source
+display order, matcher-group order, and handler order. Any block or deny
+decision wins. Otherwise later declarations overwrite scalar update fields and
+array fields append in declaration order; completion timing never changes the
+effective result.
 
 ## Tool Hook Semantics
 
@@ -176,10 +187,11 @@ context candidates. Accepted context is injected as hidden contextual user
 messages for the current invocation only. If `should_stop` is true, the owning
 call site rejects or aborts the current input before ordinary model execution.
 
-`PreCompact` and `PostCompact` produce typed outcomes with run summaries and
-`should_stop`. A stopped pre-compact aborts compaction before summarization. A
-stopped post-compact reports the completed compaction as interrupted for the
-current turn without retrying through the hook runtime.
+`PreCompact` produces a typed outcome with run summaries and `should_stop`; a
+stopped pre-compact aborts compaction before summarization. `PostCompact` is
+observation-only. Its stop, failure, timeout, or malformed output is a warning
+and cannot reverse a committed checkpoint or change a successful compaction
+result into an error.
 
 `Stop` and `SubagentStop` produce typed outcomes with run summaries,
 `should_stop`, `should_block`, optional reasons, and continuation fragments.
@@ -227,7 +239,7 @@ when a user asks for plugin or hook doctor output.
 
 Deterministic local validation must cover normalization, stable keys and
 hashes, trust/modified/untrusted states, current-invocation bypass, matcher
-behavior, concurrent launch, declaration-order summaries, completion-order input
+behavior, eight-way concurrent launch, declaration-order summaries and input
 rewrites, block/deny precedence, timeout and output bounding, permission
 ordering, one-shot permission decisions, plugin hook gating, worker adapter
 diagnostics, prompt/agent effect scoping, session/user-prompt context

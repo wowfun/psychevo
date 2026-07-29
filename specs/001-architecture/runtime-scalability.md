@@ -33,6 +33,23 @@ than module-private helpers. The split must not add a second facade, controller
 hierarchy, actor system, pass-through repository family, or public item-level
 re-export layer.
 
+Accepted Turn execution and finalization have one task-local owner. That owner
+is armed when the Turn slot is registered and remains armed until terminal
+persistence, interaction cancellation, Thread-lane release, event closure, and
+completion settlement have all reached an observable outcome. Admission
+failure, queued-lane cancellation, Adapter failure, normal completion, and
+panic unwinding reuse that same finalization path rather than carrying local
+cleanup branches.
+
+Panic unwinding synchronously releases in-memory waiters and the Thread lane
+while retaining the same `PendingTerminal` when durable outcome is not known.
+Forced task abort is distinct: dropping a non-panicking future leaves its
+active `TurnSlot` for the existing forced-shutdown path to persist as
+`Interrupted`. Finalization cleanup is idempotent and cannot panic solely
+because one of its private mutexes was poisoned. This rule does not introduce a
+public Turn state machine, a second terminal writer, an outbox, or an async
+destructor.
+
 ## Bounded Work
 
 Every list, history, transport, and client journal operation must have a bound

@@ -148,6 +148,19 @@ accepted only after the owning tool binding exists. Contributed and derived
 toolsets are selection metadata only; they are never executable handlers and
 never become model-visible declarations.
 
+The built-in tool inventory has one private source table containing only
+canonical name, aliases, supported runtime modes, owning toolset, and factory.
+Known-name lookup, mode/toolset membership, and factory lookup derive from that
+table. Permission classification, parameter-level risk, display metadata, and
+execution behavior stay with their owning modules; MCP and plugin tools do not
+enter the built-in table.
+
+Runtime resolves an accepted invocation's effective mode once. A parent in
+Plan mode or an Agent definition requesting Plan produces Plan, never a wider
+mode. Tool selection, prompt construction, metadata, child policy, and sandbox
+policy all consume that same effective value. No later configuration or child
+selection may widen the Plan hard ceiling.
+
 Profile-scoped GUI management may create, remove, enable, and disable toolsets
 through tool-surface management helpers, but those writes only change runtime
 selection configuration. They do not bypass expansion, mode filtering, source

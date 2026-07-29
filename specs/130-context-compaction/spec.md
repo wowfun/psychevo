@@ -49,6 +49,24 @@ generation with a normal `Stop` finish reason. Length-limited, content-filtered,
 aborted, failed, empty, or otherwise non-normal terminal results must not create
 or replace a checkpoint, even when they contain non-empty partial text.
 
+Unknown model input capacity defaults to 32,768 tokens and the compaction input
+hard cap is 65,536 tokens. Summary output is
+`min(model_output_limit, 4096, context_capacity / 4)` and compaction fails
+before provider dispatch when that value is below 512. Input planning reserves
+the chosen output budget plus 1,024 tokens.
+
+Compaction maintains one rolling summary rather than a summary tree. Messages
+are ordered by durable sequence, with an assistant tool-call and its matching
+result treated as one indivisible unit. A unit, fixed prompt, or manual
+instruction that cannot fit causes a zero-write failure; it is never silently
+truncated out. All summary chunks must succeed before runtime commits the one
+new checkpoint. An intermediate provider or persistence failure leaves the
+prior checkpoint and transcript unchanged.
+
+`PreCompact` retains veto authority. After checkpoint commit, `PostCompact` is
+observation-only: stop, failure, timeout, or invalid output becomes a warning
+and cannot turn a successful compaction API result into an error.
+
 ## Checkpoints
 
 Native Psychevo compaction stores completed checkpoints separately from

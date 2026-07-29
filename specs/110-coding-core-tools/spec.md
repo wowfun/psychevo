@@ -116,11 +116,14 @@ out-of-range pagination values before reading, but type errors remain failures.
 Creating a new target must not overwrite a target that appears before commit.
 Replacing an existing target requires a complete, non-truncated read by the
 same in-process task, or a successful prior write by that task. Runtime records
-the target modification time and an in-process writer sequence with that
-freshness evidence. Replacement fails without modifying the target when its
-modification time changed, when a sibling task wrote it after the evidence was
-recorded, or when the latest read was partial. Freshness evidence is
-process-local and is not restored after runtime restart.
+`FileVersion { len, modified, sha256 }` and an in-process writer sequence with
+that freshness evidence. SHA-256 is authoritative; length and modification
+time are only a fast rejection. A complete read hashes the bytes it actually
+returned, and mutation streams a fresh hash immediately before commit.
+Replacement fails without modifying the target when the authoritative digest
+changed, when a sibling task wrote it after the evidence was recorded, or when
+the latest read was partial. This detects same-length, same-mtime replacement.
+Freshness evidence is process-local and is not restored after runtime restart.
 
 When replacement is rejected because freshness evidence is absent, the error
 must state that the target already exists before explaining the required
@@ -132,10 +135,21 @@ Successful file-content replacement is atomically visible: the previous
 content remains visible until a completely prepared same-directory replacement
 is committed. This contract does not require power-loss durability. Existing
 UTF-8 BOM, dominant line-ending style, and file permissions are preserved when
-the target is replaced. Modification time is the external filesystem version
-signal in this slice; an external writer that changes content while preserving
-the same modification time is not detected unless it also participates in the
-runtime's writer sequence.
+the target is replaced.
+
+Each root Turn or child Agent invocation owns one `FileReadTracker` across its
+provider loop. It holds at most 4,096 canonical-path freshness records, evicts
+the oldest deterministically, and is dropped when that invocation ends.
+
+One process-scoped `WorkspaceMutationCoordinator` combines canonical active
+path locks with at most 4,096 FIFO last-writer diagnostics. Process scope is
+intentional so independent Applications cannot mutate the same host path
+concurrently. The coordinator retains no inactive path lock and no unbounded
+read history. Repeated writes to one path replace its diagnostic entry without
+letting stale FIFO nodes grow beyond the same bound. Atomic
+replace/no-clobber behavior remains unchanged; the narrow
+external check-to-rename race is explicitly outside this slice rather than
+being hidden behind an inode or descriptor-relative filesystem framework.
 
 Successful writes return a JSON object with stable fields:
 - `path`: target path or equivalent target identifier

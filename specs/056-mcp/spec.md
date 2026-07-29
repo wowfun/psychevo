@@ -116,6 +116,26 @@ durable permission interaction has been published, runtime cancels that exact
 interaction through the approval broker before returning the startup failure;
 it does not leave a pending request whose waiter has already been dropped.
 
+One catalog acceptance produces a private `ResolvedMcpLaunch`; startup
+permission and transport spawn consume that same immutable object rather than
+reinterpreting the declaration. Its descriptor fingerprint includes:
+
+- stdio canonical executable, argv, effective cwd, exposed environment names,
+  source revision, and policy;
+- HTTP normalized URL, header names, credential-binding names, source revision,
+  and policy.
+
+Resolved secret values never enter that fingerprint, wire projection, UI, or
+`Debug`. The same launch object still carries the captured environment and
+credential material used for the actual connection. Aggregate launch and
+permission types use redacted manual `Debug` implementations or omit `Debug`;
+they reuse `SecretValue` without adding a second secrecy framework.
+
+Startup permission/session keys use
+`server@<descriptor-sha256>` rather than name-only matching. MCP startup
+supports allow-once or deny, never allow-always. Permission requests project a
+typed `mcpStartup` detail.
+
 The Thread runtime reuses server connections while the resolved catalog and
 available environment identity are unchanged. The connection reuse key includes
 the complete resolved transport identity: stdio command, arguments, explicit

@@ -114,9 +114,23 @@ Each message emits `message_start` before `message_update` or `message_end`. `me
 
 Each tool execution emits `tool_execution_start` before any matching `tool_execution_update` or `tool_execution_end`. `tool_execution_end` completes that tool execution's lifecycle.
 
-When one assistant message requests multiple tools, agent execution may execute those tool bindings sequentially or concurrently. The spec fixes causal ordering for each tool execution, not scheduling across different tool executions.
+When one assistant message requests multiple tools, agent execution partitions
+the source-ordered calls into consecutive parallel segments separated by
+sequential bindings. A sequential binding is a barrier. Each parallel segment
+admits at most eight executions at once. Execution events preserve actual
+completion order, while the tool-result messages passed to the next generation
+are restored to original source order.
 
-Regardless of scheduling, each tool execution result must remain causally associated with the assistant tool call that requested it. This spec does not define cross-tool sorting policy, batching strategy, or concurrency policy.
+A fatal execution error prevents later segments from starting but does not
+abandon calls already admitted to the current segment. Regardless of
+scheduling, each result remains causally associated with the assistant tool
+call that requested it.
+
+When the AI SDK reports a generation resync, agent execution replaces its
+entire live assistant accumulator with the authoritative resync snapshot. It
+does not append the snapshot to possibly incomplete deltas. Started,
+generation-terminal, and invocation-terminal facts remain observable even when
+intermediate generation events were coalesced or dropped.
 
 Tool-result messages are loop-visible messages and must be ordered so the next model response can consume them as part of the loop-visible transcript.
 

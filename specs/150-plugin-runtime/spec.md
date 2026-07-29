@@ -52,6 +52,36 @@ enforce archive and extracted-size limits, and copy the unpacked package into
 the cache root. Deterministic tests must use local temporary Git repositories
 and fake npm fixtures, not network repositories.
 
+All local, Git, npm, archive extraction, and install-copy paths share one
+private `PluginMaterializationLimits` policy and one bounded walker:
+
+- 120-second subprocess/materialization deadline;
+- 50 MiB archive input;
+- 200 MiB total unpacked or installed bytes;
+- 10,000 entries;
+- 50 MiB per regular file;
+- 1,024-byte relative path;
+- 64 path components.
+
+Git uses shallow, no-tags, single-branch acquisition; an explicit ref is fetched
+and checked out at depth one. Npm packing disables lifecycle scripts and shares
+the same deadline. Every materialization subprocess owns a process tree: a Unix
+process group or a Windows kill-on-close Job. The single deadline covers direct
+process exit, descendant termination, and bounded stdout-reader completion, so
+a descendant that inherits stdout cannot extend the operation past it. The
+streaming Rust tar/gzip extractor rejects absolute and
+parent-traversal paths, symlinks, hardlinks, devices, and other non-regular
+entries before writing, and checks every quota per entry. Installation copy
+does not use a second recursive implementation.
+
+Source display, identity, and errors redact URL userinfo and credential-bearing
+query values. A failed materialization removes staging and creates no install
+record. External Git/npm cannot guarantee rejection before the first excessive
+network byte reaches their own temporary files; the accepted boundary is the
+deadline, shallow acquisition, archive input limit where Psychevo owns the
+stream, and the bounded post-materialization walk. This slice does not add
+signatures, SBOMs, filesystem quotas, or custom Git/npm clients.
+
 Install and inspect operations preserve source kind as `local`, `git`, or
 `npm`. Source identity includes the package locator, selected version or Git
 ref when present, and registry for npm sources when present.
@@ -356,6 +386,12 @@ source, ref, and sparse paths. These methods use the same runtime helpers as the
 honor resolved scope/profile rules, return typed interface metadata, and keep
 responses secret-free. GUI install overwrite and other
 force-worthy actions require an explicit request supplied by the caller.
+Catalog mutation results are method-specific. Codex add exposes
+`marketplaceName`, `installedRoot`, and `alreadyAdded`; Codex remove exposes
+`marketplaceName` and nullable `installedRoot`; Codex upgrade exposes
+`selectedMarketplaces`, `upgradedRoots`, and structured `errors`. Psychevo
+add/remove retain their own typed result alternatives rather than weakening
+the Codex contract with an all-optional object.
 `plugin/authority/setTrust` is restricted to a Codex authority selector and
 records or removes trust for that authority's current installed package
 fingerprint. It is not a generic plugin trust operation and has no Hermes,

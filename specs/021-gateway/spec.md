@@ -106,6 +106,13 @@ A task panic or timeout is observable in the shutdown report and cannot be
 silently detached. A child task remains local to the narrowest owner that can
 cancel and await it.
 
+Gateway-owned Channel replies, OAuth work, voice producers, and other genuinely
+detached transport work are admitted to the existing transport supervisor.
+Automation obtains its supervisor permit before durably claiming a run.
+Accepted Turns continue to enter Application and never move under Gateway
+ownership. TUI compaction calls the owning `Thread::compact` operation so it
+cannot bypass the Thread FIFO.
+
 ## Internal Journey Profiling
 
 Deterministic local profiling may enable a content-free internal Gateway probe
@@ -546,6 +553,17 @@ with `Authorization: Bearer <token>`. Managed browser clients authenticate with
 an HttpOnly SameSite session cookie set by the managed launch bootstrap; query
 string tokens are not a supported auth mechanism.
 
+Managed browser sessions live in one private bounded store. It retains at most
+2,048 sessions, applies a 24-hour absolute lifetime and two-hour idle lifetime,
+and evicts least-recently-seen sessions when full. Authentication and insertion
+both prune expired entries, successful authentication refreshes last-seen, and
+the cookie uses `Max-Age=86400`. This lifetime bounds authentication state; it
+does not turn the browser cwd into a fixed workspace access-control list.
+
+Agent pause and resume requests identify the owning `threadId`. Gateway routes
+them through the `Application::agent_control()` handle bound to that
+Application and must not access a process-global Agent control plane.
+
 Native Desktop webviews do not receive the managed Gateway bearer token. The
 Desktop shell owns token resolution and attaches authorization on the native
 side, while renderer code sends typed bridge requests and receives routed
@@ -588,6 +606,29 @@ First-slice JSON-RPC methods include:
 - `thread/delete`
 - `turn/start`
 - `source/reset`
+
+Every registered request has an exact Rust result type and generated TypeScript
+validator. Plugin, MCP, Skill, Tool, filesystem-approval, and MCP-startup
+results use typed shapes rather than `json_object`, `GatewayJsonResult`, or
+`resultValidation: "opaque"`. Protocol generation fails when a registry entry
+lacks a result type. Generated AJV setup registers schemars numeric formats and
+compiles in strict schema mode; runtime numeric-format validation remains
+disabled in this slice. The generation gate uses strict AJV compilation over
+the complete schema surface and rejects any JSON Schema keyword outside the
+closed runtime-interpreter subset. Browser runtimes validate the generated
+schema objects with a compact synchronous interpreter and never compile schemas
+through `eval`/`Function`, so the fixed production CSP does not need
+`unsafe-eval`; generation check fails if the strict-compilation manifest is
+missing or stale. Runtime validation failures retain a bounded structural
+location: a missing required property names that property, and other failures
+name the instance path and validation keyword without embedding the rejected
+payload. For in-process TypeScript callers, a declared optional property whose
+value is `undefined` has the same absent-property semantics as AJV; a required
+property with `undefined` remains missing.
+
+The Python SDK remains an ergonomic hand-owned interface rather than a complete
+raw Rust-to-Python protocol generator. It synchronizes the public typed
+approval and result shapes it exposes.
 
 `thread/draft/open` atomically opens an unbound source draft, resolves either an
 explicit opaque target or the Gateway default into an exact selection, prepares
@@ -845,6 +886,9 @@ bit-exact transport, including executable inode values, use decimal strings.
 When a wire field is backed by a target-width Rust integer such as `usize`,
 deserialization must also reject values that fit the JSON-safe range but do not
 fit the current compilation target; conversion must never truncate.
+Plugin trust timestamps, authority and install generations, connector expiry,
+and MCP timeout fields are part of this rule; none may be emitted as TypeScript
+`bigint` for JSON transport.
 
 The transport facade passes session-scoped source inputs and dynamic tool
 candidates to Gateway; Gateway remains responsible for validation,

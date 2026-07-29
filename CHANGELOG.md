@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-29
+
+- Centralized Turn and Agent lifecycle ownership: terminal and mailbox state
+  commits atomically, shutdown cancels and awaits owned work, and effective Plan
+  mode propagates across parent/child execution.
+- Replaced process-global Agent and file-read state with Application/invocation
+  owners; bounded Hook, Tool, generation, Gateway, browser, Python SDK, and
+  Plugin lifecycles; and hardened compaction, file mutation, MCP, and Windows
+  process boundaries.
+- Made Gateway results and approvals precisely typed, consolidated built-in
+  tool identity, and added strict CSP-safe schema generation and validation.
+- Split Workbench session-browser and workspace state into narrow stores,
+  hardened Desktop per-window production capabilities, and fixed cold-start,
+  CSP, branch-transition, and startup-budget regressions.
+
 ## 2026-07-28
 
 - Made `psychevo-ai` a provider-neutral local Rust SDK with typed capabilities,

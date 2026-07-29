@@ -137,6 +137,18 @@ matches the SDK, and starts that exact executable over newline-delimited
 JSON-RPC stdio. Protocol messages use stdout. App Server diagnostics use
 stderr.
 
+Ordinary RPCs use a 30-second deadline by default. Configure it with
+`Client(request_timeout=...)`; `None` opts out. A timeout raises
+`RequestTimeoutError` with the method, deadline, and whether delivery is
+unknown. The SDK removes that request's correlation, discards any late
+response, and never retries automatically. `TurnHandle.wait()` is deliberately
+unbounded unless `timeout=` is passed because a Turn is a long-running
+operation.
+
+`Client(close_timeout=...)` defaults to 10 seconds and is one deadline across the
+shutdown RPC, callback workers, reader, transport close, and local
+terminate-to-kill fallback.
+
 Use an explicit local executable when embedding a source build:
 
 ```python
@@ -204,6 +216,13 @@ Registrations belong to one connection. The App Server routes each callback to
 the connection captured for that turn. Disconnect, timeout, malformed output,
 or an unknown callback fails that invocation. Approval failures never grant
 permission.
+
+Each connection runs eight callback workers with a bounded backlog of 64.
+When the backlog is full, callback requests receive an overload JSON-RPC error;
+notification callbacks are reported to the asyncio loop exception handler.
+Filesystem and MCP-startup approval details are exposed as
+`FilesystemApprovalRequest` and `McpStartupApprovalRequest`, so handlers do not
+need to interpret opaque dictionaries.
 
 Clarify handlers receive a durable interaction event and may answer it for the
 caller:

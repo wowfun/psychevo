@@ -44,8 +44,8 @@ and tool execution inside the local environment defined by
 operating-system sandbox in this slice.
 [045 Sandbox](../045-sandbox/spec.md) defines the separate enforcement layer
 that may further constrain already-authorized writes or shell children.
-Tool availability, runtime mode, permission mode, approval mode, and persistent
-policy are separate concerns.
+Tool availability, runtime mode, permission mode, approval policy, approval
+reviewer, and persistent policy are separate concerns.
 
 Runtime mode controls the hard ceiling for model-visible tools. `plan` remains
 a read-only runtime mode, and `default` may expose normal editing tools when the
@@ -141,6 +141,16 @@ Legacy global configuration fields `permission_mode`, `approval_mode`,
 `smart_model`, and `permissions.allow`/`permissions.ask`/`permissions.deny`
 are invalid and must produce a clear migration error. Product-unreleased
 compatibility is not preserved except for agent frontmatter `permissionMode`.
+Runtime Profile configuration likewise rejects `approvalMode` and directs the
+operator to top-level `approvals_reviewer`; it is not retained in wire records
+or management UI.
+
+The configured `approvals_reviewer` is the only reviewer authority. Runtime
+does not expose a second Rust `ApprovalMode`, carry `approval_mode` through Turn
+or Adapter inputs, or accept an ignored reviewer constructor argument.
+`TurnRequest::with_approval` supplies only an interaction handler and clarify
+support. Turn metadata reports the effective
+`approvals_reviewer=user|smart`.
 
 Profile and policy precedence is:
 
@@ -163,6 +173,16 @@ rule-management adapter:
   text.
 - MCP grants write to the server/tool definition layer where the server was
   defined.
+
+Permission requests use typed detail variants for filesystem operations and MCP
+startup. Filesystem detail identifies the normalized operation and canonical
+targets. MCP startup detail identifies the accepted resolved launch without
+secret values. MCP startup offers allow-once or deny only; `allowAlways` and
+session/persistent grants are not offered for that boundary. Every Framework
+projection carries the typed server, transport, and descriptor fingerprint.
+Runtime validates the returned decision independently and converts turn,
+session, persistent, or filesystem-scoped MCP startup responses to deny, so a
+stale or nonconforming client cannot create a broader grant.
 - skill grants write to the active profile tools section.
 
 External capability tools may define additional rule families when the owning

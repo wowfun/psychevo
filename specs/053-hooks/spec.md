@@ -142,8 +142,10 @@ contribute compaction guidance. `Notification` payloads must be redacted to the
 minimum actionable message.
 
 Lifecycle hook effects are Codex-aligned for the current event catalog. Runtime
-may stop `SessionStart`, `SubagentStart`, `UserPromptSubmit`, `PreCompact`, and
-`PostCompact` at their owning call sites. `Stop` and `SubagentStop` may block
+may stop `SessionStart`, `SubagentStart`, `UserPromptSubmit`, and `PreCompact`
+at their owning call sites. `PostCompact` is observation-only: a stop, failure,
+timeout, or malformed result becomes a warning and cannot reverse an already
+committed checkpoint. `Stop` and `SubagentStop` may block
 completion and provide a turn-local continuation prompt through the hook runtime
 adapter. `SessionEnd`, `PostLLMCall`, and `Notification` remain non-mutating
 unless another owning spec defines a concrete consumer. Psychevo does not add
@@ -161,10 +163,17 @@ Runtime executes matching trusted hook declarations with:
 - handler type
 - hook-facing typed payload
 
-For one event occurrence, matching handlers run concurrently. Reporting remains
-ordered by source display order, matcher-group order, and handler order. Any
-block or deny decision wins. Current-call input updates resolve by completion
-order before permission and resource policy evaluate the effective request.
+For one event occurrence, matching handlers run concurrently under the runtime
+bound. Reporting and effect folding remain ordered by source display order,
+matcher-group order, and handler order, independent of completion timing. Any
+block or deny decision wins. Later declarations overwrite scalar update fields;
+array fields append in declaration order before permission and resource policy
+evaluate the effective request.
+
+Agent-declared hooks retain their actual provenance. Project agent files map to
+Project, profile/global agent files to Profile, built-ins to Managed, and
+generated or explicit runtime agents to Runtime, with path/source id preserved.
+They do not enter a blanket trusted `Agent` source kind.
 
 Hook failures degrade the handler or source unless the hook contract defines a
 blocking outcome. Runtime must not crash the agent loop because a hook handler

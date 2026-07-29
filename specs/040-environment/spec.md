@@ -107,10 +107,26 @@ long-running child sessions, yielded stdin, platform-specific process
 capabilities, and executable discovery. Shell execution remains subject to
 permissions and sandbox enforcement when those layers apply.
 
+The model-visible exec request never selects a shell executable. Runtime
+resolves the platform shell from trusted host configuration and passes only the
+command, cwd, login intent, TTY intent, environment delta, and session controls
+through the tool interface. Login execution remains subject to the existing
+host `allow_login_shell` gate. Native Windows continues to discover Git Bash
+for the model-visible POSIX shell contract; an arbitrary workspace executable
+cannot masquerade as that shell.
+
 Network exposure includes ordinary provider calls, local Gateway transports,
 MCP transports, shell-originated network risk, and future product transports.
 This topic names exposure categories only; it does not define network policy or
 network sandboxing.
+
+Remote image acquisition reuses the same per-hop URL normalization,
+public-address DNS validation, redirect revalidation, and bounded streaming
+reader as `web_fetch`. Automatic redirect following and whole-body
+`response.bytes()` collection are not valid for untrusted remote images.
+MCP, provider, managed Browser, and local preview transports retain their own
+explicitly scoped localhost/private-address allowances; the public-media rule
+must not silently narrow those separate interfaces.
 
 Environment-variable exposure is sensitive by default. Environment variables
 may guide local configuration, provider discovery, cache discovery, or isolated

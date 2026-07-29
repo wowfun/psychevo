@@ -181,6 +181,19 @@ The terminal outcome completes the generation stream. A generation stream must
 not leave agent execution without an observable terminal outcome. EOF without a
 terminal provider fact is a protocol failure rather than an inferred success.
 
+Each generation owns one private bounded event buffer. It retains at most 256
+pending events and 256 KiB of non-snapshot payload plus one latest
+authoritative resync snapshot. Adjacent deltas for the same content index may
+coalesce, Usage keeps only its latest value, and Metadata merges by key. When
+the bound would otherwise be exceeded, the stream emits
+`GenerationEvent::Resync { snapshot, dropped_events }` so a slow consumer can
+replace local state instead of guessing across a gap.
+
+Started, terminal, and completion settlement are never dropped. The terminal
+`GenerationOutput.snapshot` is authoritative regardless of which intermediate
+events a consumer observed. Event buffering is generation-local and does not
+introduce a process-wide byte governor.
+
 ## Metadata Extensions
 
 Metadata may carry provider-specific identifiers, reasoning/thinking continuity

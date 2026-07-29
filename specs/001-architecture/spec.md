@@ -300,6 +300,23 @@ Prohibited dependency rules:
   `psychevo-agent-core` or `psychevo-ai`
 - business logic must not be introduced into `psychevo-cli`
 
+## Local Ownership And Boundedness
+
+Cross-cutting reliability work must deepen the existing owning module instead
+of adding a process-wide policy facade. `Application` owns accepted Turns and
+its own active Agent invocations; standalone execution owns the same private
+Agent-supervision shape at its root. Gateway owns transport producers and other
+detached transport work, while accepted Turns remain Application-owned.
+Workspace mutation coordination is process-scoped only because independent
+Applications can mutate the same canonical host path.
+
+Bounded queues, concurrency permits, deadlines, and retained diagnostics live
+with the work they constrain. Psychevo does not add a global
+`ResourceGovernor`, universal execution-policy object, unified extension
+engine, process-wide task tree, or Workbench mega-store. A new private module
+is justified only when deleting it would spread a real invariant back across
+multiple callers; pass-through facades and duplicate projections are removed.
+
 ## Related Topics
 
 - [000 Foundation](../000-foundation/spec.md) defines the upstream project foundation and implementation-neutral principles.

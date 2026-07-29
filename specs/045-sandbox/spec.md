@@ -28,7 +28,6 @@ Out of scope:
   agent process
 - network sandboxing
 - container, remote, or cloud sandbox providers
-- native Windows enforcement
 - sandboxing MCP stdio servers, LSP helpers, managed tool downloads, internal
   Git probes, provider calls, skill loading, agent loading, hooks, or other
   in-process/auxiliary runtime paths
@@ -83,7 +82,11 @@ include_tmp = true
 include_common_caches = true
 ```
 
-`enabled = false` is the default and preserves existing behavior.
+`enabled = false` is the default for non-Plan execution and preserves existing
+behavior there. Effective-policy calculation always resolves and validates the
+configured baseline before applying runtime narrowing. Plan forces sandbox
+enabled and read-only even when the configured value is disabled, and clears
+configured, approved, temporary, cache, and other writable roots.
 
 `mode = "workspace-write"` makes the canonical cwd writable for built-in
 writers and shell children. `writable_roots` adds extra writable roots. Each
@@ -135,13 +138,41 @@ Shell enforcement is selected by platform:
 - macOS uses Seatbelt through `/usr/bin/sandbox-exec`
 - Linux uses Landlock
 - WSL2 uses the Linux Landlock path
-- native Windows is unsupported in v1
+- native Windows uses a private pipe-only advisory restricted-token backend
 
 The Linux Landlock crate is a Linux-only dependency. Native Windows builds must
-not compile or link Landlock; they report the sandbox backend as `unsupported`
-and fail closed when sandbox enforcement is enabled.
+not compile or link Landlock.
 Landlock and Seatbelt shell-enforcement helper code must be compiled only on
 the platforms that can use those backends.
+
+The Windows backend creates a restricted token with
+`DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`, adds a process-specific
+restricting SID that receives no write ACL, and retains the current user,
+logon, and World SIDs as Git Bash/MSYS compatibility identities. The token
+default DACL grants those compatibility SIDs `GENERIC_ALL` for private
+pipes/IPC objects and excludes the process-specific identity SID.
+
+This native Windows Plan backend is advisory defense in depth, not a filesystem
+write boundary: retaining the token user SID is required for Git Bash to open
+MSYS's existing per-user `CreateFileMapping` objects, and consequently the
+restricted token can still write locations writable by the signed-in user.
+Plan-mode tool selection, the immutable Plan permission ceiling, and the
+Plan-mode agent instruction remain the primary controls. `/sandbox` and child
+environment markers must identify this backend as
+`windows-restricted-token-advisory` and report helper/filesystem/network
+enforcement as `not-confined`; no UI or log may describe it as read-only
+filesystem confinement.
+
+The backend launches Git Bash with `CreateProcessAsUserW` and assigns it to a
+kill-on-close Job before execution is exposed to the caller. It preserves pipe
+streaming, yielding, stdin polling, and abort. It does not add a sandbox user,
+service, filesystem ACL rewrite, WFP/network proxy, private desktop, ConPTY, or
+command blacklist. Token, default-DACL, process creation, or Job assignment
+failure fails closed; runtime never falls back to an unrestricted child.
+Restricted process creation uses an extended startup attribute list whose
+handle whitelist contains only that invocation's stdin, stdout, and stderr
+child ends. Enabling handle inheritance must never expose pipe or IPC handles
+owned by another concurrent invocation.
 
 If `[sandbox].enabled = true` and the platform backend is unsupported, missing,
 or reports that policy was not enforced, shell execution fails closed. It must
@@ -187,7 +218,8 @@ surface; v1 does not add new RPC request fields.
 
 ## Acceptance Criteria
 
-- Default config keeps sandbox disabled and preserves existing behavior.
+- Default config keeps sandbox disabled for non-Plan execution. Plan is always
+  effectively enabled and read-only with no writable roots.
 - Invalid sandbox modes fail config loading with a clear diagnostic.
 - Effective policy canonicalizes cwd, writable roots, tmp roots, and cache
   roots without creating missing paths.
@@ -203,15 +235,21 @@ surface; v1 does not add new RPC request fields.
 - In `workspace-write` mode, sandboxed shell children may open `/dev/null` and
   `/dev/zero` for writing when those devices exist, while built-in writer roots
   remain unchanged.
-- `read-only` mode denies writer mutations and gives shell children no writable
-  roots.
+- `read-only` mode denies built-in writer mutations and gives enforced
+  macOS/Linux/WSL shell children no writable roots. Native Windows shell
+  children retain the explicitly advisory boundary above.
 - Sandboxed shell children include the `PSYCHEVO_SANDBOX*` markers.
 - Sandbox-enabled `tty=true` is rejected before spawn.
-- Backend-unavailable and native Windows cases fail closed without compiling
-  Linux-only Landlock dependencies or unused native shell-enforcement helpers
-  into native Windows builds.
+- Backend-unavailable cases fail closed without compiling Linux-only Landlock
+  dependencies or unused Unix helpers into native Windows builds.
 - macOS and Linux/WSL smoke tests verify inside-root write allowed and
   outside-root write denied when the backend is available.
+- native Windows Git Bash smoke verifies startup, reads, yielding, abort, Plan
+  instruction presence, and truthful advisory markers; it does not assert
+  filesystem write denial.
+- Native Windows token construction proves the process-specific identity SID is
+  absent from the token default DACL while the user, logon, and World
+  compatibility identities allow Git Bash/MSYS IPC initialization.
 - User shell and Gateway `shell/start` use the same effective sandbox policy as
   model `exec_command`.
 - `/sandbox` reports helper paths and network as `not-confined`.

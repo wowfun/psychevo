@@ -220,6 +220,36 @@ thread or to an ACP native session id.
 Ordinary local Markdown/built-in agents continue to use the existing native
 child-thread path.
 
+## Agent Supervision
+
+Each `Application` privately owns an `AgentSupervisor`; standalone execution
+owns the same supervisor shape at its root and children inherit that exact
+owner. The supervisor retains active runs only. It persists the child terminal
+and mailbox edge before removing the active record, and historical status is
+reconstructed from durable edges and the child Thread rather than a completed
+in-memory cache.
+The supervisor also owns every detached child task handle. Owner shutdown
+closes child-task admission, signals all active child controls, and awaits
+their finalizers before StateRuntime closes; forced shutdown aborts and reaps
+only residual tasks within the Application deadline.
+
+For a background child with a durable edge, closing that edge and appending its
+terminal parent-mailbox event form one transaction. Required-MCP initialization,
+hook, provider, persistence, and cancellation failures all pass through that
+same terminal finalizer. The active record is removed only after the terminal
+transaction commits; a commit failure retains the terminal record as the
+same-process retry owner instead of fabricating completion or silently dropping
+the run.
+
+Ordinary child execution admits at most four active children per parent
+session. Team configuration may request a smaller limit but never more than
+four. Saturation fails the spawn immediately with an observable error; it does
+not hide an unbounded queue. Pause state is scoped to the parent session.
+Interrupting or shutting down an owner cancels and awaits its active children.
+There is no process-global run map, spawn-pause flag, static `AgentControl`, or
+detached abort bridge. `Application::agent_control()` returns a handle bound to
+that Application.
+
 Interactive clients may treat the selected agent as a session-scoped setting:
 changing it affects only future invocations in that session, not previous
 messages. A missing session setting falls back to the process or CLI selected
