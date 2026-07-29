@@ -4,7 +4,6 @@ impl PermissionRuntime {
         project_config_dir: PathBuf,
         config: PermissionConfig,
         mode: PermissionMode,
-        _approval_mode: ApprovalMode,
         approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
         smart_approval_handler: Option<Arc<dyn crate::types::ApprovalHandler>>,
     ) -> Self {
@@ -84,12 +83,18 @@ impl PermissionRuntime {
         &self,
         server: &str,
         transport: &str,
+        descriptor_fingerprint: &str,
     ) -> std::result::Result<(), String> {
         let args = json!({
             "server": server,
             "transport": transport,
+            "descriptorFingerprint": descriptor_fingerprint,
         });
-        self.authorize(&format!("mcp_startup:{server}"), "mcp_startup", &args)
+        self.authorize(
+            &format!("mcp_startup:{server}@{descriptor_fingerprint}"),
+            "mcp_startup",
+            &args,
+        )
             .await
             .map_err(|output| {
                 output
@@ -262,6 +267,9 @@ impl PermissionRuntime {
                         filesystem: action
                             .as_ref()
                             .and_then(PermissionAction::filesystem_approval_request),
+                        mcp_startup: action
+                            .as_ref()
+                            .and_then(PermissionAction::mcp_startup_approval_request),
                         abort,
                     })
                     .await?;

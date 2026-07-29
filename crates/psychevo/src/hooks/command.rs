@@ -1,25 +1,26 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
-use std::thread;
+use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
-use super::output::bounded_output;
+use super::OUTPUT_LIMIT;
 
 #[derive(Debug)]
 pub(crate) struct HookCommandExecution {
     pub(crate) status: Option<ExitStatus>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
+    pub(crate) stdout_truncated: bool,
+    pub(crate) stderr_truncated: bool,
     pub(crate) elapsed_ms: u128,
     pub(crate) timed_out: bool,
     pub(crate) error: Option<String>,
 }
 
-pub(crate) fn run_hook_command_blocking(
+pub(crate) async fn run_hook_command(
     command: &str,
     cwd: &Path,
     payload: &Value,
@@ -27,7 +28,7 @@ pub(crate) fn run_hook_command_blocking(
 ) -> HookCommandExecution {
     let started = Instant::now();
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let mut process = Command::new(shell);
+    let mut process = tokio::process::Command::new(shell);
     process
         .arg("-lc")
         .arg(command)
@@ -35,96 +36,110 @@ pub(crate) fn run_hook_command_blocking(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure_process_group(&mut process);
     let inherited_env = std::env::vars().collect::<BTreeMap<_, _>>();
-    if let Err(err) = crate::process_env::apply_process_env(
+    if let Err(err) = crate::process_env::apply_tokio_process_env(
         &mut process,
         &inherited_env,
         crate::process_env::ProcessEnvOptions::new(&[]),
     ) {
-        return HookCommandExecution {
-            status: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            elapsed_ms: started.elapsed().as_millis(),
-            timed_out: false,
-            error: Some(err.to_string()),
-        };
+        return failed_execution(started, err.to_string());
     }
     let mut child = match process.spawn() {
         Ok(child) => child,
-        Err(err) => {
-            return HookCommandExecution {
-                status: None,
-                stdout: String::new(),
-                stderr: String::new(),
-                elapsed_ms: started.elapsed().as_millis(),
-                timed_out: false,
-                error: Some(err.to_string()),
-            };
-        }
+        Err(err) => return failed_execution(started, err.to_string()),
     };
 
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(payload.to_string().as_bytes());
+        let payload = payload.to_string();
+        let _ = stdin.write_all(payload.as_bytes()).await;
+        let _ = stdin.shutdown().await;
     }
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdout_reader = stdout.map(|mut stdout| {
-        thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stdout.read_to_end(&mut bytes);
-            bytes
-        })
-    });
-    let stderr_reader = stderr.map(|mut stderr| {
-        thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let _ = stderr.read_to_end(&mut bytes);
-            bytes
-        })
-    });
+    let stdout_task = child
+        .stdout
+        .take()
+        .map(|stdout| tokio::spawn(drain_bounded(stdout)));
+    let stderr_task = child
+        .stderr
+        .take()
+        .map(|stderr| tokio::spawn(drain_bounded(stderr)));
 
     let timeout = Duration::from_secs(timeout_secs.max(1));
-    let status;
-    let timed_out;
-    loop {
-        match child.try_wait() {
-            Ok(Some(done)) => {
-                status = Some(done);
-                timed_out = false;
-                break;
-            }
-            Ok(None) if started.elapsed() >= timeout => {
-                crate::process_env::terminate_std_child_tree(&mut child);
-                status = child.wait().ok();
-                timed_out = true;
-                break;
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
-            Err(err) => {
-                return HookCommandExecution {
-                    status: None,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                    elapsed_ms: started.elapsed().as_millis(),
-                    timed_out: false,
-                    error: Some(err.to_string()),
-                };
-            }
+    let (status, timed_out, error) = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => (Some(status), false, None),
+        Ok(Err(err)) => {
+            crate::process_env::terminate_tokio_child_process_group(&mut child).await;
+            (None, false, Some(err.to_string()))
         }
-    }
-    let stdout = stdout_reader
-        .and_then(|reader| reader.join().ok())
-        .unwrap_or_default();
-    let stderr = stderr_reader
-        .and_then(|reader| reader.join().ok())
-        .unwrap_or_default();
+        Err(_) => {
+            crate::process_env::terminate_tokio_child_process_group(&mut child).await;
+            (child.wait().await.ok(), true, None)
+        }
+    };
+    let (stdout, stdout_truncated) = collect_output(stdout_task).await;
+    let (stderr, stderr_truncated) = collect_output(stderr_task).await;
     HookCommandExecution {
         status,
-        stdout: bounded_output(&stdout),
-        stderr: bounded_output(&stderr),
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
         elapsed_ms: started.elapsed().as_millis(),
         timed_out,
-        error: None,
+        error,
     }
 }
+
+fn failed_execution(started: Instant, error: String) -> HookCommandExecution {
+    HookCommandExecution {
+        status: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        elapsed_ms: started.elapsed().as_millis(),
+        timed_out: false,
+        error: Some(error),
+    }
+}
+
+async fn drain_bounded(mut reader: impl AsyncRead + Unpin) -> (Vec<u8>, bool) {
+    let mut retained = Vec::with_capacity(OUTPUT_LIMIT);
+    let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
+    while let Ok(read) = reader.read(&mut buffer).await {
+        if read == 0 {
+            break;
+        }
+        let remaining = OUTPUT_LIMIT.saturating_sub(retained.len());
+        let keep = remaining.min(read);
+        retained.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    (retained, truncated)
+}
+
+async fn collect_output(
+    task: Option<tokio::task::JoinHandle<(Vec<u8>, bool)>>,
+) -> (String, bool) {
+    let (bytes, truncated) = match task {
+        Some(task) => task.await.unwrap_or_default(),
+        None => (Vec::new(), false),
+    };
+    let mut text = crate::process_env::decode_process_output(&bytes)
+        .trim()
+        .to_string();
+    if truncated {
+        text.push_str("...[truncated]");
+    }
+    (text, truncated)
+}
+
+#[cfg(unix)]
+fn configure_process_group(command: &mut tokio::process::Command) {
+    use std::os::unix::process::CommandExt;
+    command.as_std_mut().process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_process_group(_command: &mut tokio::process::Command) {}

@@ -76,6 +76,6 @@ async fn image_resolver_rejects_mime_mismatch_and_unsafe_remote_hosts() {
     assert!(
         unsafe_remote
             .to_string()
-            .contains("remote image URL host is not allowed")
+            .contains("web URL target is not public")
     );
 }

@@ -20,6 +20,10 @@ impl CwdTool {
         &self.context.task_id
     }
 
+    pub(crate) fn file_reads(&self) -> &FileReadTracker {
+        &self.context.file_reads
+    }
+
     pub(crate) fn lsp_config(&self) -> &LspConfig {
         &self.context.lsp
     }

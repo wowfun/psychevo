@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,7 @@ use tempfile::tempdir;
 use super::*;
 
 fn source(kind: &str, hooks: Value) -> HookSourceDescriptor {
+    let kind = if kind == "agent" { "runtime" } else { kind };
     HookSourceDescriptor::new(format!("{kind}:test"), kind, None, None, hooks)
 }
 
@@ -90,6 +92,80 @@ async fn non_blocking_hook_failures_are_diagnostics() {
     assert_eq!(result.blocked_reason, None);
     assert_eq!(result.summaries[0].status, HookRunStatus::Failed);
     assert_eq!(result.summaries[0].exit_code, Some(1));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn concurrent_events_share_the_runtime_wide_eight_handler_limit() {
+    let temp = tempdir().expect("temp");
+    let counter = temp.path().join("counter.txt");
+    fs::write(&counter, "0 0").expect("counter");
+    let script = temp.path().join("counter.py");
+    fs::write(
+        &script,
+        r#"import fcntl
+import pathlib
+import sys
+import time
+
+path = pathlib.Path(sys.argv[1])
+with path.open("r+") as state:
+    fcntl.flock(state, fcntl.LOCK_EX)
+    active, maximum = map(int, state.read().split())
+    active += 1
+    maximum = max(active, maximum)
+    state.seek(0)
+    state.truncate()
+    state.write(f"{active} {maximum}")
+    state.flush()
+    fcntl.flock(state, fcntl.LOCK_UN)
+time.sleep(0.15)
+with path.open("r+") as state:
+    fcntl.flock(state, fcntl.LOCK_EX)
+    active, maximum = map(int, state.read().split())
+    state.seek(0)
+    state.truncate()
+    state.write(f"{active - 1} {maximum}")
+    state.flush()
+"#,
+    )
+    .expect("counter script");
+    let command = format!(
+        "python3 {} {}",
+        script.display(),
+        counter.display()
+    );
+    let handlers = (0..8)
+        .map(|_| json!({"type": "command", "command": command, "timeout": 5}))
+        .collect::<Vec<_>>();
+    let runtime = HookRuntime::new(
+        temp.path().to_path_buf(),
+        HookRuntimeConfig {
+            sources: vec![source(
+                "agent",
+                json!({"PostToolUse": [{"hooks": handlers}]}),
+            )],
+            ..HookRuntimeConfig::default()
+        },
+    );
+
+    let first_payload = json!({"tool": "read"});
+    let second_payload = json!({"tool": "write"});
+    let (first, second) = tokio::join!(
+        runtime.run_event("PostToolUse", &first_payload),
+        runtime.run_event("PostToolUse", &second_payload),
+    );
+    assert_eq!(first.summaries.len(), 8);
+    assert_eq!(second.summaries.len(), 8);
+    let counter_result = fs::read_to_string(counter).expect("counter result");
+    let (_, maximum) = counter_result
+        .split_once(' ')
+        .expect("counter shape");
+    assert_eq!(
+        maximum.trim().parse::<usize>().expect("maximum"),
+        8,
+        "one HookRuntime admitted more than eight concurrent handlers"
+    );
 }
 
 #[test]
@@ -308,6 +384,40 @@ async fn bounded_hook_output_truncates_on_utf8_boundary() {
 }
 
 #[tokio::test]
+async fn hook_output_drains_large_stdout_and_stderr_with_explicit_diagnostics() {
+    let temp = tempdir().expect("temp");
+    let hooks = json!({"PostToolUse": [{"hooks": [{
+        "type": "command",
+        "command": "python3 -c 'import sys; sys.stdout.write(\"o\" * 1048576); sys.stderr.write(\"e\" * 1048576)'"
+    }]}]});
+    let result = run_hook_sources(
+        &[source("agent", hooks)],
+        "PostToolUse",
+        temp.path(),
+        &json!({"tool": "exec_command"}),
+    )
+    .await;
+    let summary = &result.summaries[0];
+
+    assert!(summary.stdout.ends_with("...[truncated]"));
+    assert!(summary.stderr.ends_with("...[truncated]"));
+    assert!(summary.stdout.len() < 4200);
+    assert!(summary.stderr.len() < 4200);
+    assert!(
+        summary
+            .diagnostics
+            .iter()
+            .any(|item| item == "hook stdout truncated after 4096 bytes")
+    );
+    assert!(
+        summary
+            .diagnostics
+            .iter()
+            .any(|item| item == "hook stderr truncated after 4096 bytes")
+    );
+}
+
+#[tokio::test]
 async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declaration_order() {
     let temp = tempdir().expect("temp");
     let marker = temp.path().join("marker");
@@ -339,7 +449,7 @@ async fn matching_command_hooks_launch_concurrently_and_summaries_keep_declarati
 }
 
 #[tokio::test]
-async fn pre_tool_use_completion_order_resolves_updated_input() {
+async fn pre_tool_use_declaration_order_resolves_updated_input() {
     let temp = tempdir().expect("temp");
     let hooks = json!({
         "PreToolUse": [
@@ -360,7 +470,65 @@ async fn pre_tool_use_completion_order_resolves_updated_input() {
     .await;
     assert_eq!(
         result.updated_input.as_ref().unwrap(),
-        &json!({"cmd": "slow"})
+        &json!({"cmd": "fast"})
+    );
+}
+
+#[tokio::test]
+async fn hook_runtime_caps_matching_handlers_at_eight() {
+    let temp = tempdir().expect("temp");
+    let handlers = (0..9)
+        .map(|_| json!({"type": "command", "command": "sleep 1"}))
+        .collect::<Vec<_>>();
+    let hooks = json!({"Notification": [{"hooks": handlers}]});
+    let started = Instant::now();
+    let result = run_hook_sources(
+        &[source("agent", hooks)],
+        "Notification",
+        temp.path(),
+        &json!({}),
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(result.summaries.len(), 9);
+    assert!(
+        elapsed >= Duration::from_millis(1800),
+        "nine one-second handlers exceeded the eight-handler cap too quickly: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "handlers did not retain bounded concurrency: {elapsed:?}"
+    );
+}
+
+#[test]
+fn agent_hook_provenance_maps_source_and_path_without_blanket_trust() {
+    let project_path = PathBuf::from("/workspace/.psychevo/agents/reviewer.md");
+    let project = crate::agents::parse_agent_definition_text(
+        "---\ndescription: review changes\nhooks:\n  PreToolUse:\n    - echo ok\n---\nreview",
+        "reviewer",
+        Some(project_path.clone()),
+        crate::agents::AgentSource::Project,
+    )
+    .expect("project agent");
+    let project_source = agent_hook_source(&project).expect("project hook source");
+    assert_eq!(project_source.source_kind, "project");
+    assert_eq!(project_source.path.as_ref(), Some(&project_path));
+    assert_eq!(project_source.source_id, "agent:project:reviewer");
+
+    let generated = crate::agents::parse_agent_definition_text(
+        "---\ndescription: review changes\nhooks:\n  PreToolUse:\n    - echo ok\n---\nreview",
+        "generated-reviewer",
+        None,
+        crate::agents::AgentSource::Generated,
+    )
+    .expect("generated agent");
+    let generated_source = agent_hook_source(&generated).expect("generated hook source");
+    assert_eq!(generated_source.source_kind, "runtime");
+    assert_eq!(
+        generated_source.source_id,
+        "agent:generated:generated-reviewer"
     );
 }
 
@@ -464,9 +632,13 @@ async fn typed_lifecycle_outcomes_stop_and_preserve_turn_local_context() {
     let post_compact = runtime
         .run_post_compact(&json!({"trigger": "manual"}))
         .await;
-    assert_eq!(
-        post_compact.stop_reason.as_deref(),
-        Some("post compact review")
+    assert!(post_compact.response.blocked_reason.is_none());
+    assert!(
+        post_compact
+            .response
+            .diagnostics
+            .iter()
+            .any(|item| item.contains("observation-only"))
     );
 
     let stop = runtime.run_stop(&json!({"outcome": "normal"})).await;
@@ -548,7 +720,6 @@ async fn pre_tool_use_updated_input_reaches_permission_before_inner_tool() {
         temp.path().join(".psychevo"),
         crate::types::PermissionConfig::default(),
         crate::types::PermissionMode::Default,
-        crate::types::ApprovalMode::Manual,
         None,
         None,
     )
@@ -592,7 +763,6 @@ async fn permission_request_hook_allow_is_one_shot_without_approval_handler() {
         temp.path().join(".psychevo"),
         crate::types::PermissionConfig::default(),
         crate::types::PermissionMode::Default,
-        crate::types::ApprovalMode::Manual,
         None,
         None,
     )
@@ -634,7 +804,6 @@ async fn permission_request_hook_deny_uses_feedback_reason() {
         temp.path().join(".psychevo"),
         crate::types::PermissionConfig::default(),
         crate::types::PermissionMode::Default,
-        crate::types::ApprovalMode::Manual,
         None,
         None,
     )

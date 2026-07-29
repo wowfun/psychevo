@@ -160,7 +160,6 @@ pub(crate) async fn prepare_user_shell_context(
         include_reasoning: false,
         mode: context.mode,
         permission_mode: None,
-        approval_mode: None,
         approval_handler: None,
         clarify_enabled: false,
         inherited_env: context.inherited_env.clone(),

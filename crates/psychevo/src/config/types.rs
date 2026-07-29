@@ -164,7 +164,6 @@ pub struct RuntimeProfileConfig {
     pub default_model: Option<String>,
     pub default_mode: Option<String>,
     pub default_agent: Option<String>,
-    pub approval_mode: Option<String>,
     pub sandbox: Option<String>,
     pub workspace_roots: Vec<String>,
     pub options: Value,

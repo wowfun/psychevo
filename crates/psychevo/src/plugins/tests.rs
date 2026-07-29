@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -43,9 +44,12 @@ fn write_plugin(root: &Path, manifest: &str) {
 fn write_worker(root: &Path, script: &str) -> PathBuf {
     let worker = root.join("worker.py");
     fs::write(&worker, script).expect("worker");
+    #[cfg(unix)]
+    {
     let mut perms = fs::metadata(&worker).expect("metadata").permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&worker, perms).expect("chmod");
+    }
     worker
 }
 
@@ -1890,9 +1894,42 @@ fn install_from_local_git_source_materializes_record() {
     assert_eq!(record.name, "git-plugin");
     assert!(record.source_id.starts_with("git:file://"));
     assert!(
+        record.package_root.join(".git/shallow").is_file(),
+        "git materialization must remain depth-1"
+    );
+    assert!(
         record
             .package_root
             .join(".codex-plugin/plugin.json")
             .exists()
     );
+
+    let commit = String::from_utf8(
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("git rev-parse")
+            .stdout,
+    )
+    .expect("commit utf8")
+    .trim()
+    .to_string();
+    let ref_record = install_plugin(
+        &temp.path().join("home-ref"),
+        &cwd,
+        PluginInstallOptions {
+            source: format!("file://{}", repo.display()),
+            source_kind: Some(PluginSourceKind::Git),
+            scope: PluginScope::Global,
+            git_ref: Some(commit.clone()),
+            npm_version: None,
+            npm_registry: None,
+            force: false,
+        },
+    )
+    .expect("install depth-1 git ref");
+    assert!(ref_record.source_id.ends_with(&format!("#{commit}")));
+    assert!(ref_record.package_root.join(".git/shallow").is_file());
 }

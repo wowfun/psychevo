@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use futures::{Stream, StreamExt};
@@ -20,6 +20,10 @@ use crate::{
 use crate::{AssistantContent, AssistantMessage, ErrorKind, ErrorPhase, Extensions, TextContent};
 
 pub type SharedGenerationResult = Result<Arc<GenerationOutput>, Arc<GenerationError>>;
+type EventItem = Result<GenerationEvent, GenerationError>;
+
+const MAX_PENDING_GENERATION_EVENTS: usize = 256;
+const MAX_PENDING_GENERATION_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Error)]
 #[error("{error}")]
@@ -74,15 +78,346 @@ impl CompletionHandle {
 
 /// A live language-generation invocation and its normalized event stream.
 ///
-/// Events are retained in an unbounded queue so a provider cannot deadlock
-/// when the caller temporarily stops polling. Callers that keep a `Generation`
-/// alive should therefore continue consuming its events or abort/drop it;
-/// retaining it indefinitely without polling can grow memory without bound.
+/// Slow consumers receive a bounded, coalescing stream. When incremental
+/// events exceed the bound, a `Resync` event replaces them with the latest
+/// authoritative snapshot.
 pub struct Generation {
-    events: mpsc::UnboundedReceiver<Result<GenerationEvent, GenerationError>>,
+    events: EventReceiver,
     completion: CompletionHandle,
     abort: AbortHandle,
     owns_invocation: bool,
+}
+
+struct EventQueueState {
+    pending: VecDeque<EventItem>,
+    non_snapshot_bytes: usize,
+    closed: bool,
+}
+
+struct EventSender {
+    state: Arc<Mutex<EventQueueState>>,
+    signal: mpsc::Sender<()>,
+}
+
+struct EventReceiver {
+    state: Arc<Mutex<EventQueueState>>,
+    signal_tx: mpsc::Sender<()>,
+    signal_rx: mpsc::Receiver<()>,
+}
+
+fn event_channel() -> (EventSender, EventReceiver) {
+    let state = Arc::new(Mutex::new(EventQueueState {
+        pending: VecDeque::new(),
+        non_snapshot_bytes: 0,
+        closed: false,
+    }));
+    let (signal_tx, signal_rx) = mpsc::channel(1);
+    (
+        EventSender {
+            state: Arc::clone(&state),
+            signal: signal_tx.clone(),
+        },
+        EventReceiver {
+            state,
+            signal_tx,
+            signal_rx,
+        },
+    )
+}
+
+impl EventSender {
+    fn send(&self, item: EventItem, snapshot: Option<GenerationSnapshot>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if state.closed {
+            return;
+        }
+        let essential = event_is_essential(&item);
+        let updated_resync = update_pending_resync(&mut state, snapshot.as_ref());
+        if !essential && updated_resync {
+            drop(state);
+            let _ = self.signal.try_send(());
+            return;
+        }
+        if !essential && coalesce_event(&mut state, &item) {
+            if state.non_snapshot_bytes > MAX_PENDING_GENERATION_BYTES {
+                let dropped = drop_incremental_events(&mut state);
+                if let Some(snapshot) = snapshot {
+                    insert_or_update_resync(&mut state, snapshot, dropped.max(1));
+                }
+            }
+            drop(state);
+            let _ = self.signal.try_send(());
+            return;
+        }
+        let item_bytes = event_payload_bytes(&item);
+        if state.pending.len() + 1 > MAX_PENDING_GENERATION_EVENTS
+            || state.non_snapshot_bytes.saturating_add(item_bytes) > MAX_PENDING_GENERATION_BYTES
+        {
+            let dropped = drop_incremental_events(&mut state);
+            if let Some(snapshot) = snapshot {
+                insert_or_update_resync(&mut state, snapshot, dropped.max(1));
+            }
+            if !essential {
+                drop(state);
+                let _ = self.signal.try_send(());
+                return;
+            }
+        }
+        state.non_snapshot_bytes = state.non_snapshot_bytes.saturating_add(item_bytes);
+        state.pending.push_back(item);
+        drop(state);
+        let _ = self.signal.try_send(());
+    }
+}
+
+impl Drop for EventSender {
+    fn drop(&mut self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        state.closed = true;
+        drop(state);
+        let _ = self.signal.try_send(());
+    }
+}
+
+impl EventReceiver {
+    async fn recv(&mut self) -> Option<EventItem> {
+        loop {
+            if let Some(item) = self.pop_front() {
+                return Some(item);
+            }
+            if self.is_closed() {
+                return None;
+            }
+            let _ = self.signal_rx.recv().await;
+        }
+    }
+
+    fn pop_front(&mut self) -> Option<EventItem> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let item = state.pending.pop_front()?;
+        state.non_snapshot_bytes = state
+            .non_snapshot_bytes
+            .saturating_sub(event_payload_bytes(&item));
+        let has_more = !state.pending.is_empty();
+        drop(state);
+        if has_more {
+            let _ = self.signal_tx.try_send(());
+        }
+        Some(item)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .closed
+    }
+
+    fn poll_recv(&mut self, context: &mut Context<'_>) -> Poll<Option<EventItem>> {
+        loop {
+            if let Some(item) = self.pop_front() {
+                return Poll::Ready(Some(item));
+            }
+            if self.is_closed() {
+                return Poll::Ready(None);
+            }
+            match Pin::new(&mut self.signal_rx).poll_recv(context) {
+                Poll::Ready(Some(_)) => continue,
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
+fn event_is_essential(item: &EventItem) -> bool {
+    matches!(
+        item,
+        Err(_) | Ok(GenerationEvent::Started { .. }) | Ok(GenerationEvent::Finish { .. })
+    )
+}
+
+fn event_payload_bytes(item: &EventItem) -> usize {
+    match item {
+        Ok(GenerationEvent::Resync { .. }) | Err(_) => 0,
+        Ok(event) => serde_json::to_vec(event)
+            .map(|bytes| bytes.len())
+            .unwrap_or(0),
+    }
+}
+
+fn update_pending_resync(
+    state: &mut EventQueueState,
+    snapshot: Option<&GenerationSnapshot>,
+) -> bool {
+    let Some(snapshot) = snapshot else {
+        return false;
+    };
+    let Some(Ok(GenerationEvent::Resync {
+        snapshot: retained,
+        dropped_events,
+    })) = state
+        .pending
+        .iter_mut()
+        .find(|item| matches!(item, Ok(GenerationEvent::Resync { .. })))
+    else {
+        return false;
+    };
+    *retained = snapshot.clone();
+    *dropped_events = dropped_events.saturating_add(1);
+    true
+}
+
+fn insert_or_update_resync(
+    state: &mut EventQueueState,
+    snapshot: GenerationSnapshot,
+    dropped: u64,
+) {
+    if let Some(Ok(GenerationEvent::Resync {
+        snapshot: retained,
+        dropped_events,
+    })) = state
+        .pending
+        .iter_mut()
+        .find(|item| matches!(item, Ok(GenerationEvent::Resync { .. })))
+    {
+        *retained = snapshot;
+        *dropped_events = dropped_events.saturating_add(dropped);
+        return;
+    }
+    state.pending.push_back(Ok(GenerationEvent::Resync {
+        snapshot,
+        dropped_events: dropped,
+    }));
+}
+
+fn drop_incremental_events(state: &mut EventQueueState) -> u64 {
+    let mut dropped = 0u64;
+    let mut retained = VecDeque::new();
+    while let Some(item) = state.pending.pop_front() {
+        if event_is_essential(&item) {
+            retained.push_back(item);
+        } else {
+            dropped = dropped.saturating_add(match item {
+                Ok(GenerationEvent::Resync { dropped_events, .. }) => {
+                    dropped_events.saturating_add(1)
+                }
+                _ => 1,
+            });
+        }
+    }
+    state.pending = retained;
+    state.non_snapshot_bytes = state.pending.iter().map(event_payload_bytes).sum();
+    dropped
+}
+
+fn coalesce_event(state: &mut EventQueueState, incoming: &EventItem) -> bool {
+    let Ok(incoming) = incoming else {
+        return false;
+    };
+    let replacement_index = match incoming {
+        GenerationEvent::Usage { .. } => state
+            .pending
+            .iter()
+            .rposition(|item| matches!(item, Ok(GenerationEvent::Usage { .. }))),
+        GenerationEvent::Metadata { .. } => state
+            .pending
+            .iter()
+            .rposition(|item| matches!(item, Ok(GenerationEvent::Metadata { .. }))),
+        _ => state.pending.len().checked_sub(1),
+    };
+    let Some(index) = replacement_index else {
+        return false;
+    };
+    let Some(Ok(retained)) = state.pending.get_mut(index) else {
+        return false;
+    };
+    let old_bytes = serde_json::to_vec(retained)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0);
+    let merged = match (retained, incoming) {
+        (
+            GenerationEvent::TextDelta {
+                content_index: retained_index,
+                delta: retained,
+            },
+            GenerationEvent::TextDelta {
+                content_index,
+                delta,
+            },
+        ) if retained_index == content_index => {
+            retained.push_str(delta);
+            true
+        }
+        (
+            GenerationEvent::ReasoningDelta {
+                content_index: retained_index,
+                delta: retained_delta,
+                provider_evidence: retained_evidence,
+            },
+            GenerationEvent::ReasoningDelta {
+                content_index,
+                delta,
+                provider_evidence,
+            },
+        ) if retained_index == content_index => {
+            retained_delta.push_str(delta);
+            if let Some(evidence) = provider_evidence.clone() {
+                merge_provider_evidence(retained_evidence, evidence);
+            }
+            true
+        }
+        (
+            GenerationEvent::ToolCallArgumentsDelta {
+                content_index: retained_index,
+                delta: retained,
+            },
+            GenerationEvent::ToolCallArgumentsDelta {
+                content_index,
+                delta,
+            },
+        ) if retained_index == content_index => {
+            retained.push_str(delta);
+            true
+        }
+        (GenerationEvent::Usage { usage: retained }, GenerationEvent::Usage { usage }) => {
+            *retained = usage.clone();
+            true
+        }
+        (
+            GenerationEvent::Metadata { metadata: retained },
+            GenerationEvent::Metadata { metadata },
+        ) => {
+            retained.extend(metadata.clone());
+            true
+        }
+        _ => false,
+    };
+    if merged {
+        let new_bytes = serde_json::to_vec(
+            state
+                .pending
+                .get(index)
+                .and_then(|item| item.as_ref().ok())
+                .expect("coalesced generation event"),
+        )
+        .map(|bytes| bytes.len())
+        .unwrap_or(0);
+        state.non_snapshot_bytes = state
+            .non_snapshot_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
+    }
+    merged
 }
 
 impl std::fmt::Debug for Generation {
@@ -154,13 +489,16 @@ pub(crate) fn start_generation(
     target: LanguageInvocationTarget,
     request: LanguageRequest,
 ) -> Generation {
-    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    let (event_tx, event_rx) = event_channel();
     let (completion_tx, completion_rx) = watch::channel(None);
     let (abort, abort_signal) = abort_pair();
     let descriptor = target.descriptor.clone();
-    let _ = event_tx.send(Ok(GenerationEvent::Started {
-        model: descriptor.clone(),
-    }));
+    event_tx.send(
+        Ok(GenerationEvent::Started {
+            model: descriptor.clone(),
+        }),
+        None,
+    );
 
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
@@ -177,7 +515,7 @@ pub(crate) fn start_generation(
                 ProviderError::runtime_unavailable(),
                 GenerationSnapshot::empty(descriptor),
             );
-            let _ = event_tx.send(Err(error.clone()));
+            event_tx.send(Err(error.clone()), Some(error.partial.clone()));
             let _ = completion_tx.send(Some(Err(Arc::new(error))));
         }
     }
@@ -196,7 +534,7 @@ async fn run_generation(
     target: LanguageInvocationTarget,
     request: LanguageRequest,
     mut abort: AbortSignal,
-    events: mpsc::UnboundedSender<Result<GenerationEvent, GenerationError>>,
+    events: EventSender,
     completion: watch::Sender<Option<SharedGenerationResult>>,
 ) {
     let mut accumulator = GenerationAccumulator::new(target.descriptor.clone());
@@ -324,10 +662,10 @@ async fn run_generation(
         }
         match accumulator.accept(adapter_event) {
             Ok(AcceptedEvent::Public(event)) => {
-                let _ = events.send(Ok(event));
+                events.send(Ok(event), Some(accumulator.snapshot()));
             }
             Ok(AcceptedEvent::Finished(output, event)) => {
-                let _ = events.send(Ok(event));
+                events.send(Ok(event), Some(output.snapshot.clone()));
                 let _ = completion.send(Some(Ok(Arc::new(*output))));
                 return;
             }
@@ -346,17 +684,17 @@ fn timeout_error(summary: &str, phase: ErrorPhase) -> ProviderError {
 fn complete_error(
     error: ProviderError,
     accumulator: &GenerationAccumulator,
-    events: &mpsc::UnboundedSender<Result<GenerationEvent, GenerationError>>,
+    events: &EventSender,
     completion: &watch::Sender<Option<SharedGenerationResult>>,
 ) {
     let error = GenerationError::new(error, accumulator.snapshot());
-    let _ = events.send(Err(error.clone()));
+    events.send(Err(error.clone()), Some(error.partial.clone()));
     let _ = completion.send(Some(Err(Arc::new(error))));
 }
 
 fn complete_aborted(
     accumulator: &GenerationAccumulator,
-    events: &mpsc::UnboundedSender<Result<GenerationEvent, GenerationError>>,
+    events: &EventSender,
     completion: &watch::Sender<Option<SharedGenerationResult>>,
 ) {
     let output = GenerationOutput {
@@ -364,10 +702,13 @@ fn complete_aborted(
         outcome: GenerationOutcome::Aborted,
         finish_reason: None,
     };
-    let _ = events.send(Ok(GenerationEvent::Finish {
-        outcome: GenerationOutcome::Aborted,
-        finish_reason: None,
-    }));
+    events.send(
+        Ok(GenerationEvent::Finish {
+            outcome: GenerationOutcome::Aborted,
+            finish_reason: None,
+        }),
+        Some(output.snapshot.clone()),
+    );
     let _ = completion.send(Some(Ok(Arc::new(output))));
 }
 
@@ -997,5 +1338,86 @@ mod tests {
             provider_evidence.as_ref().expect("evidence")["signature"],
             "signed-thinking"
         );
+    }
+
+    #[tokio::test]
+    async fn slow_consumer_receives_bounded_resync_and_terminal_snapshot() {
+        let (events, mut receiver) = event_channel();
+        let mut accumulator = GenerationAccumulator::new(descriptor());
+        events.send(
+            Ok(GenerationEvent::Started {
+                model: descriptor(),
+            }),
+            None,
+        );
+        let AcceptedEvent::Public(start) = accumulator
+            .accept(LanguageAdapterEvent::TextStart { content_index: 0 })
+            .expect("text start")
+        else {
+            panic!("public start");
+        };
+        events.send(Ok(start), Some(accumulator.snapshot()));
+        for _ in 0..400 {
+            let AcceptedEvent::Public(delta) = accumulator
+                .accept(LanguageAdapterEvent::TextDelta {
+                    content_index: 0,
+                    delta: "x".repeat(1024),
+                })
+                .expect("text delta")
+            else {
+                panic!("public delta");
+            };
+            events.send(Ok(delta), Some(accumulator.snapshot()));
+        }
+        let AcceptedEvent::Public(end) = accumulator
+            .accept(LanguageAdapterEvent::TextEnd { content_index: 0 })
+            .expect("text end")
+        else {
+            panic!("public end");
+        };
+        events.send(Ok(end), Some(accumulator.snapshot()));
+        let AcceptedEvent::Finished(output, finish) = accumulator
+            .accept(LanguageAdapterEvent::Finish {
+                finish_reason: None,
+            })
+            .expect("finish")
+        else {
+            panic!("finished output");
+        };
+        events.send(Ok(finish), Some(output.snapshot.clone()));
+
+        {
+            let state = events
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            assert!(state.pending.len() <= MAX_PENDING_GENERATION_EVENTS);
+            assert!(state.non_snapshot_bytes <= MAX_PENDING_GENERATION_BYTES);
+        }
+        drop(events);
+
+        let mut saw_started = false;
+        let mut saw_finish = false;
+        let mut resync = None;
+        while let Some(event) = receiver.recv().await {
+            match event.expect("public event") {
+                GenerationEvent::Started { .. } => saw_started = true,
+                GenerationEvent::Resync {
+                    snapshot,
+                    dropped_events,
+                } => resync = Some((snapshot, dropped_events)),
+                GenerationEvent::Finish { .. } => saw_finish = true,
+                _ => {}
+            }
+        }
+        let (snapshot, dropped_events) = resync.expect("resync");
+        let AssistantContent::Text(text) = &snapshot.assistant.content[0] else {
+            panic!("text snapshot");
+        };
+        assert_eq!(text.text.len(), 400 * 1024);
+        assert!(dropped_events > 0);
+        assert!(saw_started);
+        assert!(saw_finish);
+        assert_eq!(snapshot, output.snapshot);
     }
 }

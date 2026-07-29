@@ -5,6 +5,7 @@ mod inspect;
 mod install;
 mod manifest;
 mod marketplace;
+mod materialization;
 mod records;
 mod store;
 mod types;

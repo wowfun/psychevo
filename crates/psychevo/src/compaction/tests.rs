@@ -11,6 +11,10 @@ pub(crate) mod tests {
     };
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     fn record(session_seq: i64, message: Message) -> SessionMessageRecord {
         SessionMessageRecord {
@@ -110,6 +114,65 @@ pub(crate) mod tests {
         .expect("summary model")
     }
 
+    #[derive(Debug, Clone)]
+    struct CountingSummaryAdapter {
+        calls: Arc<AtomicUsize>,
+        fail_on_call: Option<usize>,
+    }
+
+    impl LanguageAdapter for CountingSummaryAdapter {
+        fn stream(
+            &self,
+            call: AdapterCall<LanguageRequest>,
+        ) -> AdapterFuture<'_, AdapterStream<LanguageAdapterEvent>> {
+            let call_index = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            let fail = self.fail_on_call == Some(call_index);
+            let max_output_tokens = call.request.settings.max_output_tokens;
+            Box::pin(async move {
+                if fail {
+                    return Err(psychevo_ai::ProviderError::protocol(
+                        "synthetic rolling summary failure",
+                    ));
+                }
+                Ok(Box::pin(stream::iter([
+                    Ok(LanguageAdapterEvent::TextStart { content_index: 0 }),
+                    Ok(LanguageAdapterEvent::TextDelta {
+                        content_index: 0,
+                        delta: format!(
+                            "rolling summary with output budget {}",
+                            max_output_tokens.unwrap_or_default()
+                        ),
+                    }),
+                    Ok(LanguageAdapterEvent::TextEnd { content_index: 0 }),
+                    Ok(LanguageAdapterEvent::Finish {
+                        finish_reason: Some(FinishReason {
+                            kind: FinishReasonKind::Stop,
+                            raw: Some("test_terminal".to_string()),
+                        }),
+                    }),
+                ])) as AdapterStream<_>)
+            })
+        }
+    }
+
+    fn counting_summary_model(
+        calls: Arc<AtomicUsize>,
+        fail_on_call: Option<usize>,
+    ) -> psychevo_ai::LanguageModel {
+        Provider::builder(
+            DeploymentConfig::new("summary", "test", "test://summary")
+                .with_default_language_protocol("test"),
+        )
+        .language_adapter(CountingSummaryAdapter {
+            calls,
+            fail_on_call,
+        })
+        .build()
+        .expect("summary provider")
+        .language_model("summary-model")
+        .expect("summary model")
+    }
+
     fn resolved_summary_provider() -> crate::config::ResolvedRunProvider {
         crate::config::ResolvedRunProvider {
             provider: "summary".to_string(),
@@ -150,6 +213,150 @@ pub(crate) mod tests {
         assert!(
             validate_summary_completion(GenerationOutcome::Aborted, None).is_err(),
             "aborted summary must fail"
+        );
+    }
+
+    #[tokio::test]
+    async fn rolling_summary_chunks_under_budget_and_sets_bounded_output() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut resolved = resolved_summary_provider();
+        resolved.context_limit = Some(8_192);
+        resolved.metadata.limits.context = Some(8_192);
+        let messages = (1..=4)
+            .map(|seq| record(seq, user_text_message("x".repeat(12_000))))
+            .collect::<Vec<_>>();
+
+        let summary = generate_summary(
+            counting_summary_model(Arc::clone(&calls), None),
+            &resolved,
+            None,
+            &messages,
+            None,
+        )
+        .await
+        .expect("rolling summary");
+
+        assert!(calls.load(Ordering::SeqCst) >= 2);
+        assert!(summary.contains("output budget 2048"));
+    }
+
+    #[tokio::test]
+    async fn rolling_summary_failure_returns_before_any_checkpoint_write() {
+        let store = StateRuntime::open(std::path::Path::new(":memory:"))
+            .await
+            .expect("store");
+        let session = store
+            .create_session(std::path::Path::new("."))
+            .await
+            .expect("session");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut resolved = resolved_summary_provider();
+        resolved.context_limit = Some(8_192);
+        resolved.metadata.limits.context = Some(8_192);
+        let messages = (1..=4)
+            .map(|seq| record(seq, user_text_message("x".repeat(12_000))))
+            .collect::<Vec<_>>();
+
+        let error = generate_summary(
+            counting_summary_model(Arc::clone(&calls), Some(2)),
+            &resolved,
+            None,
+            &messages,
+            None,
+        )
+        .await
+        .expect_err("second chunk failure");
+
+        assert!(error.to_string().contains("synthetic rolling summary failure"));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(
+            store
+                .list_valid_session_compactions(&session)
+                .await
+                .expect("compactions")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn fixed_compaction_input_and_tiny_output_fail_before_provider_call() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut tiny = resolved_summary_provider();
+        tiny.context_limit = Some(1_024);
+        tiny.metadata.limits.context = Some(1_024);
+        let tiny_error = generate_summary(
+            counting_summary_model(Arc::clone(&calls), None),
+            &tiny,
+            None,
+            &[],
+            None,
+        )
+        .await
+        .expect_err("tiny output budget");
+        assert!(tiny_error.to_string().contains("at least 512"));
+
+        let mut bounded = resolved_summary_provider();
+        bounded.context_limit = Some(8_192);
+        bounded.metadata.limits.context = Some(8_192);
+        let fixed_error = generate_summary(
+            counting_summary_model(Arc::clone(&calls), None),
+            &bounded,
+            None,
+            &[],
+            Some(&"manual focus ".repeat(4_000)),
+        )
+        .await
+        .expect_err("oversized fixed input");
+        assert!(fixed_error.to_string().contains("fixed prompt"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn summary_units_keep_tool_calls_and_results_indivisible_in_time_order() {
+        let call = ToolCallBlock {
+            id: "call-atomic".to_string(),
+            name: "read".to_string(),
+            arguments: json!({}),
+            arguments_json: "{}".to_string(),
+            arguments_error: None,
+            content_index: 0,
+            call_index: 0,
+        };
+        let messages = vec![
+            record(
+                4,
+                Message::ToolResult {
+                    tool_call_id: "call-atomic".to_string(),
+                    tool_name: "read".to_string(),
+                    content: "result".to_string(),
+                    is_error: false,
+                    timestamp_ms: now_ms(),
+                },
+            ),
+            record(1, user_text_message("old task")),
+            record(
+                2,
+                Message::Assistant {
+                    content: vec![AssistantBlock::ToolCall(call)],
+                    timestamp_ms: now_ms(),
+                    finish_reason: None,
+                    outcome: Outcome::Normal,
+                    model: None,
+                    provider: None,
+                },
+            ),
+            record(3, user_text_message("intervening context")),
+            record(5, user_text_message("next task")),
+        ];
+
+        let units = atomic_summary_units(&messages);
+
+        assert_eq!(
+            units
+                .iter()
+                .map(|unit| unit.iter().map(|record| record.session_seq).collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![vec![1], vec![2, 3, 4], vec![5]]
         );
     }
 

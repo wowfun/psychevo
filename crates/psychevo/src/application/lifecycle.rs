@@ -40,6 +40,13 @@ impl Application {
         }
     }
 
+    pub fn agent_control(&self) -> crate::agents::AgentControl {
+        crate::agents::AgentControl::new(
+            self.inner.runtime.agent_supervisor.clone(),
+            Some(self.inner.state.clone()),
+        )
+    }
+
     pub async fn shutdown(&self) -> Result<ShutdownReport> {
         self.shutdown_inner(false).await
     }
@@ -148,6 +155,11 @@ impl Application {
 
     async fn shutdown_graceful_owned(&self, report: &mut ShutdownReport) {
         self.inner.runtime.tasks.wait().await;
+        self.inner
+            .runtime
+            .agent_supervisor
+            .shutdown_graceful()
+            .await;
         if let Err(error) = self.inner.agent_sessions.shutdown(false).await {
             report.adapter = ShutdownAdapterStatus::Failed {
                 message: error.to_string(),
@@ -162,6 +174,7 @@ impl Application {
         for control in self.inner.runtime.active_controls() {
             control.abort();
         }
+        self.inner.runtime.agent_supervisor.close_and_cancel();
 
         let adapter_deadline =
             std::cmp::min(deadline, tokio::time::Instant::now() + FORCE_ADAPTER_BUDGET);
@@ -182,12 +195,25 @@ impl Application {
             deadline,
             tokio::time::Instant::now() + FORCE_COOPERATIVE_JOIN_BUDGET,
         );
-        if tokio::time::timeout_at(join_deadline, self.inner.runtime.tasks.wait())
+        let wait_for_owned_tasks = async {
+            tokio::join!(
+                self.inner.runtime.tasks.wait(),
+                self.inner.runtime.agent_supervisor.wait_background()
+            );
+        };
+        if tokio::time::timeout_at(join_deadline, wait_for_owned_tasks)
             .await
             .is_err()
         {
-            report.aborted_tasks = self.inner.runtime.abort_all_tasks();
-            if tokio::time::timeout_at(deadline, self.inner.runtime.tasks.wait())
+            report.aborted_tasks = self.inner.runtime.abort_all_tasks()
+                + self.inner.runtime.agent_supervisor.abort_background();
+            let wait_for_aborted_tasks = async {
+                tokio::join!(
+                    self.inner.runtime.tasks.wait(),
+                    self.inner.runtime.agent_supervisor.wait_background()
+                );
+            };
+            if tokio::time::timeout_at(deadline, wait_for_aborted_tasks)
                 .await
                 .is_err()
             {

@@ -431,6 +431,18 @@ pub async fn terminate_tokio_child_tree(child: &mut tokio::process::Child) {
     let _ = child.kill().await;
 }
 
+pub async fn terminate_tokio_child_process_group(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        let _ = kill_process_group_by_pid(pid);
+    }
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        let _ = kill_windows_process_tree(pid);
+    }
+    let _ = child.kill().await;
+}
+
 pub fn terminate_pty_child_tree(child: &mut dyn portable_pty::Child) {
     #[cfg(windows)]
     if let Some(pid) = child.process_id() {

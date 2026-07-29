@@ -41,6 +41,7 @@ impl PermissionRuntime {
                 filesystem: action
                     .as_ref()
                     .and_then(PermissionAction::filesystem_approval_request),
+                mcp_startup: None,
                 abort,
             })
             .await?;
@@ -110,6 +111,7 @@ impl PermissionRuntime {
             suggested_rule,
             allow_always,
             filesystem,
+            mcp_startup,
             abort,
         } = request;
         if self.inner.mode == PermissionMode::DontAsk {
@@ -137,6 +139,7 @@ impl PermissionRuntime {
                     "suggested_rule": suggested_rule,
                     "allow_always": false,
                     "filesystem": filesystem.clone(),
+                    "mcp_startup": mcp_startup.clone(),
                 }),
             )
             .await;
@@ -188,6 +191,7 @@ impl PermissionRuntime {
             suggested_rule,
             allow_always,
             filesystem,
+            mcp_startup,
             timeout_secs,
         };
         let mut pending_approval = self.start_pending_approval(&request);
@@ -229,6 +233,17 @@ fn validate_approval_decision(
     request: &PermissionApprovalRequest,
     decision: crate::types::PermissionApprovalDecision,
 ) -> crate::types::PermissionApprovalDecision {
+    if request.mcp_startup.is_some() {
+        return if matches!(
+            decision.outcome,
+            PermissionApprovalOutcome::AllowOnce | PermissionApprovalOutcome::Deny
+        ) && decision.filesystem_scope.is_none()
+        {
+            decision
+        } else {
+            crate::types::PermissionApprovalDecision::deny()
+        };
+    }
     let Some(filesystem) = &request.filesystem else {
         return if decision.outcome == PermissionApprovalOutcome::AllowTurn
             || decision.filesystem_scope.is_some()

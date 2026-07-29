@@ -280,7 +280,7 @@ pub fn resolve_mcp_server_handoffs<'a>(
             };
                 resolved.push(ResolvedMcpServerInput {
                     server,
-                    bearer_token,
+                    bearer_token: bearer_token.map(psychevo_ai::SecretValue::new),
                 });
             }
             Ok(resolved)
@@ -504,7 +504,10 @@ mod tests {
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(
-            resolved[0].bearer_token.as_deref(),
+            resolved[0]
+                .bearer_token
+                .as_ref()
+                .map(psychevo_ai::SecretValue::expose_secret),
             Some("bearer-test-secret")
         );
         let debug = format!("{:?}", resolved[0]);

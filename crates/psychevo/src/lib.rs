@@ -159,7 +159,7 @@ pub use psychevo_ai as __ai;
 pub use psychevo_ai::Provider;
 pub use skills::SelectedSkill;
 pub use types::{
-    ApprovalHandler, ApprovalMode, ImageInput, McpServerInput, PermissionMode,
-    ProjectContextInstructionMode, PromptDisplayMetadata, RunMode, RunSandboxOverride,
-    RunTerminalError, RunWarning, SelectedAgent,
+    ApprovalHandler, ImageInput, McpServerInput, PermissionMode, ProjectContextInstructionMode,
+    PromptDisplayMetadata, RunMode, RunSandboxOverride, RunTerminalError, RunWarning,
+    SelectedAgent,
 };

@@ -78,7 +78,6 @@ pub(crate) async fn base_options(temp: &tempfile::TempDir) -> RunOptions {
         include_reasoning: false,
         mode: RunMode::Default,
         permission_mode: None,
-        approval_mode: None,
         approval_handler: None,
         clarify_enabled: false,
         inherited_env: Some(BTreeMap::from([

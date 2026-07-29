@@ -77,7 +77,7 @@ pub(crate) fn write_tool_impl_for_call(
             }
             .into());
         }
-        let expected = require_fresh_read(tool.task_id(), &target)?;
+        let expected = require_fresh_read(tool.file_reads(), tool.task_id(), &target)?;
         let (text, snapshot_version) = read_text_snapshot(&LOCAL_FILE_MUTATION, &target)?;
         if snapshot_version != expected {
             return Err(MutationConflict::Modified {
@@ -99,6 +99,8 @@ pub(crate) fn write_tool_impl_for_call(
             .map_err(Error::from)?;
         (None, content.to_string(), baseline)
     };
+    record_written_file(tool.file_reads(), &target, persisted_content.as_bytes())
+        .map_err(Error::from)?;
     tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
         path: tool.relative(&target),
         before: pre_content.clone(),

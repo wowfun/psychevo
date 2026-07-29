@@ -138,7 +138,6 @@ mod sandbox_approval_tests {
             cwd.join(".psychevo"),
             config,
             PermissionMode::Default,
-            ApprovalMode::Manual,
             Some(handler),
             None,
         )
@@ -240,7 +239,6 @@ mod sandbox_approval_tests {
             work.path().join(".psychevo"),
             PermissionConfig::default(),
             PermissionMode::Default,
-            ApprovalMode::Manual,
             Some(handler),
             None,
         )
@@ -278,7 +276,6 @@ mod sandbox_approval_tests {
             work.path().join(".psychevo"),
             PermissionConfig::default(),
             PermissionMode::BypassPermissions,
-            ApprovalMode::Manual,
             None,
             None,
         );
@@ -387,6 +384,46 @@ mod sandbox_approval_tests {
         assert!(other_result.is_error, "{:?}", other_result.json);
         assert!(!other_target.exists());
         assert_eq!(handler.requests().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn mcp_startup_rejects_session_grants_and_prompts_again() {
+        let work = tempfile::tempdir().expect("work");
+        let handler = RecordingApprovalHandler::new(vec![
+            crate::types::PermissionApprovalDecision::allow_session(),
+            crate::types::PermissionApprovalDecision::deny(),
+        ]);
+        let runtime = PermissionRuntime::new(
+            work.path().to_path_buf(),
+            work.path().join(".psychevo"),
+            PermissionConfig::default(),
+            PermissionMode::Default,
+            Some(handler.clone()),
+            None,
+        );
+
+        let first = runtime
+            .authorize_mcp_startup("docs", "stdio", "fingerprint-1")
+            .await;
+        assert!(first.is_err(), "MCP startup accepted a session grant");
+        let second = runtime
+            .authorize_mcp_startup("docs", "stdio", "fingerprint-1")
+            .await;
+        assert!(second.is_err());
+        assert_eq!(
+            handler.requests().len(),
+            2,
+            "an invalid MCP startup session grant was cached"
+        );
+        let request = &handler.requests()[0];
+        assert_eq!(
+            request.mcp_startup,
+            Some(crate::types::McpStartupApprovalRequest {
+                server: "docs".to_string(),
+                transport: "stdio".to_string(),
+                descriptor_fingerprint: "fingerprint-1".to_string(),
+            })
+        );
     }
 
     #[tokio::test]

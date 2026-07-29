@@ -11,7 +11,7 @@ use psychevo_agent_core::{
     ToolBinding, ToolDisplayBodyPolicy, ToolDisplayCategory, ToolDisplaySpec, ToolExecutionMode,
     ToolOutput,
 };
-use psychevo_ai::AbortSignal;
+use psychevo_ai::{AbortSignal, SecretValue};
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, GetPromptRequestParams, ReadResourceRequestParams,
 };
@@ -28,6 +28,7 @@ use tokio::sync::Mutex;
 use crate::config::{
     config_show_value, load_mcp_oauth_access_token, parse_run_config, resolve_psychevo_home,
 };
+use crate::host_paths::{ExecutableResolveOptions, HostPlatform, resolve_executable_path};
 use crate::permissions::PermissionRuntime;
 use crate::types::{McpServerInput, McpServerPolicy, McpTransportInput, RunOptions, RunWarning};
 
@@ -174,9 +175,8 @@ fn update_mcp_transport_hash(hasher: &mut Sha256, transport: &McpTransportInput)
                 update_mcp_hash_value(hasher, arg);
             }
             hasher.update([0xff]);
-            for (name, value) in env {
+            for name in env.keys() {
                 update_mcp_hash_value(hasher, name);
-                update_mcp_hash_value(hasher, value);
             }
             hasher.update([0xff]);
             if let Some(cwd) = cwd {
@@ -192,10 +192,9 @@ fn update_mcp_transport_hash(hasher: &mut Sha256, transport: &McpTransportInput)
             oauth_client_id,
         } => {
             hasher.update(b"streamable_http");
-            update_mcp_hash_value(hasher, url);
-            for (name, value) in headers {
+            update_mcp_hash_value(hasher, &normalize_mcp_http_url(url));
+            for name in headers.keys() {
                 update_mcp_hash_value(hasher, name);
-                update_mcp_hash_value(hasher, value);
             }
             hasher.update([0xff]);
             if let Some(env_var) = bearer_token_env_var {
@@ -531,21 +530,33 @@ fn mcp_connection_identity_hash(
     hasher.update(catalog.hash().as_bytes());
     update_mcp_hash_value(&mut hasher, &cwd.to_string_lossy());
     for entry in &catalog.entries {
-        if let McpTransportInput::StreamableHttp {
-            url,
-            bearer_token_env_var,
-            ..
-        } = &entry.input.transport
-        {
-            let token = resolve_http_bearer_token(
-                &entry.input,
-                bearer_token_env_var.as_deref(),
-                url,
-            );
-            if let Some(token) = token {
-                hasher.update(Sha256::digest(token.as_bytes()));
+        match &entry.input.transport {
+            McpTransportInput::Stdio { env, .. } => {
+                for value in env.values() {
+                    hasher.update(Sha256::digest(value.as_bytes()));
+                }
+                hasher.update([0]);
             }
-            hasher.update([0]);
+            McpTransportInput::StreamableHttp {
+                url,
+                headers,
+                bearer_token_env_var,
+                ..
+            } => {
+                for value in headers.values() {
+                    hasher.update(Sha256::digest(value.as_bytes()));
+                }
+                let token = resolve_http_bearer_token(
+                    &entry.input,
+                    bearer_token_env_var.as_deref(),
+                    url,
+                );
+                if let Some(token) = token {
+                    hasher.update(Sha256::digest(token.as_bytes()));
+                }
+                hasher.update([0]);
+            }
+            McpTransportInput::Unsupported { .. } => {}
         }
     }
     if let Some(runtime) = permission_runtime {
@@ -736,6 +747,89 @@ struct PreparedMcpServer {
     prompts_available: bool,
 }
 
+/// One accepted, fully resolved startup identity. Approval and process/network
+/// startup consume this same value so neither side can reinterpret mutable
+/// environment or relative paths after the other has acted.
+struct ResolvedMcpLaunch {
+    entry: McpCatalogEntry,
+    input: McpServerInput,
+    bearer_token: Option<SecretValue>,
+    descriptor_fingerprint: String,
+}
+
+impl ResolvedMcpLaunch {
+    fn resolve(entry: McpCatalogEntry, cwd: &Path) -> Result<Self, String> {
+        let mut input = entry.input.clone();
+        let bearer_token = match &mut input.transport {
+            McpTransportInput::Stdio {
+                command,
+                env: server_env,
+                cwd: server_cwd,
+                ..
+            } => {
+                let effective_cwd = server_cwd.as_deref().unwrap_or(cwd);
+                let effective_cwd = std::fs::canonicalize(effective_cwd).map_err(|error| {
+                    format!(
+                        "MCP server `{}` cwd `{}` could not be resolved: {error}",
+                        input.name,
+                        effective_cwd.display()
+                    )
+                })?;
+                let mut executable_env = env::vars().collect::<BTreeMap<_, _>>();
+                executable_env.extend(server_env.clone());
+                let command_text = command.to_string_lossy().into_owned();
+                let executable = resolve_executable_path(
+                    &command_text,
+                    &effective_cwd,
+                    &ExecutableResolveOptions {
+                        platform: HostPlatform::current(),
+                        env: &executable_env,
+                    },
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "MCP server `{}` command `{command_text}` was not found",
+                        input.name
+                    )
+                })?;
+                *command = std::fs::canonicalize(&executable).unwrap_or(executable);
+                *server_cwd = Some(effective_cwd);
+                None
+            }
+            McpTransportInput::StreamableHttp {
+                url,
+                bearer_token_env_var,
+                ..
+            } => {
+                let configured_url = url.clone();
+                let bearer_token = resolve_http_bearer_token(
+                    &entry.input,
+                    bearer_token_env_var.as_deref(),
+                    &configured_url,
+                )
+                .map(SecretValue::new);
+                *url = normalize_mcp_http_url(&configured_url);
+                bearer_token
+            }
+            McpTransportInput::Unsupported { .. } => None,
+        };
+        let descriptor_fingerprint = mcp_descriptor_fingerprint(&entry, &input);
+        Ok(Self {
+            entry,
+            input,
+            bearer_token,
+            descriptor_fingerprint,
+        })
+    }
+
+    fn descriptor_key(&self) -> String {
+        format!(
+            "{}@{}",
+            self.entry.normalized_name, self.descriptor_fingerprint
+        )
+    }
+}
+
 struct McpStartupFailure {
     message: String,
     required: bool,
@@ -746,14 +840,22 @@ async fn prepare_mcp_server(
     cwd: &Path,
     permission_runtime: Option<&PermissionRuntime>,
 ) -> Result<PreparedMcpServer, McpStartupFailure> {
+    let required = entry.input.policy.required;
     let timeout_secs = entry
         .input
         .policy
         .startup_timeout_secs
         .unwrap_or(DEFAULT_MCP_STARTUP_TIMEOUT_SECS);
+    let display_name = entry.input.name.clone();
+    let launch =
+        ResolvedMcpLaunch::resolve(entry, cwd).map_err(|message| McpStartupFailure {
+            message,
+            required,
+        })?;
+    let authorization_id = format!("mcp_startup:{}", launch.descriptor_key());
     match tokio::time::timeout(
         Duration::from_secs(timeout_secs),
-        prepare_mcp_server_within_deadline(entry.clone(), cwd, permission_runtime),
+        prepare_mcp_server_within_deadline(launch, permission_runtime),
     )
     .await
     {
@@ -761,44 +863,50 @@ async fn prepare_mcp_server(
         Err(_) => {
             if let Some(permission_runtime) = permission_runtime {
                 permission_runtime
-                    .cancel_authorization(&format!(
-                        "mcp_startup:{}",
-                        entry.normalized_name
-                    ))
+                    .cancel_authorization(&authorization_id)
                     .await;
             }
             Err(McpStartupFailure {
                 message: format!(
                     "MCP server `{}` startup timed out after {timeout_secs}s",
-                    entry.input.name
+                    display_name
                 ),
-                required: entry.input.policy.required,
+                required,
             })
         }
     }
 }
 
 async fn prepare_mcp_server_within_deadline(
-    entry: McpCatalogEntry,
-    cwd: &Path,
+    launch: ResolvedMcpLaunch,
     permission_runtime: Option<&PermissionRuntime>,
 ) -> Result<PreparedMcpServer, McpStartupFailure> {
-    let server_name = entry.normalized_name.clone();
+    let server_name = launch.entry.normalized_name.clone();
     if let Some(permission_runtime) = permission_runtime
         && let Err(err) = permission_runtime
-            .authorize_mcp_startup(&server_name, mcp_transport_kind(&entry.input.transport))
+            .authorize_mcp_startup(
+                &server_name,
+                mcp_transport_kind(&launch.input.transport),
+                &launch.descriptor_fingerprint,
+            )
             .await
     {
         return Err(McpStartupFailure {
-            message: format!("MCP server `{}` startup omitted: {err}", entry.input.name),
-            required: entry.input.policy.required,
+            message: format!(
+                "MCP server `{}` startup omitted: {err}",
+                launch.entry.input.name
+            ),
+            required: launch.entry.input.policy.required,
         });
     }
-    let service = connect_mcp_server(&entry.input, cwd)
+    let service = connect_resolved_mcp_launch(&launch)
         .await
         .map_err(|err| McpStartupFailure {
-            message: format!("MCP server `{}` is unavailable: {err}", entry.input.name),
-            required: entry.input.policy.required,
+            message: format!(
+                "MCP server `{}` is unavailable: {err}",
+                launch.entry.input.name
+            ),
+            required: launch.entry.input.policy.required,
         })?;
     let peer = service.peer().clone();
     let capabilities = peer
@@ -818,13 +926,29 @@ async fn prepare_mcp_server_within_deadline(
         _service: Mutex::new(service),
     });
     Ok(PreparedMcpServer {
-        entry,
+        entry: launch.entry,
         connection,
         tools,
         tool_listing_error,
         resources_available: capabilities.resources.is_some(),
         prompts_available: capabilities.prompts.is_some(),
     })
+}
+
+fn normalize_mcp_http_url(url: &str) -> String {
+    url.parse::<http::Uri>()
+        .map(|uri| uri.to_string())
+        .unwrap_or_else(|_| url.trim().to_string())
+}
+
+fn mcp_descriptor_fingerprint(entry: &McpCatalogEntry, input: &McpServerInput) -> String {
+    let mut hasher = Sha256::new();
+    update_mcp_hash_value(&mut hasher, &entry.normalized_name);
+    update_mcp_hash_value(&mut hasher, &entry.source_id);
+    update_mcp_hash_value(&mut hasher, &entry.source_kind);
+    update_mcp_transport_hash(&mut hasher, &input.transport);
+    update_mcp_policy_hash(&mut hasher, &input.policy);
+    format!("{:x}", hasher.finalize())
 }
 
 pub(crate) fn mcp_transport_kind(transport: &McpTransportInput) -> &'static str {
@@ -1198,6 +1322,45 @@ pub(crate) async fn connect_mcp_server(
             }
             let transport = StreamableHttpClientTransport::from_config(config);
             ().serve(transport).await.map_err(|err| err.to_string())
+        }
+        McpTransportInput::Unsupported { kind } => Err(format!("unsupported transport `{kind}`")),
+    }
+}
+
+async fn connect_resolved_mcp_launch(
+    launch: &ResolvedMcpLaunch,
+) -> Result<RunningService<RoleClient, ()>, String> {
+    match &launch.input.transport {
+        McpTransportInput::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } => {
+            let mut cmd = Command::new(command);
+            cmd.args(args).envs(env).current_dir(
+                cwd.as_deref()
+                    .expect("resolved stdio MCP launch has an effective cwd"),
+            );
+            let transport = TokioChildProcess::new(cmd).map_err(|error| error.to_string())?;
+            ().serve(transport).await.map_err(|error| error.to_string())
+        }
+        McpTransportInput::StreamableHttp { url, headers, .. } => {
+            let mut parsed_headers = HashMap::new();
+            for (name, value) in headers {
+                let name = HeaderName::from_bytes(name.as_bytes())
+                    .map_err(|error| format!("invalid HTTP header `{name}`: {error}"))?;
+                let value = HeaderValue::from_str(value)
+                    .map_err(|error| format!("invalid HTTP header value for `{name}`: {error}"))?;
+                parsed_headers.insert(name, value);
+            }
+            let mut config = StreamableHttpClientTransportConfig::with_uri(url.clone())
+                .custom_headers(parsed_headers);
+            if let Some(token) = launch.bearer_token.as_ref() {
+                config = config.auth_header(token.expose_secret().to_string());
+            }
+            let transport = StreamableHttpClientTransport::from_config(config);
+            ().serve(transport).await.map_err(|error| error.to_string())
         }
         McpTransportInput::Unsupported { kind } => Err(format!("unsupported transport `{kind}`")),
     }
@@ -2103,18 +2266,22 @@ pub(crate) mod tests {
     #[derive(Debug)]
     struct PendingMcpApproval {
         cancelled: Arc<std::sync::atomic::AtomicBool>,
+        request: Arc<StdMutex<Option<crate::types::PermissionApprovalRequest>>>,
+        cancelled_id: Arc<StdMutex<Option<String>>>,
     }
 
     impl crate::types::ApprovalHandler for PendingMcpApproval {
         fn request_permission(
             &self,
-            _request: crate::types::PermissionApprovalRequest,
+            request: crate::types::PermissionApprovalRequest,
         ) -> BoxFuture<'static, crate::types::PermissionApprovalDecision> {
+            *self.request.lock().expect("request") = Some(request);
             Box::pin(std::future::pending())
         }
 
-        fn cancel_permission(&self, _tool_call_id: &str) -> BoxFuture<'static, ()> {
+        fn cancel_permission(&self, tool_call_id: &str) -> BoxFuture<'static, ()> {
             let cancelled = Arc::clone(&self.cancelled);
+            *self.cancelled_id.lock().expect("cancelled id") = Some(tool_call_id.to_string());
             Box::pin(async move {
                 cancelled.store(true, std::sync::atomic::Ordering::Release);
             })
@@ -2126,14 +2293,17 @@ pub(crate) mod tests {
         let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let handler = Arc::new(PendingMcpApproval {
             cancelled: Arc::clone(&cancelled),
+            request: Arc::new(StdMutex::new(None)),
+            cancelled_id: Arc::new(StdMutex::new(None)),
         });
+        let captured_request = Arc::clone(&handler.request);
+        let cancelled_id = Arc::clone(&handler.cancelled_id);
         let cwd = std::env::temp_dir();
         let permissions = PermissionRuntime::new(
             cwd.clone(),
             cwd.join(".psychevo"),
             crate::types::PermissionConfig::default(),
             crate::types::PermissionMode::Default,
-            crate::types::ApprovalMode::Manual,
             Some(handler),
             None,
         );
@@ -2162,6 +2332,21 @@ pub(crate) mod tests {
 
         assert!(failure.message.contains("timed out"));
         assert!(cancelled.load(std::sync::atomic::Ordering::Acquire));
+        let request = captured_request
+            .lock()
+            .expect("request")
+            .clone()
+            .expect("typed startup approval");
+        assert!(!request.allow_always);
+        let tool_call_id = request.tool_call_id.clone();
+        let startup = request.mcp_startup.expect("mcp startup detail");
+        assert_eq!(startup.server, "pending");
+        assert_eq!(startup.transport, "unsupported");
+        assert_eq!(startup.descriptor_fingerprint.len(), 64);
+        assert_eq!(
+            cancelled_id.lock().expect("cancelled id").as_deref(),
+            Some(tool_call_id.as_str())
+        );
     }
 
     #[tokio::test]
@@ -2254,6 +2439,53 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn descriptor_fingerprint_excludes_secret_values_but_includes_bindings() {
+        let input = McpServerInput::with_source(
+            "remote",
+            McpTransportInput::StreamableHttp {
+                url: "https://example.test/mcp".to_string(),
+                headers: BTreeMap::from([("X-Secret".to_string(), "alpha".to_string())]),
+                bearer_token_env_var: Some("MCP_TOKEN".to_string()),
+                scopes: Vec::new(),
+                oauth_resource: None,
+                oauth_client_id: None,
+            },
+            "profile:mcp:remote@7",
+            "profile",
+        );
+        let entry = McpSourceCatalog::resolve(std::slice::from_ref(&input))
+            .entries
+            .into_iter()
+            .next()
+            .expect("entry");
+        let first = mcp_descriptor_fingerprint(&entry, &input);
+
+        let mut secret_changed = input.clone();
+        if let McpTransportInput::StreamableHttp { headers, .. } =
+            &mut secret_changed.transport
+        {
+            headers.insert("X-Secret".to_string(), "beta".to_string());
+        }
+        assert_eq!(
+            first,
+            mcp_descriptor_fingerprint(&entry, &secret_changed)
+        );
+
+        let mut binding_changed = input;
+        if let McpTransportInput::StreamableHttp {
+            bearer_token_env_var,
+            ..
+        } = &mut binding_changed.transport
+        {
+            *bearer_token_env_var = Some("OTHER_MCP_TOKEN".to_string());
+        }
+        assert_ne!(
+            first,
+            mcp_descriptor_fingerprint(&entry, &binding_changed)
+        );
+    }
+
+    #[test]
     fn connection_identity_hash_includes_permission_environment() {
         let input = McpServerInput::with_source(
             "repo",
@@ -2269,7 +2501,6 @@ pub(crate) mod tests {
             cwd.join(".psychevo"),
             crate::types::PermissionConfig::default(),
             crate::types::PermissionMode::Default,
-            crate::types::ApprovalMode::Manual,
             None,
             None,
         );
@@ -2278,7 +2509,6 @@ pub(crate) mod tests {
             cwd.join(".psychevo"),
             crate::types::PermissionConfig::default(),
             crate::types::PermissionMode::BypassPermissions,
-            crate::types::ApprovalMode::Manual,
             None,
             None,
         );

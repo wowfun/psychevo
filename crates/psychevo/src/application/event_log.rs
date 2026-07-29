@@ -33,7 +33,10 @@ impl EventLog {
     }
 
     pub(super) fn push(&self, event: TurnEvent) {
-        let mut state = self.inner.lock().expect("turn event log poisoned");
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.events.len() == self.capacity {
             state.events.pop_front();
             state.first_sequence += 1;
@@ -45,7 +48,10 @@ impl EventLog {
     }
 
     pub(super) fn close(&self) {
-        self.inner.lock().expect("turn event log poisoned").closed = true;
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .closed = true;
         self.notify.notify_waiters();
     }
 
@@ -53,7 +59,10 @@ impl EventLog {
         loop {
             let notified = self.notify.notified();
             {
-                let state = self.inner.lock().expect("turn event log poisoned");
+                let state = self
+                    .inner
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if *cursor < state.first_sequence {
                     let missed = state.first_sequence - *cursor;
                     *cursor = state.first_sequence;

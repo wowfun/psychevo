@@ -123,6 +123,9 @@ impl GitBashRuntime {
     }
 
     pub fn from_bash_candidate(bash: PathBuf) -> Option<Self> {
+        if !bash.is_file() {
+            return None;
+        }
         let cygpath = bash
             .parent()
             .map(|parent| parent.join("cygpath.exe"))
@@ -796,6 +799,19 @@ mod tests {
             shell_family: ShellFamily::GitBash,
             cygpath,
         }
+    }
+
+    #[test]
+    fn git_bash_candidate_requires_the_shell_itself_to_exist() {
+        let temp = tempfile::tempdir().expect("temp");
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&bin).expect("bin");
+        std::fs::write(bin.join("cygpath.exe"), b"fixture").expect("cygpath");
+
+        assert!(GitBashRuntime::from_bash_candidate(bin.join("bash.exe")).is_none());
+
+        std::fs::write(bin.join("bash.exe"), b"fixture").expect("bash");
+        assert!(GitBashRuntime::from_bash_candidate(bin.join("bash.exe")).is_some());
     }
 
     #[test]

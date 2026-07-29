@@ -1,11 +1,14 @@
 #[allow(unused_imports)]
 pub(crate) use super::*;
 
+use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FileVersion {
-    pub(crate) mtime: SystemTime,
+    pub(crate) len: u64,
+    pub(crate) modified: SystemTime,
+    pub(crate) sha256: [u8; 32],
 }
 
 #[derive(Debug)]
@@ -95,9 +98,9 @@ pub(crate) const LOCAL_FILE_MUTATION: LocalFileMutation = LocalFileMutation;
 
 impl FileMutationBackend for LocalFileMutation {
     fn snapshot(&self, path: &Path) -> MutationResult<FileSnapshot> {
-        let before = current_file_version(path)?;
+        let before = current_file_metadata(path)?;
         let bytes = fs::read(path)?;
-        let after = current_file_version(path)?;
+        let after = current_file_metadata(path)?;
         if before != after {
             return Err(MutationConflict::Modified {
                 path: path.to_path_buf(),
@@ -105,8 +108,12 @@ impl FileMutationBackend for LocalFileMutation {
             .into());
         }
         Ok(FileSnapshot {
+            version: FileVersion {
+                len: after.len,
+                modified: after.modified,
+                sha256: sha256_bytes(&bytes),
+            },
             bytes,
-            version: after,
         })
     }
 
@@ -213,9 +220,15 @@ fn map_persist_noclobber_error(path: &Path, error: std::io::Error) -> MutationEr
     }
 }
 
-pub(crate) fn current_file_version(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileMetadataVersion {
+    len: u64,
+    modified: SystemTime,
+}
+
+fn current_file_metadata(
     path: &Path,
-) -> std::result::Result<FileVersion, MutationConflict> {
+) -> std::result::Result<FileMetadataVersion, MutationConflict> {
     let metadata = fs::metadata(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             MutationConflict::TargetMissing {
@@ -227,57 +240,153 @@ pub(crate) fn current_file_version(
             }
         }
     })?;
-    let mtime = metadata
+    let modified = metadata
         .modified()
         .map_err(|_| MutationConflict::VersionUnavailable {
             path: path.to_path_buf(),
         })?;
-    Ok(FileVersion { mtime })
+    Ok(FileMetadataVersion {
+        len: metadata.len(),
+        modified,
+    })
+}
+
+fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
+fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().into())
 }
 
 pub(crate) fn ensure_file_version(
     path: &Path,
     expected: FileVersion,
 ) -> std::result::Result<(), MutationConflict> {
-    if current_file_version(path)? == expected {
-        Ok(())
-    } else {
-        Err(MutationConflict::Modified {
+    let metadata = current_file_metadata(path)?;
+    if metadata.len != expected.len || metadata.modified != expected.modified {
+        return Err(MutationConflict::Modified {
             path: path.to_path_buf(),
-        })
+        });
     }
+    if sha256_file(path).map_err(|_| MutationConflict::VersionUnavailable {
+        path: path.to_path_buf(),
+    })? != expected.sha256
+    {
+        return Err(MutationConflict::Modified {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ReadStamp {
-    pub(crate) mtime: Option<SystemTime>,
-    pub(crate) seq: u64,
+    pub(crate) version: FileVersion,
+    pub(crate) tracker_seq: u64,
+    pub(crate) observed_writer_seq: u64,
     pub(crate) partial: bool,
 }
 
-pub(crate) struct FileState {
-    pub(crate) reads: HashMap<String, HashMap<PathBuf, ReadStamp>>,
+#[derive(Debug, Default)]
+struct FileReadTrackerState {
+    reads: HashMap<PathBuf, ReadStamp>,
+    fifo: VecDeque<(PathBuf, u64)>,
+    seq: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FileReadTracker {
+    inner: Arc<Mutex<FileReadTrackerState>>,
+}
+
+impl FileReadTracker {
+    fn record(&self, path: &Path, version: FileVersion, observed_writer_seq: u64, partial: bool) {
+        let mut state = self.inner.lock().expect("file read tracker");
+        state.seq = state.seq.saturating_add(1);
+        let seq = state.seq;
+        let path = path.to_path_buf();
+        state.reads.insert(
+            path.clone(),
+            ReadStamp {
+                version,
+                tracker_seq: seq,
+                observed_writer_seq,
+                partial,
+            },
+        );
+        state.fifo.push_back((path, seq));
+        while state.reads.len() > 4096 {
+            let Some((path, evicted_seq)) = state.fifo.pop_front() else {
+                break;
+            };
+            if state
+                .reads
+                .get(&path)
+                .is_some_and(|stamp| stamp.tracker_seq == evicted_seq)
+            {
+                state.reads.remove(&path);
+            }
+        }
+    }
+
+    fn get(&self, path: &Path) -> Option<ReadStamp> {
+        self.inner
+            .lock()
+            .expect("file read tracker")
+            .reads
+            .get(path)
+            .cloned()
+    }
+
+    pub(crate) fn remove(&self, path: &Path) {
+        self.inner
+            .lock()
+            .expect("file read tracker")
+            .reads
+            .remove(path);
+    }
+}
+
+pub(crate) struct WorkspaceMutationCoordinatorState {
+    pub(crate) active_paths: HashSet<PathBuf>,
     pub(crate) last_writer: HashMap<PathBuf, (String, u64)>,
+    pub(crate) writer_fifo: VecDeque<(PathBuf, u64)>,
     pub(crate) seq: u64,
 }
 
-impl FileState {
+impl WorkspaceMutationCoordinatorState {
     pub(crate) fn next_seq(&mut self) -> u64 {
         self.seq = self.seq.saturating_add(1);
         self.seq
     }
 }
 
-pub(crate) static FILE_STATE: LazyLock<Mutex<FileState>> = LazyLock::new(|| {
-    Mutex::new(FileState {
-        reads: HashMap::new(),
-        last_writer: HashMap::new(),
-        seq: 0,
-    })
-});
+pub(crate) struct WorkspaceMutationCoordinator {
+    state: Mutex<WorkspaceMutationCoordinatorState>,
+    wake: Condvar,
+}
 
-pub(crate) static PATH_LOCKS: LazyLock<(Mutex<HashSet<PathBuf>>, Condvar)> =
-    LazyLock::new(|| (Mutex::new(HashSet::new()), Condvar::new()));
+pub(crate) static WORKSPACE_MUTATIONS: LazyLock<WorkspaceMutationCoordinator> =
+    LazyLock::new(|| WorkspaceMutationCoordinator {
+        state: Mutex::new(WorkspaceMutationCoordinatorState {
+            active_paths: HashSet::new(),
+            last_writer: HashMap::new(),
+            writer_fifo: VecDeque::new(),
+            seq: 0,
+        }),
+        wake: Condvar::new(),
+    });
 
 pub(crate) struct FilePathLocks {
     pub(crate) paths: Vec<PathBuf>,
@@ -285,12 +394,11 @@ pub(crate) struct FilePathLocks {
 
 impl Drop for FilePathLocks {
     fn drop(&mut self) {
-        let (locked, wake) = &*PATH_LOCKS;
-        let mut locked = locked.lock().expect("path lock state");
+        let mut state = WORKSPACE_MUTATIONS.state.lock().expect("path lock state");
         for path in &self.paths {
-            locked.remove(path);
+            state.active_paths.remove(path);
         }
-        wake.notify_all();
+        WORKSPACE_MUTATIONS.wake.notify_all();
     }
 }
 
@@ -298,76 +406,104 @@ pub(crate) fn acquire_path_locks(paths: &[PathBuf]) -> FilePathLocks {
     let mut paths = paths.to_vec();
     paths.sort();
     paths.dedup();
-    let (locked, wake) = &*PATH_LOCKS;
-    let mut state = locked.lock().expect("path lock state");
+    let mut state = WORKSPACE_MUTATIONS.state.lock().expect("path lock state");
     loop {
-        if paths.iter().all(|path| !state.contains(path)) {
+        if paths.iter().all(|path| !state.active_paths.contains(path)) {
             for path in &paths {
-                state.insert(path.clone());
+                state.active_paths.insert(path.clone());
             }
             return FilePathLocks { paths };
         }
-        state = wake.wait(state).expect("path lock state");
+        state = WORKSPACE_MUTATIONS
+            .wake
+            .wait(state)
+            .expect("path lock state");
     }
 }
 
-pub(crate) fn record_file_read(task_id: &str, path: &Path, version: FileVersion, partial: bool) {
-    let mut state = FILE_STATE.lock().expect("file state");
-    let seq = state.next_seq();
-    let reads = state.reads.entry(task_id.to_string()).or_default();
-    reads.insert(
-        path.to_path_buf(),
-        ReadStamp {
-            mtime: Some(version.mtime),
-            seq,
-            partial,
+pub(crate) fn record_file_read(
+    tracker: &FileReadTracker,
+    path: &Path,
+    version: FileVersion,
+    partial: bool,
+) {
+    let observed_writer_seq = WORKSPACE_MUTATIONS
+        .state
+        .lock()
+        .expect("file state")
+        .last_writer
+        .get(path)
+        .map_or(0, |(_, seq)| *seq);
+    tracker.record(path, version, observed_writer_seq, partial);
+}
+
+pub(crate) fn record_written_file(
+    tracker: &FileReadTracker,
+    path: &Path,
+    content: &[u8],
+) -> MutationResult<()> {
+    let metadata = current_file_metadata(path)?;
+    if metadata.len != content.len() as u64 {
+        return Err(MutationConflict::Modified {
+            path: path.to_path_buf(),
+        }
+        .into());
+    }
+    let observed_writer_seq = WORKSPACE_MUTATIONS
+        .state
+        .lock()
+        .expect("file state")
+        .last_writer
+        .get(path)
+        .map_or(0, |(_, seq)| *seq);
+    tracker.record(
+        path,
+        FileVersion {
+            len: metadata.len,
+            modified: metadata.modified,
+            sha256: sha256_bytes(content),
         },
+        observed_writer_seq,
+        false,
     );
-    cap_map(reads, 4096);
+    Ok(())
 }
 
 pub(crate) fn note_file_write(task_id: &str, path: &Path) {
-    let mtime = fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok();
-    let mut state = FILE_STATE.lock().expect("file state");
+    let mut state = WORKSPACE_MUTATIONS.state.lock().expect("file state");
     let seq = state.next_seq();
     state
         .last_writer
         .insert(path.to_path_buf(), (task_id.to_string(), seq));
-    if state.last_writer.len() > 4096
-        && let Some(key) = state.last_writer.keys().next().cloned()
-    {
-        state.last_writer.remove(&key);
+    state.writer_fifo.push_back((path.to_path_buf(), seq));
+    while state.writer_fifo.len() > 4096 {
+        let Some((path, evicted_seq)) = state.writer_fifo.pop_front() else {
+            break;
+        };
+        if state
+            .last_writer
+            .get(&path)
+            .is_some_and(|(_, current_seq)| *current_seq == evicted_seq)
+        {
+            state.last_writer.remove(&path);
+        }
     }
-    let reads = state.reads.entry(task_id.to_string()).or_default();
-    reads.insert(
-        path.to_path_buf(),
-        ReadStamp {
-            mtime,
-            seq,
-            partial: false,
-        },
-    );
-    cap_map(reads, 4096);
 }
 
 pub(crate) fn require_fresh_read(
+    tracker: &FileReadTracker,
     task_id: &str,
     path: &Path,
 ) -> std::result::Result<FileVersion, MutationConflict> {
     let path = path.to_path_buf();
-    let (stamp, last_writer) = {
-        let state = FILE_STATE.lock().expect("file state");
-        (
-            state
-                .reads
-                .get(task_id)
-                .and_then(|reads| reads.get(&path))
-                .cloned(),
-            state.last_writer.get(&path).cloned(),
-        )
-    };
+    let stamp = tracker.get(&path);
+    let last_writer = WORKSPACE_MUTATIONS
+        .state
+        .lock()
+        .expect("file state")
+        .last_writer
+        .get(&path)
+        .cloned();
     let Some(stamp) = stamp else {
         return Err(MutationConflict::NotRead { path });
     };
@@ -376,25 +512,13 @@ pub(crate) fn require_fresh_read(
     }
     if let Some((writer, writer_seq)) = last_writer
         && writer != task_id
-        && writer_seq > stamp.seq
+        && writer_seq > stamp.observed_writer_seq
     {
         return Err(MutationConflict::SiblingWrite { path, writer });
     }
-    let Some(mtime) = stamp.mtime else {
-        return Err(MutationConflict::VersionUnavailable { path });
-    };
-    let version = FileVersion { mtime };
+    let version = stamp.version;
     ensure_file_version(&path, version)?;
     Ok(version)
-}
-
-pub(crate) fn cap_map<V>(map: &mut HashMap<PathBuf, V>, max_len: usize) {
-    while map.len() > max_len {
-        let Some(key) = map.keys().next().cloned() else {
-            break;
-        };
-        map.remove(&key);
-    }
 }
 
 #[cfg(test)]
@@ -463,5 +587,104 @@ pub(crate) mod file_mutation_tests {
             fs::read_to_string(path).expect("external content"),
             "external\n"
         );
+    }
+
+    #[test]
+    fn local_mutation_rejects_same_size_content_with_restored_mtime() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("note.txt");
+        fs::write(&path, "one\n").expect("seed");
+        let snapshot = LOCAL_FILE_MUTATION.snapshot(&path).expect("snapshot");
+
+        fs::write(&path, "two\n").expect("same-size external write");
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|file| {
+                file.set_times(fs::FileTimes::new().set_modified(snapshot.version.modified))
+            })
+            .expect("restore mtime");
+
+        let error = LOCAL_FILE_MUTATION
+            .replace("agent", &path, snapshot.version, b"new\n")
+            .expect_err("digest conflict");
+        assert!(matches!(
+            error,
+            MutationError::Conflict(MutationConflict::Modified { .. })
+        ));
+        assert_eq!(fs::read_to_string(path).expect("external content"), "two\n");
+    }
+
+    #[test]
+    fn read_tracker_is_per_invocation_bounded_and_dropped_with_its_owner() {
+        let first = FileReadTracker::default();
+        let shared_clone = first.clone();
+        let unrelated = FileReadTracker::default();
+        let version = FileVersion {
+            len: 0,
+            modified: SystemTime::UNIX_EPOCH,
+            sha256: [0; 32],
+        };
+        for index in 0..=4096 {
+            first.record(Path::new(&format!("/tracker/{index}")), version, 0, false);
+        }
+        assert!(first.get(Path::new("/tracker/0")).is_none());
+        assert!(shared_clone.get(Path::new("/tracker/4096")).is_some());
+        assert!(unrelated.get(Path::new("/tracker/4096")).is_none());
+
+        let weak = Arc::downgrade(&first.inner);
+        drop(first);
+        assert!(
+            weak.upgrade().is_some(),
+            "a runtime clone still owns the read set"
+        );
+        drop(shared_clone);
+        assert!(
+            weak.upgrade().is_none(),
+            "the invocation read set must be reclaimed"
+        );
+    }
+
+    #[test]
+    fn repeated_writes_to_one_path_keep_process_writer_diagnostics_bounded() {
+        let path = PathBuf::from("/writer-fifo/repeated.txt");
+        for index in 0..5000 {
+            note_file_write(&format!("writer-{index}"), &path);
+        }
+
+        let state = WORKSPACE_MUTATIONS.state.lock().expect("file state");
+        assert!(
+            state.writer_fifo.len() <= 4096,
+            "stale FIFO nodes grew to {} while the last-writer map held {} paths",
+            state.writer_fifo.len(),
+            state.last_writer.len()
+        );
+        assert_eq!(
+            state.last_writer.get(&path).map(|(writer, _)| writer.as_str()),
+            Some("writer-4999")
+        );
+    }
+
+    #[test]
+    fn workspace_path_lock_serializes_independent_runtime_owners() {
+        let temp = tempfile::tempdir().expect("temp");
+        let path = temp.path().join("shared.txt");
+        let first = acquire_path_locks(std::slice::from_ref(&path));
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let second_path = path.clone();
+        let second = thread::spawn(move || {
+            let _second = acquire_path_locks(std::slice::from_ref(&second_path));
+            entered_tx.send(()).expect("signal");
+        });
+
+        assert!(
+            entered_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "the second runtime owner entered while the first still held the path"
+        );
+        drop(first);
+        entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second runtime owner entered after release");
+        second.join().expect("second owner");
     }
 }

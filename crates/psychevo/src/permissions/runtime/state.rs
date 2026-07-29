@@ -98,6 +98,7 @@ struct ApprovalDecisionRequest<'a> {
     suggested_rule: Option<String>,
     allow_always: bool,
     filesystem: Option<FilesystemApprovalRequest>,
+    mcp_startup: Option<crate::types::McpStartupApprovalRequest>,
     abort: Option<AbortSignal>,
 }
 

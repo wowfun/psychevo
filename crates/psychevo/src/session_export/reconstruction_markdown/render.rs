@@ -418,7 +418,6 @@ pub(crate) fn reconstructed_tool_declarations(
             permission_config: Default::default(),
             lsp: Default::default(),
             permission_mode: Default::default(),
-            approval_mode: Default::default(),
             approval_handler: None,
             state: store.clone(),
             config_path: None,
@@ -446,6 +445,7 @@ pub(crate) fn reconstructed_tool_declarations(
             spawn_depth_remaining: None,
             active_team: None,
             external_delegate: None,
+            supervisor: crate::agents::AgentSupervisor::default(),
         }),
     });
     tool_declarations(&tools)

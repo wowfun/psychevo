@@ -17,6 +17,7 @@ pub(crate) enum PermissionAction {
     McpStartup {
         server: String,
         transport: String,
+        descriptor_fingerprint: String,
     },
     Mcp {
         server: String,
@@ -128,6 +129,11 @@ impl PermissionAction {
                             .and_then(Value::as_str)
                             .unwrap_or("unknown")
                             .to_string(),
+                        descriptor_fingerprint: args
+                            .get("descriptorFingerprint")
+                            .and_then(Value::as_str)
+                            .unwrap_or("missing")
+                            .to_string(),
                     })
             }
             _ => crate::mcp::mcp_utility_action(tool_name, args)
@@ -159,8 +165,16 @@ impl PermissionAction {
             Self::Skill { tool, action } => {
                 rule.tool == *tool && wildcard_match(&rule.pattern, action)
             }
-            Self::McpStartup { server, .. } => {
-                rule.tool == "mcp_startup" && wildcard_match(&rule.pattern, server)
+            Self::McpStartup {
+                server,
+                descriptor_fingerprint,
+                ..
+            } => {
+                rule.tool == "mcp_startup"
+                    && wildcard_match(
+                        &rule.pattern,
+                        &format!("{server}@{descriptor_fingerprint}"),
+                    )
             }
             Self::Mcp { server, tool } => {
                 rule.tool == "mcp" && wildcard_match(&rule.pattern, &format!("{server}/{tool}"))
@@ -192,7 +206,11 @@ impl PermissionAction {
                     .join(",")
             ),
             Self::Skill { tool, action } => format!("{tool}:{action}"),
-            Self::McpStartup { server, .. } => format!("mcp_startup:{server}"),
+            Self::McpStartup {
+                server,
+                descriptor_fingerprint,
+                ..
+            } => format!("mcp_startup:{server}@{descriptor_fingerprint}"),
             Self::Mcp { server, tool } => format!("mcp:{server}/{tool}"),
             Self::WebFetch { url } => format!("web_fetch:{url}"),
             Self::WebSearch { query } => format!("web_search:{query}"),
@@ -208,7 +226,13 @@ impl PermissionAction {
             Self::Skill { tool, action } => {
                 Some(format!("{}({action})", permission_rule_tool(tool)))
             }
-            Self::McpStartup { server, .. } => Some(format!("McpStartup({server})")),
+            Self::McpStartup {
+                server,
+                descriptor_fingerprint,
+                ..
+            } => Some(format!(
+                "McpStartup({server}@{descriptor_fingerprint})"
+            )),
             Self::Mcp { server, tool } => Some(format!("Mcp({server}/{tool})")),
             Self::WebFetch { url } => Some(format!("WebFetch({url})")),
             Self::WebSearch { query } => Some(format!("WebSearch({query})")),
@@ -221,7 +245,6 @@ impl PermissionAction {
             self,
             Self::ExecCommand { .. }
                 | Self::Skill { .. }
-                | Self::McpStartup { .. }
                 | Self::Mcp { .. }
                 | Self::WebFetch { .. }
                 | Self::WebSearch { .. }
@@ -298,6 +321,24 @@ impl PermissionAction {
         Some(FilesystemApprovalRequest {
             targets,
             scope_candidates,
+        })
+    }
+
+    pub(crate) fn mcp_startup_approval_request(
+        &self,
+    ) -> Option<crate::types::McpStartupApprovalRequest> {
+        let Self::McpStartup {
+            server,
+            transport,
+            descriptor_fingerprint,
+        } = self
+        else {
+            return None;
+        };
+        Some(crate::types::McpStartupApprovalRequest {
+            server: server.clone(),
+            transport: transport.clone(),
+            descriptor_fingerprint: descriptor_fingerprint.clone(),
         })
     }
 

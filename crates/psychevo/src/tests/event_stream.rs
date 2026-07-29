@@ -13,7 +13,7 @@ pub(crate) async fn run_start_projects_to_session_configured_bootstrap_event() {
         "model": "fake-model",
         "permission_profile": {
             "mode": "default",
-            "approval_mode": "manual",
+            "approvals_reviewer": "user",
         },
         "resume_seed": {
             "requested_session_id": null,

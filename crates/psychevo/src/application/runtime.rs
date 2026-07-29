@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use futures::FutureExt;
 use tokio::sync::oneshot;
@@ -17,6 +17,7 @@ pub(super) struct ApplicationRuntime {
     next_operation_id: AtomicU64,
     pub(super) task_panics: AtomicU64,
     mcp_runtimes: crate::mcp::McpRuntimeRegistry,
+    pub(super) agent_supervisor: crate::agents::AgentSupervisor,
 }
 
 #[derive(Default)]
@@ -63,6 +64,7 @@ impl ApplicationRuntime {
             next_operation_id: AtomicU64::new(1),
             task_panics: AtomicU64::new(0),
             mcp_runtimes: crate::mcp::McpRuntimeRegistry::default(),
+            agent_supervisor: crate::agents::AgentSupervisor::default(),
         }
     }
 
@@ -92,19 +94,14 @@ impl ApplicationRuntime {
             }
         });
         let abort = task.abort_handle();
-        self.task_aborts
-            .lock()
-            .expect("Application task registry poisoned")
-            .insert(task_id, abort.clone());
+        self.lock_task_aborts().insert(task_id, abort.clone());
         let _ = start_tx.send(());
         abort
     }
 
     pub(super) fn abort_all_tasks(&self) -> usize {
         let aborts = self
-            .task_aborts
-            .lock()
-            .expect("Application task registry poisoned")
+            .lock_task_aborts()
             .values()
             .cloned()
             .collect::<Vec<_>>();
@@ -138,7 +135,7 @@ impl ApplicationRuntime {
         thread_id: &str,
         turn_id: &str,
     ) -> oneshot::Receiver<()> {
-        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let mut state = self.lock_state();
         let cell = state.threads.entry(thread_id.to_string()).or_default();
         cell.reserve(ThreadOperationKind::Turn(turn_id.to_string()))
     }
@@ -149,7 +146,7 @@ impl ApplicationRuntime {
         turn_id: &str,
         handle: TurnHandle,
     ) -> Result<oneshot::Receiver<()>> {
-        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let mut state = self.lock_state();
         if state.turns.contains_key(turn_id) {
             return Err(Error::Message(format!(
                 "Turn id is already registered: {turn_id}"
@@ -173,13 +170,7 @@ impl ApplicationRuntime {
     }
 
     pub(super) fn set_turn_abort(&self, turn_id: &str, abort: tokio::task::AbortHandle) {
-        if let Some(slot) = self
-            .state
-            .lock()
-            .expect("Application runtime poisoned")
-            .turns
-            .get_mut(turn_id)
-        {
+        if let Some(slot) = self.lock_state().turns.get_mut(turn_id) {
             slot.abort = Some(abort);
         }
     }
@@ -190,7 +181,7 @@ impl ApplicationRuntime {
         turn_id: &str,
         pending_terminal: Option<PendingTerminal>,
     ) {
-        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let mut state = self.lock_state();
         Self::remove_thread_turn(&mut state, thread_id, turn_id);
         if let Some(pending_terminal) = pending_terminal {
             if let Some(slot) = state.turns.get_mut(turn_id) {
@@ -218,35 +209,25 @@ impl ApplicationRuntime {
     }
 
     pub(super) fn turn_handle(&self, turn_id: &str) -> Option<TurnHandle> {
-        self.state
-            .lock()
-            .expect("Application runtime poisoned")
+        self.lock_state()
             .turns
             .get(turn_id)
             .map(|slot| slot.handle.clone())
     }
 
     pub(super) fn pending_terminal(&self, turn_id: &str) -> Option<PendingTerminal> {
-        self.state
-            .lock()
-            .expect("Application runtime poisoned")
+        self.lock_state()
             .turns
             .get(turn_id)
             .and_then(|slot| slot.pending_terminal.clone())
     }
 
     pub(super) fn remove_pending_terminal(&self, turn_id: &str) {
-        self.state
-            .lock()
-            .expect("Application runtime poisoned")
-            .turns
-            .remove(turn_id);
+        self.lock_state().turns.remove(turn_id);
     }
 
     pub(super) fn thread_activity(&self, thread_id: &str) -> (bool, Option<String>, usize) {
-        self.state
-            .lock()
-            .expect("Application runtime poisoned")
+        self.lock_state()
             .threads
             .get(thread_id)
             .map(|cell| {
@@ -270,7 +251,7 @@ impl ApplicationRuntime {
     }
 
     pub(super) fn thread_turn_handles(&self, thread_id: &str) -> Vec<TurnHandle> {
-        let state = self.state.lock().expect("Application runtime poisoned");
+        let state = self.lock_state();
         let Some(cell) = state.threads.get(thread_id) else {
             return Vec::new();
         };
@@ -285,9 +266,7 @@ impl ApplicationRuntime {
     }
 
     pub(super) fn active_controls(&self) -> Vec<crate::types::RunControlHandle> {
-        self.state
-            .lock()
-            .expect("Application runtime poisoned")
+        self.lock_state()
             .turns
             .values()
             .filter(|slot| slot.phase == TurnPhase::Active)
@@ -297,7 +276,7 @@ impl ApplicationRuntime {
 
     pub(super) fn reserve_mutation(self: &Arc<Self>, thread_id: &str) -> ThreadMutationReservation {
         let operation_id = self.next_operation_id.fetch_add(1, Ordering::Relaxed);
-        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let mut state = self.lock_state();
         let cell = state.threads.entry(thread_id.to_string()).or_default();
         let ready = cell.reserve(ThreadOperationKind::Mutation(operation_id));
         ThreadMutationReservation {
@@ -309,7 +288,7 @@ impl ApplicationRuntime {
     }
 
     fn finish_mutation(&self, thread_id: &str, operation_id: u64) {
-        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let mut state = self.lock_state();
         let remove = if let Some(cell) = state.threads.get_mut(thread_id) {
             cell.release(
                 |kind| matches!(kind, ThreadOperationKind::Mutation(id) if *id == operation_id),
@@ -324,7 +303,7 @@ impl ApplicationRuntime {
     }
 
     pub(super) fn take_turn_slots(&self) -> Vec<TurnSlot> {
-        let mut state = self.state.lock().expect("Application runtime poisoned");
+        let mut state = self.lock_state();
         let slots = state
             .turns
             .drain()
@@ -332,6 +311,18 @@ impl ApplicationRuntime {
             .collect::<Vec<_>>();
         state.threads.clear();
         slots
+    }
+
+    fn lock_state(&self) -> MutexGuard<'_, ApplicationRuntimeState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn lock_task_aborts(&self) -> MutexGuard<'_, HashMap<u64, tokio::task::AbortHandle>> {
+        self.task_aborts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -381,11 +372,7 @@ struct TrackedTaskGuard {
 impl Drop for TrackedTaskGuard {
     fn drop(&mut self) {
         if let Some(runtime) = self.runtime.upgrade() {
-            runtime
-                .task_aborts
-                .lock()
-                .expect("Application task registry poisoned")
-                .remove(&self.task_id);
+            runtime.lock_task_aborts().remove(&self.task_id);
         }
     }
 }
@@ -474,5 +461,17 @@ mod tests {
 
         runtime.clear_mcp_runtimes();
         assert_eq!(runtime.mcp_runtimes.len(), 0);
+    }
+
+    #[test]
+    fn agent_supervisor_pause_state_is_application_scoped_and_parent_scoped() {
+        let first = ApplicationRuntime::new();
+        let second = ApplicationRuntime::new();
+
+        first.agent_supervisor.set_spawning_paused("thread-a", true);
+
+        assert!(first.agent_supervisor.spawning_paused("thread-a"));
+        assert!(!first.agent_supervisor.spawning_paused("thread-b"));
+        assert!(!second.agent_supervisor.spawning_paused("thread-a"));
     }
 }

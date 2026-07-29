@@ -42,12 +42,7 @@ pub(crate) async fn run_live_internal(
     let project_context_mode = loaded.config.project_context.instructions;
     let project_instructions = load_project_instructions(&cwd, project_context_mode)?;
     let permission_mode = options.permission_mode.unwrap_or_default();
-    let approval_mode = options.approval_mode.unwrap_or({
-        match loaded.config.permissions.approvals_reviewer {
-            crate::types::ApprovalsReviewer::User => crate::types::ApprovalMode::Manual,
-            crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
-        }
-    });
+    let approvals_reviewer = loaded.config.permissions.approvals_reviewer;
     let store = options.state.clone();
     let resumed_session_id = if let Some(session_id) = &options.session {
         Some(session_id.clone())
@@ -88,6 +83,7 @@ pub(crate) async fn run_live_internal(
     };
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_agent.as_ref());
+    let effective_mode = effective_run_mode(options.mode, selected_agent.as_ref());
     let mut resolved_options = options.clone();
     if resolved_options.model.is_none()
         && let Some(model) = selected_agent
@@ -112,13 +108,13 @@ pub(crate) async fn run_live_internal(
         &loaded.config.permissions,
     )?;
     let tool_selection_intent = crate::tool_surface::compile_tool_selection(
-        options.mode,
+        effective_mode,
         &loaded.config.tools,
         &loaded.config.toolsets,
         &extension_assembly.toolsets,
     );
     let web_search_selected =
-        tool_selection_intent.selects_tool("web_search", options.mode);
+        tool_selection_intent.selects_tool("web_search", effective_mode);
     let image_generation =
         crate::config::resolve_image_generation_config_from_loaded(&loaded, None, None, None, None)
             .ok();
@@ -187,9 +183,9 @@ pub(crate) async fn run_live_internal(
             "reasoning_effort": resolved.reasoning_effort.clone(),
             "context_limit": resolved.context_limit,
             "model_metadata": resolved.metadata.public_json(),
-            "mode": options.mode.as_str(),
+            "mode": effective_mode.as_str(),
             "permission_mode": permission_mode.as_str(),
-            "approval_mode": approval_mode.as_str(),
+            "approvals_reviewer": approvals_reviewer.as_str(),
             "project_context": {
                 "instructions": project_context_mode.as_str(),
             },
@@ -313,12 +309,12 @@ pub(crate) async fn run_live_internal(
         "reasoning_effort": resolved.reasoning_effort.clone(),
         "context_limit": resolved.context_limit,
         "model_metadata": resolved.metadata.public_json(),
-        "mode": options.mode.as_str(),
+        "mode": effective_mode.as_str(),
         "permission_mode": permission_mode.as_str(),
-        "approval_mode": approval_mode.as_str(),
+        "approvals_reviewer": approvals_reviewer.as_str(),
         "permission_profile": {
             "mode": permission_mode.as_str(),
-            "approval_mode": approval_mode.as_str(),
+            "approvals_reviewer": approvals_reviewer.as_str(),
             "sandbox": sandbox_profile,
         },
         "project_context": {
@@ -426,7 +422,7 @@ pub(crate) async fn run_live_internal(
     let context_profile = LiveContextProfile {
         session_id: session_id.clone(),
         context_limit: resolved.context_limit,
-        mode: options.mode,
+        mode: effective_mode,
     };
     let provider = provider
         .map_language_adapter(|adapter| {
@@ -442,14 +438,24 @@ pub(crate) async fn run_live_internal(
         .map_err(|error| Error::Config(error.to_string()))?;
     let stream_events_after = stream_events.clone();
     let controlled_run = control.is_some();
-    let (control_handle, control_receivers, clarify_control) = match control {
+    let (control_handle, control_receivers, clarify_control, agent_supervisor) = match control {
         Some(control) => {
             let clarify = Some(control.handle.clarify.clone());
-            (control.handle.inner.clone(), control.receivers, clarify)
+            (
+                control.handle.inner.clone(),
+                control.receivers,
+                clarify,
+                control.agent_supervisor,
+            )
         }
         None => {
             let (handle, receivers) = ControlHandle::new();
-            (handle, receivers, None)
+            (
+                handle,
+                receivers,
+                None,
+                crate::agents::AgentSupervisor::default(),
+            )
         }
     };
     let mut generation_metadata = json!({
@@ -475,7 +481,7 @@ pub(crate) async fn run_live_internal(
     let sandbox_policy = crate::sandbox::SandboxPolicy::from_config(
         &loaded.config.sandbox,
         &cwd,
-        options.mode,
+        effective_mode,
         &loaded.env,
     )?;
     let sandbox_grants = options.state.filesystem_grants(&session_id);
@@ -494,12 +500,11 @@ pub(crate) async fn run_live_internal(
             context_limit: resolved.context_limit,
             generation_metadata: generation_metadata.clone(),
             cwd: cwd.clone(),
-            mode: options.mode,
+            mode: effective_mode,
             project_context_mode,
             permission_config: loaded.config.permissions.clone(),
             lsp: loaded.config.lsp.clone(),
             permission_mode,
-            approval_mode,
             approval_handler: options.approval_handler.clone(),
             state: options.state.clone(),
             config_path: options.config_path.clone(),
@@ -538,6 +543,7 @@ pub(crate) async fn run_live_internal(
             .ok()
             .flatten(),
             external_delegate: options.external_agent_delegate.clone(),
+            supervisor: agent_supervisor.clone(),
         })
     } else {
         None
@@ -547,7 +553,6 @@ pub(crate) async fn run_live_internal(
         cwd.join(".psychevo"),
         loaded.config.permissions.clone(),
         permission_mode,
-        approval_mode,
         options.approval_handler.clone(),
         smart_approval_handler(
             reviewer_model,
@@ -591,7 +596,7 @@ pub(crate) async fn run_live_internal(
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         cwd: cwd.clone(),
         task_id: session_id.clone(),
-        mode: options.mode,
+        mode: effective_mode,
         lsp: loaded.config.lsp.clone(),
         allow_login_shell: loaded.config.permissions.allow_login_shell,
         stream_events: stream_events.clone(),
@@ -638,7 +643,7 @@ pub(crate) async fn run_live_internal(
         }
     }
     let mut tools = tool_surface.tools;
-    tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), options.mode);
+    tools = apply_agent_tool_policy(tools, selected_agent.as_ref(), effective_mode);
     let permission_runtime = match hook_runtime.clone() {
         Some(runtime) => permission_runtime.with_hook_runtime(runtime),
         None => permission_runtime,
@@ -685,9 +690,9 @@ pub(crate) async fn run_live_internal(
     };
     let tool_declarations_hash = tool_declarations_hash_with_search(&tools, tool_search_options);
     let prefix_metadata = json!({
-        "mode": options.mode.as_str(),
+        "mode": effective_mode.as_str(),
         "permission_mode": permission_mode.as_str(),
-        "approval_mode": approval_mode.as_str(),
+        "approvals_reviewer": approvals_reviewer.as_str(),
         "project_context": {
             "instructions": project_context_mode.as_str(),
         },
@@ -719,7 +724,7 @@ pub(crate) async fn run_live_internal(
             record,
             &resolved.provider,
             &resolved.model,
-            options.mode,
+            effective_mode,
             selected_agent_summary.as_ref(),
             &tool_declarations_hash,
             &prefix_metadata,
@@ -729,7 +734,7 @@ pub(crate) async fn run_live_internal(
         created_session || stored_prefix.is_none() || invalidation_reason.is_some();
     let (prompt_assembly, prompt_prefix_record) = if needs_prefix_rebuild {
         let assembly = assemble_main_prompt_prefix(MainPromptPrefixInput {
-            mode: options.mode,
+            mode: effective_mode,
             cwd: &cwd,
             selected_agent: selected_agent.as_ref(),
             agents: &prompt_agents,

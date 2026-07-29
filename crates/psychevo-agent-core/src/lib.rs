@@ -2,7 +2,7 @@ pub(crate) use std::collections::{BTreeMap, VecDeque};
 pub(crate) use std::sync::{Arc, Mutex};
 pub(crate) use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub(crate) use futures::future::{BoxFuture, join_all};
+pub(crate) use futures::{StreamExt, future::BoxFuture, stream::FuturesUnordered};
 pub(crate) use psychevo_ai::{
     AbortSignal, AssistantSource, FinishReasonKind, GenerationEvent, GenerationOutcome,
     LanguageModel, LanguageRequest, LanguageSettings, LanguageTool, Outcome, ToolDeclaration,

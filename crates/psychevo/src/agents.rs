@@ -1,10 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    Arc, LazyLock, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
@@ -42,9 +39,9 @@ use crate::tool_surface::{
     ClarifyToolSurface, ToolSurfaceAssembly, assemble_tool_surface_with_warnings,
 };
 use crate::types::{
-    ApprovalHandler, ApprovalMode, ExternalAgentDelegateRequest, ModelMetadata, PermissionConfig,
-    PermissionMode, ProjectContextInstructionMode, RunMode, RunStreamEvent, RunStreamSink,
-    RunWarning, RuntimeTool, SelectedAgent, SessionSummary, SmokeControl,
+    ApprovalHandler, ExternalAgentDelegateRequest, ModelMetadata, PermissionConfig, PermissionMode,
+    ProjectContextInstructionMode, RunMode, RunStreamEvent, RunStreamSink, RunWarning, RuntimeTool,
+    SelectedAgent, SessionSummary, SmokeControl,
 };
 
 #[path = "agents/catalog_surface.rs"]
@@ -54,18 +51,25 @@ pub use catalog_surface::{
     AgentControl, AgentDefinition, AgentDiagnostic, AgentDiscoveryOptions, AgentEntrypoint,
     AgentInvocationRole, AgentPermissionMode, AgentRun, AgentRunRecord, AgentRunStatus,
     AgentSource, AgentToolPolicy, MAX_AGENT_SPAWN_DEPTH_CAP, agent_source_display_label,
-    agent_spawn_paused, agent_status_records, agent_status_value, close_agent_id, discover_agents,
-    format_agents_for_prompt, list_agents_value, resolve_agent_definition, set_agent_spawn_paused,
-    stop_agent_id_with_grace, view_agent_value, view_agent_value_with_catalog, wait_agent_id,
-    wait_agent_mailbox,
+    discover_agents, format_agents_for_prompt, list_agents_value, resolve_agent_definition,
+    view_agent_value, view_agent_value_with_catalog, wait_agent_mailbox,
 };
+#[path = "agents/supervisor.rs"]
+mod supervisor;
+pub(crate) use supervisor::{AgentRunState, AgentSupervisor};
 pub(crate) use catalog_surface::{
     AgentToolContext, agent_catalog_for_prompt, agent_catalog_for_selected_policy,
     agent_policy_allows_agent_spawn, agent_project_instructions_enabled, agent_tools,
     apply_agent_tool_policy, apply_hook_runtime, apply_runtime_hooks, build_hook_runtime,
-    default_peer_agent_entrypoints, default_peer_client_capabilities, effective_tool_names,
-    format_selected_agent_instruction, narrow_permission_mode_for_agent,
+    default_peer_agent_entrypoints, default_peer_client_capabilities, effective_run_mode,
+    effective_tool_names, format_selected_agent_instruction, narrow_permission_mode_for_agent,
     skill_catalog_visible_for_tools,
+};
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(crate) use catalog_surface::{
+    agent_status_records, agent_status_value, close_agent_id, stop_agent_id_with_grace,
+    wait_agent_id,
 };
 #[path = "agents/main_agent.rs"]
 mod main_agent;
@@ -76,7 +80,9 @@ pub use main_agent::{
 };
 #[path = "agents/lifecycle.rs"]
 mod lifecycle;
-pub use lifecycle::{resume_agent_id, send_agent_message};
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(crate) use lifecycle::{resume_agent_id, send_agent_message};
 #[path = "agents/definition_policy.rs"]
 mod definition_policy;
 pub use definition_policy::{parse_agent_definition_text, valid_agent_name};

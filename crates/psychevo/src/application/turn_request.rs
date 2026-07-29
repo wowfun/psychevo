@@ -59,7 +59,6 @@ impl TurnRequest {
             include_reasoning: false,
             mode: RunMode::default(),
             permission_mode: None,
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: false,
             inherited_env: None,
@@ -156,11 +155,9 @@ impl TurnRequest {
 
     pub fn with_approval(
         mut self,
-        approval_mode: Option<ApprovalMode>,
         approval_handler: Option<Arc<dyn ApprovalHandler>>,
         clarify_enabled: bool,
     ) -> Self {
-        self.approval_mode = approval_mode;
         self.approval_handler = approval_handler;
         self.clarify_enabled = clarify_enabled;
         self
@@ -223,7 +220,6 @@ impl TurnRequest {
             include_reasoning: options.include_reasoning,
             mode: options.mode,
             permission_mode: options.permission_mode,
-            approval_mode: options.approval_mode,
             approval_handler: options.approval_handler,
             clarify_enabled: options.clarify_enabled,
             inherited_env: options.inherited_env,
@@ -340,7 +336,6 @@ impl TurnRequest {
             include_reasoning: self.include_reasoning,
             mode: self.mode,
             permission_mode: self.permission_mode,
-            approval_mode: self.approval_mode,
             approval_handler: self.approval_handler,
             clarify_enabled: self.clarify_enabled,
             inherited_env: self.inherited_env,

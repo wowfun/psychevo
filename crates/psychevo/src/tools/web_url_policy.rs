@@ -3,6 +3,8 @@ pub(crate) use super::*;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+use futures::{Stream, StreamExt};
+
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedWebUrl {
     pub(crate) url: reqwest::Url,
@@ -48,14 +50,150 @@ impl WebUrlPolicy {
                 .map_err(|_| Error::Message("web URL DNS lookup failed".into()))?
                 .collect::<Vec<_>>()
         };
-        if addresses.is_empty() || addresses.iter().any(|address| !public_ip(address.ip())) {
-            return Err(Error::Message("web URL target is not public".into()));
-        }
+        require_public_addresses(&addresses)?;
         Ok(ValidatedWebUrl {
             url,
             host,
             addresses,
         })
+    }
+}
+
+fn require_public_addresses(addresses: &[SocketAddr]) -> Result<()> {
+    if addresses.is_empty() || addresses.iter().any(|address| !public_ip(address.ip())) {
+        return Err(Error::Message("web URL target is not public".into()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PublicHttpGetOptions {
+    pub(crate) timeout: Duration,
+    pub(crate) redirect_limit: usize,
+    pub(crate) user_agent: &'static str,
+    pub(crate) accept: &'static str,
+    pub(crate) operation: &'static str,
+}
+
+pub(crate) async fn public_http_get(
+    raw: &str,
+    options: &PublicHttpGetOptions,
+    mut abort: Option<AbortSignal>,
+) -> Result<reqwest::Response> {
+    let policy = WebUrlPolicy;
+    let mut validated = policy.validate(raw).await?;
+    for redirect_count in 0..=options.redirect_limit {
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(options.timeout)
+            .user_agent(options.user_agent);
+        for address in &validated.addresses {
+            // Pin the connection to the addresses which passed the public-IP
+            // check. A subsequent DNS answer cannot redirect this request.
+            builder = builder.resolve(&validated.host, *address);
+        }
+        let request = builder
+            .build()?
+            .get(validated.url.clone())
+            .header(reqwest::header::ACCEPT, options.accept);
+        let response = match abort.as_mut() {
+            Some(abort) => {
+                tokio::select! {
+                    _ = abort.wait_for_abort() => {
+                        return Err(Error::Message(format!("{} aborted", options.operation)));
+                    }
+                    result = request.send() => result?,
+                }
+            }
+            None => request.send().await?,
+        };
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        if redirect_count == options.redirect_limit {
+            return Err(Error::Message(format!(
+                "{} redirect limit exceeded",
+                options.operation
+            )));
+        }
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "{} redirect did not contain a valid Location",
+                    options.operation
+                ))
+            })?;
+        validated = validate_redirect_target(&policy, &validated.url, location).await?;
+    }
+    unreachable!("redirect loop either returns a response or an error")
+}
+
+async fn validate_redirect_target(
+    policy: &WebUrlPolicy,
+    base: &reqwest::Url,
+    location: &str,
+) -> Result<ValidatedWebUrl> {
+    let next = base
+        .join(location)
+        .map_err(|_| Error::Message("web redirect URL is invalid".into()))?;
+    policy.validate(next.as_str()).await
+}
+
+pub(crate) async fn read_bounded_http_response(
+    response: reqwest::Response,
+    max_bytes: usize,
+    abort: Option<AbortSignal>,
+    operation: &'static str,
+) -> Result<Vec<u8>> {
+    if let Some(length) = response.content_length()
+        && length > max_bytes as u64
+    {
+        return Err(Error::Message(format!(
+            "{operation} response too large: content-length {length} exceeds {max_bytes} bytes"
+        )));
+    }
+    collect_bounded_stream(response.bytes_stream(), max_bytes, abort, operation).await
+}
+
+async fn collect_bounded_stream<S, B, E>(
+    mut stream: S,
+    max_bytes: usize,
+    mut abort: Option<AbortSignal>,
+    operation: &'static str,
+) -> Result<Vec<u8>>
+where
+    S: Stream<Item = std::result::Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: std::fmt::Display,
+{
+    let mut output = Vec::new();
+    loop {
+        let item = match abort.as_mut() {
+            Some(abort) => {
+                tokio::select! {
+                    _ = abort.wait_for_abort() => {
+                        return Err(Error::Message(format!("{operation} aborted")));
+                    }
+                    item = stream.next() => item,
+                }
+            }
+            None => stream.next().await,
+        };
+        let Some(chunk) = item else {
+            return Ok(output);
+        };
+        let chunk = chunk
+            .map_err(|error| Error::Message(format!("{operation} response failed: {error}")))?;
+        let chunk = chunk.as_ref();
+        if output.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(Error::Message(format!(
+                "{operation} response too large: exceeds {max_bytes} bytes"
+            )));
+        }
+        output.extend_from_slice(chunk);
     }
 }
 
@@ -208,5 +346,38 @@ mod tests {
         }
         assert!(public_ip("1.1.1.1".parse().unwrap()));
         assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
+    }
+
+    #[test]
+    fn rejects_mixed_public_private_dns_answers_before_connect() {
+        let addresses = [
+            "1.1.1.1:443".parse().expect("public"),
+            "127.0.0.1:443".parse().expect("private"),
+        ];
+        let error = require_public_addresses(&addresses).expect_err("mixed answer");
+        assert!(error.to_string().contains("not public"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn redirect_target_is_revalidated_before_following() {
+        let policy = WebUrlPolicy;
+        let base = reqwest::Url::parse("https://example.com/image.png").expect("base");
+        let error = validate_redirect_target(&policy, &base, "http://127.0.0.1/private")
+            .await
+            .expect_err("private redirect");
+        assert!(error.to_string().contains("not public"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn bounded_stream_stops_before_exceeding_the_limit() {
+        let stream = futures::stream::iter([
+            Ok::<_, std::convert::Infallible>(b"1234".as_slice()),
+            Ok(b"5678".as_slice()),
+            Ok(b"9".as_slice()),
+        ]);
+        let error = collect_bounded_stream(stream, 8, None, "test")
+            .await
+            .expect_err("bounded");
+        assert!(error.to_string().contains("exceeds 8 bytes"), "{error}");
     }
 }

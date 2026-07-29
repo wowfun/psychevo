@@ -14,7 +14,7 @@ pub(crate) use crate::config::{
     append_local_network_grant_with_extends, append_local_skill_grant_with_extends,
 };
 pub(crate) use crate::types::{
-    ApprovalMode, ApprovalPolicy, ApprovalsReviewer, ExecPolicyDecision, ExecPolicyPatternToken,
+    ApprovalPolicy, ApprovalsReviewer, ExecPolicyDecision, ExecPolicyPatternToken,
     FilesystemApprovalLifetime, FilesystemApprovalRequest, FilesystemApprovalScope,
     FilesystemApprovalTarget, PermissionAccess, PermissionApprovalOutcome,
     PermissionApprovalRequest, PermissionConfig, PermissionMode, PermissionProfileConfig,

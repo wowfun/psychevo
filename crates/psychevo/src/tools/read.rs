@@ -124,7 +124,7 @@ pub(crate) fn read_tool_impl(tool: CwdTool, args: Value) -> Result<Value> {
         None
     };
     record_file_read(
-        tool.task_id(),
+        tool.file_reads(),
         &target,
         snapshot.version,
         offset > 1 || truncated_by.is_some(),

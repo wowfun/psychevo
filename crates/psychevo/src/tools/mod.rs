@@ -1,4 +1,4 @@
-pub(crate) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+pub(crate) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 pub(crate) use std::fs;
 pub(crate) use std::io::{Read, Write};
 pub(crate) use std::path::{Path, PathBuf};
@@ -22,13 +22,13 @@ pub(crate) use crate::config::{
 pub(crate) use crate::error::{Error, Result};
 pub(crate) use crate::prompt_templates;
 pub(crate) use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
+#[cfg(test)]
+pub(crate) use crate::skills::SkillDiscoveryOptions;
 pub(crate) use crate::skills::{
     InstallOptions, ListSkillsOptions, SkillRuntime, SkillTarget, create_skill, install_skill,
     list_skills_value_with_options, patch_skill, remove_skill, set_skill_config_value,
     set_skill_enabled, view_skill_value,
 };
-#[cfg(test)]
-pub(crate) use crate::skills::SkillDiscoveryOptions;
 pub(crate) use crate::types::{
     RunMode, RunStreamEvent, RunStreamSink, WorkspaceMutation, WorkspaceMutationSink,
 };
@@ -56,6 +56,7 @@ pub(crate) fn default_exec_max_output_tokens() -> usize {
 #[derive(Clone)]
 pub(crate) struct ToolRuntimeContext {
     pub(crate) task_id: String,
+    pub(crate) file_reads: FileReadTracker,
     pub(crate) lsp: LspConfig,
     pub(crate) lsp_manager: Arc<crate::tools::write_support::LspManager>,
     pub(crate) allow_login_shell: bool,
@@ -75,6 +76,7 @@ impl Default for ToolRuntimeContext {
     fn default() -> Self {
         Self {
             task_id: "default".to_string(),
+            file_reads: FileReadTracker::default(),
             lsp: LspConfig::default(),
             lsp_manager: crate::tools::write_support::default_lsp_manager(),
             allow_login_shell: false,
@@ -162,28 +164,117 @@ pub(crate) fn skill_tools_for_mode_with_runtime(
     tools
 }
 
-pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
-    match mode {
-        RunMode::Plan => vec![
-            "read",
-            "exec_command",
-            "write_stdin",
-            "web_fetch",
-            "web_search",
-            "view_image",
-        ],
-        RunMode::Default => vec![
-            "read",
-            "write",
-            "edit",
-            "exec_command",
-            "write_stdin",
-            "web_fetch",
-            "web_search",
-            "view_image",
-            "image_generate",
-        ],
+type BuiltinToolFactory = fn(&Path, ToolRuntimeContext) -> Option<Arc<dyn ToolBinding>>;
+
+const MODE_DEFAULT: u8 = 1 << 0;
+const MODE_PLAN: u8 = 1 << 1;
+
+struct BuiltinToolSpec {
+    canonical_name: &'static str,
+    aliases: &'static [&'static str],
+    modes: u8,
+    toolset: &'static str,
+    factory: BuiltinToolFactory,
+}
+
+impl BuiltinToolSpec {
+    fn allows(&self, mode: RunMode) -> bool {
+        let flag = match mode {
+            RunMode::Default => MODE_DEFAULT,
+            RunMode::Plan => MODE_PLAN,
+        };
+        self.modes & flag != 0
     }
+
+    fn matches(&self, name: &str) -> bool {
+        self.canonical_name == name || self.aliases.contains(&name)
+    }
+}
+
+static BUILTIN_TOOL_SPECS: &[BuiltinToolSpec] = &[
+    BuiltinToolSpec {
+        canonical_name: "read",
+        aliases: &[],
+        modes: MODE_DEFAULT | MODE_PLAN,
+        toolset: "coding-core",
+        factory: |cwd, context| Some(Arc::new(ReadTool::new(cwd.to_path_buf(), context))),
+    },
+    BuiltinToolSpec {
+        canonical_name: "write",
+        aliases: &[],
+        modes: MODE_DEFAULT,
+        toolset: "coding-core",
+        factory: |cwd, context| Some(Arc::new(WriteTool::new(cwd.to_path_buf(), context))),
+    },
+    BuiltinToolSpec {
+        canonical_name: "edit",
+        aliases: &[],
+        modes: MODE_DEFAULT,
+        toolset: "coding-core",
+        factory: |cwd, context| Some(Arc::new(EditTool::new(cwd.to_path_buf(), context))),
+    },
+    BuiltinToolSpec {
+        canonical_name: "exec_command",
+        aliases: &[],
+        modes: MODE_DEFAULT | MODE_PLAN,
+        toolset: "coding-core",
+        factory: |cwd, context| Some(Arc::new(ExecCommandTool::new(cwd.to_path_buf(), context))),
+    },
+    BuiltinToolSpec {
+        canonical_name: "write_stdin",
+        aliases: &[],
+        modes: MODE_DEFAULT | MODE_PLAN,
+        toolset: "coding-core",
+        factory: |_cwd, context| Some(Arc::new(WriteStdinTool::new(context.task_id))),
+    },
+    BuiltinToolSpec {
+        canonical_name: "web_fetch",
+        aliases: &[],
+        modes: MODE_DEFAULT | MODE_PLAN,
+        toolset: "web",
+        factory: |_cwd, _context| Some(Arc::new(WebFetchTool::new())),
+    },
+    BuiltinToolSpec {
+        canonical_name: "web_search",
+        aliases: &[],
+        modes: MODE_DEFAULT | MODE_PLAN,
+        toolset: "web",
+        factory: |_cwd, context| {
+            (context.web_search.execution != crate::config::WebSearchExecution::Hosted).then(|| {
+                Arc::new(WebSearchTool::new(
+                    context.web_search,
+                    context.env,
+                    context.task_id,
+                )) as Arc<dyn ToolBinding>
+            })
+        },
+    },
+    BuiltinToolSpec {
+        canonical_name: "view_image",
+        aliases: &[],
+        modes: MODE_DEFAULT | MODE_PLAN,
+        toolset: "vision",
+        factory: |cwd, context| Some(Arc::new(ViewImageTool::new(cwd.to_path_buf(), context))),
+    },
+    BuiltinToolSpec {
+        canonical_name: "image_generate",
+        aliases: &["image_generation.generate"],
+        modes: MODE_DEFAULT,
+        toolset: "vision",
+        factory: |cwd, context| Some(Arc::new(ImageGenerateTool::new(cwd.to_path_buf(), context))),
+    },
+];
+
+fn builtin_tool_spec(name: &str) -> Option<&'static BuiltinToolSpec> {
+    BUILTIN_TOOL_SPECS.iter().find(|spec| spec.matches(name))
+}
+
+pub fn tool_names_for_mode(mode: RunMode) -> Vec<&'static str> {
+    BUILTIN_TOOL_SPECS
+        .iter()
+        .filter(|spec| spec.allows(mode))
+        .map(|spec| spec.canonical_name)
+        .collect()
 }
 
 pub(crate) fn effective_tool_names_for_mode_with_config(
@@ -219,8 +310,8 @@ pub(crate) fn effective_toolset_names_for_mode_with_config(
     let mut toolsets = mode_config
         .and_then(|config| config.enabled_toolsets.clone())
         .unwrap_or_else(|| {
-            DEFAULT_ENABLED_TOOLSETS
-                .iter()
+            default_enabled_toolsets()
+                .into_iter()
                 .map(|name| name.to_string())
                 .collect()
         });
@@ -246,12 +337,18 @@ fn disabled_toolset_names_for_mode(
         .unwrap_or_default()
 }
 
-pub(crate) fn builtin_toolset_names() -> &'static [&'static str] {
-    &["coding-core", "web", "vision"]
+pub(crate) fn builtin_toolset_names() -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for spec in BUILTIN_TOOL_SPECS {
+        if !names.contains(&spec.toolset) {
+            names.push(spec.toolset);
+        }
+    }
+    names
 }
 
-pub(crate) fn default_enabled_toolsets() -> &'static [&'static str] {
-    &DEFAULT_ENABLED_TOOLSETS
+pub(crate) fn default_enabled_toolsets() -> Vec<&'static str> {
+    builtin_toolset_names()
 }
 
 pub(crate) fn builtin_toolset_description(name: &str) -> Option<&'static str> {
@@ -265,54 +362,26 @@ pub(crate) fn builtin_toolset_description(name: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn builtin_toolset_tools(name: &str) -> Option<&'static [&'static str]> {
-    match name {
-        "coding-core" => Some(&["read", "write", "edit", "exec_command", "write_stdin"]),
-        "web" => Some(&["web_fetch", "web_search"]),
-        "vision" => Some(&["view_image", "image_generate"]),
-        _ => None,
-    }
+pub(crate) fn builtin_toolset_tools(name: &str) -> Option<Vec<&'static str>> {
+    let tools = BUILTIN_TOOL_SPECS
+        .iter()
+        .filter(|spec| spec.toolset == name)
+        .map(|spec| spec.canonical_name)
+        .collect::<Vec<_>>();
+    (!tools.is_empty()).then_some(tools)
 }
 
 pub(crate) fn tool_allowed_in_mode(name: &str, mode: RunMode) -> bool {
-    match mode {
-        RunMode::Plan => matches!(
-            name,
-            "read" | "exec_command" | "write_stdin" | "web_fetch" | "web_search" | "view_image"
-        ),
-        RunMode::Default => matches!(
-            name,
-            "read"
-                | "write"
-                | "edit"
-                | "exec_command"
-                | "write_stdin"
-                | "web_fetch"
-                | "web_search"
-                | "view_image"
-                | "image_generate"
-                | "image_generation.generate"
-        ),
-    }
+    builtin_tool_spec(name).is_some_and(|spec| spec.allows(mode))
 }
 
 pub(crate) fn known_tool_name(name: &str) -> bool {
-    matches!(
-        name,
-        "read"
-            | "write"
-            | "edit"
-            | "exec_command"
-            | "write_stdin"
-            | "web_fetch"
-            | "web_search"
-            | "view_image"
-            | "image_generate"
-            | "image_generation.generate"
-    )
+    builtin_tool_spec(name).is_some()
 }
 
-pub(crate) const DEFAULT_ENABLED_TOOLSETS: [&str; 3] = ["coding-core", "web", "vision"];
+pub(crate) fn builtin_tool_aliases(name: &str) -> &'static [&'static str] {
+    builtin_tool_spec(name).map_or(&[], |spec| spec.aliases)
+}
 
 pub(crate) fn collect_toolset_tools(
     name: &str,
@@ -373,26 +442,60 @@ pub(crate) fn tool_by_name(
     cwd: &Path,
     context: ToolRuntimeContext,
 ) -> Option<Arc<dyn ToolBinding>> {
-    match name {
-        "read" => Some(Arc::new(ReadTool::new(cwd.to_path_buf(), context))),
-        "write" => Some(Arc::new(WriteTool::new(cwd.to_path_buf(), context))),
-        "edit" => Some(Arc::new(EditTool::new(cwd.to_path_buf(), context))),
-        "exec_command" => Some(Arc::new(ExecCommandTool::new(cwd.to_path_buf(), context))),
-        "write_stdin" => Some(Arc::new(WriteStdinTool::new(context.task_id))),
-        "web_fetch" => Some(Arc::new(WebFetchTool::new())),
-        "web_search" => (context.web_search.execution != crate::config::WebSearchExecution::Hosted)
-            .then(|| {
-                Arc::new(WebSearchTool::new(
-                    context.web_search.clone(),
-                    context.env.clone(),
-                    context.task_id.clone(),
-                )) as Arc<dyn ToolBinding>
-            }),
-        "view_image" => Some(Arc::new(ViewImageTool::new(cwd.to_path_buf(), context))),
-        "image_generate" | "image_generation.generate" => {
-            Some(Arc::new(ImageGenerateTool::new(cwd.to_path_buf(), context)))
+    let spec = builtin_tool_spec(name)?;
+    (spec.factory)(cwd, context)
+}
+
+#[cfg(test)]
+mod builtin_tool_spec_tests {
+    use super::*;
+
+    #[test]
+    fn builtin_spec_identities_are_unique_and_factories_are_canonical() {
+        let mut identities = HashSet::new();
+        for spec in BUILTIN_TOOL_SPECS {
+            assert!(
+                identities.insert(spec.canonical_name),
+                "duplicate canonical tool {}",
+                spec.canonical_name
+            );
+            let binding = (spec.factory)(Path::new("/tmp"), ToolRuntimeContext::default())
+                .expect("default builtin factory");
+            assert_eq!(binding.name(), spec.canonical_name);
+            for alias in spec.aliases {
+                assert!(identities.insert(*alias), "duplicate alias {alias}");
+                let aliased = tool_by_name(alias, Path::new("/tmp"), ToolRuntimeContext::default())
+                    .expect("alias factory");
+                assert_eq!(aliased.name(), spec.canonical_name);
+            }
         }
-        _ => None,
+    }
+
+    #[test]
+    fn builtin_mode_and_toolset_projections_come_from_the_specs() {
+        for mode in [RunMode::Plan, RunMode::Default] {
+            let names = tool_names_for_mode(mode);
+            for spec in BUILTIN_TOOL_SPECS {
+                assert_eq!(
+                    names.contains(&spec.canonical_name),
+                    spec.allows(mode),
+                    "{} in {}",
+                    spec.canonical_name,
+                    mode.as_str()
+                );
+            }
+        }
+        for toolset in builtin_toolset_names() {
+            let projected = builtin_toolset_tools(toolset).expect("toolset projection");
+            assert_eq!(
+                projected,
+                BUILTIN_TOOL_SPECS
+                    .iter()
+                    .filter(|spec| spec.toolset == toolset)
+                    .map(|spec| spec.canonical_name)
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 }
 

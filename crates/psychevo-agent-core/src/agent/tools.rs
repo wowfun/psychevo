@@ -10,6 +10,8 @@ pub(crate) struct ToolCallBuilder {
     pub(crate) call_index: usize,
 }
 
+type IndexedToolExecution = BoxFuture<'static, (usize, Result<(ToolCallBlock, ToolOutput)>)>;
+
 pub(crate) fn assistant_outcome(message: &Message) -> Outcome {
     match message {
         Message::Assistant { outcome, .. } => *outcome,
@@ -36,35 +38,72 @@ pub(crate) async fn execute_tool_batch(
     sink: Arc<dyn EventSink>,
     abort: AbortSignal,
 ) -> Result<Vec<Message>> {
-    let has_sequential = router.has_sequential_call(tool_calls);
+    const MAX_PARALLEL_TOOLS: usize = 8;
+    let mut indexed_outputs = Vec::with_capacity(tool_calls.len());
+    let mut index = 0usize;
+    while index < tool_calls.len() {
+        if router.execution_mode_for_call(&tool_calls[index]) == ToolExecutionMode::Sequential {
+            let output = execute_one_tool_mut(
+                router,
+                tool_calls[index].clone(),
+                Arc::clone(&sink),
+                abort.clone(),
+            )
+            .await?;
+            indexed_outputs.push((index, output));
+            index += 1;
+            continue;
+        }
 
-    let outputs = if has_sequential {
-        let mut outputs = Vec::new();
-        for call in tool_calls {
-            let output =
-                execute_one_tool_mut(router, call.clone(), Arc::clone(&sink), abort.clone())
-                    .await?;
-            outputs.push(output);
+        let segment_start = index;
+        while index < tool_calls.len()
+            && router.execution_mode_for_call(&tool_calls[index]) == ToolExecutionMode::Parallel
+        {
+            index += 1;
         }
-        outputs
-    } else {
+        let segment_end = index;
         let router_snapshot = router.clone();
-        let futures = tool_calls
-            .iter()
-            .cloned()
-            .map(|call| execute_one_tool(&router_snapshot, call, Arc::clone(&sink), abort.clone()));
-        let joined = join_all(futures).await;
-        let mut outputs = Vec::new();
-        for output in joined {
-            outputs.push(output?);
+        let mut running: FuturesUnordered<IndexedToolExecution> = FuturesUnordered::new();
+        let mut next = segment_start;
+        while next < segment_end && running.len() < MAX_PARALLEL_TOOLS {
+            let call = tool_calls[next].clone();
+            let sink = Arc::clone(&sink);
+            let abort = abort.clone();
+            let router = router_snapshot.clone();
+            running.push(Box::pin(async move {
+                (next, execute_one_tool(&router, call, sink, abort).await)
+            }));
+            next += 1;
         }
-        outputs
-    };
+        let mut fatal = None;
+        while let Some((source_index, result)) = running.next().await {
+            match result {
+                Ok(output) => indexed_outputs.push((source_index, output)),
+                Err(error) => {
+                    fatal.get_or_insert(error);
+                }
+            }
+            if fatal.is_none() && next < segment_end {
+                let call = tool_calls[next].clone();
+                let sink = Arc::clone(&sink);
+                let abort = abort.clone();
+                let router = router_snapshot.clone();
+                running.push(Box::pin(async move {
+                    (next, execute_one_tool(&router, call, sink, abort).await)
+                }));
+                next += 1;
+            }
+        }
+        if let Some(error) = fatal {
+            return Err(error);
+        }
+    }
 
     let now = now_ms();
     let mut result_messages = Vec::new();
     let mut attachment_messages = Vec::new();
-    for (call, output) in outputs {
+    indexed_outputs.sort_by_key(|(source_index, _)| *source_index);
+    for (_, (call, output)) in indexed_outputs {
         attachment_messages.extend(tool_attachment_messages(&call, &output, now));
         result_messages.push(tool_result_message(call, output));
     }

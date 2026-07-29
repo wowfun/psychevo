@@ -251,10 +251,7 @@ impl ToolBinding for ImageGenerateTool {
                 prompt: prompt.to_string(),
                 count: 1,
                 aspect_ratio,
-                input_images: input_image
-                    .into_iter()
-                    .chain(resolved_references)
-                    .collect(),
+                input_images: input_image.into_iter().chain(resolved_references).collect(),
                 size: Some(config.size.clone()),
                 format: Some(config.format.as_str().to_string()),
                 headers: BTreeMap::new(),
@@ -334,9 +331,7 @@ async fn resolve_generation_input_image(
     })
 }
 
-fn image_generation_provider(
-    config: &ResolvedImageGenerationConfig,
-) -> Result<ImageModel> {
+fn image_generation_provider(config: &ResolvedImageGenerationConfig) -> Result<ImageModel> {
     match config.provider.as_str() {
         "fake" => Fake::new()
             .map_err(|error| Error::Config(error.to_string()))?

@@ -354,6 +354,20 @@ pub(crate) async fn runtime_profile_backend_ref_validation_is_fail_closed() {
     }))
     .expect_err("profile launch config moved to the backend");
     assert!(launch.to_string().contains("profile_launch_config_removed"));
+
+    let approval = crate::config::parse_runtime_profile_configs(&json!({
+        "cursor-acp": {
+            "runtime": "acp",
+            "backend_ref": "cursor",
+            "approvalMode": "manual"
+        }
+    }))
+    .expect_err("Runtime Profile approval mode is removed");
+    assert!(
+        approval
+            .to_string()
+            .contains("configure top-level permissions.approvals_reviewer")
+    );
 }
 
 #[tokio::test]

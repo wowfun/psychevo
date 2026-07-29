@@ -1,21 +1,21 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::manifest::load_plugin_manifest;
+use super::materialization::{
+    bounded_tree, extract_tar_gz_bounded, redact_source, run_materialization_command,
+};
 use super::types::{
     LoadedPluginManifest, PluginDiagnostic, PluginInspectOptions, PluginInspection,
     PluginInstallOptions, PluginManifestKind, PluginSourceKind, PluginStageDiagnostic,
 };
-use super::util::{directory_size, source_slug};
+use super::util::source_slug;
 use crate::error::{Error, Result};
-
-const MAX_NPM_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
-const MAX_NPM_EXTRACTED_BYTES: u64 = 200 * 1024 * 1024;
 
 pub(crate) struct PluginMaterializedSource {
     pub(crate) root: PathBuf,
@@ -84,11 +84,15 @@ pub(crate) fn materialize_source_in_dir(
         Some(kind) => kind,
         None => infer_source_kind(&request.source, cwd),
     };
-    match source_kind {
+    let result = match source_kind {
         PluginSourceKind::Local => materialize_local(cwd, request, temp_dir),
         PluginSourceKind::Git => materialize_git(staging_root, request, temp_dir),
         PluginSourceKind::Npm => materialize_npm(staging_root, cwd, request, temp_dir),
+    };
+    if result.is_err() {
+        let _ = fs::remove_dir_all(staging_root);
     }
+    result
 }
 
 pub(crate) fn inspect_materialized_source(
@@ -162,14 +166,20 @@ fn materialize_local(
     temp_dir: Option<TempDir>,
 ) -> Result<PluginMaterializedSource> {
     let source_path = resolve_local_source(cwd, &request.source)
-        .ok_or_else(|| Error::Config(format!("plugin source not found: {}", request.source)))?;
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "plugin source not found: {}",
+                redact_source(&request.source)
+            ))
+        })?;
     if !source_path.exists() {
         return Err(Error::Config(format!(
             "plugin source not found: {}",
-            request.source
+            redact_source(&request.source)
         )));
     }
     let root = source_path.canonicalize()?;
+    bounded_tree(&root)?;
     Ok(PluginMaterializedSource {
         root,
         source_id: format!("local:{}", source_path.display()),
@@ -188,40 +198,60 @@ fn materialize_git(
     if incoming.exists() {
         fs::remove_dir_all(&incoming)?;
     }
-    let status = Command::new("git")
-        .arg("clone")
-        .arg(&request.source)
-        .arg(&incoming)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(Error::Config(format!(
-            "git clone failed for {}",
-            request.source
-        )));
-    }
     if let Some(git_ref) = &request.git_ref {
-        let status = Command::new("git")
+        fs::create_dir_all(&incoming)?;
+        run_materialization_command(
+            Command::new("git").arg("-C").arg(&incoming).arg("init"),
+            "git init",
+            &request.source,
+            false,
+        )?;
+        run_materialization_command(
+            Command::new("git")
+                .arg("-C")
+                .arg(&incoming)
+                .args(["remote", "add", "origin"])
+                .arg(&request.source),
+            "git remote add",
+            &request.source,
+            false,
+        )?;
+        run_materialization_command(
+            Command::new("git")
+                .arg("-C")
+                .arg(&incoming)
+                .args(["fetch", "--depth", "1", "--no-tags", "origin"])
+                .arg(git_ref),
+            "git fetch",
+            &request.source,
+            false,
+        )?;
+        run_materialization_command(
+            Command::new("git")
             .arg("-C")
             .arg(&incoming)
-            .arg("checkout")
-            .arg(git_ref)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?;
-        if !status.success() {
-            return Err(Error::Config(format!(
-                "git checkout `{git_ref}` failed for {}",
-                request.source
-            )));
-        }
+                .args(["checkout", "--detach", "FETCH_HEAD"]),
+            "git checkout",
+            &request.source,
+            false,
+        )?;
+    } else {
+        run_materialization_command(
+            Command::new("git")
+                .args(["clone", "--depth", "1", "--no-tags", "--single-branch"])
+                .arg(&request.source)
+                .arg(&incoming),
+            "git clone",
+            &request.source,
+            false,
+        )?;
     }
+    bounded_tree(&incoming)?;
     Ok(PluginMaterializedSource {
         root: incoming,
         source_id: format!(
             "git:{}{}",
-            request.source,
+            redact_source(&request.source),
             request
                 .git_ref
                 .as_ref()
@@ -257,13 +287,12 @@ fn materialize_npm(
     {
         command.arg("--registry").arg(registry);
     }
-    let output = command.output()?;
-    if !output.status.success() {
-        return Err(Error::Config(format!(
-            "npm pack failed for {}",
-            request.source
-        )));
-    }
+    let output = run_materialization_command(
+        &mut command,
+        "npm pack",
+        &request.source,
+        true,
+    )?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let pack = serde_json::from_str::<Value>(&stdout)
         .map_err(|err| Error::Config(format!("npm pack returned invalid JSON: {err}")))?;
@@ -275,30 +304,18 @@ fn materialize_npm(
         .get("filename")
         .and_then(Value::as_str)
         .ok_or_else(|| Error::Config("npm pack result missing filename".to_string()))?;
-    let tarball = staging_root.join(filename);
-    let archive_size = fs::metadata(&tarball)?.len();
-    if archive_size > MAX_NPM_ARCHIVE_BYTES {
-        return Err(Error::Config(format!(
-            "npm package archive exceeds {} bytes",
-            MAX_NPM_ARCHIVE_BYTES
-        )));
+    let filename_path = Path::new(filename);
+    if filename_path.components().count() != 1
+        || !matches!(filename_path.components().next(), Some(std::path::Component::Normal(_)))
+    {
+        return Err(Error::Config(
+            "npm pack result contains an invalid archive filename".to_string(),
+        ));
     }
+    let tarball = staging_root.join(filename);
     let extract_root = staging_root.join("extract");
     fs::create_dir_all(&extract_root)?;
-    let status = Command::new("tar")
-        .arg("-xzf")
-        .arg(&tarball)
-        .arg("-C")
-        .arg(&extract_root)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(Error::Config(format!(
-            "failed to extract npm package {}",
-            tarball.display()
-        )));
-    }
+    extract_tar_gz_bounded(&tarball, &extract_root)?;
     let root = if extract_root.join("package").is_dir() {
         extract_root.join("package")
     } else {
@@ -327,24 +344,22 @@ fn materialize_npm(
             "npm package version mismatch: expected `{expected_version}`, got `{version}`"
         )));
     }
-    let extracted_size = directory_size(&root)?;
-    if extracted_size > MAX_NPM_EXTRACTED_BYTES {
-        return Err(Error::Config(format!(
-            "npm package contents exceed {} bytes",
-            MAX_NPM_EXTRACTED_BYTES
-        )));
-    }
+    bounded_tree(&root)?;
     let registry_suffix = request
         .npm_registry
         .as_ref()
         .filter(|registry| !registry.is_empty())
-        .map(|registry| format!("?registry={registry}"))
+        .map(|registry| format!("?registry={}", redact_source(registry)))
         .unwrap_or_default();
     Ok(PluginMaterializedSource {
         root,
         source_id: format!("npm:{name}@{version}{registry_suffix}"),
         source_kind: PluginSourceKind::Npm,
-        npm_registry: request.npm_registry.clone(),
+        npm_registry: request
+            .npm_registry
+            .as_deref()
+            .map(redact_source)
+            .filter(|registry| !registry.is_empty()),
         temp_dir,
     })
 }
@@ -678,7 +693,7 @@ fn npm_expected_package_name(cwd: &Path, source: &str) -> Option<String> {
     if resolve_local_source(cwd, source).is_some_and(|path| path.exists()) {
         None
     } else {
-        Some(npm_locator_name(source).to_string())
+        Some(redact_source(npm_locator_name(source)))
     }
 }
 

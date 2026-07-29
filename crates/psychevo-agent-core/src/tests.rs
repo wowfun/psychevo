@@ -893,6 +893,156 @@ pub(crate) async fn hidden_tools_are_not_model_callable() {
     assert!(content.contains("tool not found: hidden"));
 }
 
+struct BatchTrackingTool {
+    name: &'static str,
+    mode: ToolExecutionMode,
+    delay_ms: u64,
+    active: Arc<AtomicUsize>,
+    max_active: Arc<AtomicUsize>,
+    log: Arc<Mutex<Vec<String>>>,
+}
+
+impl ToolBinding for BatchTrackingTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        "track batch ordering and concurrency"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({})
+    }
+
+    fn execution_mode(&self) -> ToolExecutionMode {
+        self.mode
+    }
+
+    fn execute(
+        &self,
+        tool_call_id: String,
+        _args: Value,
+        _abort: AbortSignal,
+    ) -> BoxFuture<'static, ToolOutput> {
+        let active = Arc::clone(&self.active);
+        let max_active = Arc::clone(&self.max_active);
+        let log = Arc::clone(&self.log);
+        let delay_ms = self.delay_ms;
+        Box::pin(async move {
+            log.lock()
+                .expect("batch log")
+                .push(format!("start:{tool_call_id}"));
+            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+            max_active.fetch_max(current, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            active.fetch_sub(1, Ordering::SeqCst);
+            log.lock()
+                .expect("batch log")
+                .push(format!("end:{tool_call_id}"));
+            ToolOutput::ok(json!({"id": tool_call_id}))
+        })
+    }
+}
+
+fn batch_call(id: &str, name: &str) -> ToolCallBlock {
+    ToolCallBlock {
+        id: id.to_string(),
+        name: name.to_string(),
+        arguments: json!({}),
+        arguments_json: "{}".to_string(),
+        arguments_error: None,
+        content_index: 0,
+        call_index: 0,
+    }
+}
+
+#[tokio::test]
+async fn tool_batch_uses_parallel_segments_with_sequential_barriers() {
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let tool = |name, mode, delay_ms| {
+        Arc::new(BatchTrackingTool {
+            name,
+            mode,
+            delay_ms,
+            active: Arc::clone(&active),
+            max_active: Arc::clone(&max_active),
+            log: Arc::clone(&log),
+        }) as Arc<dyn ToolBinding>
+    };
+    let mut router = ToolRouter::from_tools(vec![
+        tool("parallel_a", ToolExecutionMode::Parallel, 80),
+        tool("parallel_b", ToolExecutionMode::Parallel, 20),
+        tool("barrier", ToolExecutionMode::Sequential, 10),
+        tool("parallel_c", ToolExecutionMode::Parallel, 5),
+    ])
+    .expect("router");
+    let (_abort_tx, abort_rx) = watch::channel(false);
+
+    let messages = execute_tool_batch(
+        &mut router,
+        &[
+            batch_call("a", "parallel_a"),
+            batch_call("b", "parallel_b"),
+            batch_call("s", "barrier"),
+            batch_call("c", "parallel_c"),
+        ],
+        Arc::new(NoopEventSink),
+        AbortSignal::new(abort_rx),
+    )
+    .await
+    .expect("batch");
+
+    let log = log.lock().expect("batch log");
+    let position = |entry: &str| log.iter().position(|item| item == entry).expect(entry);
+    assert!(position("start:s") > position("end:a"));
+    assert!(position("start:s") > position("end:b"));
+    assert!(position("start:c") > position("end:s"));
+    assert!(position("end:b") < position("end:a"));
+    assert_eq!(max_active.load(Ordering::SeqCst), 2);
+    let result_ids = messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(result_ids, vec!["a", "b", "s", "c"]);
+}
+
+#[tokio::test]
+async fn parallel_tool_segment_never_exceeds_eight_in_flight() {
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+    let tool = Arc::new(BatchTrackingTool {
+        name: "parallel",
+        mode: ToolExecutionMode::Parallel,
+        delay_ms: 50,
+        active: Arc::clone(&active),
+        max_active: Arc::clone(&max_active),
+        log: Arc::new(Mutex::new(Vec::new())),
+    }) as Arc<dyn ToolBinding>;
+    let mut router = ToolRouter::from_tools(vec![tool]).expect("router");
+    let calls = (0..9)
+        .map(|index| batch_call(&format!("call-{index}"), "parallel"))
+        .collect::<Vec<_>>();
+    let (_abort_tx, abort_rx) = watch::channel(false);
+
+    let messages = execute_tool_batch(
+        &mut router,
+        &calls,
+        Arc::new(NoopEventSink),
+        AbortSignal::new(abort_rx),
+    )
+    .await
+    .expect("batch");
+
+    assert_eq!(max_active.load(Ordering::SeqCst), 8);
+    assert_eq!(messages.len(), 9);
+}
+
 #[tokio::test]
 pub(crate) async fn prefix_contextual_user_messages_are_inserted_before_history() {
     let provider = RequestCaptureProvider::default();
@@ -1069,7 +1219,7 @@ pub(crate) async fn usage_and_metadata_do_not_emit_empty_message_updates() {
 }
 
 #[tokio::test]
-pub(crate) async fn text_stream_emits_linear_deltas_without_full_message_per_token() {
+pub(crate) async fn text_stream_preserves_linear_delta_content_without_full_message_per_token() {
     let mut provider_events = (0..1_000)
         .map(|_| StreamEvent::TextDelta {
             text: "x".to_string(),
@@ -1090,11 +1240,16 @@ pub(crate) async fn text_stream_emits_linear_deltas_without_full_message_per_tok
         .expect("loop");
 
     let events = sink.events.lock().expect("events");
+    let text_deltas = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::AssistantTextDelta { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(!text_deltas.is_empty());
     assert_eq!(
-        events
-            .iter()
-            .filter(|event| matches!(event, AgentEvent::AssistantTextDelta { .. }))
-            .count(),
+        text_deltas.iter().map(|delta| delta.len()).sum::<usize>(),
         1_000
     );
     assert_eq!(

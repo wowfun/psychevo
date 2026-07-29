@@ -9,7 +9,7 @@ use futures::future::BoxFuture;
 use psychevo_agent_core::{
     ControlHandle, ControlReceivers, Message, PendingInputId, TerminalReason, ToolBinding,
 };
-use psychevo_ai::{AbortSignal, Outcome};
+use psychevo_ai::{AbortSignal, Outcome, SecretValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -50,7 +50,6 @@ pub struct RunOptions {
     pub include_reasoning: bool,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub clarify_enabled: bool,
     pub inherited_env: Option<BTreeMap<String, String>>,
@@ -173,7 +172,6 @@ pub struct AgentSpawnOptions {
     pub reasoning_effort: Option<String>,
     pub mode: RunMode,
     pub permission_mode: Option<PermissionMode>,
-    pub approval_mode: Option<ApprovalMode>,
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub selected_parent_agent: Option<String>,
@@ -181,6 +179,8 @@ pub struct AgentSpawnOptions {
     pub selected_capability_roots: Vec<SelectedCapabilityRoot>,
     pub skill_inputs: Vec<String>,
     pub mcp_servers: Vec<McpServerInput>,
+    #[doc(hidden)]
+    pub agent_control: Option<crate::agents::AgentControl>,
 }
 
 #[derive(Debug, Clone)]
@@ -245,7 +245,7 @@ pub struct McpServerInput {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ResolvedMcpServerInput {
     pub server: McpServerInput,
-    pub bearer_token: Option<String>,
+    pub bearer_token: Option<SecretValue>,
 }
 
 impl fmt::Debug for ResolvedMcpServerInput {
@@ -486,31 +486,6 @@ impl PermissionMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApprovalMode {
-    #[default]
-    Manual,
-    Smart,
-}
-
-impl ApprovalMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Manual => "manual",
-            Self::Smart => "smart",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "manual" => Some(Self::Manual),
-            "smart" => Some(Self::Smart),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ApprovalPolicy {
     #[default]
@@ -569,7 +544,7 @@ impl ApprovalsReviewer {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "user" => Some(Self::User),
-            "smart" | "auto_review" | "guardian_subagent" => Some(Self::Smart),
+            "smart" => Some(Self::Smart),
             _ => None,
         }
     }
@@ -751,6 +726,7 @@ pub struct PermissionApprovalRequest {
     pub suggested_rule: Option<String>,
     pub allow_always: bool,
     pub filesystem: Option<FilesystemApprovalRequest>,
+    pub mcp_startup: Option<McpStartupApprovalRequest>,
     pub timeout_secs: u64,
 }
 
@@ -766,6 +742,14 @@ pub struct FilesystemApprovalTarget {
 pub struct FilesystemApprovalRequest {
     pub targets: Vec<FilesystemApprovalTarget>,
     pub scope_candidates: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStartupApprovalRequest {
+    pub server: String,
+    pub transport: String,
+    pub descriptor_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

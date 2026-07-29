@@ -25,13 +25,27 @@ pub use types::*;
 pub(crate) const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 600;
 pub(crate) const OUTPUT_LIMIT: usize = 4096;
 
-pub fn agent_hook_source(agent_name: &str, hooks: Option<&Value>) -> Option<HookSourceDescriptor> {
-    hooks.map(|hooks| {
+pub fn agent_hook_source(
+    agent: &crate::agents::AgentDefinition,
+) -> Option<HookSourceDescriptor> {
+    agent.hooks.as_ref().map(|hooks| {
+        let source_kind = match agent.source {
+            crate::agents::AgentSource::Project
+            | crate::agents::AgentSource::AgentsProject
+            | crate::agents::AgentSource::ClaudeProject => "project",
+            crate::agents::AgentSource::Global
+            | crate::agents::AgentSource::AgentsGlobal
+            | crate::agents::AgentSource::ClaudeGlobal => "profile",
+            crate::agents::AgentSource::BuiltIn => "managed",
+            crate::agents::AgentSource::Explicit | crate::agents::AgentSource::Generated => {
+                "runtime"
+            }
+        };
         HookSourceDescriptor::new(
-            format!("agent:{agent_name}"),
-            "agent",
-            Some(agent_name.to_string()),
-            None,
+            format!("agent:{}:{}", agent.source.as_str(), agent.name),
+            source_kind,
+            Some(agent.name.clone()),
+            agent.file_path.clone(),
             hooks.clone(),
         )
     })
@@ -45,7 +59,7 @@ pub async fn run_hook_commands(
 ) -> Option<String> {
     let source = HookSourceDescriptor::new(
         "agent:legacy",
-        "agent",
+        "runtime",
         None,
         None,
         hooks.cloned().unwrap_or(Value::Null),

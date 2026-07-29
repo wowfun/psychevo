@@ -453,11 +453,7 @@ impl ToolBinding for SkillHubTool {
     }
 }
 
-pub(crate) fn skill_hub_impl(
-    runtime: &SkillRuntime,
-    mode: RunMode,
-    args: Value,
-) -> Result<Value> {
+pub(crate) fn skill_hub_impl(runtime: &SkillRuntime, mode: RunMode, args: Value) -> Result<Value> {
     let options = runtime.options();
     let action = required_string(&args, "action")?;
     let readonly = matches!(

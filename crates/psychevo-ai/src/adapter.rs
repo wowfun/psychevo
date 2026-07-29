@@ -225,6 +225,10 @@ pub enum GenerationEvent {
     Warning {
         warning: Warning,
     },
+    Resync {
+        snapshot: crate::GenerationSnapshot,
+        dropped_events: u64,
+    },
     Finish {
         outcome: crate::GenerationOutcome,
         #[serde(default, skip_serializing_if = "Option::is_none")]

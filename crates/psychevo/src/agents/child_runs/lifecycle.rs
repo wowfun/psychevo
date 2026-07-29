@@ -21,6 +21,15 @@ pub(crate) struct SpawnAgentArgs {
     pub(crate) team_member: Option<String>,
 }
 
+fn child_concurrency_limit(context: &AgentToolContext) -> usize {
+    context
+        .active_team
+        .as_ref()
+        .map(|team| team.max_parallel_agents as usize)
+        .unwrap_or(super::supervisor::DEFAULT_CHILD_CONCURRENCY)
+        .min(super::supervisor::DEFAULT_CHILD_CONCURRENCY)
+}
+
 pub(crate) async fn spawn_subagent(
     context: AgentToolContext,
     args: SpawnAgentArgs,
@@ -31,7 +40,10 @@ pub(crate) async fn spawn_subagent(
         return Err(Error::Message("spawn_agent message is empty".to_string()));
     }
     validate_task_name(&args.task_name)?;
-    if agent_spawn_paused() {
+    if context
+        .supervisor
+        .spawning_paused(&context.parent_session_id)
+    {
         return Err(Error::Config("agent spawning is paused".to_string()));
     }
     if context.spawn_depth_remaining == Some(0) {
@@ -85,39 +97,13 @@ pub(crate) async fn spawn_subagent(
     } else {
         AgentInvocationRole::Subagent
     };
-    let precreated_child_session = if background {
-        Some(create_internal_child_session(InternalChildSessionInput {
-            context: &context,
-            agent: &agent,
-            id: &id,
-            task_name: &task_name,
-            prompt: &args.message,
-            model: &child_model,
-            role,
-            background,
-            fork_context: args.fork_context,
-            spawn_depth_remaining,
-            team_member_id: team_member.as_ref().map(|member| member.id.as_str()),
-            parent_tool_call_id: Some(&tool_call_id),
-        })
-        .await?)
-    } else {
-        None
-    };
-    let previous_messages_override = precreated_child_session.as_ref().map(|_| {
-        fork_messages(
-            &context.parent_context_snapshot,
-            args.fork_context,
-            args.fork_turns.as_deref(),
-        )
-    });
-    let record = AgentRunRecord {
+    let mut record = AgentRunRecord {
         id: id.clone(),
         task_name: Some(task_name.clone()),
         agent_name: agent.name.clone(),
         task: args.message.clone(),
         parent_session_id: context.parent_session_id.clone(),
-        child_session_id: precreated_child_session.clone(),
+        child_session_id: None,
         role,
         background,
         status: AgentRunStatus::Running,
@@ -143,18 +129,50 @@ pub(crate) async fn spawn_subagent(
         team_member_id: team_member.as_ref().map(|member| member.id.clone()),
         agent_path: Some(agent_path(&task_name)),
     };
-    let response_record = record.clone();
     let (control_handle, control_receivers) = ControlHandle::new();
-    {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.insert(
-            id.clone(),
-            AgentRunState {
-                record,
-                control: Some(control_handle.clone()),
-            },
-        );
+    context.supervisor.register(
+        record.clone(),
+        Some(control_handle.clone()),
+        child_concurrency_limit(&context),
+    )?;
+    let precreated_child_session = if background {
+        match create_internal_child_session(InternalChildSessionInput {
+            context: &context,
+            agent: &agent,
+            id: &id,
+            task_name: &task_name,
+            prompt: &args.message,
+            model: &child_model,
+            role,
+            background,
+            fork_context: args.fork_context,
+            spawn_depth_remaining,
+            team_member_id: team_member.as_ref().map(|member| member.id.as_str()),
+            parent_tool_call_id: Some(&tool_call_id),
+        })
+        .await
+        {
+            Ok(child_session) => Some(child_session),
+            Err(error) => {
+                context.supervisor.remove(&id);
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(child_session) = precreated_child_session.as_deref() {
+        update_run_child_session(&context.supervisor, &id, child_session);
+        record.child_session_id = Some(child_session.to_string());
     }
+    let previous_messages_override = precreated_child_session.as_ref().map(|_| {
+        fork_messages(
+            &context.parent_context_snapshot,
+            args.fork_context,
+            args.fork_turns.as_deref(),
+        )
+    });
+    let response_record = record.clone();
 
     let response_agent_name = agent.name.clone();
     let response_agent_description = agent.description.clone();
@@ -163,14 +181,6 @@ pub(crate) async fn spawn_subagent(
     let response_child_session_id = precreated_child_session.clone();
     let response_tool_call_id = tool_call_id.clone();
     let child_team_member_id = team_member.as_ref().map(|member| member.id.clone());
-    let parent_abort_bridge = if background {
-        None
-    } else {
-        Some(spawn_parent_abort_bridge(
-            abort.clone(),
-            control_handle.clone(),
-        ))
-    };
     let child = ChildRun {
         id: id.clone(),
         context,
@@ -189,14 +199,21 @@ pub(crate) async fn spawn_subagent(
         parent_tool_call_id: Some(tool_call_id),
         existing_child_session: precreated_child_session,
         previous_messages_override,
+        control_handle,
         control_receivers,
         abort,
     };
 
     if background {
-        tokio::spawn(async move {
+        let supervisor = child.context.supervisor.clone();
+        if let Err(finalizer) = supervisor.spawn_background(Box::pin(async move {
             let _ = run_child_agent(child).await;
-        });
+        })) {
+            finalizer.await;
+            return Err(Error::Message(
+                "agent supervisor is shutting down".to_string(),
+            ));
+        }
         let system_value = json!({
             "id": id,
             "agent_name": response_agent_name.clone(),
@@ -223,9 +240,6 @@ pub(crate) async fn spawn_subagent(
         ))
     } else {
         let record = run_child_agent(child).await;
-        if let Some(handle) = parent_abort_bridge {
-            handle.abort();
-        }
         let record = record?;
         let model_value = subagent_summary_value(Some(&response_store), &record, false).await;
         let response_child_session_id = record.child_session_id.clone();
@@ -346,16 +360,6 @@ fn attach_child_thread_metadata(metadata: &mut Value, child_session: &str) {
     }
 }
 
-fn spawn_parent_abort_bridge(
-    mut parent_abort: AbortSignal,
-    child_control: ControlHandle,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        parent_abort.wait_for_abort().await;
-        child_control.abort();
-    })
-}
-
 fn external_agent_runtime_ref(
     agent: &AgentDefinition,
     team_member: Option<&AgentTeamMember>,
@@ -432,6 +436,42 @@ async fn spawn_external_subagent(
         .or_else(|| runtime_options.get("model").cloned())
         .or_else(|| agent.model.clone());
     let spawn_depth_remaining = child_spawn_depth_remaining(&context, &agent, args.max_spawn_depth);
+    let mut record = AgentRunRecord {
+        id: id.clone(),
+        task_name: Some(task_name.clone()),
+        agent_name: agent.name.clone(),
+        task: args.message.clone(),
+        parent_session_id: context.parent_session_id.clone(),
+        child_session_id: None,
+        role: AgentInvocationRole::Subagent,
+        background: false,
+        status: AgentRunStatus::Running,
+        edge_status: Some(AgentEdgeStatus::Open),
+        started_at_ms: now_ms(),
+        ended_at_ms: None,
+        outcome: None,
+        final_answer: None,
+        error: None,
+        effective_max_spawn_depth: Some(spawn_depth_remaining),
+        team_run_id: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_run_id.clone()),
+        mission_run_id: context
+            .active_team
+            .as_ref()
+            .and_then(|team| team.mission_run_id.clone()),
+        team_name: context
+            .active_team
+            .as_ref()
+            .map(|team| team.team_name.clone()),
+        team_member_id: team_member.as_ref().map(|member| member.id.clone()),
+        agent_path: Some(agent_path(&task_name)),
+    };
+    context
+        .supervisor
+        .register(record.clone(), None, child_concurrency_limit(&context))?;
+    let _active_run = ActiveAgentRunGuard::new(context.supervisor.clone(), id.clone());
     let mut metadata = child_agent_metadata(ChildAgentMetadataInput {
         id: &id,
         task_name: &task_name,
@@ -467,49 +507,8 @@ async fn spawn_external_subagent(
         Some(metadata),
     )
     .await?;
-
-    let record = AgentRunRecord {
-        id: id.clone(),
-        task_name: Some(task_name.clone()),
-        agent_name: agent.name.clone(),
-        task: args.message.clone(),
-        parent_session_id: context.parent_session_id.clone(),
-        child_session_id: Some(child_session.clone()),
-        role: AgentInvocationRole::Subagent,
-        background: false,
-        status: AgentRunStatus::Running,
-        edge_status: Some(AgentEdgeStatus::Open),
-        started_at_ms: now_ms(),
-        ended_at_ms: None,
-        outcome: None,
-        final_answer: None,
-        error: None,
-        effective_max_spawn_depth: Some(spawn_depth_remaining),
-        team_run_id: context
-            .active_team
-            .as_ref()
-            .map(|team| team.team_run_id.clone()),
-        mission_run_id: context
-            .active_team
-            .as_ref()
-            .and_then(|team| team.mission_run_id.clone()),
-        team_name: context
-            .active_team
-            .as_ref()
-            .map(|team| team.team_name.clone()),
-        team_member_id: team_member.as_ref().map(|member| member.id.clone()),
-        agent_path: Some(agent_path(&task_name)),
-    };
-    {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.insert(
-            id.clone(),
-            AgentRunState {
-                record,
-                control: None,
-            },
-        );
-    }
+    update_run_child_session(&context.supervisor, &id, &child_session);
+    record.child_session_id = Some(child_session.clone());
     emit_external_agent_session_start(ExternalAgentSessionStart {
         context: &context,
         agent: &agent,
@@ -545,23 +544,29 @@ async fn spawn_external_subagent(
     let result = delegate.run(request).await;
     let record = match result {
         Ok(result) => {
-            let record = update_run_completed(&id, result.outcome, result.final_answer.clone());
+            let record = update_run_completed(
+                &context.supervisor,
+                &id,
+                result.outcome,
+                result.final_answer.clone(),
+            );
             let _ = context
                 .state
 
                 .set_agent_edge_status(&result.child_session_id, AgentEdgeStatus::Closed)
                 .await;
+            context.supervisor.remove(&id);
             record
         }
         Err(err) => {
-            update_run_failed(&id, &err.to_string());
+            update_run_failed(&context.supervisor, &id, &err.to_string());
             let _ = context
                 .state
 
                 .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
                 .await;
             let record = {
-                let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+                let runs = context.supervisor.active();
                 runs.get(&id)
                     .map(|state| state.record.clone())
                     .unwrap_or_else(|| AgentRunRecord {
@@ -597,6 +602,7 @@ async fn spawn_external_subagent(
                         agent_path: Some(agent_path(&task_name)),
                     })
             };
+            context.supervisor.remove(&id);
             let model_value =
                 subagent_summary_value(Some(&context.state), &record, false).await;
             return Ok(ToolOutput::error(model_content_string(&model_value)));
@@ -791,6 +797,12 @@ pub(crate) async fn spawn_child_agent_background(
     if prompt.trim().is_empty() {
         return Err(Error::Message("agent message is empty".to_string()));
     }
+    if context
+        .supervisor
+        .spawning_paused(&context.parent_session_id)
+    {
+        return Err(Error::Config("agent spawning is paused".to_string()));
+    }
     let worker_lease = context.extension_inputs.acquire_worker_lease();
     let id = Uuid::now_v7().to_string();
     let task_name = default_task_name(&agent.name, &id);
@@ -812,29 +824,13 @@ pub(crate) async fn spawn_child_agent_background(
         context: Some(&context),
         parent_tool_call_id: None,
     });
-    let child_session = context.state.create_child_session_with_metadata(
-        &context.parent_session_id,
-        &context.cwd,
-        "agent",
-        &child_model,
-        &context.model_provider,
-        Some(metadata.clone()),
-    )
-    .await?;
-    context.state.upsert_agent_edge(
-        &context.parent_session_id,
-        &child_session,
-        AgentEdgeStatus::Open,
-        Some(metadata),
-    )
-    .await?;
-    let record = AgentRunRecord {
+    let mut record = AgentRunRecord {
         id: id.clone(),
         task_name: Some(task_name.clone()),
         agent_name: agent.name.clone(),
         task: prompt.clone(),
         parent_session_id: context.parent_session_id.clone(),
-        child_session_id: Some(child_session.clone()),
+        child_session_id: None,
         role,
         background,
         status: AgentRunStatus::Running,
@@ -861,22 +857,58 @@ pub(crate) async fn spawn_child_agent_background(
         agent_path: Some(agent_path(&task_name)),
     };
     let (control_handle, control_receivers) = ControlHandle::new();
+    context.supervisor.register(
+        record.clone(),
+        Some(control_handle.clone()),
+        child_concurrency_limit(&context),
+    )?;
+    let child_session = match context
+        .state
+        .create_child_session_with_metadata(
+            &context.parent_session_id,
+            &context.cwd,
+            "agent",
+            &child_model,
+            &context.model_provider,
+            Some(metadata.clone()),
+        )
+        .await
     {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.insert(
-            id.clone(),
-            AgentRunState {
-                record: record.clone(),
-                control: Some(control_handle),
-            },
-        );
+        Ok(session) => session,
+        Err(error) => {
+            context.supervisor.remove(&id);
+            return Err(error);
+        }
+    };
+    if let Err(error) = context
+        .state
+        .upsert_agent_edge(
+            &context.parent_session_id,
+            &child_session,
+            AgentEdgeStatus::Open,
+            Some(metadata),
+        )
+        .await
+    {
+        context.supervisor.remove(&id);
+        return Err(error);
     }
-    append_parent_agent_start_notification(
+    update_run_child_session(&context.supervisor, &id, &child_session);
+    record.child_session_id = Some(child_session.clone());
+    if let Err(error) = append_parent_agent_start_notification(
         &context.state,
         &context.parent_session_id,
         &record,
     )
-    .await?;
+    .await
+    {
+        let _ = context
+            .state
+            .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
+            .await;
+        context.supervisor.remove(&id);
+        return Err(error);
+    }
     let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
     let child = ChildRun {
         id,
@@ -896,15 +928,22 @@ pub(crate) async fn spawn_child_agent_background(
         parent_tool_call_id: None,
         existing_child_session: Some(child_session),
         previous_messages_override: Some(Vec::new()),
+        control_handle,
         control_receivers,
         abort: AbortSignal::new(abort_rx),
     };
-    tokio::spawn(async move {
+    let supervisor = child.context.supervisor.clone();
+    if let Err(finalizer) = supervisor.spawn_background(Box::pin(async move {
         let _ = run_child_agent(child).await;
         if let Some(lease) = worker_lease {
             lease.shutdown().await;
         }
-    });
+    })) {
+        finalizer.await;
+        return Err(Error::Message(
+            "agent supervisor is shutting down".to_string(),
+        ));
+    }
     Ok(record)
 }
 
@@ -926,6 +965,7 @@ pub(crate) struct ChildRun {
     pub(crate) parent_tool_call_id: Option<String>,
     pub(crate) existing_child_session: Option<String>,
     pub(crate) previous_messages_override: Option<Vec<Message>>,
+    pub(crate) control_handle: ControlHandle,
     pub(crate) control_receivers: psychevo_agent_core::ControlReceivers,
     pub(crate) abort: AbortSignal,
 }

@@ -16,7 +16,7 @@ impl PsychevoAcpAgent {
                 session.permission_mode,
                 self.options.config_path.clone(),
             )
-            .with_approval(Some(ApprovalMode::Manual), approval_handler, false)
+            .with_approval(approval_handler, false)
             .with_environment(Some(self.options.inherited_env.clone()), None, None)
             .with_mcp_servers(session.mcp_servers.clone());
         request.__set_adapter_options(AdapterTurnOptions {
@@ -56,7 +56,6 @@ impl PsychevoAcpAgent {
             mode: session.mode,
             permission_mode: session.permission_mode,
             sandbox_override: None,
-            approval_mode: Some(ApprovalMode::Manual),
             approval_handler,
             clarify_enabled: false,
             inherited_env: Some(self.options.inherited_env.clone()),
@@ -96,7 +95,6 @@ impl PsychevoAcpAgent {
             mode: RunMode::Default,
             permission_mode: None,
             sandbox_override: None,
-            approval_mode: None,
             approval_handler: None,
             clarify_enabled: false,
             inherited_env: Some(self.options.inherited_env.clone()),

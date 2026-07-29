@@ -124,6 +124,7 @@ pub(crate) fn edit_replace(
     LOCAL_FILE_MUTATION
         .replace(tool.task_id(), &target, expected, restored.as_bytes())
         .map_err(Error::from)?;
+    record_written_file(tool.file_reads(), &target, restored.as_bytes()).map_err(Error::from)?;
     tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
         path: rel.clone(),
         before: Some(text.original.clone()),
@@ -262,7 +263,7 @@ pub(crate) fn validate_v4a_operations(
             V4aOperationKind::Delete => {
                 let target = tool.resolve_existing(&op.file_path)?;
                 tool.ensure_sandbox_write_allowed(&target, tool_call_id)?;
-                let expected = require_fresh_read(tool.task_id(), &target)?;
+                let expected = require_fresh_read(tool.file_reads(), tool.task_id(), &target)?;
                 let (text, version) = read_text_snapshot(backend, &target)?;
                 if version != expected {
                     return Err(MutationConflict::Modified { path: target }.into());
@@ -369,6 +370,8 @@ pub(crate) fn apply_v4a_plan_with_backend(
                     backend
                         .create(tool.task_id(), &target, content.as_bytes())
                         .map_err(Error::from)?;
+                    record_written_file(tool.file_reads(), &target, content.as_bytes())
+                        .map_err(Error::from)?;
                     tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
                         path: rel.clone(),
                         before: None,
@@ -390,6 +393,8 @@ pub(crate) fn apply_v4a_plan_with_backend(
                     let baseline = snapshot_lsp_baseline(tool, &target, Some(&text.original));
                     backend
                         .replace(tool.task_id(), &target, version, restored.as_bytes())
+                        .map_err(Error::from)?;
+                    record_written_file(tool.file_reads(), &target, restored.as_bytes())
                         .map_err(Error::from)?;
                     tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
                         path: rel.clone(),
@@ -418,6 +423,7 @@ pub(crate) fn apply_v4a_plan_with_backend(
                     backend
                         .delete(tool.task_id(), &target, version)
                         .map_err(Error::from)?;
+                    tool.file_reads().remove(&target);
                     tool.observe_workspace_mutation(WorkspaceMutation::ExactUtf8 {
                         path: rel.clone(),
                         before: Some(text.original.clone()),

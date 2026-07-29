@@ -45,7 +45,9 @@ pub(crate) fn default_ask_reason(action: &PermissionAction) -> Option<String> {
         PermissionAction::Skill { tool, action } => Some(format!(
             "{tool} action `{action}` changes skill configuration or files and requires approval"
         )),
-        PermissionAction::McpStartup { server, transport } => Some(format!(
+        PermissionAction::McpStartup {
+            server, transport, ..
+        } => Some(format!(
             "MCP server `{server}` startup over {transport} requires approval"
         )),
         PermissionAction::Mcp { server, tool } => {
@@ -115,10 +117,16 @@ pub(crate) fn workspace_profile_decision(action: &PermissionAction) -> ActionPol
             suggested_rule: Some(format!("skill:{tool}/{skill_action}")),
             persistent_grants: action.persistent_grants(),
         },
-        PermissionAction::McpStartup { server, transport } => ActionPolicyEvaluation::Ask {
+        PermissionAction::McpStartup {
+            server,
+            transport,
+            descriptor_fingerprint,
+        } => ActionPolicyEvaluation::Ask {
             reason: format!("MCP server `{server}` startup over {transport} requires approval"),
             matched_rule: None,
-            suggested_rule: Some(format!("mcp_startup:{server}")),
+            suggested_rule: Some(format!(
+                "mcp_startup:{server}@{descriptor_fingerprint}"
+            )),
             persistent_grants: action.persistent_grants(),
         },
         PermissionAction::Mcp { server, tool } => ActionPolicyEvaluation::Ask {

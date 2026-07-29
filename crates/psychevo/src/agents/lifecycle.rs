@@ -1,12 +1,12 @@
 use super::{
-    AbortSignal, AgentEdgeRecord, AgentEdgeStatus, BTreeMap, BTreeSet, ControlHandle, Error,
-    HashMap, Map, Message, Path, PathBuf, Result, SessionSummary, StateRuntime, Value, fs, json,
-    user_text_message,
+    AbortSignal, AgentEdgeRecord, AgentEdgeStatus, AgentRunState, AgentSupervisor, BTreeMap,
+    BTreeSet, ControlHandle, Error, HashMap, Map, Message, Path, PathBuf, Result, SessionSummary,
+    StateRuntime, Value, fs, json, user_text_message,
 };
 use super::{
     catalog_surface::{
-        AGENT_RUNS, AgentCatalog, AgentDefinition, AgentDiagnostic, AgentInvocationRole,
-        AgentRunRecord, AgentRunState, AgentRunStatus, AgentSource, AgentToolContext,
+        AgentCatalog, AgentDefinition, AgentDiagnostic, AgentInvocationRole, AgentRunRecord,
+        AgentRunStatus, AgentSource, AgentToolContext,
         MAX_AGENT_SPAWN_DEPTH_CAP, SUBAGENT_TASK_LABEL_MAX_CHARS,
     },
     child_runs::{ChildRun, bind_child_model, default_task_name, run_child_agent},
@@ -15,11 +15,12 @@ use super::{
 };
 
 pub(crate) async fn force_stop_agent_id(
+    supervisor: &AgentSupervisor,
     id: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     let live = {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        let mut runs = supervisor.active();
         match resolve_live_key_and_record_locked(&runs, id)? {
             None => None,
             Some((live_id, previous)) => {
@@ -41,11 +42,11 @@ pub(crate) async fn force_stop_agent_id(
                 if let Some(child_session) = child_session.as_deref() {
                     interrupt_live_descendants_locked(&mut runs, child_session);
                 }
-                Some((previous, child_session))
+                Some((live_id, previous, child_session))
             }
         }
     };
-    let Some((previous, child_session)) = live else {
+    let Some((live_id, previous, child_session)) = live else {
         return durable_force_stop_agent_id(id, store).await;
     };
     if let Some(store) = store
@@ -53,6 +54,7 @@ pub(crate) async fn force_stop_agent_id(
     {
         store.close_agent_edge_subtree(&child_session).await?;
     }
+    supervisor.remove(&live_id);
     Ok(Some(previous))
 }
 
@@ -166,13 +168,14 @@ pub(crate) fn interrupt_live_descendants_locked(
     }
 }
 
-pub async fn send_agent_message(
+pub(crate) async fn send_agent_message(
+    supervisor: &AgentSupervisor,
     id: &str,
     message: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     {
-        let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        let runs = supervisor.active();
         if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? {
             if !agent_status_is_final(record.status) {
                 if let Some(state) = runs.get(&live_id)
@@ -215,7 +218,7 @@ pub(crate) async fn send_agent_message_with_context(
         return Err(Error::Message("agent message is empty".to_string()));
     }
     {
-        let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        let runs = context.supervisor.active();
         if let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, target)?
             && !agent_status_is_final(record.status)
         {
@@ -278,14 +281,15 @@ pub(crate) async fn send_agent_message_with_context(
     };
     let (control_handle, control_receivers) = ControlHandle::new();
     {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.insert(
-            id.clone(),
-            AgentRunState {
-                record: record.clone(),
-                control: Some(control_handle),
-            },
-        );
+        context.supervisor.register(
+            record.clone(),
+            Some(control_handle.clone()),
+            context
+                .active_team
+                .as_ref()
+                .map(|team| team.max_parallel_agents as usize)
+                .unwrap_or(super::supervisor::DEFAULT_CHILD_CONCURRENCY),
+        )?;
     }
     context
         .state
@@ -311,21 +315,29 @@ pub(crate) async fn send_agent_message_with_context(
         parent_tool_call_id: None,
         existing_child_session: Some(edge.child_session_id),
         previous_messages_override: None,
+        control_handle,
         control_receivers,
         abort,
     };
-    tokio::spawn(async move {
+    let supervisor = child.context.supervisor.clone();
+    if let Err(finalizer) = supervisor.spawn_background(Box::pin(async move {
         let _ = run_child_agent(child).await;
-    });
+    })) {
+        finalizer.await;
+        return Err(Error::Message(
+            "agent supervisor is shutting down".to_string(),
+        ));
+    }
     Ok(Some(record))
 }
 
-pub async fn resume_agent_id(
+pub(crate) async fn resume_agent_id(
+    supervisor: &AgentSupervisor,
     id: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     if let Some(record) = {
-        let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        let runs = supervisor.active();
         resolve_live_record_locked(&runs, id)?
     } {
         return Ok(Some(record));
@@ -365,26 +377,6 @@ pub(crate) fn edge_spawn_depth_remaining(edge: &AgentEdgeRecord) -> u8 {
         .and_then(Value::as_u64)
         .map(|value| (value as u8).min(MAX_AGENT_SPAWN_DEPTH_CAP))
         .unwrap_or(0)
-}
-
-pub(crate) fn find_live_record_locked(
-    runs: &HashMap<String, AgentRunState>,
-    target: &str,
-) -> Option<AgentRunRecord> {
-    find_live_key_and_record_locked(runs, target).map(|(_, record)| record)
-}
-
-pub(crate) fn find_live_key_and_record_locked(
-    runs: &HashMap<String, AgentRunState>,
-    target: &str,
-) -> Option<(String, AgentRunRecord)> {
-    runs.iter()
-        .find(|(id, state)| {
-            id.as_str() == target
-                || state.record.child_session_id.as_deref() == Some(target)
-                || state.record.task_name.as_deref() == Some(target)
-        })
-        .map(|(id, state)| (id.clone(), state.record.clone()))
 }
 
 pub(crate) fn resolve_live_key_and_record_locked(
@@ -530,12 +522,6 @@ pub(crate) async fn agent_record_from_edge(
     store: &StateRuntime,
     edge: AgentEdgeRecord,
 ) -> AgentRunRecord {
-    if let Some(record) = {
-        let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        find_live_record_locked(&runs, &edge.child_session_id)
-    } {
-        return record;
-    }
     let agent = edge
         .metadata
         .as_ref()

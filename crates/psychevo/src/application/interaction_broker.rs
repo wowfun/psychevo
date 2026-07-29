@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::future::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::types::{
@@ -21,6 +22,7 @@ const INTERACTION_COMMAND_CAPACITY: usize = 32;
 #[derive(Clone)]
 pub(super) struct InteractionBroker {
     sender: mpsc::Sender<InteractionCommand>,
+    finished: CancellationToken,
     waiters: FrameworkInteractionControl,
     control: crate::types::RunControlHandle,
     log: Arc<EventLog>,
@@ -42,7 +44,6 @@ enum InteractionCommand {
         reason: String,
         receipt: Option<oneshot::Sender<std::result::Result<(), String>>>,
     },
-    Finish,
 }
 
 impl InteractionBroker {
@@ -56,14 +57,25 @@ impl InteractionBroker {
         turn_id: String,
     ) -> Self {
         let (sender, mut receiver) = mpsc::channel(INTERACTION_COMMAND_CAPACITY);
+        let finished = CancellationToken::new();
         let broker = Self {
             sender,
+            finished: finished.clone(),
             waiters: waiters.clone(),
             control: control.clone(),
             log: log.clone(),
         };
         runtime.spawn(async move {
-            while let Some(command) = receiver.recv().await {
+            loop {
+                let command = tokio::select! {
+                    _ = finished.cancelled() => break,
+                    command = receiver.recv() => {
+                        let Some(command) = command else {
+                            break;
+                        };
+                        command
+                    }
+                };
                 match command {
                     InteractionCommand::Request { event, receipt } => {
                         let TurnEvent::InteractionRequested {
@@ -229,7 +241,6 @@ impl InteractionBroker {
                             let _ = receipt.send(result.map(|_| ()));
                         }
                     }
-                    InteractionCommand::Finish => break,
                 }
             }
         });
@@ -331,8 +342,8 @@ impl InteractionBroker {
             .map_err(Error::Message)
     }
 
-    pub(super) async fn finish(&self) {
-        let _ = self.sender.send(InteractionCommand::Finish).await;
+    pub(super) fn finish(&self) {
+        self.finished.cancel();
     }
 }
 
@@ -362,7 +373,7 @@ impl FrameworkInteractionControl {
         let (sender, receiver) = oneshot::channel();
         self.permissions
             .lock()
-            .expect("Framework permission interaction map poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(interaction_id, sender);
         receiver
     }
@@ -374,7 +385,7 @@ impl FrameworkInteractionControl {
     ) -> bool {
         self.permissions
             .lock()
-            .expect("Framework permission interaction map poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(interaction_id)
             .and_then(|sender| sender.send(decision).ok())
             .is_some()
@@ -386,7 +397,7 @@ impl FrameworkInteractionControl {
     ) -> Option<oneshot::Sender<PermissionApprovalDecision>> {
         self.permissions
             .lock()
-            .expect("Framework permission interaction map poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(interaction_id)
     }
 
@@ -401,7 +412,7 @@ impl FrameworkInteractionControl {
         let mut permissions = self
             .permissions
             .lock()
-            .expect("Framework permission interaction map poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if permissions.contains_key(&interaction_id) {
             return false;
         }
@@ -412,14 +423,14 @@ impl FrameworkInteractionControl {
     fn remove_permission(&self, interaction_id: &str) {
         self.permissions
             .lock()
-            .expect("Framework permission interaction map poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(interaction_id);
     }
 
     pub(super) fn cancel_permissions(&self) {
         self.permissions
             .lock()
-            .expect("Framework permission interaction map poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
     }
 }
@@ -462,17 +473,7 @@ impl ApprovalHandler for FrameworkApprovalHandler {
         let request_event = TurnEvent::InteractionRequested {
             interaction_id: interaction_id.clone(),
             kind: "permission".to_string(),
-            payload: serde_json::json!({
-                "toolName": request.tool_name,
-                "summary": request.summary,
-                "reason": request.reason,
-                "matchedRule": request.matched_rule,
-                "suggestedRule": request.suggested_rule,
-                "allowSession": true,
-                "allowAlways": request.allow_always,
-                "filesystem": request.filesystem,
-                "timeoutSecs": request.timeout_secs,
-            }),
+            payload: framework_permission_payload(&request),
         };
         let delegate = self.delegate.clone();
         let interactions = self.interactions.clone();
@@ -545,6 +546,21 @@ impl ApprovalHandler for FrameworkApprovalHandler {
                 .await;
         })
     }
+}
+
+fn framework_permission_payload(request: &PermissionApprovalRequest) -> serde_json::Value {
+    serde_json::json!({
+        "toolName": request.tool_name,
+        "summary": request.summary,
+        "reason": request.reason,
+        "matchedRule": request.matched_rule,
+        "suggestedRule": request.suggested_rule,
+        "allowSession": request.mcp_startup.is_none(),
+        "allowAlways": request.mcp_startup.is_none() && request.allow_always,
+        "filesystem": request.filesystem,
+        "mcpStartup": request.mcp_startup,
+        "timeoutSecs": request.timeout_secs,
+    })
 }
 
 enum AdoptedInteractionWaiter {
@@ -630,5 +646,36 @@ fn interaction_response_reason(response: &InteractionResponse) -> &'static str {
         InteractionResponse::Permission(decision) => permission_approval_reason(decision.outcome),
         InteractionResponse::Clarify(_) => "answered",
         InteractionResponse::Cancel => "cancelled",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn framework_mcp_startup_payload_is_typed_and_one_shot_only() {
+        let payload = framework_permission_payload(&PermissionApprovalRequest {
+            tool_call_id: "call-1".to_string(),
+            tool_name: "mcp_startup".to_string(),
+            summary: "Start docs".to_string(),
+            reason: "review startup".to_string(),
+            matched_rule: None,
+            suggested_rule: None,
+            allow_always: true,
+            filesystem: None,
+            mcp_startup: Some(crate::types::McpStartupApprovalRequest {
+                server: "docs".to_string(),
+                transport: "stdio".to_string(),
+                descriptor_fingerprint: "sha256:abc".to_string(),
+            }),
+            timeout_secs: 30,
+        });
+
+        assert_eq!(payload["allowSession"], false);
+        assert_eq!(payload["allowAlways"], false);
+        assert_eq!(payload["mcpStartup"]["server"], "docs");
+        assert_eq!(payload["mcpStartup"]["transport"], "stdio");
+        assert_eq!(payload["mcpStartup"]["descriptorFingerprint"], "sha256:abc");
     }
 }

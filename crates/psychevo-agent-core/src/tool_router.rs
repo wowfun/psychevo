@@ -192,14 +192,13 @@ impl ToolRouter {
         }))
     }
 
-    pub(crate) fn has_sequential_call(&self, tool_calls: &[ToolCallBlock]) -> bool {
-        tool_calls.iter().any(|call| {
-            if call.name == TOOL_SEARCH_NAME {
-                return true;
-            }
-            self.tool(&call.name)
-                .is_none_or(|tool| tool.execution_mode() == ToolExecutionMode::Sequential)
-        })
+    pub(crate) fn execution_mode_for_call(&self, call: &ToolCallBlock) -> ToolExecutionMode {
+        if call.name == TOOL_SEARCH_NAME {
+            return ToolExecutionMode::Sequential;
+        }
+        self.tool(&call.name)
+            .map(|tool| tool.execution_mode())
+            .unwrap_or(ToolExecutionMode::Sequential)
     }
 
     pub(crate) fn is_tool_search_call(&self, name: &str) -> bool {

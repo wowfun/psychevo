@@ -1,7 +1,7 @@
 use psychevo_agent_core::now_ms;
 use sqlx::Row;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 use super::store_message_fields::optional_json_string;
 use super::{AgentMailboxEventInput, AgentMailboxEventRecord, StateRuntime};
@@ -37,6 +37,57 @@ impl StateRuntime {
             .last_insert_rowid();
             tx.commit().await?;
             Ok(id)
+        })
+        .await
+    }
+
+    pub(crate) async fn commit_agent_terminal(
+        &self,
+        child_session_id: &str,
+        mailbox: Option<AgentMailboxEventInput>,
+    ) -> Result<()> {
+        let mailbox = mailbox.map(|input| (input, psychevo_agent_core::now_ms()));
+        self.observe_sqlx(async {
+            let mut tx = self.begin_sqlx_write().await?;
+            let updated = sqlx::query(
+                "UPDATE agent_edges SET status = 'closed', updated_at_ms = ?1 WHERE child_session_id = ?2",
+            )
+            .bind(psychevo_agent_core::now_ms())
+            .bind(child_session_id)
+            .execute(&mut *tx)
+            .await?;
+            if updated.rows_affected() != 1 {
+                return Err(Error::Message(format!(
+                    "cannot commit Agent terminal: durable edge {child_session_id} was not found"
+                )));
+            }
+            if let Some((input, created_at_ms)) = mailbox {
+                let payload_json = serde_json::to_string(&input.payload)?;
+                let metadata_json = optional_json_string(&input.metadata)?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO agent_mailbox_events (
+                        parent_session_id, child_session_id, agent_id, task_name, agent_name,
+                        created_at_ms, delivered_at_ms, delivered_prompt_session_seq,
+                        delivered_after_session_seq, delivered_tool_call_id, content_text,
+                        payload_json, metadata_json
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL, NULL, NULL, ?7, ?8, ?9)
+                    "#,
+                )
+                .bind(input.parent_session_id)
+                .bind(input.child_session_id)
+                .bind(input.agent_id)
+                .bind(input.task_name)
+                .bind(input.agent_name)
+                .bind(created_at_ms)
+                .bind(input.content_text)
+                .bind(payload_json)
+                .bind(metadata_json)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
         })
         .await
     }

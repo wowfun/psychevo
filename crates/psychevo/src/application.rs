@@ -44,9 +44,9 @@ use crate::state::{
     StateRuntime,
 };
 use crate::types::{
-    ApprovalHandler, ApprovalMode, ImageInput, McpServerInput, PermissionApprovalDecision,
-    PermissionMode, ProjectContextInstructionMode, RunMode, RunOptions, RunSandboxOverride,
-    RunStreamEvent, RunStreamSink, RuntimeTool, SessionEventPayload, SessionSummary, run_control,
+    ApprovalHandler, ImageInput, McpServerInput, PermissionApprovalDecision, PermissionMode,
+    ProjectContextInstructionMode, RunMode, RunOptions, RunSandboxOverride, RunStreamEvent,
+    RunStreamSink, RuntimeTool, SessionEventPayload, SessionSummary, run_control,
 };
 use crate::{Error, Result};
 
@@ -174,7 +174,7 @@ pub struct Thread {
     id: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CompactThreadRequest {
     pub config_path: Option<PathBuf>,
     pub model: Option<String>,
@@ -182,6 +182,21 @@ pub struct CompactThreadRequest {
     pub inherited_env: Option<BTreeMap<String, String>>,
     pub instructions: Option<String>,
     pub force: bool,
+    pub reason: CompactionReason,
+}
+
+impl Default for CompactThreadRequest {
+    fn default() -> Self {
+        Self {
+            config_path: None,
+            model: None,
+            reasoning_effort: None,
+            inherited_env: None,
+            instructions: None,
+            force: false,
+            reason: CompactionReason::Manual,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -242,7 +257,6 @@ pub struct TurnRequest {
     include_reasoning: bool,
     mode: RunMode,
     permission_mode: Option<PermissionMode>,
-    approval_mode: Option<ApprovalMode>,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
     clarify_enabled: bool,
     inherited_env: Option<BTreeMap<String, String>>,
@@ -829,6 +843,7 @@ mod tests {
                     suggested_rule: None,
                     allow_always: false,
                     filesystem: None,
+                    mcp_startup: None,
                     timeout_secs: 30,
                 });
                 started.notify_one();
@@ -874,6 +889,7 @@ mod tests {
                     suggested_rule: None,
                     allow_always: false,
                     filesystem: None,
+                    mcp_startup: None,
                     timeout_secs: 30,
                 });
                 started.notify_one();
@@ -1267,6 +1283,68 @@ mod tests {
             .await
             .expect_err("closed admission");
         assert!(error.to_string().contains("shutting down"));
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_cancels_and_awaits_application_owned_agents() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let application = Application::builder()
+            .home(temp.path())
+            .database_path(":memory:")
+            .build()
+            .await
+            .expect("application");
+        let supervisor = application.inner.runtime.agent_supervisor.clone();
+        let (control, receivers) = psychevo_agent_core::ControlHandle::new();
+        supervisor
+            .register(
+                crate::agents::AgentRunRecord {
+                    id: "shutdown-child".to_string(),
+                    task_name: Some("shutdown-child".to_string()),
+                    agent_name: "worker".to_string(),
+                    task: "wait for shutdown".to_string(),
+                    parent_session_id: "parent".to_string(),
+                    child_session_id: None,
+                    role: crate::agents::AgentInvocationRole::Subagent,
+                    background: true,
+                    status: crate::agents::AgentRunStatus::Running,
+                    edge_status: None,
+                    started_at_ms: 0,
+                    ended_at_ms: None,
+                    outcome: None,
+                    final_answer: None,
+                    error: None,
+                    effective_max_spawn_depth: Some(0),
+                    team_run_id: None,
+                    mission_run_id: None,
+                    team_name: None,
+                    team_member_id: None,
+                    agent_path: None,
+                },
+                Some(control),
+                4,
+            )
+            .expect("register agent");
+        let finalized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finalized_in_task = finalized.clone();
+        let mut agent_abort = receivers.abort_signal();
+        assert!(
+            supervisor
+                .spawn_background(Box::pin(async move {
+                    agent_abort.wait_for_abort().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    finalized_in_task.store(true, std::sync::atomic::Ordering::SeqCst);
+                }))
+                .is_ok(),
+            "spawn agent"
+        );
+
+        application.shutdown().await.expect("shutdown");
+
+        assert!(
+            finalized.load(std::sync::atomic::Ordering::SeqCst),
+            "Application shutdown returned before the Agent finalizer"
+        );
     }
 
     #[tokio::test]

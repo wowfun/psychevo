@@ -7,12 +7,18 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
         .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
         .await.expect("parent");
     let id = format!("list-agent-{}", Uuid::now_v7());
-    {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.insert(
-            id.clone(),
-            AgentRunState {
-                record: AgentRunRecord {
+    let context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store,
+        db_path,
+        parent.clone(),
+        AgentCatalog::default(),
+    );
+    let supervisor = context.supervisor.clone();
+    supervisor
+        .register(
+            AgentRunRecord {
                     id: id.clone(),
                     task_name: Some("worker_task".to_string()),
                     agent_name: "worker".to_string(),
@@ -34,21 +40,14 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
                     team_name: None,
                     team_member_id: None,
                     agent_path: None,
-                },
-                control: None,
             },
-        );
-    }
+            None,
+            4,
+        )
+        .expect("register");
 
     let (_tx, rx) = watch::channel(false);
-    let output = ListAgentsTool::new(test_agent_tool_context(
-        &tmp,
-        fake_language_model(Vec::new()),
-        store,
-        db_path,
-        parent,
-        AgentCatalog::default(),
-    ))
+    let output = ListAgentsTool::new(context)
     .execute("call".to_string(), json!({}), AbortSignal::new(rx))
     .await;
 
@@ -75,8 +74,7 @@ pub(crate) async fn list_agents_model_content_uses_compact_control_summaries() {
             .contains("raw prompt detail")
     );
 
-    let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    runs.remove(&id);
+    supervisor.remove(&id);
 }
 
 #[tokio::test]
@@ -87,13 +85,11 @@ pub(crate) async fn control_targets_resolve_by_model_visible_task_or_report_ambi
     );
     let id_one = format!("target-one-{}", Uuid::now_v7());
     let id_two = format!("target-two-{}", Uuid::now_v7());
-    {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        for id in [&id_one, &id_two] {
-            runs.insert(
-                id.clone(),
-                AgentRunState {
-                    record: AgentRunRecord {
+    let supervisor = AgentSupervisor::default();
+    for id in [&id_one, &id_two] {
+        supervisor
+            .register(
+                AgentRunRecord {
                         id: id.clone(),
                         task_name: Some(task.clone()),
                     agent_name: "worker".to_string(),
@@ -115,32 +111,30 @@ pub(crate) async fn control_targets_resolve_by_model_visible_task_or_report_ambi
                         team_name: None,
                         team_member_id: None,
                         agent_path: None,
-                    },
-                    control: None,
                 },
-            );
-        }
+                None,
+                4,
+            )
+            .expect("register");
     }
 
-    let err = close_agent_id(&task, None).await.expect_err("ambiguous task");
+    let err = close_agent_id(&supervisor, &task, None)
+        .await
+        .expect_err("ambiguous task");
     assert!(err.to_string().contains("multiple agents match task"));
     assert!(err.to_string().contains("use agent_id"));
 
-    {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.remove(&id_two);
-    }
-    let resolved = resume_agent_id(&task, None)
+    supervisor.remove(&id_two);
+    let resolved = resume_agent_id(&supervisor, &task, None)
         .await.expect("resolve task")
         .expect("record");
     assert_eq!(resolved.id, id_one);
-    let resolved = resume_agent_id(&id_one, None)
+    let resolved = resume_agent_id(&supervisor, &id_one, None)
         .await.expect("resolve agent id")
         .expect("record");
     assert_eq!(resolved.id, id_one);
 
-    let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-    runs.remove(&id_one);
+    supervisor.remove(&id_one);
 }
 
 #[tokio::test]
@@ -185,6 +179,20 @@ pub(crate) async fn agent_permission_mode_can_only_narrow_parent_mode() {
     assert_eq!(
         narrow_permission_mode_for_agent(PermissionMode::DontAsk, Some(&agent)),
         PermissionMode::DontAsk
+    );
+
+    assert_eq!(
+        effective_run_mode(RunMode::Plan, Some(&agent)),
+        RunMode::Plan
+    );
+    assert_eq!(
+        effective_run_mode(RunMode::Default, Some(&agent)),
+        RunMode::Default
+    );
+    agent.tool_policy.permission_mode = Some(AgentPermissionMode::Plan);
+    assert_eq!(
+        effective_run_mode(RunMode::Default, Some(&agent)),
+        RunMode::Plan
     );
 }
 

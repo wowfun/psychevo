@@ -1,5 +1,5 @@
 use super::{
-    AgentEdgeStatus, Arc, Deserialize, Serialize,
+    AgentEdgeStatus, AgentSupervisor, Arc, Deserialize, Serialize,
     definition_policy::{
         HookedTool, SpawnAgentTool, agent_allows_tool, agent_catalog_for_policy,
         agent_policy_allows_agent_catalog, agent_policy_allows_skill_catalog,
@@ -10,7 +10,7 @@ use super::{
         agent_record_from_edge, agent_status_is_final, close_live_descendants_locked,
         collect_agent_edge_tree, find_agent_edge_for_target, force_stop_agent_id, insert_agent,
         load_agent_dir, load_agent_file, resolve_live_key_and_record_locked,
-        resolve_live_record_locked, send_agent_message, subagent_summary_value,
+        resolve_live_record_locked, resume_agent_id, send_agent_message, subagent_summary_value,
     },
     mailbox_tools::{
         CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendMessageTool, WaitAgentTool, now_ms,
@@ -18,9 +18,9 @@ use super::{
     teams::{ActiveAgentTeamContext, MAX_TEAM_PARALLEL_AGENTS_CAP},
 };
 use super::{
-    ApprovalHandler, ApprovalMode, AtomicBool, BTreeMap, BTreeSet, ControlHandle,
-    CustomToolsetConfig, Duration, Error, HashMap, Instant, LazyLock,
-    LspConfig, Message, ModelMetadata, Mutex, Ordering, Path, PathBuf, PermissionConfig,
+    ApprovalHandler, BTreeMap, BTreeSet, ControlHandle, CustomToolsetConfig, Duration,
+    Error, Instant,
+    LspConfig, Message, ModelMetadata, Path, PathBuf, PermissionConfig,
     PermissionMode, ProjectContextInstructionMode, Provider, Result, RunMode, RunStreamSink, StateRuntime,
     ToolBinding, ToolSelectionConfig, Value, json, prompt_templates,
 };

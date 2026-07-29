@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use super::inspect::{
     PluginMaterializedSource, SourceRequest, inspect_materialized_source, materialize_source_in_dir,
 };
+use super::materialization::copy_tree_bounded;
 use super::store::PluginStore;
 use super::types::{PluginInstallOptions, PluginInstallRecord, PluginManifestKind};
 use super::util::{sanitize_path_segment, source_slug};
@@ -86,7 +87,7 @@ pub fn install_plugin(
             )));
         }
     }
-    if let Err(err) = copy_dir(&materialized.root, &package_root) {
+    if let Err(err) = copy_tree_bounded(&materialized.root, &package_root) {
         let _ = fs::remove_dir_all(&package_root);
         return Err(err);
     }
@@ -139,32 +140,6 @@ pub fn install_plugin(
     };
     store.write_record(&record)?;
     Ok(record)
-}
-
-fn copy_dir(source: &Path, dest: &Path) -> Result<()> {
-    fs::create_dir_all(dest)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let path = entry.path();
-        let dest_path = dest.join(entry.file_name());
-        let metadata = fs::symlink_metadata(&path)?;
-        let file_type = metadata.file_type();
-        if file_type.is_symlink() {
-            return Err(Error::Config(format!(
-                "plugin package contains unsupported symlink: {}",
-                path.display()
-            )));
-        }
-        if file_type.is_dir() {
-            copy_dir(&path, &dest_path)?;
-        } else if file_type.is_file() {
-            if let Some(parent) = dest_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::copy(&path, &dest_path)?;
-        }
-    }
-    Ok(())
 }
 
 fn package_dir_name(name: &str, version: &str, source_slug: &str) -> String {

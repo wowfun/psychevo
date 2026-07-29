@@ -256,6 +256,91 @@ pub(crate) async fn stream_assistant(
             GenerationEvent::Warning { warning } => {
                 warnings.push(warning);
             }
+            GenerationEvent::Resync {
+                snapshot,
+                dropped_events: _,
+            } => {
+                inline_think = InlineThinkParser::new();
+                provider_reasoning.clear();
+                reasoning_details.clear();
+                tool_builders.clear();
+                provider_tools.clear();
+                sources.clear();
+                for (content_index, content) in snapshot.assistant.content.iter().enumerate() {
+                    match content {
+                        psychevo_ai::AssistantContent::Text(text) => {
+                            inline_think.push(&text.text);
+                        }
+                        psychevo_ai::AssistantContent::Reasoning {
+                            text,
+                            provider_evidence,
+                        } => {
+                            if !provider_reasoning.is_empty() && !text.is_empty() {
+                                provider_reasoning.push_str("\n\n");
+                            }
+                            provider_reasoning.push_str(text);
+                            if let Some(evidence) = provider_evidence.clone() {
+                                collect_reasoning_details(&mut reasoning_details, evidence);
+                            }
+                        }
+                        psychevo_ai::AssistantContent::ToolCall(call) => {
+                            tool_builders.insert(
+                                (content_index, content_index),
+                                ToolCallBuilder {
+                                    id: call.id.clone(),
+                                    name: call.name.clone(),
+                                    arguments_json: call.arguments_raw.clone(),
+                                    argument_error: call.argument_error.clone(),
+                                    content_index,
+                                    call_index: content_index,
+                                },
+                            );
+                        }
+                        psychevo_ai::AssistantContent::ProviderTool(tool) => {
+                            provider_tools.insert(
+                                tool.id.clone(),
+                                ProviderToolBlock {
+                                    id: tool.id.clone(),
+                                    name: tool.name.clone(),
+                                    action: tool.action.clone(),
+                                    status: tool.status.clone(),
+                                },
+                            );
+                        }
+                        psychevo_ai::AssistantContent::Source { source } => {
+                            if !sources.contains(source) {
+                                sources.push(source.clone());
+                            }
+                        }
+                        psychevo_ai::AssistantContent::Extension { .. } => {}
+                    }
+                }
+                usage = snapshot
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| serde_json::to_value(usage).ok());
+                metadata = (!snapshot.provider_metadata.is_empty()).then(|| {
+                    Value::Object(snapshot.provider_metadata.clone().into_iter().collect())
+                });
+                warnings = snapshot.warnings.clone();
+                assistant = build_assistant_message_from_snapshot(
+                    &snapshot.assistant,
+                    request,
+                    timestamp_ms,
+                    finish_reason.clone(),
+                    outcome,
+                );
+                if visible_assistant_changed(&last_visible_assistant, &assistant) {
+                    last_visible_assistant = assistant.clone();
+                    emit(
+                        &sink,
+                        AgentEvent::MessageUpdate {
+                            message: assistant.clone(),
+                        },
+                    )
+                    .await?;
+                }
+            }
             GenerationEvent::Finish {
                 outcome: done_outcome,
                 finish_reason: done_reason,

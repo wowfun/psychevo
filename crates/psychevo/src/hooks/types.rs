@@ -172,7 +172,6 @@ impl HookEventName {
                 | Self::PreToolUse
                 | Self::PermissionRequest
                 | Self::PreCompact
-                | Self::PostCompact
                 | Self::Stop
         )
     }
@@ -185,7 +184,6 @@ pub enum HookSourceKind {
     Profile,
     Project,
     CapabilityRoot,
-    Agent,
     Plugin,
     Worker,
     Runtime,
@@ -199,7 +197,7 @@ impl HookSourceKind {
             "profile" | "user" | "global" => Self::Profile,
             "project" => Self::Project,
             "capability_root" | "selected-capability-root" => Self::CapabilityRoot,
-            "agent" | "selected-agent" => Self::Agent,
+            "agent" | "selected-agent" => Self::Runtime,
             "plugin" => Self::Plugin,
             "worker" => Self::Worker,
             "runtime" => Self::Runtime,
@@ -213,7 +211,6 @@ impl HookSourceKind {
             Self::Profile => "profile",
             Self::Project => "project",
             Self::CapabilityRoot => "capability_root",
-            Self::Agent => "agent",
             Self::Plugin => "plugin",
             Self::Worker => "worker",
             Self::Runtime => "runtime",
@@ -224,7 +221,7 @@ impl HookSourceKind {
     pub(crate) fn trusted_by_source(self) -> bool {
         matches!(
             self,
-            Self::Managed | Self::Profile | Self::Agent | Self::Runtime
+            Self::Managed | Self::Profile | Self::Runtime
         )
     }
 

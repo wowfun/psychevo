@@ -202,6 +202,18 @@ pub(crate) async fn smart_review_permission(
     while let Some(event) = stream.next_event().await {
         match event.map_err(|err| Error::Message(err.to_string()))? {
             GenerationEvent::TextDelta { delta, .. } => text.push_str(&delta),
+            GenerationEvent::Resync { snapshot, .. } => {
+                text = snapshot
+                    .assistant
+                    .content
+                    .iter()
+                    .filter_map(|content| match content {
+                        psychevo_ai::AssistantContent::Text(text) => Some(text.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+            }
             GenerationEvent::Finish { .. } => break,
             _ => {}
         }
@@ -333,6 +345,7 @@ mod smart_reviewer_tests {
             suggested_rule: Some("filesystem:/etc/hosts".to_string()),
             allow_always: true,
             filesystem: None,
+            mcp_startup: None,
             timeout_secs: 90,
         }
     }

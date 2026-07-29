@@ -45,23 +45,97 @@ pub struct AgentRunRecord {
 
 pub type AgentRun = AgentRunRecord;
 
-pub struct AgentControl;
+#[derive(Clone)]
+pub struct AgentControl {
+    pub(crate) supervisor: AgentSupervisor,
+    pub(crate) store: Option<StateRuntime>,
+}
+
+impl std::fmt::Debug for AgentControl {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentControl")
+            .finish_non_exhaustive()
+    }
+}
 
 impl AgentControl {
-    pub async fn status_value() -> Value {
-        agent_status_value(None, None, false).await
+    pub(crate) fn new(supervisor: AgentSupervisor, store: Option<StateRuntime>) -> Self {
+        Self { supervisor, store }
     }
 
-    pub async fn wait(id: &str, timeout: Duration) -> Result<Option<AgentRunRecord>> {
-        wait_agent_id(id, timeout).await
+    #[doc(hidden)]
+    pub fn __standalone(store: Option<StateRuntime>) -> Self {
+        Self::new(AgentSupervisor::default(), store)
     }
 
-    pub async fn close(id: &str) -> Result<Option<AgentRunRecord>> {
-        close_agent_id(id, None).await
+    pub async fn status_value(&self) -> Value {
+        self.status_value_for(None, false).await
     }
 
-    pub async fn send(id: &str, message: &str) -> Result<Option<AgentRunRecord>> {
-        send_agent_message(id, message, None).await
+    pub async fn status_value_for(
+        &self,
+        parent_session_id: Option<&str>,
+        all: bool,
+    ) -> Value {
+        agent_status_value(
+            &self.supervisor,
+            self.store.as_ref(),
+            parent_session_id,
+            all,
+        )
+        .await
+    }
+
+    pub async fn status_records(
+        &self,
+        parent_session_id: Option<&str>,
+        all: bool,
+    ) -> Vec<AgentRunRecord> {
+        agent_status_records(
+            &self.supervisor,
+            self.store.as_ref(),
+            parent_session_id,
+            all,
+        )
+        .await
+    }
+
+    pub async fn wait(
+        &self,
+        id: &str,
+        timeout: Duration,
+    ) -> Result<Option<AgentRunRecord>> {
+        wait_agent_id(&self.supervisor, id, self.store.as_ref(), timeout).await
+    }
+
+    pub async fn close(&self, id: &str) -> Result<Option<AgentRunRecord>> {
+        close_agent_id(&self.supervisor, id, self.store.as_ref()).await
+    }
+
+    pub async fn send(&self, id: &str, message: &str) -> Result<Option<AgentRunRecord>> {
+        send_agent_message(&self.supervisor, id, message, self.store.as_ref()).await
+    }
+
+    pub async fn stop_with_grace(
+        &self,
+        id: &str,
+        grace: Duration,
+    ) -> Result<Option<AgentRunRecord>> {
+        stop_agent_id_with_grace(&self.supervisor, id, self.store.as_ref(), grace).await
+    }
+
+    pub async fn resume(&self, id: &str) -> Result<Option<AgentRunRecord>> {
+        resume_agent_id(&self.supervisor, id, self.store.as_ref()).await
+    }
+
+    pub fn spawning_paused(&self, parent_session_id: &str) -> bool {
+        self.supervisor.spawning_paused(parent_session_id)
+    }
+
+    pub fn set_spawning_paused(&self, parent_session_id: &str, paused: bool) -> bool {
+        self.supervisor
+            .set_spawning_paused(parent_session_id, paused)
     }
 }
 
@@ -126,7 +200,6 @@ pub(crate) struct AgentToolContext {
     pub(crate) permission_config: PermissionConfig,
     pub(crate) lsp: LspConfig,
     pub(crate) permission_mode: PermissionMode,
-    pub(crate) approval_mode: ApprovalMode,
     pub(crate) approval_handler: Option<Arc<dyn ApprovalHandler>>,
     pub(crate) state: StateRuntime,
     pub(crate) config_path: Option<PathBuf>,
@@ -154,23 +227,7 @@ pub(crate) struct AgentToolContext {
     pub(crate) spawn_depth_remaining: Option<u8>,
     pub(crate) active_team: Option<ActiveAgentTeamContext>,
     pub(crate) external_delegate: Option<Arc<dyn crate::types::ExternalAgentDelegate>>,
-}
-
-pub(crate) struct AgentRunState {
-    pub(crate) record: AgentRunRecord,
-    pub(crate) control: Option<ControlHandle>,
-}
-
-pub(crate) static AGENT_RUNS: LazyLock<Mutex<HashMap<String, AgentRunState>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-pub(crate) static AGENT_SPAWN_PAUSED: AtomicBool = AtomicBool::new(false);
-
-pub fn agent_spawn_paused() -> bool {
-    AGENT_SPAWN_PAUSED.load(Ordering::SeqCst)
-}
-
-pub fn set_agent_spawn_paused(paused: bool) -> bool {
-    AGENT_SPAWN_PAUSED.swap(paused, Ordering::SeqCst)
+    pub(crate) supervisor: AgentSupervisor,
 }
 
 pub fn discover_agents(options: &AgentDiscoveryOptions) -> Result<AgentCatalog> {
@@ -563,6 +620,21 @@ pub(crate) fn narrow_permission_mode_for_agent(
     }
 }
 
+pub(crate) fn effective_run_mode(
+    parent: RunMode,
+    agent: Option<&AgentDefinition>,
+) -> RunMode {
+    if parent == RunMode::Plan
+        || agent.is_some_and(|agent| {
+            agent.tool_policy.permission_mode == Some(AgentPermissionMode::Plan)
+        })
+    {
+        RunMode::Plan
+    } else {
+        parent
+    }
+}
+
 pub(crate) fn effective_tool_names(tools: &[Arc<dyn ToolBinding>]) -> Vec<String> {
     tools.iter().map(|tool| tool.name().to_string()).collect()
 }
@@ -609,7 +681,7 @@ pub(crate) fn build_hook_runtime(
     cwd: &Path,
 ) -> Option<crate::hooks::HookRuntime> {
     if let Some(agent) = agent.filter(|agent| agent.hooks.is_some())
-        && let Some(source) = crate::hooks::agent_hook_source(&agent.name, agent.hooks.as_ref())
+        && let Some(source) = crate::hooks::agent_hook_source(agent)
     {
         config.sources.push(source);
     }
@@ -664,16 +736,19 @@ pub(crate) fn agent_tools(context: AgentToolContext) -> Vec<Arc<dyn ToolBinding>
     tools
 }
 
-pub async fn agent_status_value(
+pub(crate) async fn agent_status_value(
+    supervisor: &AgentSupervisor,
     store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
-    let records = agent_status_records(store, parent_session_id, all).await;
+    let records = agent_status_records(supervisor, store, parent_session_id, all).await;
+    let spawning_paused = parent_session_id
+        .is_some_and(|parent| supervisor.spawning_paused(parent));
     json!({
         "agents": records,
         "control": {
-            "spawning_paused": agent_spawn_paused(),
+            "spawning_paused": spawning_paused,
             "max_spawn_depth_cap": MAX_AGENT_SPAWN_DEPTH_CAP,
             "concurrency_cap": MAX_TEAM_PARALLEL_AGENTS_CAP,
         }
@@ -681,11 +756,12 @@ pub async fn agent_status_value(
 }
 
 pub(crate) async fn agent_status_model_value(
+    supervisor: &AgentSupervisor,
     store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
 ) -> Value {
-    let records = agent_status_records(store, parent_session_id, all).await;
+    let records = agent_status_records(supervisor, store, parent_session_id, all).await;
     let mut agents = Vec::with_capacity(records.len());
     for record in &records {
         agents.push(subagent_summary_value(store, record, true).await);
@@ -693,13 +769,15 @@ pub(crate) async fn agent_status_model_value(
     json!({
         "agents": agents,
         "control": {
-            "spawning_paused": agent_spawn_paused(),
+            "spawning_paused": parent_session_id
+                .is_some_and(|parent| supervisor.spawning_paused(parent)),
             "max_spawn_depth_cap": MAX_AGENT_SPAWN_DEPTH_CAP,
         }
     })
 }
 
-pub async fn agent_status_records(
+pub(crate) async fn agent_status_records(
+    supervisor: &AgentSupervisor,
     store: Option<&StateRuntime>,
     parent_session_id: Option<&str>,
     all: bool,
@@ -724,7 +802,7 @@ pub async fn agent_status_records(
             records.push(agent_record_from_edge(store, edge).await);
         }
     }
-    let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+    let runs = supervisor.active();
     for state in runs.values() {
         if !all && let Some(parent) = parent_session_id {
             let in_scope = state.record.parent_session_id == parent
@@ -741,22 +819,49 @@ pub async fn agent_status_records(
     records
 }
 
-pub async fn wait_agent_id(id: &str, timeout: Duration) -> Result<Option<AgentRunRecord>> {
+pub(crate) async fn wait_agent_id(
+    supervisor: &AgentSupervisor,
+    id: &str,
+    store: Option<&StateRuntime>,
+    timeout: Duration,
+) -> Result<Option<AgentRunRecord>> {
     let started = Instant::now();
     loop {
-        if let Some(record) = {
-            let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-            resolve_live_record_locked(&runs, id)?
-        } && agent_status_is_final(record.status)
+        if let Some(record) = resolve_supervised_record(supervisor, id)?
+            && agent_status_is_final(record.status)
         {
             return Ok(Some(record));
         }
+        if let Some(store) = store
+            && let Some(edge) = find_agent_edge_for_target(store, id).await?
+        {
+            let record = agent_record_from_edge(store, edge).await;
+            if agent_status_is_final(record.status) {
+                return Ok(Some(record));
+            }
+        }
         if started.elapsed() >= timeout {
-            let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-            return resolve_live_record_locked(&runs, id);
+            if let Some(record) = resolve_supervised_record(supervisor, id)? {
+                return Ok(Some(record));
+            }
+            return if let Some(store) = store
+                && let Some(edge) = find_agent_edge_for_target(store, id).await?
+            {
+                Ok(Some(agent_record_from_edge(store, edge).await))
+            } else {
+                Ok(None)
+            };
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+fn resolve_supervised_record(
+    supervisor: &AgentSupervisor,
+    id: &str,
+) -> Result<Option<AgentRunRecord>> {
+    let runs = supervisor.active();
+    resolve_live_record_locked(&runs, id)
 }
 
 pub async fn wait_agent_mailbox(
@@ -785,12 +890,13 @@ pub async fn wait_agent_mailbox(
     }
 }
 
-pub async fn close_agent_id(
+pub(crate) async fn close_agent_id(
+    supervisor: &AgentSupervisor,
     id: &str,
     store: Option<&StateRuntime>,
 ) -> Result<Option<AgentRunRecord>> {
     let live = {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+        let mut runs = supervisor.active();
         if let Some((live_id, previous)) = resolve_live_key_and_record_locked(&runs, id)? {
             let child_session = {
                 let state = runs.get_mut(&live_id).expect("live record exists");
@@ -806,12 +912,12 @@ pub async fn close_agent_id(
             if let Some(child_session) = child_session.as_deref() {
                 close_live_descendants_locked(&mut runs, child_session);
             }
-            Some((previous, child_session))
+            Some((live_id, previous, child_session))
         } else {
             None
         }
     };
-    let Some((previous, child_session)) = live else {
+    let Some((live_id, previous, child_session)) = live else {
         return close_persisted_agent(id, store).await;
     };
     if let Some(store) = store
@@ -819,6 +925,7 @@ pub async fn close_agent_id(
     {
         store.close_agent_edge_subtree(&child_session).await?;
     }
+    supervisor.remove(&live_id);
     Ok(Some(previous))
 }
 
@@ -836,21 +943,25 @@ async fn close_persisted_agent(
     Ok(None)
 }
 
-pub async fn stop_agent_id_with_grace(
+pub(crate) async fn stop_agent_id_with_grace(
+    supervisor: &AgentSupervisor,
     id: &str,
     store: Option<&StateRuntime>,
     grace: Duration,
 ) -> Result<Option<AgentRunRecord>> {
-    let requested = request_agent_stop_id(id)?;
+    let requested = request_agent_stop_id(supervisor, id)?;
     if requested.is_none() {
-        return close_agent_id(id, store).await;
+        return close_agent_id(supervisor, id, store).await;
     }
     tokio::time::sleep(grace).await;
-    force_stop_agent_id(id, store).await
+    force_stop_agent_id(supervisor, id, store).await
 }
 
-pub(crate) fn request_agent_stop_id(id: &str) -> Result<Option<AgentRunRecord>> {
-    let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+pub(crate) fn request_agent_stop_id(
+    supervisor: &AgentSupervisor,
+    id: &str,
+) -> Result<Option<AgentRunRecord>> {
+    let runs = supervisor.active();
     let Some((live_id, record)) = resolve_live_key_and_record_locked(&runs, id)? else {
         return Ok(None);
     };

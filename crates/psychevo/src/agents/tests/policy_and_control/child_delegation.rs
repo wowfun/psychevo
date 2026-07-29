@@ -136,16 +136,18 @@ pub(crate) async fn invalid_child_model_is_rejected_before_lifecycle_state() {
         diagnostics: Vec::new(),
     };
     let (_tx, rx) = watch::channel(false);
+    let context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store.clone(),
+        db_path,
+        parent.clone(),
+        catalog,
+    );
+    let supervisor = context.supervisor.clone();
 
     let result = spawn_subagent(
-        test_agent_tool_context(
-            &tmp,
-            fake_language_model(Vec::new()),
-            store.clone(),
-            db_path,
-            parent.clone(),
-            catalog,
-        ),
+        context,
         SpawnAgentArgs {
             agent_type: Some("worker".to_string()),
             message: "Use an invalid explicit child model.".to_string(),
@@ -180,7 +182,7 @@ pub(crate) async fn invalid_child_model_is_rejected_before_lifecycle_state() {
         0,
         "{sessions:#?}"
     );
-    let runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
+    let runs = supervisor.active();
     assert!(
         runs.values()
             .all(|state| state.record.parent_session_id != parent),
@@ -998,6 +1000,102 @@ pub(crate) async fn background_agent_tool_result_includes_child_session_identity
     assert_eq!(model_value["status"], "running");
     assert!(model_value.get("child_session_id").is_none());
     assert!(model_value.get("session_id").is_none());
+}
+
+#[tokio::test]
+pub(crate) async fn background_required_mcp_failure_commits_terminal_edge_and_mailbox() {
+    let tmp = TempDir::new().expect("tmp");
+    let db_path = tmp.path().join("state.sqlite");
+    let store = StateRuntime::open(&db_path).await.expect("store");
+    let parent = store
+        .create_session_with_metadata(tmp.path(), "run", "model", "provider", None)
+        .await
+        .expect("parent");
+    let catalog = AgentCatalog {
+        agents: vec![built_in_agent("worker", "Worker", "Work.", None)],
+        shadowed_agents: Vec::new(),
+        disabled_agents: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    let mut context = test_agent_tool_context(
+        &tmp,
+        fake_language_model(Vec::new()),
+        store.clone(),
+        db_path,
+        parent.clone(),
+        catalog,
+    );
+    let supervisor = context.supervisor.clone();
+    let policy = crate::types::McpServerPolicy {
+        required: true,
+        ..Default::default()
+    };
+    context.extension_inputs.mcp_servers.push(
+        crate::types::McpServerInput::new(
+            "required-broken",
+            crate::types::McpTransportInput::Unsupported {
+                kind: "fixture".to_string(),
+            },
+        )
+        .with_policy(policy),
+    );
+    let (_tx, rx) = watch::channel(false);
+    let output = spawn_subagent(
+        context,
+        SpawnAgentArgs {
+            agent_type: Some("worker".to_string()),
+            message: "Use the required server.".to_string(),
+            task_name: "required_mcp".to_string(),
+            background: Some(true),
+            model: None,
+            fork_context: false,
+            fork_turns: None,
+            max_turns: Some(1),
+            max_spawn_depth: None,
+            team_member: None,
+        },
+        "call-required-mcp".to_string(),
+        AbortSignal::new(rx),
+    )
+    .await
+    .expect("background spawn accepted");
+    let id = output.json["id"].as_str().expect("agent id").to_string();
+    let child_session = output.json["child_session_id"]
+        .as_str()
+        .expect("child session")
+        .to_string();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if !supervisor.active().contains_key(&id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("background terminal finalizer");
+
+    let edge = store
+        .find_agent_edge(&child_session)
+        .await
+        .expect("edge")
+        .expect("child edge");
+    assert_eq!(edge.status, AgentEdgeStatus::Closed);
+    let mailbox = store
+        .load_agent_mailbox_events(&parent)
+        .await
+        .expect("mailbox");
+    assert_eq!(mailbox.len(), 1);
+    assert_eq!(
+        mailbox[0].metadata.as_ref().expect("metadata")["status"],
+        "errored"
+    );
+    assert!(
+        mailbox[0]
+            .content_text
+            .contains("required MCP server unavailable")
+    );
 }
 
 #[tokio::test]

@@ -53,10 +53,6 @@ impl ToolBinding for ExecCommandTool {
                     "type": "string",
                     "description": "Working directory for the command. Defaults to the invocation working directory; relative paths resolve from it."
                 },
-                "shell": {
-                    "type": "string",
-                    "description": "Shell executable to use. Defaults to the user's shell."
-                },
                 "tty": {
                     "type": "boolean",
                     "default": false,
@@ -210,12 +206,14 @@ pub(crate) async fn exec_command_tool_impl_with_context(
     if cmd.trim().is_empty() {
         return Err(Error::Message("cmd must not be empty".to_string()));
     }
+    if args.get("shell").is_some() {
+        return Err(Error::Message(
+            "shell is host-controlled and is not an exec_command argument".to_string(),
+        ));
+    }
     reject_untracked_background_command(&cmd)?;
     let cwd = resolve_exec_cwd(&accepted_cwd, optional_string(&args, "cwd")?)?;
-    let shell = optional_string(&args, "shell")?
-        .map(ToOwned::to_owned)
-        .map(Ok)
-        .unwrap_or_else(|| default_shell_for_env(&context.env))?;
+    let shell = default_shell_for_env(&context.env)?;
     let tty = optional_bool(&args, "tty")?.unwrap_or(false);
     if tty && context.sandbox_policy.enabled {
         return Err(crate::sandbox::sandbox_denied(
@@ -443,6 +441,8 @@ pub(crate) struct ExecSessionState {
 
 pub(crate) enum ExecProcess {
     Pipe(Arc<Mutex<std::process::Child>>),
+    #[cfg(windows)]
+    WindowsRestricted(Arc<Mutex<windows_restricted::WindowsRestrictedProcess>>),
     Pty(Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>),
 }
 
@@ -624,6 +624,12 @@ impl ExecProcess {
                     terminate_std_child_tree(&mut child);
                 }
             }
+            #[cfg(windows)]
+            Self::WindowsRestricted(child) => {
+                if let Ok(child) = child.lock() {
+                    child.kill();
+                }
+            }
             Self::Pty(child) => {
                 if let Ok(mut child) = child.lock() {
                     crate::process_env::terminate_pty_child_tree(child.as_mut());
@@ -669,6 +675,21 @@ pub(crate) fn spawn_pipe_session(
     initial_output: &[u8],
 ) -> Result<Arc<ExecSession>> {
     invocation.sandbox_policy.ensure_shell_supported()?;
+    #[cfg(windows)]
+    if invocation.sandbox_policy.enabled
+        && matches!(
+            invocation.sandbox_policy.backend,
+            crate::sandbox::SandboxBackend::WindowsRestricted
+        )
+    {
+        return spawn_windows_restricted_pipe_session(
+            id,
+            context,
+            invocation,
+            stdin_allowed,
+            initial_output,
+        );
+    }
     let mut command = pipe_command(invocation)?;
     command
         .current_dir(&invocation.cwd)
@@ -726,6 +747,44 @@ pub(crate) fn spawn_pipe_session(
     spawn_reader_thread(Arc::clone(&session), stdout);
     spawn_reader_thread(Arc::clone(&session), stderr);
     spawn_pipe_waiter_thread(Arc::clone(&session), child);
+    Ok(session)
+}
+
+#[cfg(windows)]
+fn spawn_windows_restricted_pipe_session(
+    id: u64,
+    context: ExecSessionContext,
+    invocation: &ExecInvocation,
+    stdin_allowed: bool,
+    initial_output: &[u8],
+) -> Result<Arc<ExecSession>> {
+    let spawned = windows_restricted::spawn_read_only(invocation, stdin_allowed).map_err(|error| {
+        crate::sandbox::sandbox_denied(format!(
+            "failed to spawn Windows restricted-token command: {error}"
+        ))
+    })?;
+    let windows_restricted::WindowsRestrictedSpawn {
+        process,
+        stdin,
+        stdout,
+        stderr,
+    } = spawned;
+    let child = Arc::new(Mutex::new(process));
+    let session = Arc::new(ExecSession::new(
+        id,
+        context,
+        invocation,
+        ExecSessionIo {
+            process: ExecProcess::WindowsRestricted(Arc::clone(&child)),
+            readers_active: 2,
+            stdin: stdin.map(|stdin| Box::new(stdin) as Box<dyn Write + Send>),
+            stdin_allowed,
+            initial_output: initial_output.to_vec(),
+        },
+    ));
+    spawn_reader_thread(Arc::clone(&session), stdout);
+    spawn_reader_thread(Arc::clone(&session), stderr);
+    spawn_windows_restricted_waiter_thread(Arc::clone(&session), child);
     Ok(session)
 }
 
@@ -862,6 +921,34 @@ pub(crate) fn spawn_pipe_waiter_thread(
             match status {
                 Ok(Some(status)) => {
                     session.mark_exit(status.code());
+                    return;
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Err(_) => {
+                    session.mark_exit(None);
+                    return;
+                }
+            }
+        }
+    });
+}
+
+#[cfg(windows)]
+fn spawn_windows_restricted_waiter_thread(
+    session: Arc<ExecSession>,
+    child: Arc<Mutex<windows_restricted::WindowsRestrictedProcess>>,
+) {
+    thread::spawn(move || {
+        loop {
+            let status = {
+                let Ok(child) = child.lock() else {
+                    return;
+                };
+                child.try_wait()
+            };
+            match status {
+                Ok(Some(status)) => {
+                    session.mark_exit(Some(status));
                     return;
                 }
                 Ok(None) => thread::sleep(Duration::from_millis(10)),

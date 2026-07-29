@@ -115,7 +115,6 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
         include_reasoning: false,
         mode,
         permission_mode: None,
-        approval_mode: None,
         approval_handler: None,
         clarify_enabled: false,
         inherited_env: Some(env.clone()),
@@ -225,7 +224,6 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
             permission_config: PermissionConfig::default(),
             lsp: Default::default(),
             permission_mode: Default::default(),
-            approval_mode: Default::default(),
             approval_handler: None,
             state: options.state.clone(),
             config_path: options.config_path.clone(),
@@ -267,6 +265,7 @@ pub async fn reload_session_context(options: ReloadContextOptions) -> Result<Rel
             .ok()
             .flatten(),
             external_delegate: None,
+            supervisor: crate::agents::AgentSupervisor::default(),
         })
     } else {
         None
@@ -426,7 +425,6 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         include_reasoning: false,
         mode: options.mode,
         permission_mode: options.permission_mode,
-        approval_mode: options.approval_mode,
         approval_handler: options.approval_handler.clone(),
         clarify_enabled: false,
         inherited_env: options.inherited_env.clone(),
@@ -458,12 +456,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         .await;
     let spawn_result = async {
     let permission_mode = options.permission_mode.unwrap_or_default();
-    let approval_mode = options.approval_mode.unwrap_or({
-        match loaded.config.permissions.approvals_reviewer {
-            crate::types::ApprovalsReviewer::User => crate::types::ApprovalMode::Manual,
-            crate::types::ApprovalsReviewer::Smart => crate::types::ApprovalMode::Smart,
-        }
-    });
+    let approvals_reviewer = loaded.config.permissions.approvals_reviewer;
     let agents_home = resolve_agents_home(&loaded.env, &cwd)?;
     let mut explicit_agent_inputs = options
         .selected_parent_agent
@@ -489,6 +482,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
     };
     let permission_mode =
         narrow_permission_mode_for_agent(permission_mode, selected_parent_agent.as_ref());
+    let effective_mode = effective_run_mode(options.mode, selected_parent_agent.as_ref());
     let child_agent = resolve_agent_definition(&agent_catalog, &options.agent, &cwd, &loaded.env)?;
     if selected_parent_agent
         .as_ref()
@@ -554,9 +548,9 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
                     "reasoning_effort": resolved.reasoning_effort.clone(),
                     "context_limit": resolved.context_limit,
                     "model_metadata": resolved.metadata.public_json(),
-                    "mode": options.mode.as_str(),
+                    "mode": effective_mode.as_str(),
                     "permission_mode": permission_mode.as_str(),
-                    "approval_mode": approval_mode.as_str(),
+                    "approvals_reviewer": approvals_reviewer.as_str(),
                     "project_context": {
                         "instructions": loaded.config.project_context.instructions.as_str(),
                     },
@@ -577,6 +571,11 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         resolved.provider.clone(),
         resolved.inference_idle_timeout_secs,
     )?;
+    let supervisor = options
+        .agent_control
+        .as_ref()
+        .map(|control| control.supervisor.clone())
+        .unwrap_or_default();
     let context = AgentToolContext {
         provider,
         model_provider: resolved.provider.clone(),
@@ -591,12 +590,11 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
             "reasoning_effort": resolved.reasoning_effort.clone(),
         }),
         cwd: cwd.clone(),
-        mode: options.mode,
+        mode: effective_mode,
         project_context_mode: loaded.config.project_context.instructions,
         permission_config: loaded.config.permissions.clone(),
         lsp: loaded.config.lsp.clone(),
         permission_mode,
-        approval_mode,
         approval_handler: options.approval_handler.clone(),
         state: options.state.clone(),
         config_path: options.config_path.clone(),
@@ -613,7 +611,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         sandbox_policy: crate::sandbox::SandboxPolicy::from_config(
             &loaded.config.sandbox,
             &cwd,
-            options.mode,
+            effective_mode,
             &loaded.env,
         )?,
         home,
@@ -640,6 +638,7 @@ pub async fn spawn_agent_background(options: AgentSpawnOptions) -> Result<AgentS
         .ok()
         .flatten(),
         external_delegate: None,
+        supervisor,
     };
     let agent = spawn_child_agent_background(context, child_agent, options.prompt).await?;
     Ok(AgentSpawnResult {

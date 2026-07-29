@@ -59,6 +59,7 @@ pub(crate) enum SandboxBackend {
     Disabled,
     Seatbelt,
     Landlock,
+    WindowsRestricted,
     Unsupported,
 }
 
@@ -68,6 +69,7 @@ impl SandboxBackend {
             Self::Disabled => "disabled",
             Self::Seatbelt => "seatbelt",
             Self::Landlock => "landlock",
+            Self::WindowsRestricted => "windows-restricted-token-advisory",
             Self::Unsupported => "unsupported",
         }
     }
@@ -249,14 +251,15 @@ impl SandboxPolicy {
         run_mode: RunMode,
         env: &BTreeMap<String, String>,
     ) -> Result<Self> {
-        if !config.enabled {
+        let plan_mode = matches!(run_mode, RunMode::Plan);
+        if !config.enabled && !plan_mode {
             let mut policy = Self::disabled();
             policy.configured_mode = config.mode;
             policy.effective_mode = config.mode;
             return Ok(policy);
         }
 
-        let effective_mode = if matches!(run_mode, RunMode::Plan) {
+        let effective_mode = if plan_mode {
             SandboxMode::ReadOnly
         } else {
             config.mode
@@ -302,6 +305,17 @@ impl SandboxPolicy {
         })
     }
 
+    pub(crate) fn narrowed_for_run_mode(mut self, run_mode: RunMode) -> Self {
+        if matches!(run_mode, RunMode::Plan) {
+            self.enabled = true;
+            self.effective_mode = SandboxMode::ReadOnly;
+            self.backend = backend_for_platform();
+            self.writable_roots.clear();
+            self.shell_extra_roots.clear();
+        }
+        self
+    }
+
     pub(crate) fn with_approval_roots(mut self, roots: Vec<PathBuf>) -> Self {
         if self.enabled && matches!(self.effective_mode, SandboxMode::WorkspaceWrite) {
             for root in roots {
@@ -317,6 +331,14 @@ impl SandboxPolicy {
                 "sandbox is not supported on platform {}",
                 self.platform
             )));
+        }
+        if self.enabled
+            && matches!(self.backend, SandboxBackend::WindowsRestricted)
+            && !matches!(self.effective_mode, SandboxMode::ReadOnly)
+        {
+            return Err(sandbox_denied(
+                "the native Windows restricted-token backend currently enforces read-only Plan execution only",
+            ));
         }
         Ok(())
     }
@@ -565,10 +587,12 @@ fn landlock_io_error<E: std::fmt::Display>(err: E) -> std::io::Error {
 fn shell_enforcement(policy: &SandboxPolicy) -> &'static str {
     if !policy.enabled {
         "disabled"
-    } else if matches!(policy.backend, SandboxBackend::Unsupported) {
-        "unsupported"
     } else {
-        "confined"
+        match policy.backend {
+            SandboxBackend::Unsupported => "unsupported",
+            SandboxBackend::WindowsRestricted => "not-confined",
+            _ => "confined",
+        }
     }
 }
 
@@ -589,7 +613,11 @@ fn backend_for_platform() -> SandboxBackend {
     {
         SandboxBackend::Seatbelt
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        SandboxBackend::WindowsRestricted
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         SandboxBackend::Unsupported
     }
@@ -781,6 +809,48 @@ mod tests {
     }
 
     #[test]
+    fn plan_mode_enables_sandbox_even_when_the_configured_baseline_is_disabled() {
+        let dir = tempdir().unwrap();
+        let env = BTreeMap::new();
+        let config = SandboxConfig {
+            enabled: false,
+            mode: SandboxMode::WorkspaceWrite,
+            writable_roots: vec![dir.path().display().to_string()],
+            include_tmp: true,
+            include_common_caches: true,
+        };
+
+        let policy = SandboxPolicy::from_config(&config, dir.path(), RunMode::Plan, &env).unwrap();
+
+        assert!(policy.enabled);
+        assert_eq!(policy.configured_mode, SandboxMode::WorkspaceWrite);
+        assert_eq!(policy.effective_mode, SandboxMode::ReadOnly);
+        assert!(policy.writable_roots.is_empty());
+        assert!(policy.shell_extra_roots.is_empty());
+        assert!(!matches!(policy.backend, SandboxBackend::Disabled));
+    }
+
+    #[test]
+    fn child_plan_narrowing_clears_parent_writable_and_extra_roots() {
+        let dir = tempdir().unwrap();
+        let policy = SandboxPolicy {
+            enabled: false,
+            configured_mode: SandboxMode::WorkspaceWrite,
+            effective_mode: SandboxMode::WorkspaceWrite,
+            platform: platform_name(),
+            backend: SandboxBackend::Disabled,
+            writable_roots: vec![dir.path().to_path_buf()],
+            shell_extra_roots: vec![dir.path().join("tmp")],
+        }
+        .narrowed_for_run_mode(RunMode::Plan);
+
+        assert!(policy.enabled);
+        assert_eq!(policy.effective_mode, SandboxMode::ReadOnly);
+        assert!(policy.writable_roots.is_empty());
+        assert!(policy.shell_extra_roots.is_empty());
+    }
+
+    #[test]
     fn workspace_write_allows_workspace_and_denies_outside() {
         let dir = tempdir().unwrap();
         let outside = tempdir().unwrap();
@@ -870,5 +940,24 @@ mod tests {
         assert_eq!(policy.configured_mode, SandboxMode::ReadOnly);
         assert_eq!(policy.effective_mode, SandboxMode::ReadOnly);
         assert_eq!(policy.backend, SandboxBackend::Disabled);
+    }
+
+    #[test]
+    fn windows_restricted_backend_reports_advisory_shell_enforcement() {
+        let policy = SandboxPolicy {
+            enabled: true,
+            configured_mode: SandboxMode::ReadOnly,
+            effective_mode: SandboxMode::ReadOnly,
+            platform: "windows".to_string(),
+            backend: SandboxBackend::WindowsRestricted,
+            writable_roots: Vec::new(),
+            shell_extra_roots: Vec::new(),
+        };
+
+        assert_eq!(shell_enforcement(&policy), "not-confined");
+        assert_eq!(
+            policy.status_value()["shell_enforcement"],
+            serde_json::json!("not-confined")
+        );
     }
 }

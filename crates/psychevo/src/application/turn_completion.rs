@@ -1,6 +1,20 @@
 use super::*;
 
 impl PendingTerminal {
+    pub(super) fn failed(receipt: TurnReceipt, message: Arc<str>) -> Self {
+        Self {
+            terminal_event: TurnEvent::Failed {
+                thread_id: receipt.thread_id.clone(),
+                turn_id: receipt.turn_id.clone(),
+                message: message.to_string(),
+            },
+            receipt,
+            completion: Err(message),
+            completed_at_ms: psychevo_agent_core::now_ms(),
+            last_error: String::new(),
+        }
+    }
+
     pub(super) fn interrupted(receipt: TurnReceipt) -> Self {
         let result = TurnResult {
             thread_id: receipt.thread_id.clone(),
@@ -104,7 +118,10 @@ impl TurnCompletion {
     }
 
     pub(super) fn settle(&self, value: SharedTurnCompletion) -> bool {
-        let mut current = self.value.lock().expect("Turn completion poisoned");
+        let mut current = self
+            .value
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if current.is_some() {
             return false;
         }
@@ -117,7 +134,12 @@ impl TurnCompletion {
     async fn wait(&self) -> SharedTurnCompletion {
         loop {
             let notified = self.notify.notified();
-            if let Some(value) = self.value.lock().expect("Turn completion poisoned").clone() {
+            if let Some(value) = self
+                .value
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+            {
                 return value;
             }
             notified.await;

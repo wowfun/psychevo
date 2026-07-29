@@ -241,7 +241,7 @@ impl Thread {
             model: request.model,
             reasoning_effort: request.reasoning_effort,
             inherited_env: Some(inherited_env),
-            reason: CompactionReason::Manual,
+            reason: request.reason,
             instructions: request.instructions,
             force: request.force,
         })

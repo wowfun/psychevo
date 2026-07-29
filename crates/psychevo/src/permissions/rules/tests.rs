@@ -14,7 +14,6 @@ pub(crate) mod tests {
             PathBuf::from("/repo/.psychevo"),
             config,
             mode,
-            ApprovalMode::Manual,
             None,
             None,
         )
@@ -193,7 +192,6 @@ pub(crate) mod tests {
                 ..Default::default()
             },
             PermissionMode::Default,
-            ApprovalMode::Manual,
             None,
             None,
         );
@@ -220,7 +218,6 @@ pub(crate) mod tests {
             cwd.path().join(".psychevo"),
             PermissionConfig::default(),
             PermissionMode::Default,
-            ApprovalMode::Manual,
             None,
             None,
         )
@@ -606,7 +603,6 @@ print(len(data))""#;
             PathBuf::from("/repo/.psychevo"),
             PermissionConfig::default(),
             PermissionMode::Default,
-            ApprovalMode::Manual,
             Some(Arc::new(PendingApprovalHandler)),
             None,
         );

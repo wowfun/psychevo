@@ -1,5 +1,4 @@
 use std::fs;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -9,6 +8,7 @@ use reqwest::Url;
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
+use crate::tools::{PublicHttpGetOptions, public_http_get, read_bounded_http_response};
 
 pub const MAX_IMAGE_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
 pub const PSYCHEVO_MEDIA_SCHEME: &str = "psychevo-media";
@@ -281,26 +281,24 @@ fn resolve_media_image_source(
 }
 
 async fn resolve_remote_image_source(source: &str) -> Result<ResolvedImageSource> {
-    let url =
-        Url::parse(source).map_err(|err| Error::Message(format!("invalid image URL: {err}")))?;
-    reject_unsafe_remote_image_url(&url)?;
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(3))
-        .timeout(Duration::from_secs(10))
-        .build()?;
-    let response = client.get(url.clone()).send().await?;
-    reject_unsafe_remote_image_url(response.url())?;
+    Url::parse(source).map_err(|err| Error::Message(format!("invalid image URL: {err}")))?;
+    let response = public_http_get(
+        source,
+        &PublicHttpGetOptions {
+            timeout: Duration::from_secs(10),
+            redirect_limit: 3,
+            user_agent: "Psychevo/remote-image",
+            accept: "image/png, image/jpeg, image/webp, image/gif, image/bmp, image/avif",
+            operation: "remote image",
+        },
+        None,
+    )
+    .await
+    .map_err(|error| Error::Message(format!("remote image fetch rejected: {error}")))?;
     if !response.status().is_success() {
         return Err(Error::Message(format!(
             "image URL returned HTTP {}",
             response.status()
-        )));
-    }
-    if let Some(length) = response.content_length()
-        && length > MAX_IMAGE_SOURCE_BYTES
-    {
-        return Err(Error::Message(format!(
-            "remote image is too large: {length} exceeds {MAX_IMAGE_SOURCE_BYTES} bytes"
         )));
     }
     let content_type = response
@@ -313,12 +311,13 @@ async fn resolve_remote_image_source(source: &str) -> Result<ResolvedImageSource
             Error::Message("remote URL did not return an image MIME type".to_string())
         })?;
     let final_url = response.url().to_string();
-    let bytes = response.bytes().await?.to_vec();
-    if bytes.len() as u64 > MAX_IMAGE_SOURCE_BYTES {
-        return Err(Error::Message(format!(
-            "remote image exceeds {MAX_IMAGE_SOURCE_BYTES} bytes"
-        )));
-    }
+    let bytes = read_bounded_http_response(
+        response,
+        MAX_IMAGE_SOURCE_BYTES as usize,
+        None,
+        "remote image",
+    )
+    .await?;
     let resolved = resolved_from_bytes(source, &final_url, &final_url, bytes)?;
     if resolved.mime_type != content_type {
         return Err(Error::Message(format!(
@@ -371,50 +370,6 @@ fn parse_data_image(source: &str) -> Result<(String, &str)> {
         .and_then(normalized_image_mime)
         .ok_or_else(|| Error::Message("unsupported data image MIME type".to_string()))?;
     Ok((mime, data))
-}
-
-fn reject_unsafe_remote_image_url(url: &Url) -> Result<()> {
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(Error::Message(
-            "remote image URL must use http or https".to_string(),
-        ));
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| Error::Message("remote image URL is missing a host".to_string()))?;
-    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
-        return Err(Error::Message(
-            "remote image URL host is not allowed".to_string(),
-        ));
-    }
-    if let Ok(ip) = host.parse::<IpAddr>()
-        && unsafe_ip_address(ip)
-    {
-        return Err(Error::Message(
-            "remote image URL host is not allowed".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn unsafe_ip_address(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            ip.is_private()
-                || ip.is_loopback()
-                || ip.is_link_local()
-                || ip.is_broadcast()
-                || ip.is_documentation()
-                || ip.is_unspecified()
-        }
-        IpAddr::V6(ip) => {
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_unique_local()
-                || ip.is_unicast_link_local()
-                || ip.is_multicast()
-        }
-    }
 }
 
 fn image_dimensions(bytes: &[u8]) -> (Option<u32>, Option<u32>) {

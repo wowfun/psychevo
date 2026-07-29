@@ -14,9 +14,9 @@ use crate::config::{CustomToolsetConfig, LspConfig, ToolSelectionConfig, Toolset
 use crate::sandbox::{SandboxPolicy, SandboxWriteGrants};
 use crate::skills::SkillRuntime;
 use crate::tools::{
-    ToolRuntimeContext, builtin_toolset_description, builtin_toolset_names, builtin_toolset_tools,
-    clarify_tool, default_enabled_toolsets, known_tool_name, skill_tools_for_mode_with_runtime,
-    tool_allowed_in_mode, tool_by_name, tool_names_for_mode,
+    ToolRuntimeContext, builtin_tool_aliases, builtin_toolset_description, builtin_toolset_names,
+    builtin_toolset_tools, clarify_tool, default_enabled_toolsets, known_tool_name,
+    skill_tools_for_mode_with_runtime, tool_allowed_in_mode, tool_by_name, tool_names_for_mode,
 };
 use crate::types::{
     ClarifyControl, RunMode, RunStreamSink, RunWarning, RuntimeTool, WorkspaceMutationSink,
@@ -138,6 +138,7 @@ pub(crate) fn assemble_tool_surface_with_warnings(input: ToolSurfaceAssembly) ->
     let mut available_tools = ToolRegistry::default();
     let runtime_context = ToolRuntimeContext {
         task_id: input.task_id,
+        file_reads: crate::tools::FileReadTracker::default(),
         lsp: input.lsp.clone(),
         lsp_manager: crate::tools::write_support::default_lsp_manager(),
         allow_login_shell: input.allow_login_shell,
@@ -155,11 +156,11 @@ pub(crate) fn assemble_tool_surface_with_warnings(input: ToolSurfaceAssembly) ->
 
     for name in tool_names_for_mode(input.mode) {
         if let Some(binding) = tool_by_name(name, &input.cwd, runtime_context.clone()) {
-            available_tools.register(AvailableToolEntry::new(
-                binding,
-                format!("builtin:tool:{name}"),
-                "builtin",
-            ));
+            let entry = AvailableToolEntry::new(binding, format!("builtin:tool:{name}"), "builtin");
+            available_tools.register(entry.clone());
+            for alias in builtin_tool_aliases(name) {
+                available_tools.register(entry.clone().with_name(*alias));
+            }
         }
     }
     let mut fallback_entries = Vec::new();
@@ -367,6 +368,11 @@ impl AvailableToolEntry {
             source_kind: source_kind.into(),
         }
     }
+
+    fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
 }
 
 #[derive(Clone)]
@@ -383,9 +389,9 @@ fn build_toolset_definitions(
     for name in builtin_toolset_names() {
         if let Some(tools) = builtin_toolset_tools(name) {
             definitions.insert(
-                (*name).to_string(),
+                name.to_string(),
                 ToolsetDefinition {
-                    name: (*name).to_string(),
+                    name: name.to_string(),
                     config: CustomToolsetConfig {
                         description: builtin_toolset_description(name).map(str::to_string),
                         tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
@@ -722,6 +728,32 @@ mod tests {
             compile_tool_selection(RunMode::Default, &selection, &BTreeMap::new(), &contributed);
 
         assert!(intent.selects_tool("web_search", RunMode::Default));
+    }
+
+    #[test]
+    fn builtin_alias_selects_the_canonical_binding_from_the_same_registry() {
+        let mut input = base_input(RunMode::Default);
+        let mut selection = ToolSelectionConfig::default();
+        selection.modes.insert(
+            "default".to_string(),
+            ToolModeConfig {
+                enabled_toolsets: Some(vec!["legacy-image-name".to_string()]),
+                disabled_toolsets: Vec::new(),
+            },
+        );
+        let custom = BTreeMap::from([(
+            "legacy-image-name".to_string(),
+            CustomToolsetConfig {
+                description: None,
+                tools: vec!["image_generation.generate".to_string()],
+                includes: Vec::new(),
+            },
+        )]);
+        input.selection = compile_tool_selection(RunMode::Default, &selection, &custom, &[]);
+
+        let result = assemble_tool_surface_with_warnings(input);
+
+        assert_eq!(selected_names(&result), vec!["image_generate"]);
     }
 
     #[test]

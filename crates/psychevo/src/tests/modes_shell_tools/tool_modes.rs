@@ -127,6 +127,10 @@ pub(crate) async fn exec_command_provider_schema_replaces_bash() {
     let exec_params = exec.parameters();
     assert_eq!(exec_params["required"], json!(["cmd"]));
     assert!(exec_params["properties"]["cmd"]["description"].is_string());
+    assert!(
+        exec_params["properties"].get("shell").is_none(),
+        "the model-visible schema must not select the executable"
+    );
     assert_eq!(exec_params["properties"]["tty"]["default"], false);
     assert_eq!(
         exec_params["properties"]["yield_time_ms"]["default"],
@@ -185,6 +189,25 @@ pub(crate) async fn exec_command_provider_schema_replaces_bash() {
         .expect("web_fetch");
     assert!(web_fetch.description().contains("untrusted"));
     assert!(!web_fetch.description().contains("default to markdown"));
+}
+
+#[tokio::test]
+pub(crate) async fn exec_command_rejects_model_selected_shells() {
+    let temp = tempdir().expect("temp");
+    let (_handle, receivers) = psychevo_agent_core::ControlHandle::new();
+    let error = crate::tools::exec_command_tool_impl(
+        temp.path().to_path_buf(),
+        false,
+        json!({"cmd": "printf safe", "shell": "./workspace-wrapper"}),
+        receivers.abort_signal(),
+    )
+    .await
+    .expect_err("model-selected shell must be rejected");
+
+    assert!(
+        error.to_string().contains("shell is host-controlled"),
+        "{error}"
+    );
 }
 
 #[tokio::test]
@@ -266,6 +289,8 @@ pub(crate) async fn cross_tool_guidance_lives_in_mode_instructions() {
 
     let plan = crate::tools::mode_instruction(RunMode::Plan);
     assert!(plan.contains("Use read for file contents"));
+    assert!(plan.contains("shell commands must be limited to read-only exploration"));
+    assert!(plan.contains("Do not write files"));
     assert!(plan.contains("prefer rg"));
     assert!(plan.contains("web_fetch for a known URL"));
 

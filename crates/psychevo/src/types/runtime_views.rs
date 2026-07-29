@@ -1155,6 +1155,7 @@ impl fmt::Debug for RunControlHandle {
 pub struct RunControl {
     pub(crate) handle: RunControlHandle,
     pub(crate) receivers: ControlReceivers,
+    pub(crate) agent_supervisor: crate::agents::AgentSupervisor,
 }
 
 impl RunControl {
@@ -1176,5 +1177,12 @@ pub fn run_control() -> (RunControlHandle, RunControl) {
     let (inner, receivers) = ControlHandle::new();
     let clarify = Arc::new(ClarifyControl::default());
     let handle = RunControlHandle { inner, clarify };
-    (handle.clone(), RunControl { handle, receivers })
+    (
+        handle.clone(),
+        RunControl {
+            handle,
+            receivers,
+            agent_supervisor: crate::agents::AgentSupervisor::default(),
+        },
+    )
 }

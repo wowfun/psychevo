@@ -17,8 +17,8 @@ pub(crate) use crate::agents::{
     AgentDefinition, AgentDiscoveryOptions, AgentToolContext, agent_catalog_for_prompt,
     agent_catalog_for_selected_policy, agent_mailbox_event_message,
     agent_policy_allows_agent_spawn, agent_project_instructions_enabled, apply_agent_tool_policy,
-    apply_runtime_hooks, discover_agents, effective_tool_names, main_agent_metadata,
-    narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
+    apply_runtime_hooks, discover_agents, effective_run_mode, effective_tool_names,
+    main_agent_metadata, narrow_permission_mode_for_agent, resolve_agent_definition, resolve_agents_home,
     session_agent_input_from_metadata, skill_catalog_visible_for_tools,
     spawn_child_agent_background,
 };

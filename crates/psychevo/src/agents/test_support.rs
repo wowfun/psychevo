@@ -224,7 +224,6 @@ mod tests {
             permission_config: PermissionConfig::default(),
             lsp: Default::default(),
             permission_mode: PermissionMode::Default,
-            approval_mode: ApprovalMode::Manual,
             approval_handler: None,
             state: store,
             config_path: None,
@@ -252,6 +251,7 @@ mod tests {
             spawn_depth_remaining: None,
             active_team: None,
             external_delegate: None,
+            supervisor: AgentSupervisor::default(),
         }
     }
 

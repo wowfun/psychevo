@@ -27,6 +27,11 @@ use crate::types::{ImageInput, RunMode, RunOptions};
 pub(crate) const SUMMARY_TOOL_TEXT_LIMIT: usize = 4_000;
 pub(crate) const SUMMARY_MESSAGE_TEXT_LIMIT: usize = 12_000;
 pub(crate) const MIN_SUMMARIZED_MESSAGES: usize = 2;
+pub(crate) const DEFAULT_COMPACTION_INPUT_TOKENS: u64 = 32_768;
+pub(crate) const HARD_COMPACTION_INPUT_TOKENS: u64 = 65_536;
+pub(crate) const MAX_COMPACTION_OUTPUT_TOKENS: u64 = 4_096;
+pub(crate) const MIN_COMPACTION_OUTPUT_TOKENS: u64 = 512;
+pub(crate) const COMPACTION_INPUT_RESERVE_TOKENS: u64 = 1_024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -242,7 +247,7 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
         })),
     })
     .await?;
-    if let Some(runtime) = &hook_runtime {
+    let post_compact_warning = if let Some(runtime) = &hook_runtime {
         let post = runtime.run_post_compact(&json!({
             "session_id": summary.id.clone(),
             "reason": options.reason.as_str(),
@@ -254,15 +259,22 @@ pub async fn compact_session(options: CompactSessionOptions) -> Result<Compactio
             "tokens_after": record.tokens_after,
         }))
         .await;
-        if let Some(reason) = post.stop_reason {
-            return Err(Error::Message(reason));
-        }
-    }
+        (!post.response.diagnostics.is_empty()).then(|| {
+            format!(
+                "PostCompact warnings: {}",
+                post.response.diagnostics.join("; ")
+            )
+        })
+    } else {
+        None
+    };
     Ok(CompactionResult {
         session_id: summary.id,
         compacted: true,
         reason: options.reason.as_str().to_string(),
-        message: "context compacted".to_string(),
+        message: post_compact_warning
+            .map(|warning| format!("context compacted; {warning}"))
+            .unwrap_or_else(|| "context compacted".to_string()),
         checkpoint_id: Some(record.id),
         first_kept_session_seq: Some(record.first_kept_session_seq),
         tokens_before: record.tokens_before,
@@ -494,6 +506,170 @@ pub(crate) async fn generate_summary(
     messages: &[SessionMessageRecord],
     instructions: Option<&str>,
 ) -> Result<String> {
+    let budget = compaction_generation_budget(resolved)?;
+    let units = atomic_summary_units(messages);
+    let mut previous_summary = previous.map(|record| record.summary_text.clone());
+    validate_fixed_summary_input(
+        previous_summary.as_deref(),
+        instructions,
+        budget.input_tokens,
+    )?;
+    let mut unit_index = 0usize;
+    let mut generated_any = false;
+    while unit_index < units.len() || !generated_any {
+        let mut chunk = Vec::new();
+        while unit_index < units.len() {
+            let mut candidate = chunk.clone();
+            candidate.extend(units[unit_index].iter().cloned());
+            if summary_request_tokens(
+                previous_summary.as_deref(),
+                &candidate,
+                instructions,
+            ) <= budget.input_tokens
+            {
+                chunk = candidate;
+                unit_index += 1;
+                continue;
+            }
+            if chunk.is_empty() {
+                return Err(Error::Message(format!(
+                    "compaction atomic message unit at session_seq {} exceeds the {} token input budget",
+                    units[unit_index]
+                        .first()
+                        .map(|record| record.session_seq)
+                        .unwrap_or_default(),
+                    budget.input_tokens
+                )));
+            }
+            break;
+        }
+        previous_summary = Some(
+            generate_summary_chunk(
+                &provider,
+                resolved,
+                previous_summary.as_deref(),
+                &chunk,
+                instructions,
+                budget.output_tokens,
+            )
+            .await?,
+        );
+        generated_any = true;
+    }
+    previous_summary.ok_or_else(|| {
+        Error::Message("compaction did not produce a rolling summary".to_string())
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompactionGenerationBudget {
+    pub(crate) input_tokens: u64,
+    pub(crate) output_tokens: u64,
+}
+
+pub(crate) fn compaction_generation_budget(
+    resolved: &crate::config::ResolvedRunProvider,
+) -> Result<CompactionGenerationBudget> {
+    let context_tokens = resolved
+        .context_limit
+        .or(resolved.metadata.limits.context)
+        .unwrap_or(DEFAULT_COMPACTION_INPUT_TOKENS)
+        .min(HARD_COMPACTION_INPUT_TOKENS);
+    let model_input_tokens = resolved
+        .metadata
+        .limits
+        .input
+        .unwrap_or(context_tokens)
+        .min(context_tokens)
+        .min(HARD_COMPACTION_INPUT_TOKENS);
+    let output_tokens = resolved
+        .metadata
+        .limits
+        .output
+        .unwrap_or(MAX_COMPACTION_OUTPUT_TOKENS)
+        .min(MAX_COMPACTION_OUTPUT_TOKENS)
+        .min(context_tokens / 4);
+    if output_tokens < MIN_COMPACTION_OUTPUT_TOKENS {
+        return Err(Error::Message(format!(
+            "compaction output budget is {output_tokens} tokens; at least {MIN_COMPACTION_OUTPUT_TOKENS} are required"
+        )));
+    }
+    let input_tokens = model_input_tokens
+        .checked_sub(output_tokens.saturating_add(COMPACTION_INPUT_RESERVE_TOKENS))
+        .filter(|budget| *budget > 0)
+        .ok_or_else(|| {
+            Error::Message(format!(
+                "compaction input limit {model_input_tokens} cannot reserve {output_tokens} output tokens plus {COMPACTION_INPUT_RESERVE_TOKENS} safety tokens"
+            ))
+        })?;
+    Ok(CompactionGenerationBudget {
+        input_tokens,
+        output_tokens,
+    })
+}
+
+fn validate_fixed_summary_input(
+    previous_summary: Option<&str>,
+    instructions: Option<&str>,
+    input_tokens: u64,
+) -> Result<()> {
+    let fixed_tokens = summary_request_tokens(previous_summary, &[], instructions);
+    if fixed_tokens <= input_tokens {
+        return Ok(());
+    }
+    Err(Error::Message(format!(
+        "compaction fixed prompt, manual instructions, and rolling summary require {fixed_tokens} tokens but the input budget is {input_tokens}"
+    )))
+}
+
+fn summary_request_tokens(
+    previous_summary: Option<&str>,
+    messages: &[SessionMessageRecord],
+    instructions: Option<&str>,
+) -> u64 {
+    estimate_text_tokens(summary_system_prompt()).saturating_add(estimate_text_tokens(
+        &summary_user_prompt_text(previous_summary, messages, instructions),
+    ))
+}
+
+pub(crate) fn atomic_summary_units(
+    messages: &[SessionMessageRecord],
+) -> Vec<Vec<SessionMessageRecord>> {
+    let mut ordered = messages.to_vec();
+    ordered.sort_by_key(|record| record.session_seq);
+    let mut result_indices = BTreeMap::<String, usize>::new();
+    for (index, record) in ordered.iter().enumerate() {
+        if let Message::ToolResult { tool_call_id, .. } = &record.message {
+            result_indices.insert(tool_call_id.clone(), index);
+        }
+    }
+    let mut units = Vec::new();
+    let mut start = 0usize;
+    while start < ordered.len() {
+        let mut end = start;
+        let mut scan = start;
+        while scan <= end {
+            for tool_call_id in assistant_tool_call_ids(&ordered[scan].message) {
+                if let Some(result_index) = result_indices.get(&tool_call_id) {
+                    end = end.max(*result_index);
+                }
+            }
+            scan += 1;
+        }
+        units.push(ordered[start..=end].to_vec());
+        start = end + 1;
+    }
+    units
+}
+
+async fn generate_summary_chunk(
+    provider: &LanguageModel,
+    resolved: &crate::config::ResolvedRunProvider,
+    previous_summary: Option<&str>,
+    messages: &[SessionMessageRecord],
+    instructions: Option<&str>,
+    output_tokens: u64,
+) -> Result<String> {
     let mut metadata = json!({
         "model_metadata": resolved.metadata.public_json(),
     });
@@ -508,23 +684,38 @@ pub(crate) async fn generate_summary(
     let request = LanguageRequest {
         messages: vec![
             psychevo_ai::Message::system(summary_system_prompt()),
-            psychevo_ai::Message::user(summary_user_prompt(
-                previous,
+            psychevo_ai::Message::user(summary_user_prompt_text(
+                previous_summary,
                 messages,
                 instructions,
             )),
         ],
         tools: Vec::new(),
         extensions: BTreeMap::from([("psychevo".to_string(), metadata)]),
+        settings: psychevo_ai::LanguageSettings {
+            max_output_tokens: Some(output_tokens),
+            ..Default::default()
+        },
         ..LanguageRequest::default()
     };
     let mut stream = provider.stream(request);
     let mut text = String::new();
     while let Some(event) = stream.next_event().await {
-        if let GenerationEvent::TextDelta { delta, .. } =
-            event.map_err(|err| Error::Message(format!("summary provider failed: {err}")))?
-        {
-            text.push_str(&delta);
+        match event.map_err(|err| Error::Message(format!("summary provider failed: {err}")))? {
+            GenerationEvent::TextDelta { delta, .. } => text.push_str(&delta),
+            GenerationEvent::Resync { snapshot, .. } => {
+                text = snapshot
+                    .assistant
+                    .content
+                    .iter()
+                    .filter_map(|content| match content {
+                        psychevo_ai::AssistantContent::Text(text) => Some(text.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+            }
+            _ => {}
         }
     }
     let output = stream
@@ -560,8 +751,8 @@ pub(crate) fn summary_system_prompt() -> &'static str {
     prompt_templates::compaction_summary_system()
 }
 
-pub(crate) fn summary_user_prompt(
-    previous: Option<&SessionCompactionRecord>,
+pub(crate) fn summary_user_prompt_text(
+    previous_summary: Option<&str>,
     messages: &[SessionMessageRecord],
     instructions: Option<&str>,
 ) -> String {
@@ -573,9 +764,9 @@ pub(crate) fn summary_user_prompt(
     } else {
         String::new()
     };
-    let previous_summary_section = if let Some(previous) = previous {
+    let previous_summary_section = if let Some(previous_summary) = previous_summary {
         prompt_templates::compaction_summary_previous_section(&redact_secrets(
-            &previous.summary_text,
+            previous_summary,
         ))
     } else {
         String::new()
@@ -779,7 +970,6 @@ pub(crate) fn auto_compaction_check_run_options(
         include_reasoning: false,
         mode: RunMode::Default,
         permission_mode: None,
-        approval_mode: None,
         approval_handler: None,
         clarify_enabled: false,
         inherited_env: options.inherited_env.clone(),
@@ -827,7 +1017,6 @@ pub(crate) fn compaction_run_options(
         include_reasoning: false,
         mode: RunMode::Default,
         permission_mode: None,
-        approval_mode: None,
         approval_handler: None,
         clarify_enabled: false,
         inherited_env: options.inherited_env.clone(),

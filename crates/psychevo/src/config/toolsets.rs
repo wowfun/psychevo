@@ -35,9 +35,9 @@ pub fn toolsets_value(options: &RunOptions, scope: ConfigScope) -> Result<Value>
     let mut toolsets = Vec::new();
     for name in crate::tools::builtin_toolset_names() {
         let tools = crate::tools::builtin_toolset_tools(name)
-            .unwrap_or(&[])
-            .iter()
-            .map(|tool| (*tool).to_string())
+            .unwrap_or_default()
+            .into_iter()
+            .map(str::to_string)
             .collect::<Vec<_>>();
         toolsets.push(json!({
             "name": name,
@@ -46,7 +46,7 @@ pub fn toolsets_value(options: &RunOptions, scope: ConfigScope) -> Result<Value>
             "tools": tools,
             "includes": [],
             "unknown_tools": [],
-            "mode_mutable": *name != "coding-core",
+            "mode_mutable": name != "coding-core",
             "removable": false,
         }));
     }

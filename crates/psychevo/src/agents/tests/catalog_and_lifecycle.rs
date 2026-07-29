@@ -62,7 +62,6 @@ Coordinate.
             permission_config: PermissionConfig::default(),
             lsp: Default::default(),
             permission_mode: PermissionMode::Default,
-            approval_mode: ApprovalMode::Manual,
             approval_handler: None,
             state: store,
             config_path: None,
@@ -90,6 +89,7 @@ Coordinate.
             spawn_depth_remaining: None,
             active_team: None,
             external_delegate: None,
+            supervisor: AgentSupervisor::default(),
         },
         SpawnAgentArgs {
             agent_type: Some("explore-extra".to_string()),
@@ -847,12 +847,13 @@ pub(crate) async fn max_spawn_depth_defaults_to_leaf_and_decrements() {
 
 #[tokio::test]
 pub(crate) async fn pause_new_spawns_state_is_explicit() {
-    set_agent_spawn_paused(false);
-    assert!(!agent_spawn_paused());
-    let previous = set_agent_spawn_paused(true);
+    let supervisor = AgentSupervisor::default();
+    assert!(!supervisor.spawning_paused("parent-a"));
+    let previous = supervisor.set_spawning_paused("parent-a", true);
     assert!(!previous);
-    assert!(agent_spawn_paused());
-    set_agent_spawn_paused(false);
+    assert!(supervisor.spawning_paused("parent-a"));
+    assert!(!supervisor.spawning_paused("parent-b"));
+    supervisor.set_spawning_paused("parent-a", false);
 }
 
 #[tokio::test]
@@ -897,15 +898,13 @@ pub(crate) async fn child_session_summary_uses_latest_assistant_usage_tokens() {
 }
 
 #[tokio::test]
-pub(crate) async fn stop_agent_with_grace_marks_live_run_interrupted() {
+pub(crate) async fn stop_agent_with_grace_removes_terminal_run_from_active_state() {
     let id = format!("test-stop-{}-{:?}", now_ms(), std::thread::current().id());
     let (control, _receivers) = ControlHandle::new();
-    {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.insert(
-            id.clone(),
-            AgentRunState {
-                record: AgentRunRecord {
+    let supervisor = AgentSupervisor::default();
+    supervisor
+        .register(
+            AgentRunRecord {
                     id: id.clone(),
                     task_name: Some("worker_task".to_string()),
                     agent_name: "general".to_string(),
@@ -927,26 +926,22 @@ pub(crate) async fn stop_agent_with_grace_marks_live_run_interrupted() {
                     team_name: None,
                     team_member_id: None,
                     agent_path: None,
-                },
-                control: Some(control),
             },
-        );
-    }
+            Some(control),
+            4,
+        )
+        .expect("register");
 
-    let previous = stop_agent_id_with_grace(&id, None, Duration::ZERO)
+    let previous = stop_agent_id_with_grace(&supervisor, &id, None, Duration::ZERO)
         .await
         .expect("stop")
         .expect("previous record");
     assert_eq!(previous.status, AgentRunStatus::Running);
 
-    let record = {
-        let mut runs = AGENT_RUNS.lock().expect("agent run registry poisoned");
-        runs.remove(&id).expect("run state").record
-    };
-    assert_eq!(record.status, AgentRunStatus::Interrupted);
-    assert_eq!(record.edge_status, Some(AgentEdgeStatus::Closed));
-    assert_eq!(record.outcome.as_deref(), Some("interrupted"));
-    assert!(record.ended_at_ms.is_some());
+    assert!(
+        !supervisor.active().contains_key(&id),
+        "terminal records must be reconstructed from durable state, not retained in the active map"
+    );
 }
 
 #[tokio::test]

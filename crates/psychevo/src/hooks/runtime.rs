@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::thread;
+use std::sync::Arc;
 use std::time::Instant;
 
+use futures::{StreamExt, stream::FuturesUnordered};
 use serde_json::{Value, json};
+use tokio::sync::Semaphore;
 
-use super::command::{HookCommandExecution, run_hook_command_blocking};
+use super::command::{HookCommandExecution, run_hook_command};
 use super::declarations::{matcher_matches, normalize_hook_declarations};
 use super::identity::{hook_definition_hash, hook_key};
 use super::output::{
@@ -20,6 +21,7 @@ use super::worker::call_worker_hook;
 pub struct HookRuntime {
     cwd: PathBuf,
     handlers: Vec<ConfiguredHook>,
+    semaphore: Arc<Semaphore>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,7 +114,11 @@ impl HookRuntime {
                 }
             }
         }
-        Self { cwd, handlers }
+        Self {
+            cwd,
+            handlers,
+            semaphore: Arc::new(Semaphore::new(8)),
+        }
     }
 
     pub fn metadata(&self) -> Vec<HookMetadata> {
@@ -195,8 +201,8 @@ impl HookRuntime {
         )
     }
 
-    pub async fn run_post_compact(&self, payload: &Value) -> HookLifecycleOutcome {
-        HookLifecycleOutcome::from_response(
+    pub async fn run_post_compact(&self, payload: &Value) -> HookReadOnlyOutcome {
+        HookReadOnlyOutcome::from_response(
             self.run_event_name(HookEventName::PostCompact, payload).await,
         )
     }
@@ -213,8 +219,7 @@ impl HookRuntime {
 
     async fn run_event_name(&self, event: HookEventName, payload: &Value) -> HookResponse {
         let mut response = HookResponse::default();
-        let mut command_jobs = Vec::new();
-        let (tx, rx) = mpsc::channel();
+        let mut jobs = FuturesUnordered::new();
 
         for hook in self.handlers.iter().filter(|hook| {
             hook.event == event && matcher_matches(event, hook.matcher.as_deref(), payload)
@@ -223,73 +228,76 @@ impl HookRuntime {
                 response.summaries.push(skipped_summary(hook, reason));
                 continue;
             }
-            match hook.handler.handler_type {
-                HookHandlerType::Command => {
-                    let command = hook.handler.command.clone().unwrap_or_default();
-                    let payload = runtime_payload(event, &hook.metadata, &self.cwd, payload);
-                    let cwd = self.cwd.clone();
-                    let metadata = hook.metadata.clone();
-                    let timeout = hook.handler.timeout_secs;
-                    let tx = tx.clone();
-                    command_jobs.push(thread::spawn(move || {
-                        let execution =
-                            run_hook_command_blocking(&command, &cwd, &payload, timeout);
-                        let _ = tx.send((metadata, execution));
-                    }));
-                }
-                HookHandlerType::Worker => {
-                    let started = Instant::now();
-                    let summary = match hook.worker.as_ref() {
-                        Some(worker) => {
-                            let payload =
-                                runtime_payload(event, &hook.metadata, &self.cwd, payload);
-                            let result =
-                                call_worker_hook(worker, &hook.metadata, payload).await;
-                            summary_from_worker_result(hook, started, result)
-                        }
-                        None => skipped_summary(hook, "worker adapter unavailable"),
-                    };
-                    fold_summary(event, &mut response, summary);
-                }
-                HookHandlerType::Prompt => {
-                    let mut summary = completed_summary(hook, 0);
-                    if let Some(prompt) = &hook.handler.prompt {
-                        summary.entries.push(HookRunEntry {
-                            kind: "context".to_string(),
-                            message: prompt.clone(),
-                        });
-                        response.context.push(json!({
-                            "source": hook.metadata.key,
-                            "text": prompt,
-                        }));
-                    }
-                    response.summaries.push(summary);
-                }
-                HookHandlerType::Agent | HookHandlerType::Unsupported => {
-                    response.summaries.push(skipped_summary(
-                        hook,
-                        if hook.handler.handler_type == HookHandlerType::Agent {
-                            "agent hook adapter unavailable"
-                        } else {
-                            "unsupported hook handler type"
-                        },
-                    ));
-                }
-            }
+            let hook = hook.clone();
+            let cwd = self.cwd.clone();
+            let payload = payload.clone();
+            let semaphore = Arc::clone(&self.semaphore);
+            jobs.push(async move {
+                let _permit = semaphore
+                    .acquire_owned()
+                    .await
+                    .expect("hook runtime semaphore cannot close");
+                run_configured_hook(event, hook, cwd, payload).await
+            });
         }
 
-        drop(tx);
-        for (metadata, execution) in rx {
-            let summary = summary_from_command_execution(event, metadata, execution);
-            fold_summary(event, &mut response, summary);
-        }
-        for job in command_jobs {
-            let _ = job.join();
+        while let Some(summary) = jobs.next().await {
+            response.summaries.push(summary);
         }
         response
             .summaries
             .sort_by_key(|summary| summary.display_order);
+        let summaries = std::mem::take(&mut response.summaries);
+        for summary in summaries {
+            fold_summary(event, &mut response, summary);
+        }
         response
+    }
+}
+
+async fn run_configured_hook(
+    event: HookEventName,
+    hook: ConfiguredHook,
+    cwd: PathBuf,
+    payload: Value,
+) -> HookRunSummary {
+    match hook.handler.handler_type {
+        HookHandlerType::Command => {
+            let command = hook.handler.command.clone().unwrap_or_default();
+            let payload = runtime_payload(event, &hook.metadata, &cwd, &payload);
+            let execution =
+                run_hook_command(&command, &cwd, &payload, hook.handler.timeout_secs).await;
+            summary_from_command_execution(event, hook.metadata, execution)
+        }
+        HookHandlerType::Worker => {
+            let started = Instant::now();
+            match hook.worker.as_ref() {
+                Some(worker) => {
+                    let payload = runtime_payload(event, &hook.metadata, &cwd, &payload);
+                    let result = call_worker_hook(worker, &hook.metadata, payload).await;
+                    summary_from_worker_result(&hook, started, result)
+                }
+                None => skipped_summary(&hook, "worker adapter unavailable"),
+            }
+        }
+        HookHandlerType::Prompt => {
+            let mut summary = completed_summary(&hook, 0);
+            if let Some(prompt) = &hook.handler.prompt {
+                summary.entries.push(HookRunEntry {
+                    kind: "context".to_string(),
+                    message: prompt.clone(),
+                });
+            }
+            summary
+        }
+        HookHandlerType::Agent | HookHandlerType::Unsupported => skipped_summary(
+            &hook,
+            if hook.handler.handler_type == HookHandlerType::Agent {
+                "agent hook adapter unavailable"
+            } else {
+                "unsupported hook handler type"
+            },
+        ),
     }
 }
 
@@ -373,6 +381,12 @@ fn summary_from_command_execution(
     execution: HookCommandExecution,
 ) -> HookRunSummary {
     let mut diagnostics = Vec::new();
+    if execution.stdout_truncated {
+        diagnostics.push("hook stdout truncated after 4096 bytes".to_string());
+    }
+    if execution.stderr_truncated {
+        diagnostics.push("hook stderr truncated after 4096 bytes".to_string());
+    }
     let exit_code = execution.status.and_then(|status| status.code());
     let mut status = if execution.timed_out {
         diagnostics.push("hook command timed out".to_string());
@@ -383,10 +397,17 @@ fn summary_from_command_execution(
     } else if execution.status.is_some_and(|status| status.success()) {
         HookRunStatus::Completed
     } else {
+        diagnostics.push(format!(
+            "hook command failed with exit code {}",
+            exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ));
         HookRunStatus::Failed
     };
     let entries = parse_output_entries(event, &execution.stdout, &mut diagnostics);
     let parsed = parse_hook_output(&execution.stdout);
+    diagnose_invalid_json(&execution.stdout, parsed.as_ref(), &mut diagnostics);
     if event.supports_block()
         && (parsed
             .as_ref()
@@ -396,6 +417,17 @@ fn summary_from_command_execution(
             || (event == HookEventName::PreToolUse && exit_code == Some(2)))
     {
         status = HookRunStatus::Blocked;
+    } else if !event.supports_block()
+        && parsed
+            .as_ref()
+            .and_then(|value| value.get("continue"))
+            .and_then(Value::as_bool)
+            == Some(false)
+    {
+        diagnostics.push(format!(
+            "{} is observation-only; its block request was ignored",
+            event.as_str()
+        ));
     }
     HookRunSummary {
         run_id: format!("hook-run-{}", metadata.display_order),
@@ -425,6 +457,30 @@ fn summary_from_worker_result(
             let stdout = bounded_output(value.to_string().as_bytes());
             let mut diagnostics = Vec::new();
             let entries = parse_output_entries(hook.event, &stdout, &mut diagnostics);
+            let parsed = parse_hook_output(&stdout);
+            if !hook.event.supports_block()
+                && parsed
+                    .as_ref()
+                    .and_then(|value| value.get("continue"))
+                    .and_then(Value::as_bool)
+                    == Some(false)
+            {
+                diagnostics.push(format!(
+                    "{} is observation-only; its block request was ignored",
+                    hook.event.as_str()
+                ));
+            }
+            let status = if hook.event.supports_block()
+                && parsed
+                    .as_ref()
+                    .and_then(|value| value.get("continue"))
+                    .and_then(Value::as_bool)
+                    == Some(false)
+            {
+                HookRunStatus::Blocked
+            } else {
+                HookRunStatus::Completed
+            };
             HookRunSummary {
                 run_id: format!("hook-run-{}", hook.metadata.display_order),
                 event: hook.event.as_str().to_string(),
@@ -432,7 +488,7 @@ fn summary_from_worker_result(
                 source_kind: hook.metadata.source_kind.clone(),
                 source_id: hook.metadata.source_id.clone(),
                 display_order: hook.metadata.display_order,
-                status: HookRunStatus::Completed,
+                status,
                 trust_status: hook.metadata.trust_status,
                 exit_code: None,
                 stdout: stdout.clone(),
@@ -500,10 +556,7 @@ fn completed_summary(hook: &ConfiguredHook, elapsed_ms: u128) -> HookRunSummary 
 }
 
 fn fold_summary(event: HookEventName, response: &mut HookResponse, summary: HookRunSummary) {
-    if matches!(
-        summary.status,
-        HookRunStatus::Blocked | HookRunStatus::TimedOut
-    ) && response.blocked_reason.is_none()
+    if summary.status == HookRunStatus::Blocked && response.blocked_reason.is_none()
     {
         response.blocked_reason = Some(block_reason(&summary.stdout, &summary.stderr));
     }
@@ -535,4 +588,15 @@ fn fold_summary(event: HookEventName, response: &mut HookResponse, summary: Hook
     }
     response.diagnostics.extend(summary.diagnostics.clone());
     response.summaries.push(summary);
+}
+
+fn diagnose_invalid_json(
+    stdout: &str,
+    parsed: Option<&Value>,
+    diagnostics: &mut Vec<String>,
+) {
+    let trimmed = stdout.trim();
+    if parsed.is_none() && (trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        diagnostics.push("hook output was not valid JSON".to_string());
+    }
 }

@@ -502,7 +502,11 @@ pub(crate) fn parse_runtime_profile_config(
     let default_model = optional_string_alias_field(object, "default_model", "defaultModel")?;
     let default_mode = optional_string_alias_field(object, "default_mode", "defaultMode")?;
     let default_agent = optional_string_alias_field(object, "default_agent", "defaultAgent")?;
-    let approval_mode = optional_string_alias_field(object, "approval_mode", "approvalMode")?;
+    if object.contains_key("approval_mode") || object.contains_key("approvalMode") {
+        return Err(Error::Config(format!(
+            "runtime_profiles.{id}.approval_mode is removed; configure top-level permissions.approvals_reviewer"
+        )));
+    }
     let sandbox = optional_string_field(object, "sandbox")?;
     let workspace_roots = object
         .get("workspace_roots")
@@ -520,7 +524,6 @@ pub(crate) fn parse_runtime_profile_config(
         default_model,
         default_mode,
         default_agent,
-        approval_mode,
         sandbox,
         workspace_roots,
         options,

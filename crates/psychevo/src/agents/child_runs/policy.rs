@@ -1,16 +1,66 @@
 pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
-    if child.abort.aborted() {
-        if let Some(child_session) = child.existing_child_session.as_deref() {
-            update_run_child_session(&child.id, child_session);
-            let _ = child
-                .context
-                .state
+    let supervisor = child.context.supervisor.clone();
+    let state = child.context.state.clone();
+    let id = child.id.clone();
+    let parent_session_id = child.context.parent_session_id.clone();
+    let result = run_child_agent_inner(child).await;
+    if let Err(error) = &result {
+        update_run_failed(&supervisor, &id, &error.to_string());
+    }
+    let record = {
+        let runs = supervisor.active();
+        runs.get(&id).map(|state| state.record.clone())
+    };
+    let Some(record) = record else {
+        return result;
+    };
+    let Some(child_session_id) = record.child_session_id.as_deref() else {
+        supervisor.remove(&id);
+        return result;
+    };
+    let mailbox = if record.background {
+        let outcome = record.outcome.as_deref().unwrap_or("failed");
+        let summary = record
+            .final_answer
+            .as_deref()
+            .or(record.error.as_deref())
+            .unwrap_or_default();
+        Some(
+            parent_agent_mailbox_event_input(
+                &state,
+                &parent_session_id,
+                &record,
+                outcome,
+                summary,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    state
+        .commit_agent_terminal(child_session_id, mailbox)
+        .await?;
+    supervisor.remove(&id);
+    result
+}
 
-                .set_agent_edge_status(child_session, AgentEdgeStatus::Closed)
-                .await;
+async fn run_child_agent_inner(child: ChildRun) -> Result<AgentRunRecord> {
+    if child.abort.aborted() || child.control_handle.is_aborted() {
+        if let Some(child_session) = child.existing_child_session.as_deref() {
+            update_run_child_session(&child.context.supervisor, &child.id, child_session);
         }
-        update_run_failed(&child.id, "parent invocation aborted");
-        return Err(Error::Message("parent invocation aborted".to_string()));
+        let reason = if child.abort.aborted() {
+            "parent invocation aborted"
+        } else {
+            "application shutdown"
+        };
+        update_run_failed(
+            &child.context.supervisor,
+            &child.id,
+            reason,
+        );
+        return Err(Error::Message(reason.to_string()));
     }
     let child_model = child.model.clone();
     let child_session = if let Some(child_session) = child.existing_child_session.clone() {
@@ -50,7 +100,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
             )
             .await?
     };
-    update_run_child_session(&child.id, &child_session);
+    update_run_child_session(&child.context.supervisor, &child.id, &child_session);
     emit_agent_session_start(&child, &child_session);
     if child.existing_child_session.is_none() {
         child.context.state.upsert_agent_edge(
@@ -84,13 +134,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         }))
         .await;
         if let Some(reason) = outcome.stop_reason {
-            update_run_failed(&child.id, &reason);
-            let _ = child
-                .context
-                .state
-
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
-                .await;
+            update_run_failed(&child.context.supervisor, &child.id, &reason);
             return Err(Error::Message(reason));
         }
     }
@@ -114,6 +158,14 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     child_agent_tool_context.parent_context_snapshot = previous_messages.clone();
     child_agent_tool_context.required_agent_names = Vec::new();
     child_agent_tool_context.spawn_depth_remaining = Some(child.spawn_depth_remaining);
+    let effective_mode = effective_run_mode(child.context.mode, Some(&child.agent));
+    let sandbox_policy = child
+        .context
+        .sandbox_policy
+        .clone()
+        .narrowed_for_run_mode(effective_mode);
+    child_agent_tool_context.mode = effective_mode;
+    child_agent_tool_context.sandbox_policy = sandbox_policy.clone();
     let sandbox_grants = child
         .context
         .state
@@ -125,7 +177,6 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         child.context.cwd.join(".psychevo"),
         child.context.permission_config.clone(),
         permission_mode,
-        child.context.approval_mode,
         child.context.approval_handler.clone(),
         None,
     );
@@ -136,7 +187,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         None => permission_runtime,
     };
     let permission_runtime = permission_runtime
-        .with_sandbox(child.context.sandbox_policy.clone(), sandbox_grants.clone());
+        .with_sandbox(sandbox_policy.clone(), sandbox_grants.clone());
     let mut mcp_manager = crate::mcp::McpConnectionManager::default();
     let mcp_snapshot = mcp_manager
         .snapshot(
@@ -165,21 +216,21 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     let tool_surface = assemble_tool_surface_with_warnings(ToolSurfaceAssembly {
         cwd: child.context.cwd.clone(),
         task_id: child_session.clone(),
-        mode: child.context.mode,
+        mode: effective_mode,
         lsp: child.context.lsp.clone(),
         allow_login_shell: child.context.permission_config.allow_login_shell,
         stream_events: child.context.stream_events.clone(),
         workspace_mutations: child.context.workspace_mutations.clone(),
         env: child.context.env.clone(),
         path_prefixes: child.context.path_prefixes.clone(),
-        sandbox_policy: child.context.sandbox_policy.clone(),
+        sandbox_policy,
         sandbox_grants: sandbox_grants.clone(),
         home: Some(child.context.home.clone()),
         image_input_enabled: child.context.image_input_enabled,
         image_generation: child.context.image_generation.clone(),
         web_search: child.context.web_search.clone(),
         selection: crate::tool_surface::compile_tool_selection(
-            child.context.mode,
+            effective_mode,
             &child.context.tool_selection,
             &child.context.custom_toolsets,
             &child.context.extension_inputs.toolsets,
@@ -191,7 +242,7 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
     });
     emit_child_warning_events(&child, &child_session, &tool_surface.warnings);
     let mut tools = tool_surface.tools;
-    tools = apply_agent_tool_policy(tools, Some(&child.agent), child.context.mode);
+    tools = apply_agent_tool_policy(tools, Some(&child.agent), effective_mode);
     tools = permission_runtime.wrap_tools(tools);
     if let Some(runtime) = hook_runtime.clone() {
         tools = apply_hook_runtime(tools, runtime);
@@ -214,16 +265,16 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         path: child.agent.file_path.clone(),
     };
     let prompt_assembly = assemble_child_prompt_prefix(
-        child.context.mode,
+        effective_mode,
         &child.context.cwd,
         &child.agent,
         &child.context.model_metadata.capabilities,
         !tools.is_empty(),
     );
     let prefix_metadata = json!({
-        "mode": child.context.mode.as_str(),
+        "mode": effective_mode.as_str(),
         "permission_mode": permission_mode.as_str(),
-        "approval_mode": child.context.approval_mode.as_str(),
+        "approvals_reviewer": child.context.permission_config.approvals_reviewer.as_str(),
         "selected_agent": selected_agent.clone(),
         "agent_role": invocation_role_str(child.role),
         "parent_session_id": child.context.parent_session_id.clone(),
@@ -340,25 +391,26 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         selected_agent: Some(selected_agent),
         prompt_prefix_metadata: Some(prompt_prefix_metadata),
     });
-    let parent_store = child.context.state.clone();
-    let parent_session_id = child.context.parent_session_id.clone();
-    let completion = match psychevo_agent_core::run_agent_loop(
+    let mut parent_abort = child.abort.clone();
+    let loop_future = psychevo_agent_core::run_agent_loop(
         child.provider.clone(),
         request,
         sink,
         child.control_receivers,
-    )
-    .await
-    {
+    );
+    tokio::pin!(loop_future);
+    let loop_result = tokio::select! {
+        biased;
+        _ = parent_abort.wait_for_abort() => {
+            child.control_handle.abort();
+            loop_future.await
+        }
+        result = &mut loop_future => result,
+    };
+    let completion = match loop_result {
         Ok(completion) => completion,
         Err(err) => {
-            update_run_failed(&child.id, &err.to_string());
-            let _ = child
-                .context
-                .state
-
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
-                .await;
+            update_run_failed(&child.context.supervisor, &child.id, &err.to_string());
             if let Some(runtime) = &hook_runtime {
                 let _ = runtime.run_subagent_stop(&json!({
                     "id": child.id.clone(),
@@ -386,33 +438,16 @@ pub(crate) async fn run_child_agent(child: ChildRun) -> Result<AgentRunRecord> {
         }))
         .await;
         if let Some(reason) = stop.block_reason {
-            update_run_failed(&child.id, &reason);
-            let _ = child
-                .context
-                .state
-
-                .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
-                .await;
+            update_run_failed(&child.context.supervisor, &child.id, &reason);
             return Err(Error::Message(reason));
         }
     }
-    let record = update_run_completed(&child.id, completion.outcome, final_answer.clone());
-    let _ = child
-        .context
-        .state
-
-        .set_agent_edge_status(&child_session, AgentEdgeStatus::Closed)
-        .await;
-    if child.background {
-        let _ = append_parent_agent_mailbox_event(
-            &parent_store,
-            &parent_session_id,
-            &record,
-            completion.outcome.as_str(),
-            &final_answer,
-        )
-        .await;
-    }
+    let record = update_run_completed(
+        &child.context.supervisor,
+        &child.id,
+        completion.outcome,
+        final_answer.clone(),
+    );
     Ok(record)
 }
 
@@ -544,7 +579,6 @@ fn child_hook_runtime_config(
         include_reasoning: false,
         mode: context.mode,
         permission_mode: Some(context.permission_mode),
-        approval_mode: Some(context.approval_mode),
         approval_handler: context.approval_handler.clone(),
         clarify_enabled: false,
         inherited_env: Some(context.env.clone()),
@@ -689,8 +723,14 @@ pub(crate) fn child_agent_metadata(input: ChildAgentMetadataInput<'_>) -> Value 
             Value::String(context.permission_mode.as_str().to_string()),
         );
         object.insert(
-            "approval_mode".to_string(),
-            Value::String(context.approval_mode.as_str().to_string()),
+            "approvals_reviewer".to_string(),
+            Value::String(
+                context
+                    .permission_config
+                    .approvals_reviewer
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let context_limit = context
             .context_limit

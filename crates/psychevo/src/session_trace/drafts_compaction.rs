@@ -217,7 +217,7 @@ fn compact_run_start_payload(payload: &Value) -> Value {
         "model",
         "mode",
         "permission_mode",
-        "approval_mode",
+        "approvals_reviewer",
         "reasoning_effort",
         "context_limit",
         "project_context",

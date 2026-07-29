@@ -735,6 +735,21 @@ pub(crate) mod permission_rule_tests {
     }
 
     #[test]
+    fn approvals_reviewer_rejects_retired_aliases() {
+        for retired in ["auto_review", "guardian_subagent"] {
+            let error = parse_run_config(json!({
+                "approvals_reviewer": retired,
+            }))
+            .expect_err("retired reviewer alias must fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("approvals_reviewer must be user or smart")
+            );
+        }
+    }
+
+    #[test]
     fn legacy_permission_schema_is_a_hard_error() {
         let err = parse_run_config(json!({
             "permissions": {
